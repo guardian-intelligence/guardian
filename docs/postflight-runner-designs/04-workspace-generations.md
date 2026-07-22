@@ -47,9 +47,13 @@ the existing `hostd/sim` model):
 
 **Clone (after local assignment).** The immutable assignment records the
 scope's `source_generation` (this exact value is the CAS guard later).
-hostd clones that generation's snapshot into the assignment's workspace,
-tool, and process zvols; no generation creates an empty capsule (cold path;
-the customer's first green run seeds the lineage).
+hostd clones that generation's workspace and tool snapshots. It clones the
+process snapshot only while the generation catalog marks the authenticated
+artifact valid. A scope with no generation starts with three empty volumes; a
+scope whose process artifact was invalidated keeps its warm workspace/tool
+cache and starts with an empty process zvol. The immutable assignment freezes
+the process digest/version it selected, so invalidation never mutates a job
+already in flight.
 
 **Seal (at runner exit 0).** guestd quiesces (01) → hostd
 `zfs snapshot ws/<assignment>@sealed`, records `used/logicalused/written/
@@ -98,9 +102,11 @@ member. A remote miss becomes a cold capsule and remains correct.
 - `workspace_scopes` (new): scope key dims, `current_generation_id`,
   `home_host_id`.
 - `workspace_generations` (exists): add `scope_id`, `state`,
-  `parent_generation_id`, `snapshot_guid`, `sealed_at`, size stats columns.
+  `parent_generation_id`, `snapshot_guid`, `sealed_at`, process validity, and
+  size stats columns.
 - `runner_job_assignments`: immutable local job/member binding,
-  `source_generation`, `workspace_scope_id`, restore outcome, and seal result.
+  `source_generation`, frozen source-process identity, `workspace_scope_id`,
+  restore outcome, and seal result.
 
 ## Pre-TEE scope
 

@@ -127,7 +127,10 @@ qmp_attach_started/completed
 guest_rendezvous_received
 mounts_ready
 restore_started
-restore_succeeded | restore_fallback_started/completed | restore_unsafe
+restore_succeeded
+  | generation_restore_failed -> restore_cleanup_started/completed
+      -> cold_capsule_start_started/completed
+  | restore_unsafe
 clock_checked
 worker_released
 customer_steps_released

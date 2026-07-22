@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
 
@@ -27,12 +28,16 @@ type assignment struct {
 	toolVolume    zvol.ToolVolume
 	processVolume zvol.ProcessVolume
 
-	exit       int
-	reason     string
-	restore    *syncproto.RestoreReport
-	checkpoint *syncproto.CheckpointArtifact
-	sealGen    string
-	timing     []syncproto.TimingPoint
+	exit             int
+	reason           string
+	restore          *syncproto.RestoreReport
+	checkpoint       *syncproto.CheckpointArtifact
+	sealGen          string
+	timing           []syncproto.TimingPoint
+	hostBeforeUnixNS int64
+	updateTiming     vm.TimingPoint
+	trace            *traceState
+	termination      syncproto.AssignmentState
 }
 
 func (a *assignment) enter(state syncproto.AssignmentState, now time.Time) {

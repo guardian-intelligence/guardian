@@ -58,11 +58,13 @@ sync: generic VM is warm
   → Runner.Listener receives GitHub's encrypted job message
   → publish check-run/request/protocol-job identity before Worker dispatch
   → create one immutable job-to-member assignment in the control plane
-  → clone its workspace/tool/process generation (or empty cold capsule)
+  → clone its workspace/tool generation and its process image when valid
+  → otherwise attach an empty process zvol for a cold capsule
   → QMP hot-attach that tuple to the already selected QEMU
   → guest mounts and attempts the process restore
   → recoverable restore miss tears out process state and cold-starts
-  → integrity or unprovable-cleanup failure recycles the VM fail-closed
+  → integrity or unprovable-cleanup failure destroys the VM fail-closed
+  → publish requeue/fail-closed only after VM destruction is proven
   → authorize the blocked Worker only after exact identity validation
   → on exit 0: checkpoint and flush, destroy QEMU, seal all zvols
   → refill the pool with a new member incarnation

@@ -7,6 +7,12 @@ DROP TABLE host_leases CASCADE;
 ALTER TABLE github_workflow_jobs
     ADD COLUMN check_run_id BIGINT NOT NULL DEFAULT 0 CHECK (check_run_id >= 0);
 
+ALTER TABLE workspace_generations
+    ADD COLUMN process_valid BOOLEAN NOT NULL DEFAULT true,
+    ADD COLUMN process_invalidated_at TIMESTAMPTZ,
+    ADD COLUMN process_invalidation_class TEXT NOT NULL DEFAULT '',
+    ADD COLUMN process_invalidation_code TEXT NOT NULL DEFAULT '';
+
 CREATE UNIQUE INDEX idx_github_workflow_jobs_check_run
     ON github_workflow_jobs (check_run_id) WHERE check_run_id > 0;
 
@@ -97,6 +103,8 @@ CREATE TABLE runner_job_assignments (
          'sealing', 'sealed', 'completed', 'requeued', 'failed_closed')),
     workspace_scope_id  UUID REFERENCES workspace_scopes (scope_id),
     source_generation   TEXT NOT NULL DEFAULT '',
+    source_process_digest TEXT NOT NULL DEFAULT '',
+    source_process_version TEXT NOT NULL DEFAULT '',
     seal_generation     TEXT NOT NULL DEFAULT '',
     checkpoint_digest   TEXT NOT NULL DEFAULT '',
     checkpoint_version  TEXT NOT NULL DEFAULT '',
@@ -111,6 +119,8 @@ CREATE TABLE runner_job_assignments (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (member_id),
+    CHECK ((source_process_digest = '' AND source_process_version = '') OR
+           (source_process_digest ~ '^sha256:[0-9a-f]{64}$' AND source_process_version <> '')),
     CHECK ((checkpoint_digest = '' AND checkpoint_version = '') OR
            (checkpoint_digest ~ '^sha256:[0-9a-f]{64}$' AND checkpoint_version <> ''))
 );

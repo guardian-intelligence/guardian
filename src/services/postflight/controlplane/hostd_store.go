@@ -355,13 +355,17 @@ WHERE provider_job_id = $1`, providerJobID, observed.RequestID, observed.JobID);
 INSERT INTO runner_job_assignments (
     member_id, provider_job_id, host_id, request_id, protocol_job_id, check_run_id,
     runner_name, job_display_name, run_id, run_attempt, repository,
-    workflow_job, state, workspace_scope_id, source_generation, timing_json
+    workflow_job, state, workspace_scope_id, source_generation,
+    source_process_digest, source_process_version, timing_json
 )
 SELECT $1, i.provider_job_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-       'observed', d.workspace_scope_id, COALESCE(s.current_generation_id, ''), $12::jsonb
+       'observed', d.workspace_scope_id, COALESCE(s.current_generation_id, ''),
+       COALESCE(CASE WHEN g.process_valid THEN g.process_digest END, ''),
+       COALESCE(CASE WHEN g.process_valid THEN g.criu_version END, ''), $12::jsonb
 FROM github_job_intents i
 JOIN github_provider_demands d ON d.provider_job_id = i.provider_job_id
 LEFT JOIN workspace_scopes s ON s.scope_id = d.workspace_scope_id
+LEFT JOIN workspace_generations g ON g.generation = s.current_generation_id
 WHERE i.provider_job_id = $13
 RETURNING assignment_id::text`, member.MemberID, hostID, observed.RequestID, observed.JobID, observed.CheckRunID,
 		runnerName, observed.JobDisplayName, observed.Identity.RunID, observed.Identity.RunAttempt,
@@ -435,6 +439,18 @@ WHERE assignment_id::text = $1`, report.AssignmentID, restore.Outcome,
 		restore.FailureClass, restore.FailureCode, restore.ProcessInvalidated,
 		report.Reason, string(timing)); err != nil {
 		return err
+	}
+	if restore.ProcessInvalidated && sourceGeneration != "" {
+		if _, err := tx.Exec(ctx, `
+UPDATE workspace_generations SET
+    process_valid = false,
+    process_invalidated_at = COALESCE(process_invalidated_at, now()),
+    process_invalidation_class = CASE WHEN process_invalidation_class = '' THEN $2 ELSE process_invalidation_class END,
+    process_invalidation_code = CASE WHEN process_invalidation_code = '' THEN $3 ELSE process_invalidation_code END,
+    updated_at = now()
+WHERE generation = $1`, sourceGeneration, restore.FailureClass, restore.FailureCode); err != nil {
+			return err
+		}
 	}
 	switch report.State {
 	case syncproto.AssignmentObserved, syncproto.AssignmentBinding, syncproto.AssignmentAuthorizing, syncproto.AssignmentRunning:
@@ -592,13 +608,12 @@ SELECT a.assignment_id::text, a.member_id, a.request_id, a.protocol_job_id, a.ch
        a.run_id, a.run_attempt, a.runner_name, a.repository, a.workflow_job,
        m.runner_class, a.source_generation,
        c.disk_bytes, c.tool_disk_bytes, c.process_disk_bytes,
-       COALESCE(g.process_digest, ''), COALESCE(g.criu_version, ''),
+       a.source_process_digest, a.source_process_version,
        a.seal_generation, a.checkpoint_digest, a.checkpoint_version
 FROM runner_job_assignments a
 JOIN runner_pool_members m ON m.member_id = a.member_id
 JOIN runner_classes c ON c.class = m.runner_class
 JOIN github_provider_demands d ON d.provider_job_id = a.provider_job_id
-LEFT JOIN workspace_generations g ON g.generation = a.source_generation
 WHERE a.host_id = $1 AND a.state IN
     ('observed','binding','authorizing','running','exited','sealing')
 ORDER BY a.created_at`, hostID)

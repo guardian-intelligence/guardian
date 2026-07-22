@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +45,7 @@ type Agent struct {
 	bootID     string
 	metrics    Metrics
 	timing     *postflighttiming.Recorder
+	traces     map[string]*traceState
 
 	mu                 sync.Mutex
 	assignments        map[string]*assignment
@@ -82,7 +84,7 @@ func New(cfg Config, zvols zvol.Driver, vms vm.Driver, credential string, hostSe
 		desiredMembers:     map[string]syncproto.DesiredPoolMember{},
 		desiredAssignments: map[string]syncproto.DesiredAssignment{},
 		quarantinedMembers: map[string]bool{}, quarantinedJobs: map[string]bool{},
-		poolTargets: map[vm.Class]int{},
+		poolTargets: map[vm.Class]int{}, traces: map[string]*traceState{},
 	}
 	if a.logger == nil {
 		a.logger = slog.Default()
@@ -95,6 +97,11 @@ func New(cfg Config, zvols zvol.Driver, vms vm.Driver, credential string, hostSe
 	}
 	if a.newID == nil {
 		a.newID = randomID
+	}
+	if cfg.TraceDir != "" {
+		if err := os.MkdirAll(cfg.TraceDir, 0o750); err != nil {
+			return nil, fmt.Errorf("agent: create trace directory: %w", err)
+		}
 	}
 	a.bootID = a.newID()
 	a.timing = options.Timing
@@ -137,6 +144,7 @@ func (a *Agent) Report(ctx context.Context) (syncproto.SyncRequest, error) {
 }
 
 func (a *Agent) Run(ctx context.Context) error {
+	defer a.closeTraceFiles()
 	var updates <-chan vm.ID
 	if source, ok := a.vms.(vm.UpdateSource); ok {
 		updates = source.Updates()

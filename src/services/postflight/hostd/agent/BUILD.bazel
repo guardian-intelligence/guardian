@@ -10,6 +10,7 @@ go_library(
         "converge.go",
         "gc.go",
         "pool.go",
+		"rendezvous_trace.go",
         "snapshot.go",
         "sync.go",
     ],

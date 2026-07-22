@@ -115,6 +115,7 @@ func run(logger *slog.Logger) error {
 		Images:              map[vm.Class]string{class: image},
 		SyncInterval:        cfg.syncInterval,
 		CheckoutGuestOrigin: cfg.checkoutGuestOrigin,
+		TraceDir:            filepath.Join(cfg.stateDir, "rendezvous"),
 		Platform:            platformFingerprint(cfg),
 	}, storage, vms, cfg.syncSecret, hostSecret, agent.Options{Logger: logger})
 	if err != nil {

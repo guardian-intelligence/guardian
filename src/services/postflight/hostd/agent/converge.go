@@ -35,6 +35,7 @@ func (a *Agent) Tick(ctx context.Context) {
 	a.reapGenerations(ctx)
 	a.reconcilePool(ctx, view)
 	a.collectOrphans(ctx, view)
+	a.pruneTraces()
 	a.logger.Info("postflight.hostd.convergence.completed",
 		"duration_ns", time.Since(started).Nanoseconds(), "vms", len(view.byID),
 		"members", len(a.desiredMembers), "assignments", len(a.assignments))
@@ -84,13 +85,31 @@ func (a *Agent) stepMembers(ctx context.Context, view *vmView) {
 		if !ok {
 			continue
 		}
+		trace, err := a.traceFor(memberID, desired.RunnerName, string(status.ID))
+		if err != nil {
+			a.logger.Error("opening pool-member evidence", "member_id", memberID, "vm", status.ID, "err", err)
+		} else {
+			a.appendBootstrapTiming(trace, status.Timing)
+			if trace != nil && (trace.seen["runner_registered"] || status.Phase == vm.PhaseListening) {
+				a.appendTrace(trace, nil, "pool_ready", func(event *traceEvent) {
+					event.Platform = a.platformEvidence()
+				})
+			}
+		}
+		assignmentOwned := a.assignmentOwnsMember(memberID)
 		if desired.State == syncproto.DesiredMemberRecycle {
+			if assignmentOwned {
+				continue
+			}
 			if err := a.vms.Destroy(ctx, status.ID); err != nil {
 				a.logger.Error("recycling pool member", "member_id", memberID, "vm", status.ID, "err", err)
 			}
 			continue
 		}
 		if status.Phase == vm.PhaseRecycleRequired || status.Phase == vm.PhaseExited {
+			if assignmentOwned {
+				continue
+			}
 			if err := a.vms.Destroy(ctx, status.ID); err != nil {
 				a.logger.Error("recycling unusable pool member", "member_id", memberID, "vm", status.ID, "err", err)
 			}
@@ -117,6 +136,15 @@ func (a *Agent) stepMembers(ctx context.Context, view *vmView) {
 	}
 }
 
+func (a *Agent) assignmentOwnsMember(memberID string) bool {
+	for _, record := range a.assignments {
+		if record.spec.MemberID == memberID {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *Agent) stepStatus(ctx context.Context, status vm.Status) {
 	for _, record := range a.assignments {
 		if record.spec.MemberID == status.Incarnation {
@@ -132,6 +160,16 @@ func (a *Agent) stepStatus(ctx context.Context, status vm.Status) {
 
 func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vmView) {
 	if a.quarantinedJobs[record.spec.AssignmentID] {
+		return
+	}
+	if record.termination != "" {
+		a.finishPendingTermination(ctx, record)
+		return
+	}
+	if record.state.Terminal() {
+		if record.vmID != "" {
+			a.destroyAssignmentVM(ctx, record)
+		}
 		return
 	}
 	// The VM is deliberately gone after a successful runner exit. Generation
@@ -150,6 +188,18 @@ func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vm
 		return
 	}
 	record.vmID = string(status.ID)
+	if record.trace == nil {
+		trace, err := a.traceFor(record.spec.MemberID, record.spec.Identity.RunnerName, record.vmID)
+		if err != nil {
+			a.logger.Error("opening assignment evidence", "assignment_id", record.spec.AssignmentID, "member_id", record.spec.MemberID, "err", err)
+		} else {
+			record.trace = trace
+		}
+	}
+	if record.updateTiming.Event != "" {
+		a.appendOriginTiming(record.trace, record, []vm.TimingPoint{record.updateTiming})
+	}
+	a.appendOriginTiming(record.trace, record, status.Timing)
 	record.timing = mergeTiming(record.timing, status.Timing)
 	if deadline, ok := assignmentDeadlines[record.state]; ok && a.now().Sub(record.since) > deadline {
 		a.recycleAndRequeue(ctx, record, "deadline exceeded in "+string(record.state))
@@ -178,15 +228,26 @@ func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vm
 			a.failClosed(ctx, record, "binding identity: "+err.Error())
 			return
 		}
+		a.appendTrace(record.trace, record, "assignment_observed", nil)
 		started := time.Now()
+		a.appendTrace(record.trace, record, "generation_materialization_started", nil)
 		if err := a.materialize(ctx, record); err != nil {
 			a.recycleAndRequeue(ctx, record, "materialize generation: "+err.Error())
 			return
 		}
+		a.appendTrace(record.trace, record, "generation_resolved", func(event *traceEvent) {
+			event.GenerationSet = generationSet(record)
+			event.Volumes = traceVolumes(record, false)
+		})
+		record.hostBeforeUnixNS = time.Now().UnixNano()
 		if err := a.vms.Rendezvous(ctx, status.ID, a.rendezvous(record)); err != nil {
 			a.recycleAndRequeue(ctx, record, "rendezvous: "+err.Error())
 			return
 		}
+		a.appendTrace(record.trace, record, "rendezvous_dispatched", func(event *traceEvent) {
+			event.GenerationSet = generationSet(record)
+			event.Volumes = traceVolumes(record, true)
+		})
 		record.enter(syncproto.AssignmentBinding, a.now())
 		a.logger.Info("postflight.hostd.rendezvous.dispatched",
 			"assignment_id", record.spec.AssignmentID, "member_id", record.spec.MemberID,
@@ -197,6 +258,21 @@ func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vm
 			return
 		}
 		a.captureRestore(record, status)
+		hostAfterUnixNS := time.Now().UnixNano()
+		a.appendTrace(record.trace, record, "mounts_ready", func(event *traceEvent) {
+			event.GenerationSet = generationSet(record)
+			event.Volumes = traceVolumes(record, true)
+			event.Restore = traceRestoreEvidence(record.restore)
+		})
+		a.appendTrace(record.trace, record, "clock_checked", func(event *traceEvent) {
+			event.GenerationSet = generationSet(record)
+			event.Clock = &traceClock{
+				HostBeforeUnixNS: record.hostBeforeUnixNS, HostAfterUnixNS: hostAfterUnixNS,
+				GuestUnixNS: status.Clock.UnixNS, MaxSkewNS: int64(5 * time.Second),
+				GuestSynchronized: status.Clock.Synchronized, Clocksource: status.Clock.Clocksource,
+				AfterRestore: status.Clock.AfterRestore,
+			}
+		})
 		if record.restore != nil && record.restore.Outcome == string(guestproto.RestoreColdFallback) {
 			a.metrics.ColdFallbacks.Add(1)
 		}
@@ -204,6 +280,7 @@ func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vm
 			a.recycleAndRequeue(ctx, record, "authorize: "+err.Error())
 			return
 		}
+		a.appendTrace(record.trace, record, "worker_authorization_sent", nil)
 		record.enter(syncproto.AssignmentAuthorizing, a.now())
 		a.logger.Info("postflight.hostd.worker.authorization_sent",
 			"assignment_id", record.spec.AssignmentID, "member_id", record.spec.MemberID,
@@ -217,6 +294,9 @@ func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vm
 			}
 		}
 		if status.Phase == vm.PhaseReady {
+			a.appendTrace(record.trace, record, "job_hook_released", func(event *traceEvent) {
+				event.GenerationSet = generationSet(record)
+			})
 			record.enter(syncproto.AssignmentRunning, a.now())
 			a.logger.Info("postflight.hostd.customer_steps.released",
 				"assignment_id", record.spec.AssignmentID, "member_id", record.spec.MemberID,
@@ -232,10 +312,9 @@ func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vm
 
 func (a *Agent) finalizeExitedAssignment(ctx context.Context, record *assignment) {
 	if record.vmID != "" {
-		if err := a.vms.Destroy(ctx, vm.ID(record.vmID)); err != nil {
+		if !a.destroyAssignmentVM(ctx, record) {
 			return
 		}
-		record.vmID = ""
 	}
 	if record.spec.State != syncproto.DesiredAssignmentSeal {
 		return
@@ -249,6 +328,10 @@ func (a *Agent) finalizeExitedAssignment(ctx context.Context, record *assignment
 		record.enter(syncproto.AssignmentCompleted, a.now())
 		return
 	}
+	a.appendTrace(record.trace, record, "snapshot_seal_started", func(event *traceEvent) {
+		event.GenerationSet = generationSet(record)
+		event.Checkpoint = &traceCheckpoint{Digest: record.checkpoint.Digest, Version: record.checkpoint.Version}
+	})
 	set, err := a.zvols.SealSet(ctx, zvol.AssignmentID(record.spec.AssignmentID), zvol.GenerationID(record.spec.SealGeneration))
 	if err != nil {
 		record.reason = "snapshot skipped: " + err.Error()
@@ -256,6 +339,10 @@ func (a *Agent) finalizeExitedAssignment(ctx context.Context, record *assignment
 		return
 	}
 	record.sealGen = string(set.Workspace.Generation)
+	a.appendTrace(record.trace, record, "snapshot_seal_completed", func(event *traceEvent) {
+		event.GenerationSet = "workspace:" + string(set.Workspace.Generation) + ",tool:" + string(set.Tool.Generation) + ",process:" + string(set.Process.Generation)
+		event.Checkpoint = &traceCheckpoint{Digest: record.checkpoint.Digest, Version: record.checkpoint.Version}
+	})
 	record.enter(syncproto.AssignmentSealed, a.now())
 	a.metrics.SealedGenerations.Add(1)
 }
@@ -360,23 +447,33 @@ func (a *Agent) captureRestore(record *assignment, status vm.Status) {
 func (a *Agent) finishAssignment(ctx context.Context, record *assignment, status vm.Status) {
 	record.exit = status.ExitCode
 	a.captureRestore(record, status)
+	a.appendTrace(record.trace, record, "runner_exit_observed", func(event *traceEvent) {
+		event.GenerationSet = generationSet(record)
+	})
 	if !status.CustomerStepsReleased {
 		a.recycleAndRequeue(ctx, record, "runner exited before customer steps: "+status.FailureReason)
 		return
 	}
-	if status.ExitCode == 0 && record.device != "" {
+	if status.ExitCode == 0 && record.device != "" && record.checkpoint == nil && record.reason == "" {
+		a.appendTrace(record.trace, record, "checkpoint_started", func(event *traceEvent) {
+			event.GenerationSet = generationSet(record)
+		})
 		artifact, err := a.vms.Quiesce(ctx, status.ID)
+		a.appendOriginTiming(record.trace, record, artifact.Timing)
 		record.timing = mergeTiming(record.timing, artifact.Timing)
 		if err == nil {
 			record.checkpoint = &syncproto.CheckpointArtifact{Digest: artifact.Digest, Version: artifact.Version}
+			a.appendTrace(record.trace, record, "checkpoint_completed", func(event *traceEvent) {
+				event.GenerationSet = generationSet(record)
+				event.Checkpoint = &traceCheckpoint{Digest: artifact.Digest, Version: artifact.Version}
+			})
 		} else {
 			record.reason = "snapshot skipped: " + err.Error()
 		}
 	}
-	if err := a.vms.Destroy(ctx, status.ID); err != nil {
-		record.reason = "vm recycle pending: " + err.Error()
+	if !a.destroyAssignmentVM(ctx, record) {
+		return
 	}
-	record.vmID = ""
 	if record.exit == 0 && record.checkpoint != nil {
 		record.enter(syncproto.AssignmentExited, a.now())
 	} else {
@@ -385,29 +482,69 @@ func (a *Agent) finishAssignment(ctx context.Context, record *assignment, status
 }
 
 func (a *Agent) recycleAndRequeue(ctx context.Context, record *assignment, reason string) {
-	if record.vmID != "" {
-		_ = a.vms.Destroy(ctx, vm.ID(record.vmID))
-		record.vmID = ""
-	}
-	a.requeue(record, reason)
+	record.reason = reason
+	record.termination = syncproto.AssignmentRequeued
+	a.finishPendingTermination(ctx, record)
 }
 
 func (a *Agent) requeue(record *assignment, reason string) {
 	record.reason = reason
+	a.appendTrace(record.trace, record, "assignment_requeued", func(event *traceEvent) {
+		event.GenerationSet = generationSet(record)
+		event.FailureReason = reason
+		event.Restore = traceRestoreEvidence(record.restore)
+	})
 	record.enter(syncproto.AssignmentRequeued, a.now())
 	a.metrics.RequeuedAssignments.Add(1)
 	a.logger.Warn("postflight.hostd.assignment.requeued", "assignment_id", record.spec.AssignmentID, "member_id", record.spec.MemberID, "job_id", record.spec.JobID, "reason", reason)
 }
 
 func (a *Agent) failClosed(ctx context.Context, record *assignment, reason string) {
-	if record.vmID != "" {
-		_ = a.vms.Destroy(ctx, vm.ID(record.vmID))
-		record.vmID = ""
-	}
 	record.reason = reason
+	record.termination = syncproto.AssignmentFailedClosed
+	a.finishPendingTermination(ctx, record)
+}
+
+func (a *Agent) finishPendingTermination(ctx context.Context, record *assignment) {
+	if record.vmID != "" && !a.destroyAssignmentVM(ctx, record) {
+		return
+	}
+	pending := record.termination
+	record.termination = ""
+	switch pending {
+	case syncproto.AssignmentRequeued:
+		a.requeue(record, record.reason)
+	case syncproto.AssignmentFailedClosed:
+		a.markFailedClosed(record)
+	}
+}
+
+func (a *Agent) markFailedClosed(record *assignment) {
+	a.appendTrace(record.trace, record, "assignment_failed_closed", func(event *traceEvent) {
+		event.GenerationSet = generationSet(record)
+		event.FailureReason = record.reason
+		event.Restore = traceRestoreEvidence(record.restore)
+	})
 	record.enter(syncproto.AssignmentFailedClosed, a.now())
 	a.metrics.FailedClosedAssignments.Add(1)
-	a.logger.Error("postflight.hostd.assignment.failed_closed", "assignment_id", record.spec.AssignmentID, "member_id", record.spec.MemberID, "job_id", record.spec.JobID, "reason", reason)
+	a.logger.Error("postflight.hostd.assignment.failed_closed", "assignment_id", record.spec.AssignmentID, "member_id", record.spec.MemberID, "job_id", record.spec.JobID, "reason", record.reason)
+}
+
+func (a *Agent) destroyAssignmentVM(ctx context.Context, record *assignment) bool {
+	if record.vmID == "" {
+		return true
+	}
+	destroyedVMID := record.vmID
+	a.appendTrace(record.trace, record, "vm_destroy_started", nil)
+	if err := a.vms.Destroy(ctx, vm.ID(destroyedVMID)); err != nil {
+		a.logger.Error("destroying assignment vm", "assignment_id", record.spec.AssignmentID, "member_id", record.spec.MemberID, "vm", destroyedVMID, "err", err)
+		return false
+	}
+	record.vmID = ""
+	a.appendTrace(record.trace, record, "vm_destroy_completed", func(event *traceEvent) {
+		event.VMID = destroyedVMID
+	})
+	return true
 }
 
 const runnerWorkRoot = "/home/runner/_work"

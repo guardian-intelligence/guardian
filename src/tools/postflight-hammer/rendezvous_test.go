@@ -126,6 +126,13 @@ func validRendezvousTrace(warm, full bool) []rendezvousEvent {
 		case eventRendezvousDispatched, eventMountsReady:
 			b.events[index].GenerationSet = generationSetForTest(warm)
 			b.events[index].Volumes = bound
+			if b.events[index].Event == eventMountsReady {
+				if warm {
+					b.events[index].Restore = &restoreEvidence{Outcome: "restored"}
+				} else {
+					b.events[index].Restore = &restoreEvidence{Outcome: "not-requested"}
+				}
+			}
 		case eventClockChecked:
 			b.events[index].GenerationSet = generationSetForTest(warm)
 			b.events[index].Clock = &clockEvidence{
@@ -200,6 +207,56 @@ func TestValidWarmRendezvousAndCheckpointPasses(t *testing.T) {
 	}
 }
 
+func TestRecoverableProcessRestoreFallsBackColdWithoutDiscardingWorkspace(t *testing.T) {
+	events := validRendezvousTrace(true, false)
+	filtered := make([]rendezvousEvent, 0, len(events)+3)
+	for _, event := range events {
+		if event.Event == eventRestoreCRIUCompleted || event.Event == eventCRIURestoreCompleted {
+			continue
+		}
+		if event.Event == eventGenerationRestoreCompleted {
+			for _, name := range []string{
+				eventGenerationRestoreFailed, eventRestoreCleanupStarted, eventRestoreCleanupCompleted,
+				eventColdCapsuleStartStarted, eventColdCapsuleStartCompleted,
+			} {
+				inserted := event
+				inserted.Event = name
+				inserted.Restore = nil
+				filtered = append(filtered, inserted)
+			}
+		}
+		if event.Event == eventMountsReady {
+			event.Restore = &restoreEvidence{
+				Outcome: "cold-fallback", ProcessInvalidated: true,
+				FailureClass: "incompatible", FailureCode: "criu-rejected",
+			}
+		}
+		if event.Event == eventClockChecked {
+			event.Clock.AfterRestore = false
+		}
+		filtered = append(filtered, event)
+	}
+	resequenceTrace(filtered)
+	report := validateRendezvousTraceScope(filtered, true)
+	if !report.TraceValid || report.Outcome != outcomePass || report.WorkspaceMode != "warm" || report.ProcessMode != "cold-fallback" {
+		t.Fatalf("recoverable restore trace = %+v", report)
+	}
+	if report.RestoreFailureClass != "incompatible" || report.RestoreFailureCode != "criu-rejected" || report.DurationsNS["restore_cleanup"] <= 0 {
+		t.Fatalf("fallback evidence = %+v", report)
+	}
+}
+
+func resequenceTrace(events []rendezvousEvent) {
+	origin := map[string]uint64{}
+	for index := range events {
+		origin[events[index].Source]++
+		events[index].Seq = uint64(index + 1)
+		events[index].OriginSeq = origin[events[index].Source]
+		events[index].MonotonicNS = int64(origin[events[index].Source]) * int64(time.Millisecond)
+		events[index].WallTime = rendezvousT0.Add(time.Duration(index+1) * time.Millisecond)
+	}
+}
+
 func TestAdoptedWarmVMDoesNotRequireInMemoryLaunchTiming(t *testing.T) {
 	events := validRendezvousTrace(false, false)
 	filtered := events[:0]
@@ -253,7 +310,7 @@ func TestWorkspaceAndProcessMustBeOneGeneration(t *testing.T) {
 		}
 	}
 	report := validateRendezvousTraceScope(events, true)
-	if report.TraceValid || !containsDetail(report.Violations, "do not share one generation") {
+	if report.TraceValid || !containsDetail(report.Violations, "does not belong to the workspace generation") {
 		t.Fatalf("split generation passed: %+v", report)
 	}
 }
@@ -285,6 +342,30 @@ func TestClockSkewIsAConcernNotFailure(t *testing.T) {
 	report := validateRendezvousTraceScope(events, true)
 	if !report.TraceValid || report.Outcome != outcomeConcern || !containsDetail(report.Concerns, "clock_skew") {
 		t.Fatalf("clock concern = %+v", report)
+	}
+}
+
+func TestIntegrityRestoreFailureIsValidEvidenceForAnInvalidRun(t *testing.T) {
+	b := &traceBuilder{originSeq: map[string]uint64{}}
+	b.add(eventPoolReady, "hostd-agent").Platform = &platformEvidence{
+		QEMUVersion: "11.0.2", KernelRelease: "6.8.0", OSImageID: "ubuntu-24.04",
+		MachineType: "pc-q35-11.0", CPUModel: "EPYC-v4", CRIUVersion: "4.2",
+	}
+	b.add(eventAssignmentUpdateReceived, "hostd-agent")
+	failed := b.add(eventAssignmentFailedClosed, "hostd-agent")
+	failed.FailureReason = "checkpoint digest mismatch"
+	failed.Restore = &restoreEvidence{
+		Outcome: "unsafe", ProcessInvalidated: true,
+		FailureClass: "integrity", FailureCode: "artifact-digest",
+	}
+	report := validateRendezvousTraceScope(b.events, true)
+	if !report.TraceValid || report.Outcome != outcomeInvalid || report.RestoreOutcome != "unsafe" {
+		t.Fatalf("integrity failure trace = %+v", report)
+	}
+	b.add(eventCustomerStepsReleased, "guestd")
+	report = validateRendezvousTraceScope(b.events, true)
+	if report.TraceValid || !containsDetail(report.Violations, "released customer steps") {
+		t.Fatalf("fail-closed release passed: %+v", report)
 	}
 }
 

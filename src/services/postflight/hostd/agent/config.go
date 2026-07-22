@@ -32,6 +32,9 @@ type Config struct {
 	CheckoutGuestOrigin string
 	// CheckoutPath is the checkout endpoint's path prefix.
 	CheckoutPath string
+	// TraceDir receives one append-only JSONL trace per single-use runner.
+	// Empty disables the local evidence sink.
+	TraceDir string
 
 	Platform PlatformFingerprint
 }

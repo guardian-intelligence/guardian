@@ -266,6 +266,31 @@ func TestWarmPoolLocalAssignmentAndRecoverableRestoreEndToEnd(t *testing.T) {
 	waitFor(t, "two registered listeners", func() bool {
 		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening'`) == "2"
 	})
+	const sourceGeneration = "generation-source"
+	const sourceProcessDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	scopeID, err := (&pgStore{pool: control.pool}).EnsureWorkspaceScope(context.Background(), workspaceScopeKey{
+		Org: "acme", Repo: "widget", ScopeRef: "main", WorkflowPath: ".github/workflows/ci.yml",
+		JobName: "build", RunnerClass: e2eClass,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(context.Background(), `UPDATE github_provider_demands SET workspace_scope_id = $2::uuid WHERE provider_job_id = $1`, e2eJobID, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(context.Background(), `
+INSERT INTO workspace_generations (
+    generation, host_id, runner_class, state, scope_id, process_digest, criu_version,
+    sealed_at
+) VALUES ($1, 'host-e2e', $2, 'committed', $3::uuid, $4, 'Version: 4.2', now())`, sourceGeneration, e2eClass, scopeID, sourceProcessDigest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(context.Background(), `
+UPDATE workspace_scopes SET current_generation_id = $1, home_host_id = 'host-e2e'
+WHERE scope_id = $2::uuid`, sourceGeneration, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	volumes.SeedGeneration(sourceGeneration, 1<<30)
 	statuses, err := vms.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -342,6 +367,12 @@ func TestWarmPoolLocalAssignmentAndRecoverableRestoreEndToEnd(t *testing.T) {
 	if got := queryString(t, control.pool, `SELECT restore_outcome || ':' || process_invalidated::text FROM runner_job_assignments WHERE assignment_id::text = $1`, rendezvous.AssignmentID); got != "cold-fallback:true" {
 		t.Fatalf("restore telemetry = %q", got)
 	}
+	if got := queryString(t, control.pool, `SELECT process_valid::text || ':' || process_invalidation_class || ':' || process_invalidation_code FROM workspace_generations WHERE generation = $1`, sourceGeneration); got != "false:incompatible:criu-rejected" {
+		t.Fatalf("source process invalidation = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT source_process_digest FROM runner_job_assignments WHERE assignment_id::text = $1`, rendezvous.AssignmentID); got != sourceProcessDigest {
+		t.Fatalf("immutable assignment lost selected process digest = %q", got)
+	}
 	if got := queryString(t, control.pool, `SELECT timing_json->0->>'event' FROM runner_job_assignments WHERE assignment_id::text = $1`, rendezvous.AssignmentID); got != "runner_assignment_received" {
 		t.Fatalf("assignment timing = %q", got)
 	}
@@ -355,6 +386,80 @@ func TestWarmPoolLocalAssignmentAndRecoverableRestoreEndToEnd(t *testing.T) {
 	waitFor(t, "assignment volume cleanup", func() bool {
 		return !volumes.HasWorkspace(zvol.AssignmentID(rendezvous.AssignmentID))
 	})
+
+	const retryJobID = int64(9002)
+	const retryCheckRunID = int64(8002)
+	if _, err := control.pool.Exec(context.Background(), `
+INSERT INTO github_workflow_jobs (
+    provider_job_id, provider_run_id, provider_run_attempt,
+    provider_repository_id, provider_installation_id, repository_full_name,
+    name, status, labels_json, runner_class, head_branch, check_run_id
+) VALUES ($1, 778, 1, $2, $3, $4, 'build', 'queued', $5::jsonb, $6, 'main', $7)`,
+		retryJobID, e2eRepositoryID, e2eInstallationID, e2eRepo,
+		`["`+e2eClass+`"]`, e2eClass, retryCheckRunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(context.Background(), `
+INSERT INTO github_provider_demands (
+    provider_job_id, provider_installation_id, provider_repository_id,
+    repository_full_name, provider_run_id, provider_run_attempt,
+    trust_class, runner_class, workspace_scope_id, state
+) VALUES ($1, $2, $3, $4, 778, 1, $5, $6, $7::uuid, 'demand_recorded')`,
+		retryJobID, e2eInstallationID, e2eRepositoryID, e2eRepo,
+		trustClassPR, e2eClass, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&pgStore{pool: control.pool}).EnsureJobIntents(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "replacement listeners", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening'`) == "2"
+	})
+	statuses, err = vms.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retryMember vm.Status
+	for _, status := range statuses {
+		if status.Phase == vm.PhaseListening {
+			retryMember = status
+			break
+		}
+	}
+	retryRunner := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, retryMember.Incarnation)
+	if !vms.MarkAssigned(retryMember.ID, vm.Assignment{
+		RequestID: "request-9002", JobID: "protocol-job-9002", CheckRunID: retryCheckRunID,
+		RunnerName: retryRunner, JobDisplayName: "build",
+		Identity: vm.JobIdentity{
+			RunID: "778", RunAttempt: 1, RunnerName: retryRunner,
+			Repository: e2eRepo, WorkflowJob: "build",
+		},
+	}) {
+		t.Fatal("replacement listener did not accept assignment")
+	}
+	var retryRendezvous vm.Rendezvous
+	waitFor(t, "workspace-warm process-cold rendezvous", func() bool {
+		var found bool
+		retryRendezvous, found = vms.RendezvousFor(retryMember.ID)
+		return found
+	})
+	if retryRendezvous.CheckpointDigest != "" || retryRendezvous.CheckpointVersion != "" {
+		t.Fatalf("invalidated process artifact was selected again: %+v", retryRendezvous)
+	}
+	_, workspaces, err := volumes.Inventory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retriedWorkspace zvol.WorkspaceVolume
+	for _, workspace := range workspaces {
+		if strings.HasSuffix(workspace.Name, "/ws/"+retryRendezvous.AssignmentID) {
+			retriedWorkspace = workspace
+			break
+		}
+	}
+	if retriedWorkspace.Source != zvol.GenerationID(sourceGeneration) {
+		t.Fatalf("valid workspace cache was discarded with process image: %+v", retriedWorkspace)
+	}
 }
 
 func TestIntegrityFailureFailsClosedAndRefillsPool(t *testing.T) {

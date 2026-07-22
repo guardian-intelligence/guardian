@@ -24,6 +24,9 @@ func validateMember(spec syncproto.DesiredPoolMember) error {
 	if spec.VMID == "" || spec.RunnerClass == "" || spec.RunnerName == "" {
 		return errors.New("member VM, class, and runner name are required")
 	}
+	if err := zvol.ValidateName("runner", spec.RunnerName); err != nil {
+		return err
+	}
 	if spec.State != syncproto.DesiredMemberListen && spec.State != syncproto.DesiredMemberRecycle {
 		return fmt.Errorf("unknown member state %q", spec.State)
 	}
@@ -109,7 +112,23 @@ func (a *Agent) applyDesired(response syncproto.SyncResponse) {
 		desiredAssignments[spec.AssignmentID] = spec
 		record := a.assignments[spec.AssignmentID]
 		if record == nil {
-			a.assignments[spec.AssignmentID] = &assignment{spec: spec, state: syncproto.AssignmentObserved, since: a.now()}
+			point := a.timing.Point("assignment_update_received")
+			record = &assignment{
+				spec: spec, state: syncproto.AssignmentObserved, since: a.now(),
+				updateTiming: vm.TimingPoint{
+					Event: point.Event, Source: point.Source, BootID: point.BootID,
+					Sequence: point.Sequence, MonotonicNS: point.MonotonicNS, UnixNS: point.UnixNS,
+				},
+			}
+			if member, ok := members[spec.MemberID]; ok {
+				trace, err := a.traceFor(spec.MemberID, member.RunnerName, member.VMID)
+				if err != nil {
+					a.logger.Error("opening assignment evidence", "assignment_id", spec.AssignmentID, "member_id", spec.MemberID, "err", err)
+				} else {
+					record.trace = trace
+				}
+			}
+			a.assignments[spec.AssignmentID] = record
 			continue
 		}
 		if !sameImmutableAssignment(record.spec, spec) {

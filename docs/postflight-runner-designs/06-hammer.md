@@ -36,30 +36,32 @@ host, guest, and GitHub.
 1. `pool_ready`: the QEMU VM is running and its generic runner is listening.
    It names only the pool-member incarnation, runner, and VM; it carries no
    run, assignment, or customer volume.
-2. `assignment_observed`: the local listener publishes GitHub's check-run,
-   request, protocol-job, run-attempt, and runner identity. The trace now
-   names the selected member and immutable assignment separately.
-3. `job_hook_blocked`: the synchronous job-start hook holds the runner before
-   any customer step.
-4. `job_identity_reported`: the hook reports runner, job, and repository
-   identity to the host.
-5. `generation_resolved`: the control plane resolves one immutable workspace,
-   toolchain, data, and optional memory snapshot tuple for that exact job.
-6. `rendezvous_bound`: the host atomically hot-binds the generation set's
-   workspace and optional toolchain, data, and memory zvols to that exact
-   QEMU VM.
-7. `mounts_ready` and `clock_checked`: guestd mounts and verifies every
+2. `runner_assignment_received` through `assignment_update_received` and
+   `assignment_observed`: the local listener publishes GitHub's check-run,
+   request, protocol-job, run-attempt, and runner identity; the control plane
+   returns the immutable assignment for that selected member.
+3. `generation_materialization_started` and `generation_resolved`: hostd
+   materializes the immutable workspace/tool/process tuple for that exact job.
+4. `rendezvous_dispatched`: the host hot-binds all three zvols to the already
+   selected QEMU VM.
+5. `mounts_ready` and `clock_checked`: guestd mounts and verifies every
    resolved device by its stable serial, then records a bounded host/guest
-   realtime sample after memory restore when applicable.
-8. `job_hook_released`: only now may the Actions runner execute the job.
+   realtime sample after process restore when applicable.
+6. `worker_authorization_sent`, `job_hook_validated`, and
+   `job_hook_released`: only now may the Actions runner execute customer code.
 
 The validator rejects a changed job, check-run, run attempt, runner, member,
 assignment, VM, or generation-set identity,
 a pool VM that already knows customer identity or carries customer volumes,
 a workspace dataset that does not belong to the assignment,
 a bound or mounted tuple that differs from the resolved snapshots, a missing
-workspace, a memory snapshot without its workspace, duplicate volume roles,
-and hook release before mounts and post-restore clock evidence. Deterministic
+workspace, a process snapshot from another workspace generation, duplicate
+volume roles, and hook release before mounts and post-restore clock evidence. A
+valid trace separately classifies workspace materialization (`cold`/`warm`) and
+process execution (`cold`/`restored`/`cold-fallback`). A recoverable process
+failure must prove failure, capsule cleanup, process invalidation, and cold
+capsule start; an integrity or unprovable-cleanup failure must prove fail-closed
+recycling. Deterministic
 assignment means accepting GitHub's local runner selection and joining the
 encrypted message's check-run ID to provider truth; labels and display names
 never choose a job.
@@ -74,9 +76,10 @@ Snapshot creation is a candidate protocol, separate from promotion:
   explicit benchmark seed, after the runner exits successfully;
 - Actions runner memory is prohibited. Only explicitly allowlisted build
   daemons may be captured;
-- durable filesystems are quiesced before their snapshots and the process
-  image and every volume in the bound generation set share one manifest
-  identity;
+- durable filesystems are quiesced before their snapshots and a newly sealed
+  workspace, tool, and process image share one manifest identity. If an older
+  process image is invalidated, later assignments may retain its workspace/tool
+  generation while starting with an empty process component;
 - the candidate is promoted only after GitHub reports attempt-scoped success.
   Every ambiguity or non-success conclusion discards it.
 

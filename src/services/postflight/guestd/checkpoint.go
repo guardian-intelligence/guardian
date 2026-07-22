@@ -27,9 +27,9 @@ type CapsuleLifecycle interface {
 }
 
 type ProcessCheckpoints struct {
-	Capsules   CapsuleLifecycle
-	CRIU       CRIU
-	ImagesRoot string
+	Capsules        CapsuleLifecycle
+	CRIU            CRIU
+	ImagesRoot      string
 	RecoveryTimeout time.Duration
 }
 
@@ -75,6 +75,7 @@ func (p ProcessCheckpoints) RestoreOrCold(ctx context.Context, imagesDir, expect
 		return ProcessRestoreResult{Restored: true}, nil
 	}
 	class, code := generation.RestoreFailureDetails(restoreErr)
+	observeCheckpoint(observer, "generation_restore_failed")
 	timeout := p.RecoveryTimeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -89,11 +90,11 @@ func (p ProcessCheckpoints) RestoreOrCold(ctx context.Context, imagesDir, expect
 	if class != generation.RestoreIncompatible {
 		return ProcessRestoreResult{}, restoreErr
 	}
-	observeCheckpoint(observer, "restore_fallback_started")
+	observeCheckpoint(observer, "cold_capsule_start_started")
 	if err := p.Capsules.Start(recoveryCtx); err != nil {
 		return ProcessRestoreResult{}, generation.NewRestoreFailure(generation.RestoreCleanup, "cold-capsule-start", errors.Join(restoreErr, err))
 	}
-	observeCheckpoint(observer, "restore_fallback_completed")
+	observeCheckpoint(observer, "cold_capsule_start_completed")
 	return ProcessRestoreResult{
 		ColdFallback: true, ProcessInvalidated: true,
 		FailureClass: class, FailureCode: code,

@@ -49,11 +49,14 @@ const (
 	eventRestoreDigestCompleted            = "restore_digest_completed"
 	eventRestoreCRIUStarted                = "restore_criu_started"
 	eventRestoreCRIUCompleted              = "restore_criu_completed"
+	eventRestoreCleanupStarted             = "restore_cleanup_started"
+	eventRestoreCleanupCompleted           = "restore_cleanup_completed"
 	eventCRIURestoreCompleted              = "criu_restore_completed"
 	eventColdCapsuleStartStarted           = "cold_capsule_start_started"
 	eventColdCapsuleStartCompleted         = "cold_capsule_start_completed"
 	eventGenerationRestoreCompleted        = "generation_restore_completed"
 	eventGenerationRestoreFailed           = "generation_restore_failed"
+	eventGenerationRecycleRequired         = "generation_recycle_required"
 	eventMountsReady                       = "mounts_ready"
 	eventClockChecked                      = "clock_checked"
 	eventWorkerAuthorizationSent           = "worker_authorization_sent"
@@ -122,10 +125,12 @@ var allowedTraceEvents = map[string]bool{
 	eventRestoreVersionStarted: true, eventRestoreVersionCompleted: true,
 	eventRestoreDigestStarted: true, eventRestoreDigestCompleted: true,
 	eventRestoreCRIUStarted: true, eventRestoreCRIUCompleted: true,
+	eventRestoreCleanupStarted: true, eventRestoreCleanupCompleted: true,
 	eventColdCapsuleStartStarted: true, eventColdCapsuleStartCompleted: true,
 	eventGenerationRestoreCompleted: true, eventGenerationRestoreFailed: true,
-	eventMountsReady:  true,
-	eventClockChecked: true, eventWorkerAuthorizationSent: true,
+	eventGenerationRecycleRequired: true,
+	eventMountsReady:               true,
+	eventClockChecked:              true, eventWorkerAuthorizationSent: true,
 	eventRunnerWorkerReleased: true, eventRunnerWorkerGateEntered: true,
 	eventRunnerWorkerGateCompleted: true, eventRunnerWorkerExecStarted: true,
 	eventRunnerWorkerExecFailed: true, eventJobHookValidated: true,
@@ -202,6 +207,7 @@ type rendezvousEvent struct {
 	Platform       *platformEvidence       `json:"platform,omitempty"`
 	Clock          *clockEvidence          `json:"clock,omitempty"`
 	Checkpoint     *checkpointEvidence     `json:"checkpoint,omitempty"`
+	Restore        *restoreEvidence        `json:"restore,omitempty"`
 	Issue          *issueEvidence          `json:"issue,omitempty"`
 	Classification *classificationEvidence `json:"classification,omitempty"`
 }
@@ -239,6 +245,13 @@ type checkpointEvidence struct {
 	Version string `json:"version"`
 }
 
+type restoreEvidence struct {
+	Outcome            string `json:"outcome"`
+	ProcessInvalidated bool   `json:"process_invalidated,omitempty"`
+	FailureClass       string `json:"failure_class,omitempty"`
+	FailureCode        string `json:"failure_code,omitempty"`
+}
+
 type issueEvidence struct {
 	Code   string `json:"code"`
 	Detail string `json:"detail"`
@@ -253,26 +266,31 @@ type classificationEvidence struct {
 }
 
 type rendezvousTraceReport struct {
-	SchemaVersion    int              `json:"schema_version"`
-	RunID            string           `json:"run_id"`
-	Repo             string           `json:"repo,omitempty"`
-	Lane             string           `json:"lane,omitempty"`
-	JobID            int64            `json:"job_id,omitempty"`
-	RunAttempt       int              `json:"run_attempt,omitempty"`
-	RunnerName       string           `json:"runner_name,omitempty"`
-	VMID             string           `json:"vm_id,omitempty"`
-	GenerationSet    string           `json:"generation_set,omitempty"`
-	MemberID         string           `json:"member_id,omitempty"`
-	AssignmentID     string           `json:"assignment_id,omitempty"`
-	CheckRunID       int64            `json:"check_run_id,omitempty"`
-	RestoreMode      string           `json:"restore_mode,omitempty"`
-	Events           int              `json:"events"`
-	DurationsNS      map[string]int64 `json:"durations_ns,omitempty"`
-	ClockSkewBoundNS int64            `json:"clock_skew_bound_ns,omitempty"`
-	Outcome          benchmarkOutcome `json:"outcome"`
-	TraceValid       bool             `json:"trace_valid"`
-	Violations       []string         `json:"violations,omitempty"`
-	Concerns         []string         `json:"concerns,omitempty"`
+	SchemaVersion       int              `json:"schema_version"`
+	RunID               string           `json:"run_id"`
+	Repo                string           `json:"repo,omitempty"`
+	Lane                string           `json:"lane,omitempty"`
+	JobID               int64            `json:"job_id,omitempty"`
+	RunAttempt          int              `json:"run_attempt,omitempty"`
+	RunnerName          string           `json:"runner_name,omitempty"`
+	VMID                string           `json:"vm_id,omitempty"`
+	GenerationSet       string           `json:"generation_set,omitempty"`
+	MemberID            string           `json:"member_id,omitempty"`
+	AssignmentID        string           `json:"assignment_id,omitempty"`
+	CheckRunID          int64            `json:"check_run_id,omitempty"`
+	WorkspaceMode       string           `json:"workspace_mode,omitempty"`
+	ProcessMode         string           `json:"process_mode,omitempty"`
+	RestoreMode         string           `json:"restore_mode,omitempty"`
+	RestoreOutcome      string           `json:"restore_outcome,omitempty"`
+	RestoreFailureClass string           `json:"restore_failure_class,omitempty"`
+	RestoreFailureCode  string           `json:"restore_failure_code,omitempty"`
+	Events              int              `json:"events"`
+	DurationsNS         map[string]int64 `json:"durations_ns,omitempty"`
+	ClockSkewBoundNS    int64            `json:"clock_skew_bound_ns,omitempty"`
+	Outcome             benchmarkOutcome `json:"outcome"`
+	TraceValid          bool             `json:"trace_valid"`
+	Violations          []string         `json:"violations,omitempty"`
+	Concerns            []string         `json:"concerns,omitempty"`
 }
 
 func readRendezvousTrace(r io.Reader) ([]rendezvousEvent, error) {
@@ -320,6 +338,7 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 	var resolvedVolumes, boundVolumes []volumeEvidence
 	var platform *platformEvidence
 	var checkpoint *checkpointEvidence
+	var restore *restoreEvidence
 	var explicit *classificationEvidence
 
 	violate := func(format string, args ...any) {
@@ -367,6 +386,14 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 			validateUnownedBootstrap(*event, violate)
 		}
 		mergeTraceIdentity(report, *event, preAssignmentEvents[event.Event], violate)
+		if event.Restore != nil {
+			if restore == nil {
+				copy := *event.Restore
+				restore = &copy
+			} else if *restore != *event.Restore {
+				violate("event %s changes restore evidence", event.Event)
+			}
+		}
 
 		switch event.Event {
 		case eventPoolReady:
@@ -391,6 +418,14 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 		case eventMountsReady:
 			validateVolumes(event.Volumes, platform, true, event.AssignmentID, violate)
 			compareVolumes(event.Event, boundVolumes, event.Volumes, violate)
+			if event.Restore == nil {
+				violate("mounts_ready requires process restore evidence")
+			}
+		case eventAssignmentRequeued, eventAssignmentFailedClosed:
+			validateExactAssignment(*event, violate)
+			if event.FailureReason == "" {
+				violate("%s requires failure_reason", event.Event)
+			}
 		case eventCheckpointCompleted, eventSnapshotSealStarted, eventSnapshotSealCompleted:
 			validateCheckpoint(event.Event, event.Checkpoint, violate)
 			if checkpoint == nil {
@@ -416,15 +451,69 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 		}
 	}
 
-	if len(boundVolumes) == 3 {
-		if boundVolumes[0].Materialization == "clone" {
-			report.RestoreMode = "warm"
-		} else if boundVolumes[0].Materialization == "empty" {
-			report.RestoreMode = "cold"
+	if workspace, ok := volumeForRole(boundVolumes, volumeWorkspace); ok {
+		switch workspace.Materialization {
+		case "clone":
+			report.WorkspaceMode = "warm"
+		case "empty":
+			report.WorkspaceMode = "cold"
+		}
+	}
+	switch {
+	case seen[eventCRIURestoreCompleted] != nil:
+		report.ProcessMode, report.RestoreMode = "restored", "warm"
+	case seen[eventCRIURestoreStarted] != nil && seen[eventGenerationRestoreFailed] != nil && seen[eventColdCapsuleStartCompleted] != nil:
+		report.ProcessMode, report.RestoreMode = "cold-fallback", "cold-fallback"
+	case seen[eventCRIURestoreStarted] == nil && seen[eventColdCapsuleStartCompleted] != nil:
+		report.ProcessMode, report.RestoreMode = "cold", "cold"
+	}
+	if seen[eventCRIURestoreStarted] != nil && seen[eventCRIURestoreCompleted] == nil && seen[eventGenerationRestoreFailed] == nil {
+		violate("process restore has neither %s nor %s", eventCRIURestoreCompleted, eventGenerationRestoreFailed)
+	}
+	if restore != nil {
+		report.RestoreOutcome = restore.Outcome
+		report.RestoreFailureClass = restore.FailureClass
+		report.RestoreFailureCode = restore.FailureCode
+		validateRestoreEvidence(report.ProcessMode, restore, violate)
+	}
+	if process, ok := volumeForRole(boundVolumes, volumeProcess); ok {
+		switch report.ProcessMode {
+		case "restored", "cold-fallback":
+			if process.Materialization != "clone" {
+				violate("%s process mode requires a cloned process volume", report.ProcessMode)
+			}
+		case "cold":
+			if process.Materialization != "empty" {
+				violate("cold process mode requires an empty process volume")
+			}
 		}
 	}
 	if clock := seen[eventClockChecked]; clock != nil {
-		report.ClockSkewBoundNS = validateClock(clock.Clock, report.RestoreMode == "warm", concern, violate)
+		report.ClockSkewBoundNS = validateClock(clock.Clock, report.ProcessMode == "restored", concern, violate)
+	}
+
+	terminalFailure := seen[eventAssignmentRequeued]
+	if failedClosed := seen[eventAssignmentFailedClosed]; failedClosed != nil {
+		terminalFailure = failedClosed
+		if seen[eventCustomerStepsReleased] != nil {
+			violate("failed-closed assignment released customer steps")
+		}
+	}
+	if terminalFailure != nil {
+		for _, name := range []string{eventPoolReady, eventAssignmentUpdateReceived} {
+			if seen[name] == nil {
+				violate("terminal assignment trace is missing %s", name)
+			}
+		}
+		deriveDurations(report.DurationsNS, seen)
+		if len(report.DurationsNS) == 0 {
+			report.DurationsNS = nil
+		}
+		report.Outcome = outcomeInvalid
+		if len(report.Violations) > 0 {
+			report.TraceValid = false
+		}
+		return report
 	}
 
 	if explicit == nil || explicit.Outcome == outcomePass || explicit.Outcome == outcomeConcern {
@@ -444,7 +533,7 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 			eventRunnerWorkerExecStarted,
 			eventJobHookValidated, eventCustomerStepsReleased, eventJobHookReleased,
 		}
-		switch report.RestoreMode {
+		switch report.ProcessMode {
 		case "cold":
 			required = append(required, eventColdCapsuleStartStarted, eventColdCapsuleStartCompleted)
 			for _, forbidden := range []string{eventCRIURestoreStarted, eventCRIURestoreCompleted} {
@@ -452,15 +541,27 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 					violate("cold rendezvous unexpectedly contains %s", forbidden)
 				}
 			}
-		case "warm":
+		case "restored":
 			required = append(required, eventCRIURestoreStarted, eventCRIURestoreCompleted)
 			for _, forbidden := range []string{eventColdCapsuleStartStarted, eventColdCapsuleStartCompleted} {
 				if seen[forbidden] != nil {
 					violate("warm rendezvous unexpectedly contains %s", forbidden)
 				}
 			}
+		case "cold-fallback":
+			required = append(required,
+				eventCRIURestoreStarted, eventGenerationRestoreFailed,
+				eventRestoreCleanupStarted, eventRestoreCleanupCompleted,
+				eventColdCapsuleStartStarted, eventColdCapsuleStartCompleted,
+			)
+			if seen[eventCRIURestoreCompleted] != nil {
+				violate("cold fallback unexpectedly contains %s", eventCRIURestoreCompleted)
+			}
 		default:
-			violate("rendezvous does not prove a complete cold or warm generation")
+			violate("rendezvous does not prove a complete cold, restored, or cold-fallback process capsule")
+		}
+		if report.WorkspaceMode != "cold" && report.WorkspaceMode != "warm" {
+			violate("rendezvous does not prove workspace materialization")
 		}
 		if !throughRelease {
 			required = append(required,
@@ -660,14 +761,53 @@ func validateVolumes(volumes []volumeEvidence, platform *platformEvidence, requi
 		violate("rendezvous must contain exactly one workspace, tool, and process volume")
 		return
 	}
-	if workspace.Materialization != tool.Materialization || workspace.Materialization != process.Materialization {
-		violate("workspace, tool, and process volumes have different materialization modes")
+	if workspace.Materialization != tool.Materialization {
+		violate("workspace and tool volumes have different materialization modes")
 	}
-	if workspace.Materialization == "clone" && (workspace.Generation != tool.Generation || workspace.Generation != process.Generation) {
-		violate("workspace, tool, and process volumes do not share one generation")
+	if workspace.Materialization == "clone" && workspace.Generation != tool.Generation {
+		violate("workspace and tool volumes do not share one generation")
 	}
-	if workspace.Materialization == "clone" && (platform == nil || platform.CRIUVersion == "") {
-		violate("warm rendezvous has no CRIU version in the platform fingerprint")
+	if process.Materialization == "clone" && (workspace.Materialization != "clone" || workspace.Generation != process.Generation) {
+		violate("cloned process volume does not belong to the workspace generation")
+	}
+	if process.Materialization == "clone" && (platform == nil || platform.CRIUVersion == "") {
+		violate("process restore has no CRIU version in the platform fingerprint")
+	}
+}
+
+func volumeForRole(volumes []volumeEvidence, role string) (volumeEvidence, bool) {
+	for _, volume := range volumes {
+		if volume.Role == role {
+			return volume, true
+		}
+	}
+	return volumeEvidence{}, false
+}
+
+func validateRestoreEvidence(processMode string, restore *restoreEvidence, violate func(string, ...any)) {
+	if restore == nil {
+		return
+	}
+	switch processMode {
+	case "restored":
+		if restore.Outcome != "restored" || restore.ProcessInvalidated || restore.FailureClass != "" || restore.FailureCode != "" {
+			violate("successful process restore carries inconsistent restore evidence")
+		}
+	case "cold-fallback":
+		if restore.Outcome != "cold-fallback" || !restore.ProcessInvalidated || restore.FailureClass != "incompatible" || restore.FailureCode == "" {
+			violate("cold process fallback lacks incompatible, invalidated restore evidence")
+		}
+	case "cold":
+		if restore.Outcome != "not-requested" || restore.ProcessInvalidated || restore.FailureClass != "" || restore.FailureCode != "" {
+			violate("cold process start carries inconsistent restore evidence")
+		}
+	case "":
+		if restore.Outcome != "unsafe" {
+			violate("incomplete process lifecycle carries unexpected restore outcome %q", restore.Outcome)
+		} else if !restore.ProcessInvalidated ||
+			(restore.FailureClass != "integrity" && restore.FailureClass != "cleanup") || restore.FailureCode == "" {
+			violate("unsafe process restore lacks fail-closed invalidation evidence")
+		}
 	}
 }
 
@@ -778,6 +918,7 @@ func deriveDurations(out map[string]int64, seen map[string]*rendezvousEvent) {
 		"restore_version_validation":         {eventRestoreVersionStarted, eventRestoreVersionCompleted},
 		"restore_digest_validation":          {eventRestoreDigestStarted, eventRestoreDigestCompleted},
 		"restore_criu":                       {eventRestoreCRIUStarted, eventRestoreCRIUCompleted},
+		"restore_cleanup":                    {eventRestoreCleanupStarted, eventRestoreCleanupCompleted},
 		"cold_capsule_start":                 {eventColdCapsuleStartStarted, eventColdCapsuleStartCompleted},
 		"assignment_publication":             {eventGuestAssignmentReceived, eventGuestAssignmentPublished},
 		"assignment_to_worker_authorization": {eventAssignmentObserved, eventWorkerAuthorizationSent},
