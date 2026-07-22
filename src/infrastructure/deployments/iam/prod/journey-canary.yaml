@@ -40,7 +40,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: browser
-              image: ghcr.io/guardian-intelligence/canary-journeys@sha256:4bbf4f176bf850fb7fdcfe49eb12bcbdbd6fb2d17e4300675d06d539c04f7214
+              image: ghcr.io/guardian-intelligence/canary-journeys@sha256:8805b71aa06ce4608015d420f11c346a1de31ab4fb7843ca72f4ae13e9efcddf
               imagePullPolicy: IfNotPresent
               env:
                 # Browser-launch stderr into the pod log while the shadow
