@@ -134,6 +134,69 @@ func assignVM(t *testing.T, vms *vm.Fake, member syncproto.DesiredPoolMember, sp
 	}
 }
 
+func TestImageRolloutReplacesRegisteredIdleListener(t *testing.T) {
+	a, vms, _ := newTestAgent(t, 1)
+	members := poolMembers(t, a, vms, 1)
+	oldID := vm.ID(members[0].VMID)
+	a.cfg.Images[testRunnerClass] = "golden-v2"
+	vms.Images[testRunnerClass] = "golden-v2"
+
+	a.Tick(context.Background())
+	statuses, err := vms.List(context.Background())
+	if err != nil || len(statuses) != 1 {
+		t.Fatalf("replacement pool = %+v, %v", statuses, err)
+	}
+	if statuses[0].ID == oldID || statuses[0].Image != "golden-v2" || statuses[0].Phase != vm.PhaseBooting || statuses[0].MemberID != "" {
+		t.Fatalf("replacement = %+v, old VM = %s", statuses[0], oldID)
+	}
+	destroy, launch := -1, -1
+	for index, entry := range vms.Journal {
+		if entry == "destroy "+string(oldID) {
+			destroy = index
+		}
+		if strings.HasPrefix(entry, "launch "+string(statuses[0].ID)+" ") {
+			launch = index
+		}
+	}
+	if destroy < 0 || launch <= destroy {
+		t.Fatalf("replacement did not destroy then refill: %v", vms.Journal)
+	}
+}
+
+func TestImageRolloutPreservesDurablyAssignedListener(t *testing.T) {
+	a, vms, _ := newTestAgent(t, 1)
+	members := poolMembers(t, a, vms, 1)
+	oldID := vm.ID(members[0].VMID)
+	spec := assignmentSpec(0, members[0])
+	a.HandleSync(syncproto.SyncResponse{
+		BootID: a.bootID, Members: members, Assignments: []syncproto.DesiredAssignment{spec},
+		PoolTargets: map[string]int{string(testRunnerClass): 1},
+	})
+	a.cfg.Images[testRunnerClass] = "golden-v2"
+	vms.Images[testRunnerClass] = "golden-v2"
+
+	a.Tick(context.Background())
+	statuses, err := vms.List(context.Background())
+	if err != nil || len(statuses) != 1 || statuses[0].ID != oldID || statuses[0].Image != "golden" {
+		t.Fatalf("assigned listener was replaced during rollout: %+v, %v", statuses, err)
+	}
+}
+
+func TestImageRolloutPreservesLocallyAssignedListenerBeforeSync(t *testing.T) {
+	a, vms, _ := newTestAgent(t, 1)
+	members := poolMembers(t, a, vms, 1)
+	oldID := vm.ID(members[0].VMID)
+	assignVM(t, vms, members[0], assignmentSpec(0, members[0]))
+	a.cfg.Images[testRunnerClass] = "golden-v2"
+	vms.Images[testRunnerClass] = "golden-v2"
+
+	a.Tick(context.Background())
+	statuses, err := vms.List(context.Background())
+	if err != nil || len(statuses) != 1 || statuses[0].ID != oldID || statuses[0].Image != "golden" || statuses[0].Assignment.RequestID == "" {
+		t.Fatalf("locally assigned listener was replaced during rollout: %+v, %v", statuses, err)
+	}
+}
+
 func TestSixListeningMembersBindConcurrentJobsExactly(t *testing.T) {
 	a, vms, volumes := newTestAgent(t, 6)
 	members := poolMembers(t, a, vms, 6)
