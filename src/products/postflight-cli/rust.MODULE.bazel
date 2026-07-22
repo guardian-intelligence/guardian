@@ -1,7 +1,9 @@
 # Rust toolchain + crate dependencies for the postflight CLI. Rust in this
-# repo is pinned to the latest stable and built pure-Rust (rustls, no C
-# linkage); crate resolution is driven by the package's Cargo.{toml,lock} so
-# Renovate proposes bumps through the standard cargo manager.
+# repo is pinned to the latest stable with no C interop in our code (the one
+# sanctioned exception is vendored, statically-built crypto inside rustls's
+# ring backend); crate resolution is driven by the package's Cargo.{toml,lock}
+# so Renovate proposes bumps through the standard cargo manager. The version
+# here is kept in lockstep with rust-toolchain.toml by toolchain_lockstep_test.
 bazel_dep(name = "rules_rust", version = "0.71.3")
 
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
