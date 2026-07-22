@@ -20,6 +20,8 @@ spec:
       app.kubernetes.io/name: postflight-controlplane
   template:
     metadata:
+      annotations:
+        guardian.dev/hostd-sync-generation: "2"
       labels:
         # app.kubernetes.io/name is load-bearing: the CiliumNetworkPolicy and
         # the tenant-root ingress-egress pair in networkpolicy.yaml select
