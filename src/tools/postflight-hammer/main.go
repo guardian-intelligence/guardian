@@ -69,10 +69,12 @@ Reading the report:
     in hostd's own GC and simulation tests.
   - Pickup segments marked * are watch observations at poll resolution; unmarked
     boundaries are authoritative timestamps from the ledger, assignment rows, and GitHub.
-  - validate-rendezvous consumes the host/guest/runner JSONL evidence stream. The first
-    six logical events are pool_ready, assignment_observed, job_hook_blocked,
-    job_identity_reported, generation_resolved, and rendezvous_bound. Step 6 is the
-    atomic zvol-to-QEMU binding; no customer volume may be present on pool_ready.
+  - validate-rendezvous consumes the host/guest/runner JSONL evidence stream. Its
+    assignment ladder proves pool_ready, the local Runner.Listener observation,
+    the immutable control-plane assignment, generation materialization,
+    zvol-to-QEMU rendezvous, guest mount/restore/clock checks, and Worker release.
+    No customer identity or volume may be present at pool_ready. Workspace warmth
+    and process restoration are classified independently.
 
 State: every subcommand shares one state file (-state, default ./postflight-hammer.json).
 Patterns accumulate into it; delete it (or point elsewhere) to start a fresh battery.
