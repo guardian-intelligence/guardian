@@ -92,16 +92,6 @@ spec:
               "$kcadm" update users/profile \
                 --config "$config" --realm "$realm" -f /realm/up-config.json
 
-              # One-shot retirement of the pre-rename guardian-cli client;
-              # drop this stanza once prod has converged without it.
-              stale_id="$("$kcadm" get clients \
-                --config "$config" --realm "$realm" \
-                -q "clientId=guardian-cli" --fields id --format csv --noquotes)"
-              if test -n "$stale_id"; then
-                "$kcadm" delete "clients/$stale_id" \
-                  --config "$config" --realm "$realm"
-              fi
-
               for client in /clients/*.json; do
                 client_id="${client##*/}"
                 client_id="${client_id%.json}"
