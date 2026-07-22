@@ -1,6 +1,10 @@
 build --incompatible_strict_action_env
 test --test_output=errors
 
+# Clippy findings (including the pedantic tier enabled at each crate root)
+# fail the build rather than scroll past as warnings.
+build --@rules_rust//rust/settings:clippy_flags=-Dwarnings
+
 # CI persists this root across runs via actions/cache (build.yml): action
 # outputs and fetched external archives survive the ephemeral runner, so a
 # PR build re-executes only what its diff invalidates. GC bounds what a main

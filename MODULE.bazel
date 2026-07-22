@@ -47,6 +47,7 @@ python.toolchain(
 )
 use_repo(python, "python_3_12_12")
 
+include("//src/products/postflight-cli:rust.MODULE.bazel")
 include("//src/tools/oathtool:oathtool.MODULE.bazel")
 include("//src/tools/postgres:postgres.MODULE.bazel")
 include("//src/tools/restic:restic.MODULE.bazel")
@@ -158,6 +159,7 @@ go_deps.gazelle_override(
     directives = ["gazelle:proto disable"],
     path = "k8s.io/component-base",
 )
+
 # The OpenTelemetry Go modules import each other's internal/ packages across
 # module boundaries (e.g. the otlptracegrpc and sdk modules pull
 # go.opentelemetry.io/otel/internal/global). gazelle scopes generated
@@ -259,6 +261,7 @@ oci.pull(
     image = "gcr.io/distroless/cc-debian12",
     platforms = ["linux/amd64"],
 )
+
 # A real Chromium process is the subject of the checkout canary: it executes
 # Stripe-hosted Checkout and propagates browser trace context across the
 # public edge. Playwright's pinned browser image carries Chromium plus the

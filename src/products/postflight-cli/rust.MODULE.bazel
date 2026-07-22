@@ -1,0 +1,22 @@
+# Rust toolchain + crate dependencies for the postflight CLI. Rust in this
+# repo is pinned to the latest stable and built pure-Rust (rustls, no C
+# linkage); crate resolution is driven by the package's Cargo.{toml,lock} so
+# Renovate proposes bumps through the standard cargo manager.
+bazel_dep(name = "rules_rust", version = "0.71.3")
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2024",
+    versions = ["1.97.0"],
+)
+use_repo(rust, "rust_toolchains")
+
+register_toolchains("@rust_toolchains//:all")
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "postflight_cli_crates",
+    cargo_lockfile = "//src/products/postflight-cli:Cargo.lock",
+    manifests = ["//src/products/postflight-cli:Cargo.toml"],
+)
+use_repo(crate, "postflight_cli_crates")

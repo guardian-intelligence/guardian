@@ -1,0 +1,42 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_clippy", "rust_test")
+
+rust_binary(
+    name = "postflight",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2024",
+    rustc_env = {
+        # Replaced by release stamping once the release lane exists.
+        "CARGO_PKG_VERSION": "0.1.0",
+    },
+    visibility = ["//visibility:public"],
+    deps = [
+        "@postflight_cli_crates//:base64",
+        "@postflight_cli_crates//:clap",
+        "@postflight_cli_crates//:serde",
+        "@postflight_cli_crates//:serde_json",
+        "@postflight_cli_crates//:thiserror",
+        "@postflight_cli_crates//:ureq",
+    ],
+)
+
+rust_test(
+    name = "postflight_test",
+    crate = ":postflight",
+    edition = "2024",
+)
+
+# Built as part of //... so clippy findings gate CI like any other target.
+rust_clippy(
+    name = "clippy",
+    testonly = True,
+    deps = [
+        ":postflight",
+        ":postflight_test",
+    ],
+)
+
+alias(
+    name = "format",
+    actual = "@rules_rust//tools/rustfmt",
+    tags = ["guardian-format"],
+)
