@@ -25,9 +25,13 @@ a narrow, explicit, named read grant for the agent.
    from-nothing recovery starts from: the Cloudflare account login, the
    custody repository passphrase, and the operator age identity. Nothing else
    is human-held, and no system the cluster controls ever holds these.
-2. **The custody bundle** — the Talos genesis secrets, `talm.key`, and the
-   OpenBao static seal key: precisely the members whose *changes* require
-   reading them (a CA or seal-key rotation is read-modify by nature). An
+2. **The custody bundle** — the Talos genesis secrets, `talm.key`, the
+   OpenBao static seal key, and the `custody.env` operator keys (provider
+   and R2 state-backend credentials, plus
+   `tofu_state_encryption_passphrase` — the pbkdf2 key that keeps the
+   bootstrap roots' OpenTofu state ciphertext in R2): precisely the members
+   ceremonies must read (a CA or seal-key rotation is read-modify by
+   nature; a tofu apply must decrypt its own state). An
    encrypted restic repository replicated to R2 and pulled to offline media
    on a cadence, whose steady state is **sealed**: it opens for disasters and
    rotation ceremonies, every open pages, and nothing routine touches it.
@@ -130,6 +134,13 @@ never leak the root of trust that rebuilds it.
   Snapshots are barrier-encrypted — unreadable without the seal key in the
   custody bundle — so R2 holds ciphertext while the operator vault holds the
   keys, and neither alone recovers anything.
+- OpenTofu state for the bootstrap roots carries the same split: every root
+  encrypts its state (pbkdf2 → AES-GCM) with the custody
+  `tofu_state_encryption_passphrase`, exported as `TF_ENCRYPTION` at
+  apply/ceremony time (`cold-boot-bootstrap.md`, "OpenTofu state
+  encryption"), so the state bucket's credentials alone read none of the
+  secret values retained in state — the guardian-mgmt-cloudflare-tokens
+  lane tokens, the guardian-stripe-sandbox webhook signing secret.
 - **Recovery is restore, not re-entry.** The full chain from nothing:
   password manager → Cloudflare login → pull the custody repository and
   bootstrap set from R2 (or from the offline pull, if R2 is unreachable) →

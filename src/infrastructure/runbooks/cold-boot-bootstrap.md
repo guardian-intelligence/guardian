@@ -24,11 +24,17 @@ from-nothing bring-up may require.
    in `openBaoStaticSealKeyID` in
    `src/infrastructure/tests/openbao_conformance_test.go`. Never print or
    commit the key bytes.
-2. **`custody.env`** — the 8 operator keys (Cloudflare tokens, R2
-   credentials, account id) matching the `openbao_secret_import` schema. Keep
-   it OUTSIDE the repo: `aspect infra validate` (run inside `bootstrap`)
-   refuses an in-repo env file, and the importer deletes the file on success —
-   keep a custody backup.
+2. **`custody.env`** — the operator keys (Cloudflare tokens, R2 credentials,
+   account id, the rest of the `openbao_secret_import` schema) plus
+   `tofu_state_encryption_passphrase`, the OpenTofu state-encryption
+   passphrase (≥16 characters; every `tofu` command against the R2-backed
+   roots needs it — see "OpenTofu state encryption" below). Store the
+   passphrase in the operator vault first, then mirror it into the bundle
+   with `aspect infra custody --action env-set
+   --env-key tofu_state_encryption_passphrase` (value on stdin). Keep
+   `custody.env` OUTSIDE the repo: `aspect infra validate` (run inside
+   `bootstrap`) refuses an in-repo env file, and the importer deletes the
+   file on success — keep a custody backup.
 3. **Latitude API token** and the workstation SSH key registered on the
    account (`ssh_W9EKa3oBbaRoB` = the guardian-controller key).
 
@@ -351,11 +357,74 @@ Target state on every key-bearing node (all three today):
 key `0440 root:1000`. Works on NotReady nodes (nodeName bypasses the
 scheduler).
 
+## OpenTofu state encryption
+
+All five bootstrap roots (`guardian-mgmt`, `guardian-mgmt-dns`,
+`guardian-mgmt-edge-policy`, `guardian-mgmt-cloudflare-tokens`,
+`guardian-stripe-sandbox`) encrypt their
+R2 state at rest: pbkdf2 over the custody passphrase feeding AES-GCM,
+declared in each root's `versions.tf`. R2 holds ciphertext, custody holds the
+key — the same trust split as the OpenBao raft snapshots. Every `tofu`
+command that touches real state (backend init, plan, apply, output, state
+pull) needs the passphrase in the environment first; `fmt`, `validate`, and
+`init -backend=false` do not, which is why the validate suite runs without
+it. A missing or wrong passphrase fails loudly (`no passphrase` /
+`decryption failed for all provided methods`); nothing falls back to a
+plaintext write.
+
+```sh
+# after: aspect infra custody --action restore
+export TF_ENCRYPTION=$(jq -n \
+  --arg p "$(. /dev/shm/guardian-custody/custody.env && printf %s "$tofu_state_encryption_passphrase")" \
+  '{key_provider: {pbkdf2: {custody: {passphrase: $p}}}}')
+```
+
+One-time migration ceremony (a root whose state predates encryption): the
+`unencrypted` fallback method in `versions.tf` lets the first
+passphrase-bearing run read the plaintext state, and the write that follows
+comes out encrypted.
+
+1. Phase 1 — with `TF_ENCRYPTION` exported and the root's usual apply
+   credentials at hand, `aspect infra tofu-init --root <root>` and then a
+   plain apply (expect `No changes` — persisting the state snapshot is what
+   re-encrypts it):
+
+   ```sh
+   bazelisk run @multitool//tools/tofu:workspace_root -- \
+     -chdir=src/infrastructure/bootstrap/<root> apply -input=false \
+     -var-file=src/infrastructure/bootstrap/backend.tfvars
+   ```
+
+   (`guardian-mgmt` and `guardian-stripe-sandbox` declare no variables —
+   drop the `-var-file` there.)
+
+2. Confirm the stored state is ciphertext with a wrong-passphrase probe —
+   the fallback makes a decryption failure the proof (a plaintext state
+   would still read cleanly):
+
+   ```sh
+   TF_ENCRYPTION='key_provider "pbkdf2" "custody" { passphrase = "0000000000000000" }' \
+     bazelisk run @multitool//tools/tofu:workspace_root -- \
+     -chdir=src/infrastructure/bootstrap/<root> state pull >/dev/null
+   # must fail with "decryption failed for all provided methods"
+   ```
+
+3. Phase 2 — once every root passes the probe, a follow-up PR deletes the
+   `method "unencrypted"` block and the `fallback` from every root and sets
+   `enforced = true` on each `state` block; from then on plaintext state can
+   neither be read nor written (`enforced` and an `unencrypted` method are
+   mutually exclusive, which is why phase 1 cannot set it).
+
+DR order: restore the custody bundle and export `TF_ENCRYPTION` before any
+`tofu` step below — `aspect infra bootstrap` reads and writes guardian-mgmt
+state on its first move.
+
 ## Declarative handoff
 
 ```sh
 # env from the custody custody.env: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
-# (cloudflare_r2_* keys), AWS_ENDPOINT_URL_S3, AWS_EC2_METADATA_DISABLED=true
+# (cloudflare_r2_* keys), AWS_ENDPOINT_URL_S3, AWS_EC2_METADATA_DISABLED=true,
+# TF_ENCRYPTION (see "OpenTofu state encryption" above)
 aspect infra bootstrap --kubeconfig <off-vlan-kubeconfig-copy> \
   --endpoints <node-public-ip> --nodes "<ip1>,<ip2>,<ip3>"
 ```
@@ -469,7 +538,8 @@ deleted mid-ingest lost zero acknowledged rows). Cold-boot notes:
    ```
 
 1. `aspect infra edge-health` (expect all targets green) and, with
-   `CLOUDFLARE_API_TOKEN` set from the dns-lb-provisioner key,
+   `CLOUDFLARE_API_TOKEN` set from the dns-lb-provisioner key and
+   `TF_ENCRYPTION` exported,
    `aspect infra tofu-init --root guardian-mgmt-dns` followed by
    `bazelisk run @multitool//tools/tofu:workspace_root -- -chdir=src/infrastructure/bootstrap/guardian-mgmt-dns plan -input=false -var-file=src/infrastructure/bootstrap/backend.tfvars`
    (in steady state, zero changes — node IPs are unchanged). Workload
