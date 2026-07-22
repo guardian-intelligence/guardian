@@ -80,3 +80,4 @@ One proposer per pin: Renovate proposes source-plane pins, Kargo proposes render
 Product Surfaces:
 
 - Postflight - GitHub App, Blacksmith.sh but using QEMU warm pool, CRIU, on SEV-SNP hardware, ZFS for caching build artifacts and memory snapshots to create a "golden image" per repo. (In Progress)
+- Shortty - rumi.engineering, browser-native video clipper: up to a minute of any video at the best quality that fits under a hard 4 MB limit (mediabunny in a worker, measured-size acceptance gate, no upload). (In Progress)

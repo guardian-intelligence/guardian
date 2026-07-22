@@ -19,6 +19,9 @@ spec:
     - stageSelector:
         name: postflight-controlplane-prod
       autoPromotionEnabled: true
+    - stageSelector:
+        name: shortty-web-prod
+      autoPromotionEnabled: true
 ---
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Warehouse
@@ -61,5 +64,18 @@ spec:
   subscriptions:
     - image:
         repoURL: ghcr.io/guardian-intelligence/postflight-controlplane
+        imageSelectionStrategy: Digest
+        constraint: edge
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: shortty-web
+  namespace: guardian-products
+spec:
+  interval: 1m0s
+  subscriptions:
+    - image:
+        repoURL: ghcr.io/guardian-intelligence/shortty-web
         imageSelectionStrategy: Digest
         constraint: edge

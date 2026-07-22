@@ -43,7 +43,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: ingest
-          image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:720bd0a0d191955bbbe3a229b266d1fdd8f7b26bb5daa1b88fe043dc11ae7899
+          image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:5d9c4f3597a1cd0c278a0358f3a21e0cba8a75db6bf5c05955527a8cc5067ba6
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -125,6 +125,20 @@ spec:
   ingressClassName: tenant-root
   rules:
     - host: guardianintelligence.org
+      http:
+        paths:
+          - path: /api/events
+            pathType: Prefix
+            backend:
+              service:
+                name: analytics-ingest
+                port:
+                  number: 80
+    # Shortty publishes to the same relative endpoint from its own apex, so
+    # ingest stays same-origin on every product domain and needs no CORS.
+    # The rumi.engineering origin cert is registered by the shortty-web
+    # Ingress's tls block; this rule only adds the host's path routing.
+    - host: rumi.engineering
       http:
         paths:
           - path: /api/events

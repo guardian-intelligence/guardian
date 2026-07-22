@@ -16,3 +16,4 @@ resources:
   - products-stage-prod.yaml
   - products-payments-stage-prod.yaml
   - products-postflight-stage-prod.yaml
+  - products-shortty-stage-prod.yaml
