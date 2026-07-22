@@ -66,22 +66,31 @@ func (p ProcessCheckpoints) Restore(ctx context.Context, imagesDir, expectedDige
 	return p.restoreObserved(ctx, imagesDir, expectedDigest, expectedVersion, externalMounts, nil)
 }
 
-// RestoreOrCold treats process state as an optimization. Every failed warm
-// attempt first destroys and proves empty the capsule cgroup. Only a typed
-// incompatibility may then start a cold capsule in the same live guest.
+// RestoreOrCold treats process state as an optimization. Restore begins only
+// inside an empty capsule cgroup, and every failed warm attempt destroys and
+// proves that boundary empty again. Only a typed incompatibility may then
+// start a cold capsule in the same live guest.
 func (p ProcessCheckpoints) RestoreOrCold(ctx context.Context, imagesDir, expectedDigest, expectedVersion string, externalMounts []ExternalMount, observer checkpointObserver) (ProcessRestoreResult, error) {
-	_, restoreErr := p.restoreObserved(ctx, imagesDir, expectedDigest, expectedVersion, externalMounts, observer)
-	if restoreErr == nil {
-		return ProcessRestoreResult{Restored: true}, nil
+	if err := p.validate(imagesDir, externalMounts); err != nil {
+		return ProcessRestoreResult{}, generation.NewRestoreFailure(generation.RestoreIntegrity, "invalid-generation", err)
 	}
-	class, code := generation.RestoreFailureDetails(restoreErr)
-	observeCheckpoint(observer, "generation_restore_failed")
 	timeout := p.RecoveryTimeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
 	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
+	observeCheckpoint(observer, "restore_boundary_started")
+	if err := p.Capsules.Reset(recoveryCtx); err != nil {
+		return ProcessRestoreResult{}, generation.NewRestoreFailure(generation.RestoreCleanup, "capsule-not-empty", err)
+	}
+	observeCheckpoint(observer, "restore_boundary_completed")
+	_, restoreErr := p.restoreObserved(ctx, imagesDir, expectedDigest, expectedVersion, externalMounts, observer)
+	if restoreErr == nil {
+		return ProcessRestoreResult{Restored: true}, nil
+	}
+	class, code := generation.RestoreFailureDetails(restoreErr)
+	observeCheckpoint(observer, "generation_restore_failed")
 	observeCheckpoint(observer, "restore_cleanup_started")
 	if err := p.Capsules.Reset(recoveryCtx); err != nil {
 		return ProcessRestoreResult{}, generation.NewRestoreFailure(generation.RestoreCleanup, "capsule-not-empty", errors.Join(restoreErr, err))
@@ -90,15 +99,29 @@ func (p ProcessCheckpoints) RestoreOrCold(ctx context.Context, imagesDir, expect
 	if class != generation.RestoreIncompatible {
 		return ProcessRestoreResult{}, restoreErr
 	}
-	observeCheckpoint(observer, "cold_capsule_start_started")
-	if err := p.Capsules.Start(recoveryCtx); err != nil {
-		return ProcessRestoreResult{}, generation.NewRestoreFailure(generation.RestoreCleanup, "cold-capsule-start", errors.Join(restoreErr, err))
+	var startErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		observeCheckpoint(observer, "cold_capsule_start_started")
+		if err := p.Capsules.Start(recoveryCtx); err == nil {
+			observeCheckpoint(observer, "cold_capsule_start_completed")
+			return ProcessRestoreResult{
+				ColdFallback: true, ProcessInvalidated: true,
+				FailureClass: class, FailureCode: code,
+			}, nil
+		} else {
+			startErr = err
+		}
+		observeCheckpoint(observer, "cold_capsule_start_failed")
+		if attempt == 1 {
+			break
+		}
+		observeCheckpoint(observer, "restore_cleanup_started")
+		if err := p.Capsules.Reset(recoveryCtx); err != nil {
+			return ProcessRestoreResult{}, generation.NewRestoreFailure(generation.RestoreCleanup, "capsule-not-empty", errors.Join(restoreErr, startErr, err))
+		}
+		observeCheckpoint(observer, "restore_cleanup_completed")
 	}
-	observeCheckpoint(observer, "cold_capsule_start_completed")
-	return ProcessRestoreResult{
-		ColdFallback: true, ProcessInvalidated: true,
-		FailureClass: class, FailureCode: code,
-	}, nil
+	return ProcessRestoreResult{}, generation.NewRestoreFailure(generation.RestoreCleanup, "cold-capsule-start", errors.Join(restoreErr, startErr))
 }
 
 func (p ProcessCheckpoints) restoreObserved(ctx context.Context, imagesDir, expectedDigest, expectedVersion string, externalMounts []ExternalMount, observer checkpointObserver) (int, error) {

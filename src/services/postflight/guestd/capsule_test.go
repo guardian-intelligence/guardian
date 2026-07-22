@@ -1,8 +1,10 @@
 package guestd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -21,6 +23,17 @@ func TestProcessIsNamespaceInit(t *testing.T) {
 				t.Fatal("invalid namespace init was accepted")
 			}
 		})
+	}
+}
+
+func TestCapsuleProcLookupRacesAreTransient(t *testing.T) {
+	for _, err := range []error{os.ErrNotExist, syscall.ESRCH, &os.PathError{Op: "read", Path: "/proc/123/status", Err: syscall.ESRCH}} {
+		if !transientCapsuleProcError(err) {
+			t.Fatalf("lookup race %v was not transient", err)
+		}
+	}
+	if transientCapsuleProcError(errors.New("permission denied")) {
+		t.Fatal("unrelated process lookup failure was transient")
 	}
 }
 
