@@ -31,7 +31,7 @@ releases:
       image: ghcr.io/guardian-intelligence/login-canary@sha256:c9a67b055860421593bd9df168ec23ee5612cf63d5869986284fafc98946365b
   postflight-controlplane:
     prod:
-      image: ghcr.io/guardian-intelligence/postflight-controlplane@sha256:0019ce7c31ceb329a0cf02bf4b6cd41e111b9bd08026f2a404081be97f1f35d5
+      image: ghcr.io/guardian-intelligence/postflight-controlplane@sha256:4998b1c240d776fa8fa5e38c7575c2e99c287338fddbb80d289bb6a725b2e39f
   payments:
     prod:
       image: ghcr.io/guardian-intelligence/payments@sha256:9f0a28e4110c71568c8eea1ac8ed87cdf14dc1b79bc3798ef729a558ca852b40
