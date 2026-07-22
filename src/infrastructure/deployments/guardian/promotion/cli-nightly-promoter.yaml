@@ -89,18 +89,23 @@ data:
       beat; exit 0
     fi
 
+    # Kargo's webhook does not copy template steps into directly-created
+    # Promotions ("Stage ... defines no promotion steps") — compose the spec
+    # the way the controller does, with the template's vars and steps inline.
+    template=$(kubectl get stage "$STAGE" -n "$NS" -o json | jq '.spec.promotionTemplate.spec')
+    if [ "$(jq -r '.steps | length' <<<"$template")" = "0" ]; then
+      echo "stage template defines no steps; refusing to promote"
+      beat; exit 1
+    fi
     name="${STAGE}-$(date -u +%Y%m%d)-${latest:0:7}"
     echo "promoting $STAGE to freight $latest as $name"
-    kubectl create -f - <<EOF
-    apiVersion: kargo.akuity.io/v1alpha1
-    kind: Promotion
-    metadata:
-      name: ${name}
-      namespace: ${NS}
-    spec:
-      stage: ${STAGE}
-      freight: ${latest}
-    EOF
+    jq -n --arg stage "$STAGE" --arg freight "$latest" \
+      --arg name "$name" --arg ns "$NS" --argjson tpl "$template" \
+      '{apiVersion: "kargo.akuity.io/v1alpha1", kind: "Promotion",
+        metadata: {name: $name, namespace: $ns},
+        spec: {stage: $stage, freight: $freight,
+               vars: ($tpl.vars // []), steps: $tpl.steps}}' \
+      | kubectl create -f -
     created=$?
     if [ "$created" -ne 0 ]; then
       echo "promotion create failed"
