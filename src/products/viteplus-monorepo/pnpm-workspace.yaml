@@ -42,6 +42,7 @@ catalog:
   gray-matter: 4.0.3
   lucide-react: 1.25.0
   marked: 15.0.12
+  mediabunny: 1.50.9
   nitro: 3.0.260610-beta
   npm: 11.18.0
   react: ^19.0.0
