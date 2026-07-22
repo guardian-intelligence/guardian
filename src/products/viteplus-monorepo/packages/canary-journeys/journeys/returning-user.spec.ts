@@ -4,6 +4,12 @@ import { loadJourneyConfig, type JourneyConfig } from "../src/config.ts";
 import { PROBE_SELECTORS, SELECTORS, oauthPageProbe } from "../src/probes.ts";
 import { totp, totpBoundaryDelayMs } from "../src/totp.ts";
 
+// Step markers reach the pod log through the reporter's stdout forwarding;
+// a hung step is then named by the last marker emitted.
+function step(name: string): void {
+  process.stdout.write(`${JSON.stringify({ event: "step", name })}\n`);
+}
+
 interface SessionEnvelope {
   status: number;
   body: {
@@ -111,15 +117,21 @@ test("returning user signs in through GitHub, reaches the console, and signs out
   const cfg = loadJourneyConfig(process.env);
   test.setTimeout(cfg.timeoutMs);
 
+  step("open-postflight");
   await page.goto(cfg.pageUrl);
+  step("click-sign-in");
   await page.locator(SELECTORS.signIn).click();
+  step("await-github-redirect");
   await awaitGitHubRedirect(page);
 
+  step("github-login");
   await page.locator(SELECTORS.githubLogin).fill(cfg.githubUsername);
   await page.locator(SELECTORS.githubPassword).fill(cfg.githubPassword);
   await page.locator(SELECTORS.githubSubmit).first().click();
+  step("github-authorization");
   await finishGitHubAuthorization(page, cfg);
 
+  step("console-landing");
   await awaitPostflightLanding(
     page,
     "/postflight/console",
@@ -137,6 +149,7 @@ test("returning user signs in through GitHub, reaches the console, and signs out
   expect(session.body.user?.subject).toBeTruthy();
   expect(session.body.user?.username).toBeTruthy();
 
+  step("logout");
   await page.goto(`${cfg.pageUrl.replace(/\/$/, "")}/auth/logout`);
   await awaitPostflightLanding(page, "/postflight", SELECTORS.oobeReady, "logout landing");
   const loggedOutStatus = await page.evaluate(async () => {

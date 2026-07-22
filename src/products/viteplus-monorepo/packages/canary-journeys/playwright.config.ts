@@ -4,11 +4,14 @@ import { defineConfig } from "@playwright/test";
 // (docs/canaries.md): traces, video, and screenshots capture typed secrets,
 // so every capture stays off and failures surface as classified page states
 // through the redacting reporter instead of pixels.
+const outputDir = process.env.CANARY_OUTPUT_DIR ?? "/tmp/canary-journeys-output";
+
 export default defineConfig({
   testDir: "./journeys",
   // The canary pod runs with a read-only root filesystem; /tmp is the only
   // writable mount.
-  outputDir: "/tmp/canary-journeys-output",
+  outputDir,
+  globalTeardown: "./src/sanitize-artifacts.ts",
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -18,5 +21,22 @@ export default defineConfig({
     trace: "off",
     video: "off",
     screenshot: "off",
+    // Bounded so a hung navigation or action names itself instead of riding
+    // the whole test budget into a bare timeout.
+    actionTimeout: 15_000,
+    navigationTimeout: 30_000,
+    launchOptions: {
+      // Flag parity with the chromedp canary this journey replaces: both
+      // flags are proven against this cluster's pod environment, and their
+      // absence is the leading suspect for Chromium hanging where node's
+      // fetch succeeds (64Mi /dev/shm, no GPU device in the pod).
+      args: ["--disable-dev-shm-usage", "--disable-gpu"],
+    },
+    // Debugging aid, off by default. Any HAR that gets recorded passes
+    // through the sanitizing egress gate in globalTeardown before anything
+    // can ship it.
+    ...(process.env.CANARY_CAPTURE_HAR === "1"
+      ? { contextOptions: { recordHar: { path: `${outputDir}/journey.har` } } }
+      : {}),
   },
 });

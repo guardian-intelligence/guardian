@@ -26,6 +26,15 @@ describe("RedactionRegistry", () => {
     expect(registry.scrub("lower gezdgnbvgy3tqojq")).toContain("[REDACTED:seed]");
   });
 
+  it("registers the honeytoken like a secret", () => {
+    const registry = registryFromEnv({
+      CANARY_HONEYTOKEN: "guardian-canary-honeytoken-example",
+    });
+    expect(registry.scrub("marker=guardian-canary-honeytoken-example")).toBe(
+      "marker=[REDACTED:honeytoken]",
+    );
+  });
+
   it("builds a registry from the credential env", () => {
     const registry = registryFromEnv({
       GITHUB_CANARY_PASSWORD: "sup3rs3cretvalue",
