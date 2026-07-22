@@ -6,6 +6,9 @@ import { defineConfig } from "@playwright/test";
 // through the redacting reporter instead of pixels.
 export default defineConfig({
   testDir: "./journeys",
+  // The canary pod runs with a read-only root filesystem; /tmp is the only
+  // writable mount.
+  outputDir: "/tmp/canary-journeys-output",
   fullyParallel: false,
   workers: 1,
   retries: 0,
