@@ -103,14 +103,15 @@ func (s *pgStore) EnsureRunnerPools(ctx context.Context, desiredCount int) (int6
 	}
 	tag, err := s.pool.Exec(ctx, `
 INSERT INTO runner_pools (org_id, installation_id, runner_class, desired_count)
-SELECT DISTINCT ON (split_part(repository_full_name, '/', 1), runner_class)
-       split_part(repository_full_name, '/', 1), provider_installation_id,
-       runner_class, $1
-FROM github_provider_demands
-WHERE provider_installation_id > 0
-  AND split_part(repository_full_name, '/', 1) <> ''
-  AND split_part(repository_full_name, '/', 2) <> ''
-ORDER BY split_part(repository_full_name, '/', 1), runner_class, updated_at DESC
+SELECT DISTINCT ON (split_part(d.repository_full_name, '/', 1), d.runner_class)
+       split_part(d.repository_full_name, '/', 1), d.provider_installation_id,
+       d.runner_class, $1
+FROM github_provider_demands d
+JOIN runner_classes c ON c.class = d.runner_class
+WHERE d.provider_installation_id > 0
+  AND split_part(d.repository_full_name, '/', 1) <> ''
+  AND split_part(d.repository_full_name, '/', 2) <> ''
+ORDER BY split_part(d.repository_full_name, '/', 1), d.runner_class, d.updated_at DESC
 ON CONFLICT (org_id, runner_class) DO UPDATE SET
     installation_id = EXCLUDED.installation_id,
     desired_count = EXCLUDED.desired_count,
