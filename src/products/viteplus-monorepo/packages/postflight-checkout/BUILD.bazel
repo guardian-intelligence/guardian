@@ -43,7 +43,6 @@ genrule(
         # input — without it the genrule only works when an unrelated build
         # has already materialized root node_modules.
         "//src/products/viteplus-monorepo:node_modules/vite-plus",
-        "//src/products/viteplus-monorepo:.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.2.4/dir",
         "//src/products/viteplus-monorepo:vp_node",
         "//src/products/viteplus-monorepo:workspace_sources",
     ],

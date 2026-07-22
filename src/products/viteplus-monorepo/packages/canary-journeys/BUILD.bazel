@@ -44,7 +44,6 @@ genrule(
         # input — without it the genrule only works when an unrelated build
         # has already materialized root node_modules.
         "//src/products/viteplus-monorepo:node_modules/vite-plus",
-        "//src/products/viteplus-monorepo:.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.2.4/dir",
         "//src/products/viteplus-monorepo:vp_node",
         "//src/products/viteplus-monorepo:workspace_sources",
     ],
@@ -86,10 +85,8 @@ printf 'canary-journeys checks ok\\n' > "$$execroot/$@"
 genrule(
     name = "journey_runtime",
     srcs = [
+        ":node_modules/@playwright/test",
         ":sources",
-        "//src/products/viteplus-monorepo:.aspect_rules_js/node_modules/@playwright+test@1.61.0/dir",
-        "//src/products/viteplus-monorepo:.aspect_rules_js/node_modules/playwright@1.61.0/dir",
-        "//src/products/viteplus-monorepo:.aspect_rules_js/node_modules/playwright-core@1.61.0/dir",
     ],
     outs = ["journey-runtime.tar"],
     cmd = """
@@ -104,9 +101,15 @@ for f in $(locations :sources); do
   mkdir -p "$$app/$$(dirname "$$rel")"
   cp "$$f" "$$app/$$rel"
 done
-cp -RL "$$execroot/$(location //src/products/viteplus-monorepo:.aspect_rules_js/node_modules/@playwright+test@1.61.0/dir)" "$$app/node_modules/@playwright/test"
-cp -RL "$$execroot/$(location //src/products/viteplus-monorepo:.aspect_rules_js/node_modules/playwright@1.61.0/dir)" "$$app/node_modules/playwright"
-cp -RL "$$execroot/$(location //src/products/viteplus-monorepo:.aspect_rules_js/node_modules/playwright-core@1.61.0/dir)" "$$app/node_modules/playwright-core"
+for d in $(locations :node_modules/@playwright/test); do
+  case "$$d" in
+    */node_modules/@playwright/test) dest="$$app/node_modules/@playwright/test" ;;
+    */node_modules/playwright) dest="$$app/node_modules/playwright" ;;
+    */node_modules/playwright-core) dest="$$app/node_modules/playwright-core" ;;
+    *) continue ;;
+  esac
+  [ -e "$$dest" ] || cp -RL "$$execroot/$$d" "$$dest"
+done
 chmod -R u+w "$$work"
 tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \\
   -cf "$$execroot/$@" -C "$$work" app
