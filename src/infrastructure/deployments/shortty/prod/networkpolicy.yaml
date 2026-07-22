@@ -1,0 +1,33 @@
+# shortty-web's own flows. The app is a static-shell server: all media work
+# happens in the visitor's browser, so the pod needs no egress beyond DNS.
+# Public ingress arrives with node identity (hostNetwork root ingress) and is
+# admitted by the additive CCNP in root-ingress-networkpolicy.yaml; selecting
+# only egress here leaves that admit intact.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: shortty-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: shortty-web
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - shortty-web
+          - shortty-web-primary
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
