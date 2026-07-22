@@ -61,11 +61,13 @@ Warm restore has three outcomes:
    attestation, key-release, or unprovable-cleanup failure, keep Worker blocked,
    fail closed, and recycle the guest.
 
-If QEMU or the guest actually dies, the connected runner dies with it. GitHub
-requeues the job and assigns a different pool member; the replacement uses a
-cold capsule because the failed process snapshot has been invalidated. “Same
-Worker” applies only to a recoverable restore failure inside a still-healthy
-guest.
+If QEMU or the guest dies before its listener acquires the broker message,
+GitHub's pickup deadline leaves the job eligible for another listener. Local
+assignment observation happens after the listener's `acquirejob` commit point.
+There is no provider release operation after that point, so losing that guest
+fails the acquired attempt closed; the ledger must not claim that another pool
+member can receive it. “Same Worker” applies to a recoverable restore failure
+inside a still-healthy guest.
 
 Snapshot publication is ordered: stop and remove runner processes, freeze the
 capsule, checkpoint it, flush the workspace and tool filesystems, snapshot the
@@ -90,7 +92,7 @@ monotonic clocks from different boot IDs.
 - A cleanup failure cannot silently downgrade to a cold run in a contaminated
   guest.
 - Pool members are single-use. Completion, cancellation, guest loss, and unsafe
-  restore all recycle the guest and replenish the pool.
+  restore all recycle the guest and replenish capacity for future jobs.
 - The control plane can ingest scale-set events for earlier staging and richer
   telemetry, but correctness does not depend on an internet round trip before
   GitHub assigns the runner.

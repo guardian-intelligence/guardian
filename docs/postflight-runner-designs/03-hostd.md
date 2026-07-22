@@ -64,7 +64,7 @@ sync: generic VM is warm
   → guest mounts and attempts the process restore
   → recoverable restore miss tears out process state and cold-starts
   → integrity or unprovable-cleanup failure destroys the VM fail-closed
-  → publish requeue/fail-closed only after VM destruction is proven
+  → publish provider withdrawal/fail-closed only after VM destruction is proven
   → authorize the blocked Worker only after exact identity validation
   → on exit 0: checkpoint and flush, destroy QEMU, seal all zvols
   → refill the pool with a new member incarnation

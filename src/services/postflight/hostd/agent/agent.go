@@ -26,7 +26,6 @@ type Metrics struct {
 	RejectedAssignments     atomic.Int64
 	ColdFallbacks           atomic.Int64
 	FailedClosedAssignments atomic.Int64
-	RequeuedAssignments     atomic.Int64
 	SealedGenerations       atomic.Int64
 	ReapedGenerations       atomic.Int64
 	OrphansDestroyed        atomic.Int64

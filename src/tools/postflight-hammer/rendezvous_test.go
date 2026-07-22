@@ -90,6 +90,8 @@ func validRendezvousTrace(warm, full bool) []rendezvousEvent {
 	}
 	if warm {
 		b.add(eventCRIURestoreStarted, "guestd")
+		b.add(eventRestoreBoundaryStarted, "guestd")
+		b.add(eventRestoreBoundaryCompleted, "guestd")
 		b.add(eventRestoreVersionStarted, "guestd")
 		b.add(eventRestoreVersionCompleted, "guestd")
 		b.add(eventRestoreDigestStarted, "guestd")
@@ -195,7 +197,7 @@ func TestValidWarmRendezvousAndCheckpointPasses(t *testing.T) {
 		t.Fatalf("valid warm trace = %+v", report)
 	}
 	for _, duration := range []string{
-		"criu_restore", "restore_version_validation", "restore_digest_validation", "restore_criu",
+		"criu_restore", "restore_boundary", "restore_version_validation", "restore_digest_validation", "restore_criu",
 		"qmp_to_workspace_attach", "workspace_to_tool_attach", "tool_to_process_attach",
 		"process_attach_to_guest_dispatch",
 		"worker_gate", "checkpoint_dump", "checkpoint_capsule_prepare", "checkpoint_version",
@@ -204,6 +206,48 @@ func TestValidWarmRendezvousAndCheckpointPasses(t *testing.T) {
 		if report.DurationsNS[duration] <= 0 {
 			t.Fatalf("missing %s duration: %+v", duration, report.DurationsNS)
 		}
+	}
+}
+
+func TestTerminalRestoreRetryEventsRemainValidEvidence(t *testing.T) {
+	b := &traceBuilder{originSeq: map[string]uint64{}}
+	b.add(eventPoolReady, "hostd-agent").Platform = &platformEvidence{
+		QEMUVersion: "11.0.2", KernelRelease: "6.8.0", OSImageID: "ubuntu-24.04",
+		MachineType: "pc-q35-11.0", CPUModel: "EPYC-v4", CRIUVersion: "4.2",
+	}
+	b.add(eventAssignmentUpdateReceived, "hostd-agent")
+	for attempt := 0; attempt < 2; attempt++ {
+		b.add(eventRestoreCleanupStarted, "guestd")
+		b.add(eventRestoreCleanupCompleted, "guestd")
+		b.add(eventColdCapsuleStartStarted, "guestd")
+		b.add(eventColdCapsuleStartFailed, "guestd")
+	}
+	failed := b.add(eventAssignmentFailedClosed, "hostd-agent")
+	failed.FailureReason = "cold capsule start failed"
+	failed.Restore = &restoreEvidence{
+		Outcome: "unsafe", ProcessInvalidated: true,
+		FailureClass: "cleanup", FailureCode: "cold-capsule-start",
+	}
+	report := validateRendezvousTraceScope(b.events, true)
+	if !report.TraceValid || report.Outcome != outcomeInvalid {
+		t.Fatalf("terminal retry trace = %+v", report)
+	}
+}
+
+func TestProviderAbortedAssignmentIsValidTerminalEvidence(t *testing.T) {
+	b := &traceBuilder{originSeq: map[string]uint64{}}
+	b.add(eventPoolReady, "hostd-agent").Platform = &platformEvidence{
+		QEMUVersion: "11.0.2", KernelRelease: "6.8.0", OSImageID: "ubuntu-24.04",
+		MachineType: "pc-q35-11.0", CPUModel: "EPYC-v4", CRIUVersion: "4.2",
+	}
+	b.add(eventAssignmentUpdateReceived, "hostd-agent")
+	b.add(eventVMDestroyStarted, "hostd-agent")
+	b.add(eventVMDestroyCompleted, "hostd-agent")
+	aborted := b.add(eventAssignmentAborted, "hostd-agent")
+	aborted.FailureReason = "assignment withdrawn by provider"
+	report := validateRendezvousTraceScope(b.events, true)
+	if !report.TraceValid || report.Outcome != outcomeInvalid {
+		t.Fatalf("provider-aborted trace = %+v", report)
 	}
 }
 

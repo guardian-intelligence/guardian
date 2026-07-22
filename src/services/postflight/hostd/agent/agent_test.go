@@ -316,7 +316,7 @@ func TestUnsafeRestoreFailsClosedWithoutReleasingWorker(t *testing.T) {
 	}
 }
 
-func TestCrashedMemberRequeuesAssignment(t *testing.T) {
+func TestCrashedMemberFailsAcquiredAssignmentClosed(t *testing.T) {
 	a, vms, _ := newTestAgent(t, 1)
 	members := poolMembers(t, a, vms, 1)
 	spec := assignmentSpec(0, members[0])
@@ -327,8 +327,42 @@ func TestCrashedMemberRequeuesAssignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.Tick(context.Background())
-	if got := a.Snapshot()[0].State; got != syncproto.AssignmentRequeued {
+	if got := a.Snapshot()[0].State; got != syncproto.AssignmentFailedClosed {
 		t.Fatalf("crashed assignment state = %s", got)
+	}
+}
+
+func TestProviderWithdrawalAbortsOnlyAfterVMDestruction(t *testing.T) {
+	a, vms, _ := newTestAgent(t, 1)
+	members := poolMembers(t, a, vms, 1)
+	spec := assignmentSpec(0, members[0])
+	assignVM(t, vms, members[0], spec)
+	a.HandleSync(syncproto.SyncResponse{
+		BootID: a.bootID, Members: members, Assignments: []syncproto.DesiredAssignment{spec},
+		PoolTargets: map[string]int{string(testRunnerClass): 1},
+	})
+	a.Tick(context.Background())
+
+	spec.State = syncproto.DesiredAssignmentAbort
+	a.HandleSync(syncproto.SyncResponse{
+		BootID: a.bootID, Members: members, Assignments: []syncproto.DesiredAssignment{spec},
+		PoolTargets: map[string]int{string(testRunnerClass): 1},
+	})
+	a.Tick(context.Background())
+	if got := a.Snapshot()[0].State; got != syncproto.AssignmentCompleted {
+		t.Fatalf("withdrawn assignment state = %s", got)
+	}
+	if a.Metrics().FailedClosedAssignments.Load() != 0 {
+		t.Fatal("provider withdrawal was counted as an infrastructure failure")
+	}
+	raw, err := os.ReadFile(filepath.Join(a.cfg.TraceDir, "runner-0.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	destroyed := strings.Index(string(raw), `"event":"vm_destroy_completed"`)
+	aborted := strings.Index(string(raw), `"event":"assignment_aborted"`)
+	if destroyed < 0 || aborted <= destroyed {
+		t.Fatalf("abort was not preceded by proven VM destruction:\n%s", raw)
 	}
 }
 

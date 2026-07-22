@@ -235,7 +235,8 @@ const (
 	RunnerWorkerFailed RunnerState = "worker-failed"
 	// RunnerRecycleRequired: restore evidence is unsafe or cleanup could not
 	// prove the capsule empty. Worker remains blocked while hostd destroys the
-	// VM; GitHub may requeue the disconnected job to another pool member.
+	// VM. The acquired attempt fails closed because GitHub exposes no release
+	// operation for its broker message.
 	RunnerRecycleRequired RunnerState = "recycle-required"
 	// RunnerReleased: the job-start hook validated the actual workflow
 	// identity and customer steps may run.

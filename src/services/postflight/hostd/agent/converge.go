@@ -183,7 +183,7 @@ func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vm
 	if !exists || status.Phase == vm.PhaseGone {
 		if !record.state.Terminal() {
 			record.vmID = ""
-			a.requeue(record, "pool member disappeared")
+			a.failClosed(ctx, record, "pool member disappeared after provider acquisition")
 		}
 		return
 	}
@@ -202,11 +202,11 @@ func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vm
 	a.appendOriginTiming(record.trace, record, status.Timing)
 	record.timing = mergeTiming(record.timing, status.Timing)
 	if deadline, ok := assignmentDeadlines[record.state]; ok && a.now().Sub(record.since) > deadline {
-		a.recycleAndRequeue(ctx, record, "deadline exceeded in "+string(record.state))
+		a.failClosed(ctx, record, "deadline exceeded in "+string(record.state))
 		return
 	}
 	if record.spec.State == syncproto.DesiredAssignmentAbort {
-		a.recycleAndRequeue(ctx, record, "assignment withdrawn")
+		a.recycleAndComplete(ctx, record, "assignment withdrawn by provider")
 		return
 	}
 	if status.Phase == vm.PhaseRecycleRequired {
@@ -232,7 +232,7 @@ func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vm
 		started := time.Now()
 		a.appendTrace(record.trace, record, "generation_materialization_started", nil)
 		if err := a.materialize(ctx, record); err != nil {
-			a.recycleAndRequeue(ctx, record, "materialize generation: "+err.Error())
+			a.failClosed(ctx, record, "materialize generation: "+err.Error())
 			return
 		}
 		a.appendTrace(record.trace, record, "generation_resolved", func(event *traceEvent) {
@@ -241,7 +241,7 @@ func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vm
 		})
 		record.hostBeforeUnixNS = time.Now().UnixNano()
 		if err := a.vms.Rendezvous(ctx, status.ID, a.rendezvous(record)); err != nil {
-			a.recycleAndRequeue(ctx, record, "rendezvous: "+err.Error())
+			a.failClosed(ctx, record, "rendezvous: "+err.Error())
 			return
 		}
 		a.appendTrace(record.trace, record, "rendezvous_dispatched", func(event *traceEvent) {
@@ -277,7 +277,7 @@ func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vm
 			a.metrics.ColdFallbacks.Add(1)
 		}
 		if err := a.vms.Authorize(ctx, status.ID, a.authorization(record)); err != nil {
-			a.recycleAndRequeue(ctx, record, "authorize: "+err.Error())
+			a.failClosed(ctx, record, "authorize: "+err.Error())
 			return
 		}
 		a.appendTrace(record.trace, record, "worker_authorization_sent", nil)
@@ -451,7 +451,7 @@ func (a *Agent) finishAssignment(ctx context.Context, record *assignment, status
 		event.GenerationSet = generationSet(record)
 	})
 	if !status.CustomerStepsReleased {
-		a.recycleAndRequeue(ctx, record, "runner exited before customer steps: "+status.FailureReason)
+		a.failClosed(ctx, record, "runner exited before customer steps: "+status.FailureReason)
 		return
 	}
 	if status.ExitCode == 0 && record.device != "" && record.checkpoint == nil && record.reason == "" {
@@ -481,22 +481,20 @@ func (a *Agent) finishAssignment(ctx context.Context, record *assignment, status
 	}
 }
 
-func (a *Agent) recycleAndRequeue(ctx context.Context, record *assignment, reason string) {
+func (a *Agent) recycleAndComplete(ctx context.Context, record *assignment, reason string) {
 	record.reason = reason
-	record.termination = syncproto.AssignmentRequeued
+	record.termination = syncproto.AssignmentCompleted
 	a.finishPendingTermination(ctx, record)
 }
 
-func (a *Agent) requeue(record *assignment, reason string) {
-	record.reason = reason
-	a.appendTrace(record.trace, record, "assignment_requeued", func(event *traceEvent) {
+func (a *Agent) markAborted(record *assignment) {
+	a.appendTrace(record.trace, record, "assignment_aborted", func(event *traceEvent) {
 		event.GenerationSet = generationSet(record)
-		event.FailureReason = reason
+		event.FailureReason = record.reason
 		event.Restore = traceRestoreEvidence(record.restore)
 	})
-	record.enter(syncproto.AssignmentRequeued, a.now())
-	a.metrics.RequeuedAssignments.Add(1)
-	a.logger.Warn("postflight.hostd.assignment.requeued", "assignment_id", record.spec.AssignmentID, "member_id", record.spec.MemberID, "job_id", record.spec.JobID, "reason", reason)
+	record.enter(syncproto.AssignmentCompleted, a.now())
+	a.logger.Info("postflight.hostd.assignment.aborted", "assignment_id", record.spec.AssignmentID, "member_id", record.spec.MemberID, "job_id", record.spec.JobID, "reason", record.reason)
 }
 
 func (a *Agent) failClosed(ctx context.Context, record *assignment, reason string) {
@@ -512,8 +510,8 @@ func (a *Agent) finishPendingTermination(ctx context.Context, record *assignment
 	pending := record.termination
 	record.termination = ""
 	switch pending {
-	case syncproto.AssignmentRequeued:
-		a.requeue(record, record.reason)
+	case syncproto.AssignmentCompleted:
+		a.markAborted(record)
 	case syncproto.AssignmentFailedClosed:
 		a.markFailedClosed(record)
 	}

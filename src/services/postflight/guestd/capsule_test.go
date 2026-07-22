@@ -1,11 +1,13 @@
 package guestd
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestProcessIsNamespaceInit(t *testing.T) {
@@ -23,6 +25,44 @@ func TestProcessIsNamespaceInit(t *testing.T) {
 				t.Fatal("invalid namespace init was accepted")
 			}
 		})
+	}
+}
+
+func TestResetCapsuleBoundaryReplacesTheKilledCgroup(t *testing.T) {
+	kills := 0
+	observations := 0
+	replacements := 0
+	err := resetCapsuleBoundary(context.Background(), time.Microsecond,
+		func() error {
+			kills++
+			return nil
+		},
+		func() (bool, error) {
+			observations++
+			return observations == 2, nil
+		},
+		func() error {
+			replacements++
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kills != 1 || observations != 2 || replacements != 1 {
+		t.Fatalf("reset calls = kill:%d observe:%d replace:%d", kills, observations, replacements)
+	}
+}
+
+func TestResetCapsuleBoundaryFailsClosedWhenReplacementFails(t *testing.T) {
+	replacementErr := errors.New("cgroup still referenced")
+	err := resetCapsuleBoundary(context.Background(), time.Microsecond,
+		func() error { return nil },
+		func() (bool, error) { return true, nil },
+		func() error { return replacementErr },
+	)
+	if !errors.Is(err, replacementErr) {
+		t.Fatalf("reset error = %v; want replacement failure", err)
 	}
 }
 

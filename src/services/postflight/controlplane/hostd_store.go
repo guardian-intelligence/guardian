@@ -147,7 +147,7 @@ ON CONFLICT (provider_job_id) DO UPDATE SET
     job_display_name = EXCLUDED.job_display_name,
     check_run_id = EXCLUDED.check_run_id,
     updated_at = now()
-WHERE github_job_intents.state IN ('queued', 'requeued')`)
+WHERE github_job_intents.state = 'queued'`)
 	return tag.RowsAffected(), err
 }
 
@@ -314,7 +314,7 @@ FROM github_job_intents i
 WHERE i.runner_class = $1 AND i.repository_full_name = $2
   AND i.provider_run_id = $3 AND i.provider_run_attempt = $4
   AND i.check_run_id = $5
-  AND i.state IN ('queued', 'observed', 'requeued')
+  AND i.state IN ('queued', 'observed')
   AND (i.request_id = '' OR i.request_id = $6)
 ORDER BY (i.request_id = $6) DESC, i.provider_job_id
 LIMIT 2
@@ -410,7 +410,7 @@ FOR UPDATE OF a`, report.AssignmentID, report.MemberID, hostID, report.RequestID
 	if err != nil {
 		return err
 	}
-	if state == "completed" || state == "sealed" || state == "requeued" || state == "failed_closed" {
+	if state == "completed" || state == "sealed" || state == "failed_closed" {
 		return nil
 	}
 	timing, err := json.Marshal(report.Timing)
@@ -455,7 +455,7 @@ WHERE generation = $1`, sourceGeneration, restore.FailureClass, restore.FailureC
 	}
 	switch report.State {
 	case syncproto.AssignmentObserved, syncproto.AssignmentBinding, syncproto.AssignmentAuthorizing, syncproto.AssignmentRunning:
-		if _, err := tx.Exec(ctx, `UPDATE runner_job_assignments SET state = $2, updated_at = now() WHERE assignment_id::text = $1 AND state NOT IN ('completed','sealed','requeued','failed_closed')`, report.AssignmentID, string(report.State)); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE runner_job_assignments SET state = $2, updated_at = now() WHERE assignment_id::text = $1 AND state NOT IN ('completed','sealed','failed_closed')`, report.AssignmentID, string(report.State)); err != nil {
 			return err
 		}
 		if report.State == syncproto.AssignmentRunning {
@@ -518,14 +518,6 @@ WHERE generation = $1 AND state = 'candidate'`, report.SealedGeneration,
 
 	case syncproto.AssignmentCompleted:
 		if err := completeAssignmentTx(ctx, tx, report.AssignmentID, providerJobID, report.ExitCode); err != nil {
-			return err
-		}
-
-	case syncproto.AssignmentRequeued:
-		if _, err := tx.Exec(ctx, `UPDATE runner_job_assignments SET state = 'requeued', reason = $2, updated_at = now() WHERE assignment_id::text = $1`, report.AssignmentID, report.Reason); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE github_job_intents SET state = 'requeued', request_id = '', protocol_job_id = '', updated_at = now() WHERE provider_job_id = $1`, providerJobID); err != nil {
 			return err
 		}
 
@@ -751,15 +743,22 @@ FOR UPDATE OF a`, cutoff)
 	if len(assignmentIDs) > 0 {
 		if _, err := tx.Exec(ctx, `
 UPDATE runner_job_assignments
-SET state = 'requeued', reason = 'host stopped syncing', updated_at = now()
+SET state = 'failed_closed', reason = 'host stopped syncing after provider acquisition', updated_at = now()
 WHERE assignment_id::text = ANY($1::text[])`, assignmentIDs); err != nil {
 			return 0, err
 		}
 		if _, err := tx.Exec(ctx, `
 UPDATE github_job_intents
-SET state = 'requeued', request_id = '', protocol_job_id = '', updated_at = now()
+SET state = 'failed_closed', updated_at = now()
 WHERE provider_job_id = ANY($1::bigint[])`, providerJobIDs); err != nil {
 			return 0, err
+		}
+		for _, providerJobID := range providerJobIDs {
+			if err := failDemandTx(ctx, tx, providerJobID, demandSandboxFailed,
+				[]string{demandRecorded, demandCapacityRequested, demandAssigned},
+				[]problem{problemSandboxFailed("host stopped syncing after provider acquisition")}); err != nil {
+				return 0, err
+			}
 		}
 	}
 	sealingRows, err := tx.Query(ctx, `

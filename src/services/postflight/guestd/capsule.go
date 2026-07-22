@@ -30,14 +30,15 @@ type CapsuleManager struct {
 	SleepPath  string
 	RunnerRoot string
 	// CgroupPath confines every cold or restored capsule. A failed restore may
-	// continue cold only after cgroup.kill followed by populated=0 proves that
-	// no partial process survived.
+	// continue cold only after the killed, empty cgroup is replaced with a new
+	// cgroup identity.
 	CgroupPath string
 
-	mu        sync.Mutex
-	rootPID   int
-	rootReady bool
-	command   *exec.Cmd
+	lifecycleMu sync.Mutex
+	mu          sync.Mutex
+	rootPID     int
+	rootReady   bool
+	command     *exec.Cmd
 }
 
 func (m *CapsuleManager) validate() error {
@@ -96,6 +97,8 @@ func (m *CapsuleManager) Start(ctx context.Context) error {
 	if err := m.validate(); err != nil {
 		return err
 	}
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
 	if m.rootPID > 1 && m.rootReady {
 		m.mu.Unlock()
@@ -160,25 +163,43 @@ func (m *CapsuleManager) Reset(ctx context.Context) error {
 	if err := m.validate(); err != nil {
 		return err
 	}
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	if err := m.prepareCgroup(); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(m.CgroupPath, "cgroup.kill"), []byte("1\n"), 0o200); err != nil {
+	if err := resetCapsuleBoundary(ctx, 10*time.Millisecond,
+		func() error {
+			return os.WriteFile(filepath.Join(m.CgroupPath, "cgroup.kill"), []byte("1\n"), 0o200)
+		},
+		func() (bool, error) { return capsuleCgroupEmpty(m.CgroupPath) },
+		func() error { return replaceCapsuleCgroup(m.CgroupPath) },
+	); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.rootPID = 0
+	m.rootReady = false
+	m.command = nil
+	m.mu.Unlock()
+	return nil
+}
+
+func resetCapsuleBoundary(ctx context.Context, poll time.Duration, kill func() error, empty func() (bool, error), replace func() error) error {
+	if err := kill(); err != nil {
 		return fmt.Errorf("guestd: killing capsule cgroup: %w", err)
 	}
-	ticker := time.NewTicker(10 * time.Millisecond)
+	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
 	for {
-		empty, err := capsuleCgroupEmpty(m.CgroupPath)
+		isEmpty, err := empty()
 		if err != nil {
 			return err
 		}
-		if empty {
-			m.mu.Lock()
-			m.rootPID = 0
-			m.rootReady = false
-			m.command = nil
-			m.mu.Unlock()
+		if isEmpty {
+			if err := replace(); err != nil {
+				return fmt.Errorf("guestd: replacing capsule cgroup: %w", err)
+			}
 			return nil
 		}
 		select {
@@ -187,6 +208,39 @@ func (m *CapsuleManager) Reset(ctx context.Context) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// Ubuntu 24.04's 6.8 kernel has delivered SIGKILL to CLONE_INTO_CGROUP
+// children launched immediately after cgroup.kill and populated=0. Holding the
+// old directory open while replacing it gives the next capsule a distinct
+// cgroup identity and makes that kernel behavior irrelevant.
+func replaceCapsuleCgroup(path string) error {
+	old, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer old.Close()
+	oldInfo, err := old.Stat()
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	if err := os.Mkdir(path, 0o755); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(path, "cgroup.events")); err != nil {
+		return fmt.Errorf("replacement is not cgroup v2: %w", err)
+	}
+	newInfo, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if os.SameFile(oldInfo, newInfo) {
+		return errors.New("replacement retained the old cgroup identity")
+	}
+	return nil
 }
 
 func capsuleCgroupEmpty(path string) (bool, error) {
@@ -314,6 +368,8 @@ func RunCapsuleEnter(args []string) error {
 
 // UseRestored adopts a capsule restored before a fresh runner is launched.
 func (m *CapsuleManager) UseRestored(_ context.Context, restoredRoot int) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	if restoredRoot <= 1 {
 		return errors.New("guestd: invalid restored capsule root")
 	}

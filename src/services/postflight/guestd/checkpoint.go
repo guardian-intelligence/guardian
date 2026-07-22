@@ -67,9 +67,9 @@ func (p ProcessCheckpoints) Restore(ctx context.Context, imagesDir, expectedDige
 }
 
 // RestoreOrCold treats process state as an optimization. Restore begins only
-// inside an empty capsule cgroup, and every failed warm attempt destroys and
-// proves that boundary empty again. Only a typed incompatibility may then
-// start a cold capsule in the same live guest.
+// inside a fresh capsule cgroup, and every failed warm attempt destroys and
+// replaces that boundary. Only a typed incompatibility may then start a cold
+// capsule in the same live guest.
 func (p ProcessCheckpoints) RestoreOrCold(ctx context.Context, imagesDir, expectedDigest, expectedVersion string, externalMounts []ExternalMount, observer checkpointObserver) (ProcessRestoreResult, error) {
 	if err := p.validate(imagesDir, externalMounts); err != nil {
 		return ProcessRestoreResult{}, generation.NewRestoreFailure(generation.RestoreIntegrity, "invalid-generation", err)
