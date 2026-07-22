@@ -116,7 +116,11 @@ func (c *Config) validate() error {
 		if err != nil {
 			return fmt.Errorf("vm: read boot id: %w", err)
 		}
-		c.Timing, err = timing.New("hostd-qemu", strings.TrimSpace(string(bootID)))
+		recorderID, err := newIncarnation()
+		if err != nil {
+			return err
+		}
+		c.Timing, err = timing.New("hostd-qemu:"+recorderID, strings.TrimSpace(string(bootID)))
 		if err != nil {
 			return err
 		}
