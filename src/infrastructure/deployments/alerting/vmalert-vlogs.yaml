@@ -52,12 +52,14 @@ spec:
     - guardian-trust-vlogs-rules
     - guardian-talos-vlogs-rules
     - guardian-ingress-canary-vlogs-rules
+    - guardian-canary-redaction-vlogs-rules
   rulePath:
     - /etc/vm/configs/guardian-audit-vlogs-rules/*.yaml
     - /etc/vm/configs/guardian-log-pipeline-vlogs-rules/*.yaml
     - /etc/vm/configs/guardian-trust-vlogs-rules/*.yaml
     - /etc/vm/configs/guardian-talos-vlogs-rules/*.yaml
     - /etc/vm/configs/guardian-ingress-canary-vlogs-rules/*.yaml
+    - /etc/vm/configs/guardian-canary-redaction-vlogs-rules/*.yaml
 ---
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMServiceScrape

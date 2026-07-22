@@ -9,57 +9,41 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
-import { Route as PostflightRouteImport } from './routes/postflight'
-import { Route as MetricsRouteImport } from './routes/metrics'
-import { Route as LivezRouteImport } from './routes/livez'
-import { Route as HealthzRouteImport } from './routes/healthz'
-import { Route as NewsRouteRouteImport } from './routes/news/route'
-import { Route as LettersRouteRouteImport } from './routes/letters/route'
 import { Route as WorkshopRouteRouteImport } from './routes/_workshop/route'
-import { Route as NewsIndexRouteImport } from './routes/news/index'
-import { Route as LettersIndexRouteImport } from './routes/letters/index'
+import { Route as HealthzRouteImport } from './routes/healthz'
+import { Route as LettersRouteRouteImport } from './routes/letters/route'
+import { Route as LivezRouteImport } from './routes/livez'
+import { Route as MetricsRouteImport } from './routes/metrics'
+import { Route as NewsRouteRouteImport } from './routes/news/route'
+import { Route as PostflightRouteImport } from './routes/postflight'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as WorkshopIndexRouteImport } from './routes/_workshop/index'
-import { Route as PostflightConsoleRouteImport } from './routes/postflight_.console'
-import { Route as OgSlugRouteImport } from './routes/og/$slug'
-import { Route as NewsSlugRouteImport } from './routes/news/$slug'
-import { Route as LettersSlugRouteImport } from './routes/letters/$slug'
-import { Route as WorkshopSolutionsRouteImport } from './routes/_workshop/solutions'
-import { Route as WorkshopPressRouteImport } from './routes/_workshop/press'
-import { Route as WorkshopContactRouteImport } from './routes/_workshop/contact'
-import { Route as WorkshopCompanyRouteImport } from './routes/_workshop/company'
-import { Route as WorkshopChangelogRouteImport } from './routes/_workshop/changelog'
 import { Route as WorkshopCareersRouteImport } from './routes/_workshop/careers'
+import { Route as WorkshopChangelogRouteImport } from './routes/_workshop/changelog'
+import { Route as WorkshopCompanyRouteImport } from './routes/_workshop/company'
+import { Route as WorkshopContactRouteImport } from './routes/_workshop/contact'
 import { Route as WorkshopDesignRouteRouteImport } from './routes/_workshop/design/route'
+import { Route as WorkshopPressRouteImport } from './routes/_workshop/press'
+import { Route as WorkshopSolutionsRouteImport } from './routes/_workshop/solutions'
+import { Route as LettersIndexRouteImport } from './routes/letters/index'
+import { Route as LettersSlugRouteImport } from './routes/letters/$slug'
+import { Route as NewsIndexRouteImport } from './routes/news/index'
+import { Route as NewsSlugRouteImport } from './routes/news/$slug'
+import { Route as OgSlugRouteImport } from './routes/og/$slug'
+import { Route as PostflightConsoleRouteImport } from './routes/postflight_.console'
 import { Route as WorkshopDesignIndexRouteImport } from './routes/_workshop/design/index'
-import { Route as PostflightAuthSessionRouteImport } from './routes/postflight.auth.session'
-import { Route as PostflightAuthLogoutRouteImport } from './routes/postflight.auth.logout'
-import { Route as PostflightAuthLoginRouteImport } from './routes/postflight.auth.login'
-import { Route as PostflightAuthCallbackRouteImport } from './routes/postflight.auth.callback'
-import { Route as OgLetterSlugRouteImport } from './routes/og/letter/$slug'
-import { Route as WorkshopPostflightDocsRouteImport } from './routes/_workshop/postflight/docs'
-import { Route as WorkshopDesignWorkshopRouteImport } from './routes/_workshop/design/workshop'
-import { Route as WorkshopDesignNewsroomRouteImport } from './routes/_workshop/design/newsroom'
 import { Route as WorkshopDesignLettersRouteImport } from './routes/_workshop/design/letters'
+import { Route as WorkshopDesignNewsroomRouteImport } from './routes/_workshop/design/newsroom'
+import { Route as WorkshopDesignWorkshopRouteImport } from './routes/_workshop/design/workshop'
+import { Route as WorkshopPostflightDocsRouteImport } from './routes/_workshop/postflight/docs'
+import { Route as OgLetterSlugRouteImport } from './routes/og/letter/$slug'
+import { Route as PostflightAuthCallbackRouteImport } from './routes/postflight.auth.callback'
+import { Route as PostflightAuthLoginRouteImport } from './routes/postflight.auth.login'
+import { Route as PostflightAuthLogoutRouteImport } from './routes/postflight.auth.logout'
+import { Route as PostflightAuthSessionRouteImport } from './routes/postflight.auth.session'
 
-const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
-  id: '/sitemap.xml',
-  path: '/sitemap.xml',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PostflightRoute = PostflightRouteImport.update({
-  id: '/postflight',
-  path: '/postflight',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MetricsRoute = MetricsRouteImport.update({
-  id: '/metrics',
-  path: '/metrics',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LivezRoute = LivezRouteImport.update({
-  id: '/livez',
-  path: '/livez',
+const WorkshopRouteRoute = WorkshopRouteRouteImport.update({
+  id: '/_workshop',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HealthzRoute = HealthzRouteImport.update({
@@ -67,78 +51,39 @@ const HealthzRoute = HealthzRouteImport.update({
   path: '/healthz',
   getParentRoute: () => rootRouteImport,
 } as any)
-const NewsRouteRoute = NewsRouteRouteImport.update({
-  id: '/news',
-  path: '/news',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const LettersRouteRoute = LettersRouteRouteImport.update({
   id: '/letters',
   path: '/letters',
   getParentRoute: () => rootRouteImport,
 } as any)
-const WorkshopRouteRoute = WorkshopRouteRouteImport.update({
-  id: '/_workshop',
+const LivezRoute = LivezRouteImport.update({
+  id: '/livez',
+  path: '/livez',
   getParentRoute: () => rootRouteImport,
 } as any)
-const NewsIndexRoute = NewsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => NewsRouteRoute,
+const MetricsRoute = MetricsRouteImport.update({
+  id: '/metrics',
+  path: '/metrics',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const LettersIndexRoute = LettersIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => LettersRouteRoute,
+const NewsRouteRoute = NewsRouteRouteImport.update({
+  id: '/news',
+  path: '/news',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PostflightRoute = PostflightRouteImport.update({
+  id: '/postflight',
+  path: '/postflight',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const WorkshopIndexRoute = WorkshopIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => WorkshopRouteRoute,
-} as any)
-const PostflightConsoleRoute = PostflightConsoleRouteImport.update({
-  id: '/postflight_/console',
-  path: '/postflight/console',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OgSlugRoute = OgSlugRouteImport.update({
-  id: '/og/$slug',
-  path: '/og/$slug',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const NewsSlugRoute = NewsSlugRouteImport.update({
-  id: '/$slug',
-  path: '/$slug',
-  getParentRoute: () => NewsRouteRoute,
-} as any)
-const LettersSlugRoute = LettersSlugRouteImport.update({
-  id: '/$slug',
-  path: '/$slug',
-  getParentRoute: () => LettersRouteRoute,
-} as any)
-const WorkshopSolutionsRoute = WorkshopSolutionsRouteImport.update({
-  id: '/solutions',
-  path: '/solutions',
-  getParentRoute: () => WorkshopRouteRoute,
-} as any)
-const WorkshopPressRoute = WorkshopPressRouteImport.update({
-  id: '/press',
-  path: '/press',
-  getParentRoute: () => WorkshopRouteRoute,
-} as any)
-const WorkshopContactRoute = WorkshopContactRouteImport.update({
-  id: '/contact',
-  path: '/contact',
-  getParentRoute: () => WorkshopRouteRoute,
-} as any)
-const WorkshopCompanyRoute = WorkshopCompanyRouteImport.update({
-  id: '/company',
-  path: '/company',
-  getParentRoute: () => WorkshopRouteRoute,
-} as any)
-const WorkshopChangelogRoute = WorkshopChangelogRouteImport.update({
-  id: '/changelog',
-  path: '/changelog',
   getParentRoute: () => WorkshopRouteRoute,
 } as any)
 const WorkshopCareersRoute = WorkshopCareersRouteImport.update({
@@ -146,49 +91,74 @@ const WorkshopCareersRoute = WorkshopCareersRouteImport.update({
   path: '/careers',
   getParentRoute: () => WorkshopRouteRoute,
 } as any)
+const WorkshopChangelogRoute = WorkshopChangelogRouteImport.update({
+  id: '/changelog',
+  path: '/changelog',
+  getParentRoute: () => WorkshopRouteRoute,
+} as any)
+const WorkshopCompanyRoute = WorkshopCompanyRouteImport.update({
+  id: '/company',
+  path: '/company',
+  getParentRoute: () => WorkshopRouteRoute,
+} as any)
+const WorkshopContactRoute = WorkshopContactRouteImport.update({
+  id: '/contact',
+  path: '/contact',
+  getParentRoute: () => WorkshopRouteRoute,
+} as any)
 const WorkshopDesignRouteRoute = WorkshopDesignRouteRouteImport.update({
   id: '/design',
   path: '/design',
   getParentRoute: () => WorkshopRouteRoute,
+} as any)
+const WorkshopPressRoute = WorkshopPressRouteImport.update({
+  id: '/press',
+  path: '/press',
+  getParentRoute: () => WorkshopRouteRoute,
+} as any)
+const WorkshopSolutionsRoute = WorkshopSolutionsRouteImport.update({
+  id: '/solutions',
+  path: '/solutions',
+  getParentRoute: () => WorkshopRouteRoute,
+} as any)
+const LettersIndexRoute = LettersIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => LettersRouteRoute,
+} as any)
+const LettersSlugRoute = LettersSlugRouteImport.update({
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => LettersRouteRoute,
+} as any)
+const NewsIndexRoute = NewsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => NewsRouteRoute,
+} as any)
+const NewsSlugRoute = NewsSlugRouteImport.update({
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => NewsRouteRoute,
+} as any)
+const OgSlugRoute = OgSlugRouteImport.update({
+  id: '/og/$slug',
+  path: '/og/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PostflightConsoleRoute = PostflightConsoleRouteImport.update({
+  id: '/postflight_/console',
+  path: '/postflight/console',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const WorkshopDesignIndexRoute = WorkshopDesignIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => WorkshopDesignRouteRoute,
 } as any)
-const PostflightAuthSessionRoute = PostflightAuthSessionRouteImport.update({
-  id: '/auth/session',
-  path: '/auth/session',
-  getParentRoute: () => PostflightRoute,
-} as any)
-const PostflightAuthLogoutRoute = PostflightAuthLogoutRouteImport.update({
-  id: '/auth/logout',
-  path: '/auth/logout',
-  getParentRoute: () => PostflightRoute,
-} as any)
-const PostflightAuthLoginRoute = PostflightAuthLoginRouteImport.update({
-  id: '/auth/login',
-  path: '/auth/login',
-  getParentRoute: () => PostflightRoute,
-} as any)
-const PostflightAuthCallbackRoute = PostflightAuthCallbackRouteImport.update({
-  id: '/auth/callback',
-  path: '/auth/callback',
-  getParentRoute: () => PostflightRoute,
-} as any)
-const OgLetterSlugRoute = OgLetterSlugRouteImport.update({
-  id: '/og/letter/$slug',
-  path: '/og/letter/$slug',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const WorkshopPostflightDocsRoute = WorkshopPostflightDocsRouteImport.update({
-  id: '/postflight/docs',
-  path: '/postflight/docs',
-  getParentRoute: () => WorkshopRouteRoute,
-} as any)
-const WorkshopDesignWorkshopRoute = WorkshopDesignWorkshopRouteImport.update({
-  id: '/workshop',
-  path: '/workshop',
+const WorkshopDesignLettersRoute = WorkshopDesignLettersRouteImport.update({
+  id: '/letters',
+  path: '/letters',
   getParentRoute: () => WorkshopDesignRouteRoute,
 } as any)
 const WorkshopDesignNewsroomRoute = WorkshopDesignNewsroomRouteImport.update({
@@ -196,10 +166,40 @@ const WorkshopDesignNewsroomRoute = WorkshopDesignNewsroomRouteImport.update({
   path: '/newsroom',
   getParentRoute: () => WorkshopDesignRouteRoute,
 } as any)
-const WorkshopDesignLettersRoute = WorkshopDesignLettersRouteImport.update({
-  id: '/letters',
-  path: '/letters',
+const WorkshopDesignWorkshopRoute = WorkshopDesignWorkshopRouteImport.update({
+  id: '/workshop',
+  path: '/workshop',
   getParentRoute: () => WorkshopDesignRouteRoute,
+} as any)
+const WorkshopPostflightDocsRoute = WorkshopPostflightDocsRouteImport.update({
+  id: '/postflight/docs',
+  path: '/postflight/docs',
+  getParentRoute: () => WorkshopRouteRoute,
+} as any)
+const OgLetterSlugRoute = OgLetterSlugRouteImport.update({
+  id: '/og/letter/$slug',
+  path: '/og/letter/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PostflightAuthCallbackRoute = PostflightAuthCallbackRouteImport.update({
+  id: '/auth/callback',
+  path: '/auth/callback',
+  getParentRoute: () => PostflightRoute,
+} as any)
+const PostflightAuthLoginRoute = PostflightAuthLoginRouteImport.update({
+  id: '/auth/login',
+  path: '/auth/login',
+  getParentRoute: () => PostflightRoute,
+} as any)
+const PostflightAuthLogoutRoute = PostflightAuthLogoutRouteImport.update({
+  id: '/auth/logout',
+  path: '/auth/logout',
+  getParentRoute: () => PostflightRoute,
+} as any)
+const PostflightAuthSessionRoute = PostflightAuthSessionRouteImport.update({
+  id: '/auth/session',
+  path: '/auth/session',
+  getParentRoute: () => PostflightRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -416,32 +416,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/sitemap.xml': {
-      id: '/sitemap.xml'
-      path: '/sitemap.xml'
-      fullPath: '/sitemap.xml'
-      preLoaderRoute: typeof SitemapDotxmlRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/postflight': {
-      id: '/postflight'
-      path: '/postflight'
-      fullPath: '/postflight'
-      preLoaderRoute: typeof PostflightRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/metrics': {
-      id: '/metrics'
-      path: '/metrics'
-      fullPath: '/metrics'
-      preLoaderRoute: typeof MetricsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/livez': {
-      id: '/livez'
-      path: '/livez'
-      fullPath: '/livez'
-      preLoaderRoute: typeof LivezRouteImport
+    '/_workshop': {
+      id: '/_workshop'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof WorkshopRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/healthz': {
@@ -451,13 +430,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HealthzRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/news': {
-      id: '/news'
-      path: '/news'
-      fullPath: '/news'
-      preLoaderRoute: typeof NewsRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/letters': {
       id: '/letters'
       path: '/letters'
@@ -465,95 +437,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LettersRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_workshop': {
-      id: '/_workshop'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof WorkshopRouteRouteImport
+    '/livez': {
+      id: '/livez'
+      path: '/livez'
+      fullPath: '/livez'
+      preLoaderRoute: typeof LivezRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/news/': {
-      id: '/news/'
-      path: '/'
-      fullPath: '/news/'
-      preLoaderRoute: typeof NewsIndexRouteImport
-      parentRoute: typeof NewsRouteRoute
+    '/metrics': {
+      id: '/metrics'
+      path: '/metrics'
+      fullPath: '/metrics'
+      preLoaderRoute: typeof MetricsRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/letters/': {
-      id: '/letters/'
-      path: '/'
-      fullPath: '/letters/'
-      preLoaderRoute: typeof LettersIndexRouteImport
-      parentRoute: typeof LettersRouteRoute
+    '/news': {
+      id: '/news'
+      path: '/news'
+      fullPath: '/news'
+      preLoaderRoute: typeof NewsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/postflight': {
+      id: '/postflight'
+      path: '/postflight'
+      fullPath: '/postflight'
+      preLoaderRoute: typeof PostflightRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_workshop/': {
       id: '/_workshop/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof WorkshopIndexRouteImport
-      parentRoute: typeof WorkshopRouteRoute
-    }
-    '/postflight_/console': {
-      id: '/postflight_/console'
-      path: '/postflight/console'
-      fullPath: '/postflight/console'
-      preLoaderRoute: typeof PostflightConsoleRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/og/$slug': {
-      id: '/og/$slug'
-      path: '/og/$slug'
-      fullPath: '/og/$slug'
-      preLoaderRoute: typeof OgSlugRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/news/$slug': {
-      id: '/news/$slug'
-      path: '/$slug'
-      fullPath: '/news/$slug'
-      preLoaderRoute: typeof NewsSlugRouteImport
-      parentRoute: typeof NewsRouteRoute
-    }
-    '/letters/$slug': {
-      id: '/letters/$slug'
-      path: '/$slug'
-      fullPath: '/letters/$slug'
-      preLoaderRoute: typeof LettersSlugRouteImport
-      parentRoute: typeof LettersRouteRoute
-    }
-    '/_workshop/solutions': {
-      id: '/_workshop/solutions'
-      path: '/solutions'
-      fullPath: '/solutions'
-      preLoaderRoute: typeof WorkshopSolutionsRouteImport
-      parentRoute: typeof WorkshopRouteRoute
-    }
-    '/_workshop/press': {
-      id: '/_workshop/press'
-      path: '/press'
-      fullPath: '/press'
-      preLoaderRoute: typeof WorkshopPressRouteImport
-      parentRoute: typeof WorkshopRouteRoute
-    }
-    '/_workshop/contact': {
-      id: '/_workshop/contact'
-      path: '/contact'
-      fullPath: '/contact'
-      preLoaderRoute: typeof WorkshopContactRouteImport
-      parentRoute: typeof WorkshopRouteRoute
-    }
-    '/_workshop/company': {
-      id: '/_workshop/company'
-      path: '/company'
-      fullPath: '/company'
-      preLoaderRoute: typeof WorkshopCompanyRouteImport
-      parentRoute: typeof WorkshopRouteRoute
-    }
-    '/_workshop/changelog': {
-      id: '/_workshop/changelog'
-      path: '/changelog'
-      fullPath: '/changelog'
-      preLoaderRoute: typeof WorkshopChangelogRouteImport
       parentRoute: typeof WorkshopRouteRoute
     }
     '/_workshop/careers': {
@@ -563,12 +486,89 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkshopCareersRouteImport
       parentRoute: typeof WorkshopRouteRoute
     }
+    '/_workshop/changelog': {
+      id: '/_workshop/changelog'
+      path: '/changelog'
+      fullPath: '/changelog'
+      preLoaderRoute: typeof WorkshopChangelogRouteImport
+      parentRoute: typeof WorkshopRouteRoute
+    }
+    '/_workshop/company': {
+      id: '/_workshop/company'
+      path: '/company'
+      fullPath: '/company'
+      preLoaderRoute: typeof WorkshopCompanyRouteImport
+      parentRoute: typeof WorkshopRouteRoute
+    }
+    '/_workshop/contact': {
+      id: '/_workshop/contact'
+      path: '/contact'
+      fullPath: '/contact'
+      preLoaderRoute: typeof WorkshopContactRouteImport
+      parentRoute: typeof WorkshopRouteRoute
+    }
     '/_workshop/design': {
       id: '/_workshop/design'
       path: '/design'
       fullPath: '/design'
       preLoaderRoute: typeof WorkshopDesignRouteRouteImport
       parentRoute: typeof WorkshopRouteRoute
+    }
+    '/_workshop/press': {
+      id: '/_workshop/press'
+      path: '/press'
+      fullPath: '/press'
+      preLoaderRoute: typeof WorkshopPressRouteImport
+      parentRoute: typeof WorkshopRouteRoute
+    }
+    '/_workshop/solutions': {
+      id: '/_workshop/solutions'
+      path: '/solutions'
+      fullPath: '/solutions'
+      preLoaderRoute: typeof WorkshopSolutionsRouteImport
+      parentRoute: typeof WorkshopRouteRoute
+    }
+    '/letters/': {
+      id: '/letters/'
+      path: '/'
+      fullPath: '/letters/'
+      preLoaderRoute: typeof LettersIndexRouteImport
+      parentRoute: typeof LettersRouteRoute
+    }
+    '/letters/$slug': {
+      id: '/letters/$slug'
+      path: '/$slug'
+      fullPath: '/letters/$slug'
+      preLoaderRoute: typeof LettersSlugRouteImport
+      parentRoute: typeof LettersRouteRoute
+    }
+    '/news/': {
+      id: '/news/'
+      path: '/'
+      fullPath: '/news/'
+      preLoaderRoute: typeof NewsIndexRouteImport
+      parentRoute: typeof NewsRouteRoute
+    }
+    '/news/$slug': {
+      id: '/news/$slug'
+      path: '/$slug'
+      fullPath: '/news/$slug'
+      preLoaderRoute: typeof NewsSlugRouteImport
+      parentRoute: typeof NewsRouteRoute
+    }
+    '/og/$slug': {
+      id: '/og/$slug'
+      path: '/og/$slug'
+      fullPath: '/og/$slug'
+      preLoaderRoute: typeof OgSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/postflight_/console': {
+      id: '/postflight_/console'
+      path: '/postflight/console'
+      fullPath: '/postflight/console'
+      preLoaderRoute: typeof PostflightConsoleRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_workshop/design/': {
       id: '/_workshop/design/'
@@ -577,53 +577,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkshopDesignIndexRouteImport
       parentRoute: typeof WorkshopDesignRouteRoute
     }
-    '/postflight/auth/session': {
-      id: '/postflight/auth/session'
-      path: '/auth/session'
-      fullPath: '/postflight/auth/session'
-      preLoaderRoute: typeof PostflightAuthSessionRouteImport
-      parentRoute: typeof PostflightRoute
-    }
-    '/postflight/auth/logout': {
-      id: '/postflight/auth/logout'
-      path: '/auth/logout'
-      fullPath: '/postflight/auth/logout'
-      preLoaderRoute: typeof PostflightAuthLogoutRouteImport
-      parentRoute: typeof PostflightRoute
-    }
-    '/postflight/auth/login': {
-      id: '/postflight/auth/login'
-      path: '/auth/login'
-      fullPath: '/postflight/auth/login'
-      preLoaderRoute: typeof PostflightAuthLoginRouteImport
-      parentRoute: typeof PostflightRoute
-    }
-    '/postflight/auth/callback': {
-      id: '/postflight/auth/callback'
-      path: '/auth/callback'
-      fullPath: '/postflight/auth/callback'
-      preLoaderRoute: typeof PostflightAuthCallbackRouteImport
-      parentRoute: typeof PostflightRoute
-    }
-    '/og/letter/$slug': {
-      id: '/og/letter/$slug'
-      path: '/og/letter/$slug'
-      fullPath: '/og/letter/$slug'
-      preLoaderRoute: typeof OgLetterSlugRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_workshop/postflight/docs': {
-      id: '/_workshop/postflight/docs'
-      path: '/postflight/docs'
-      fullPath: '/postflight/docs'
-      preLoaderRoute: typeof WorkshopPostflightDocsRouteImport
-      parentRoute: typeof WorkshopRouteRoute
-    }
-    '/_workshop/design/workshop': {
-      id: '/_workshop/design/workshop'
-      path: '/workshop'
-      fullPath: '/design/workshop'
-      preLoaderRoute: typeof WorkshopDesignWorkshopRouteImport
+    '/_workshop/design/letters': {
+      id: '/_workshop/design/letters'
+      path: '/letters'
+      fullPath: '/design/letters'
+      preLoaderRoute: typeof WorkshopDesignLettersRouteImport
       parentRoute: typeof WorkshopDesignRouteRoute
     }
     '/_workshop/design/newsroom': {
@@ -633,12 +591,54 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkshopDesignNewsroomRouteImport
       parentRoute: typeof WorkshopDesignRouteRoute
     }
-    '/_workshop/design/letters': {
-      id: '/_workshop/design/letters'
-      path: '/letters'
-      fullPath: '/design/letters'
-      preLoaderRoute: typeof WorkshopDesignLettersRouteImport
+    '/_workshop/design/workshop': {
+      id: '/_workshop/design/workshop'
+      path: '/workshop'
+      fullPath: '/design/workshop'
+      preLoaderRoute: typeof WorkshopDesignWorkshopRouteImport
       parentRoute: typeof WorkshopDesignRouteRoute
+    }
+    '/_workshop/postflight/docs': {
+      id: '/_workshop/postflight/docs'
+      path: '/postflight/docs'
+      fullPath: '/postflight/docs'
+      preLoaderRoute: typeof WorkshopPostflightDocsRouteImport
+      parentRoute: typeof WorkshopRouteRoute
+    }
+    '/og/letter/$slug': {
+      id: '/og/letter/$slug'
+      path: '/og/letter/$slug'
+      fullPath: '/og/letter/$slug'
+      preLoaderRoute: typeof OgLetterSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/postflight/auth/callback': {
+      id: '/postflight/auth/callback'
+      path: '/auth/callback'
+      fullPath: '/postflight/auth/callback'
+      preLoaderRoute: typeof PostflightAuthCallbackRouteImport
+      parentRoute: typeof PostflightRoute
+    }
+    '/postflight/auth/login': {
+      id: '/postflight/auth/login'
+      path: '/auth/login'
+      fullPath: '/postflight/auth/login'
+      preLoaderRoute: typeof PostflightAuthLoginRouteImport
+      parentRoute: typeof PostflightRoute
+    }
+    '/postflight/auth/logout': {
+      id: '/postflight/auth/logout'
+      path: '/auth/logout'
+      fullPath: '/postflight/auth/logout'
+      preLoaderRoute: typeof PostflightAuthLogoutRouteImport
+      parentRoute: typeof PostflightRoute
+    }
+    '/postflight/auth/session': {
+      id: '/postflight/auth/session'
+      path: '/auth/session'
+      fullPath: '/postflight/auth/session'
+      preLoaderRoute: typeof PostflightAuthSessionRouteImport
+      parentRoute: typeof PostflightRoute
     }
   }
 }
