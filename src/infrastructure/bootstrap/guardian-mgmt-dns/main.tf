@@ -164,3 +164,24 @@ resource "cloudflare_dns_record" "rumi_engineering_apex" {
   proxied = true
   comment = "shortty ${each.key} product edge"
 }
+
+# CAA policy for the zone, owned here rather than inherited from its
+# pre-Guardian life: Cloudflare edge certificates issue via Google Trust
+# Services or Let's Encrypt; nothing else may issue for this zone.
+resource "cloudflare_dns_record" "rumi_engineering_caa" {
+  for_each = {
+    letsencrypt = "letsencrypt.org"
+    google      = "pki.goog"
+  }
+
+  zone_id = data.cloudflare_zone.rumi_engineering.id
+  name    = "rumi.engineering"
+  type    = "CAA"
+  ttl     = 1
+  data = {
+    flags = 0
+    tag   = "issue"
+    value = each.value
+  }
+  comment = "shortty edge certificate issuance policy"
+}
