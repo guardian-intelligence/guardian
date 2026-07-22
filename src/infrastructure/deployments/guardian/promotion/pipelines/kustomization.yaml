@@ -10,6 +10,7 @@ resources:
   - iam-secrets.yaml
   - iam-stage-prod.yaml
   - iam-login-canary-stage-prod.yaml
+  - iam-journey-canary-stage-prod.yaml
   - products-namespace.yaml
   - products-project.yaml
   - products-secrets.yaml
