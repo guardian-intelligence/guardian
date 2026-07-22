@@ -95,7 +95,7 @@ Two more rules the platform depends on (keep them or the results are wrong):
    `securityContext`, and a `CiliumNetworkPolicy` egress allowlist (kube-dns,
    the target Service, vminsert:8480, and `world:443` only if a flow needs the
    public host). Copy the pair at the bottom of
-   `deployments/iam/login-canary.yaml`.
+   `deployments/iam/journey-canary.yaml`.
 
 5. **Alert on it** with a `VMRule` in the surface's `observability.yaml`: a
    `Failing` rule on the failure/error series and an `Absent` rule so a canary

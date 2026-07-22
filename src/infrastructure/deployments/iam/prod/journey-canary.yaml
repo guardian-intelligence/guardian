@@ -8,12 +8,11 @@ metadata:
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
 spec:
-  # Shadow ring beside guardian-login-canary (*/15). Twice hourly keeps the
-  # combined OAuth token mint rate at six per hour, under GitHub's ten
-  # tokens/hour/user/application ceiling that forces interactive
-  # reauthorization when crossed. The Playwright journey takes over the full
-  # cadence when the chromedp canary retires.
-  schedule: "22,52 * * * *"
+  # GitHub limits one user/application/scope combination to ten OAuth tokens
+  # per hour and forces interactive reauthorization when the limit is
+  # crossed; every 15 minutes also keeps GuardianSignInStale's traffic floor
+  # (two canary cycles = 35 minutes).
+  schedule: "*/15 * * * *"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 1
@@ -43,10 +42,6 @@ spec:
               image: ghcr.io/guardian-intelligence/canary-journeys@sha256:4ba2c77a51557e63ff3b7ad2a72c57b102c2d4a0f70eadacb5edc20a2e7a44c1
               imagePullPolicy: IfNotPresent
               env:
-                # Browser-launch stderr into the pod log while the shadow
-                # ring's Chromium hang is under diagnosis.
-                - name: DEBUG
-                  value: pw:browser
                 - name: POSTFLIGHT_URL
                   value: https://guardianintelligence.org/postflight
                 - name: CANARY_TIMEOUT

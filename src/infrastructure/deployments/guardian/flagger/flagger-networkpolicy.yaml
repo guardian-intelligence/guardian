@@ -76,9 +76,8 @@ spec:
               protocol: TCP
 ---
 # Ingress half of the alert path: tenant-root's generated isolation does not
-# admit other namespaces (same reason as the vminsert-from-login-canary
-# pair in ../../iam/*/login-canary.yaml); admit exactly the Flagger
-# controller to the alert-relay.
+# admit other namespaces; admit exactly the Flagger controller to the
+# alert-relay.
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy
 metadata:
