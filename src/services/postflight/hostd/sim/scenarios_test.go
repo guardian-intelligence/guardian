@@ -154,7 +154,7 @@ func TestUnsafeRestoreRecyclesWithoutCustomerRelease(t *testing.T) {
 	}
 }
 
-func TestMemberCrashRequeuesAndPoolRefills(t *testing.T) {
+func TestMemberCrashFailsAcquiredAssignmentClosedAndPoolRefills(t *testing.T) {
 	world := NewWorld(t, map[vm.Class]int{runnerClass: 1})
 	members := listeningMembers(t, world, 1)
 	desired := desiredAssignment(0, members[0])
@@ -165,7 +165,7 @@ func TestMemberCrashRequeuesAndPoolRefills(t *testing.T) {
 		t.Fatal(err)
 	}
 	world.Tick()
-	if snapshot := world.Assignment(desired.AssignmentID); snapshot.State != syncproto.AssignmentRequeued {
+	if snapshot := world.Assignment(desired.AssignmentID); snapshot.State != syncproto.AssignmentFailedClosed {
 		t.Fatalf("crashed assignment = %+v", snapshot)
 	}
 	statuses, err := world.VMs.List(context.Background())

@@ -233,7 +233,7 @@ func (a *Agent) appendTrace(state *traceState, record *assignment, event string,
 	}
 	state.seq = observation.Seq
 	state.seen[event] = true
-	if event == "vm_destroy_completed" || event == "assignment_requeued" || event == "assignment_failed_closed" || event == "snapshot_seal_completed" {
+	if event == "vm_destroy_completed" || event == "assignment_aborted" || event == "assignment_failed_closed" || event == "snapshot_seal_completed" {
 		if err := state.file.Sync(); err != nil {
 			a.logger.Error("syncing terminal rendezvous evidence", "member_id", state.memberID, "event", event, "err", err)
 		}

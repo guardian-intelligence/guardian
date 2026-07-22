@@ -39,7 +39,7 @@ type config struct {
 	// its dataset on the host) forever.
 	verdictTimeout time.Duration
 	// hostOfflineTimeout is how long a host may go without syncing before
-	// its active assignments are requeued (the host is presumed dead).
+	// its acquired assignments fail closed (the host is presumed dead).
 	hostOfflineTimeout time.Duration
 }
 

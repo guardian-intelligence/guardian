@@ -10,7 +10,7 @@ and encrypted node-local zvol generations.
 | --- | --- | --- | --- |
 | Pool member | `(host, vm, incarnation)` | A generic guest is launched | Its single job ends or the guest is recycled |
 | Job intent | `(scale set, runner request ID, protocol job ID)` | `JobAvailable` is received | GitHub completes or cancels the request |
-| Assignment | `(protocol job ID, member incarnation)` | The selected guest reports the job locally | The job ends or GitHub requeues after guest loss |
+| Assignment | `(protocol job ID, member incarnation)` | The selected guest reports the job locally | The job ends, is withdrawn, or fails closed |
 | Generation | Authenticated manifest digest and monotonic generation number | A trusted successful donor is sealed | Retention reaps it or policy invalidates it |
 
 A numeric GitHub REST job ID is useful for UI and conclusion reconciliation,
@@ -58,6 +58,7 @@ verify manifest and scope
        -> incompatible:
             destroy partial capsule
             prove restore isolation is empty
+            replace the cgroup boundary
             invalidate process component
             create cold capsule
        -> unsafe:
@@ -70,8 +71,9 @@ verify manifest and scope
 
 The restore isolation is disposable. CRIU runs with its process tree confined
 to the capsule PID namespace and cgroup. A recoverable error is allowed to
-continue cold only after both are empty and every temporary mount is detached.
-Failure to prove cleanup is an unsafe outcome.
+continue cold only after the process tree is empty, every temporary mount is
+detached, and the killed cgroup has been replaced with a distinct cgroup
+object. Failure to prove or replace that boundary is an unsafe outcome.
 
 ### Failure policy
 
@@ -82,12 +84,21 @@ Failure to prove cleanup is an unsafe outcome.
 | CRIU exits unsuccessfully and cleanup is proven | Cold fallback | Invalidate | Continue on same live Worker |
 | Snapshot digest, signature, tenant/scope, rollback floor, measurement, TCB, or key binding mismatch | Recycle VM | Quarantine generation | Never release this Worker |
 | Cleanup cannot prove an empty capsule | Recycle VM | Invalidate and quarantine evidence | Never release this Worker |
-| QEMU, guestd, or listener dies | Recycle/refill | Invalidate suspect process component | GitHub requeues to another member |
-| Cold capsule creation fails | Recycle VM | Already invalidated | GitHub requeues to another member |
+| QEMU, guestd, or listener dies before provider acquisition | Recycle/refill | Invalidate suspect process component | GitHub requeues after its pickup deadline |
+| QEMU, guestd, or listener dies after provider acquisition | Recycle/refill | Invalidate suspect process component | Current attempt cannot be transparently requeued |
+| Cold capsule creation fails | Recycle VM | Already invalidated | Current attempt cannot be transparently requeued |
 
 The workspace and tool snapshots survive a process-only invalidation if their
 authenticated manifest components remain valid. The next attempt gets their
 artifacts with a cold process capsule.
+
+GitHub's broker `acquirejob` call is a commit point. Before it, disconnecting a
+listener leaves the job eligible for GitHub's normal pickup retry. After it,
+the provider does not expose a release operation that can assign the same job
+message to another listener. The durable assignment ledger must not describe
+post-acquisition VM loss as requeued; transparent recovery would require a
+separately designed, attested handoff of the acquired job message and its
+listener state to a replacement VM.
 
 ## Generation creation and publication
 

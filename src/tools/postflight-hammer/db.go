@@ -21,7 +21,6 @@ var (
 	terminalAssignmentStates = map[string]bool{
 		"sealed":        true,
 		"completed":     true,
-		"requeued":      true,
 		"failed_closed": true,
 	}
 )

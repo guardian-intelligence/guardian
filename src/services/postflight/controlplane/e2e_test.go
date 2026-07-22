@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel/trace/noop"
 
@@ -90,6 +91,88 @@ type e2eControlPlane struct {
 	pool   *pgxpool.Pool
 	server *httptest.Server
 	github *fakeGitHub
+}
+
+func TestProviderAcquisitionMigrationFailsHistoricalRequeuesClosed(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := pool.Exec(ctx, `CREATE TABLE schema_migrations (
+		version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"001_initial.sql", "002_hostd_scheduler.sql", "003_workspace_generations.sql",
+		"004_provider_installations.sql", "005_confidential_generations.sql",
+		"006_durable_tool_generations.sql", "007_durable_runner_model.sql",
+	} {
+		if err := applyMigration(ctx, pool, name); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO hosts (host_id, boot_id, last_sync_at) VALUES ('host-migration', 'boot-1', now());
+INSERT INTO runner_pools (pool_id, org_id, installation_id, runner_class, desired_count)
+VALUES ('10000000-0000-0000-0000-000000000008', 'acme', $2, $1, 1);
+INSERT INTO runner_pool_members (
+    member_id, host_id, vm_id, pool_id, runner_name, runner_class, state
+) VALUES (
+    'member-migration', 'host-migration', 'vm-migration',
+    '10000000-0000-0000-0000-000000000008', 'runner-migration', $1, 'lost'
+);
+INSERT INTO github_workflow_jobs (
+    provider_job_id, provider_run_id, provider_run_attempt,
+    provider_repository_id, provider_installation_id, repository_full_name,
+    name, status, labels_json, runner_class, head_branch, check_run_id
+) VALUES ($3, $4, 1, $5, $2, $6, 'build', 'in_progress', $7::jsonb, $1, 'main', $8);
+INSERT INTO github_provider_demands (
+    provider_job_id, provider_installation_id, provider_repository_id,
+    repository_full_name, provider_run_id, provider_run_attempt,
+    trust_class, runner_class, state
+) VALUES ($3, $2, $5, $6, $4, 1, $9, $1, 'assigned');
+INSERT INTO github_job_intents (
+    provider_job_id, runner_class, repository_full_name, provider_run_id,
+    provider_run_attempt, job_display_name, check_run_id, request_id,
+    protocol_job_id, state
+) VALUES ($3, $1, $6, $4, 1, 'build', $8, 'request-migration', 'job-migration', 'requeued');
+INSERT INTO runner_job_assignments (
+    assignment_id, member_id, provider_job_id, host_id, request_id,
+    protocol_job_id, check_run_id, runner_name, job_display_name, run_id,
+    run_attempt, repository, workflow_job, state
+) VALUES (
+    '20000000-0000-0000-0000-000000000008', 'member-migration', $3,
+    'host-migration', 'request-migration', 'job-migration', $8,
+    'runner-migration', 'build', $4::text, 1, $6, 'build', 'requeued'
+)`, pgx.QueryExecModeSimpleProtocol, e2eClass, e2eInstallationID, e2eJobID, e2eRunID, e2eRepositoryID,
+		e2eRepo, `["`+e2eClass+`"]`, e2eCheckRunID, trustClassPR); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := applyMigration(ctx, pool, "008_provider_acquisition_boundary.sql"); err != nil {
+		t.Fatal(err)
+	}
+	if got := queryString(t, pool, `SELECT state FROM runner_job_assignments WHERE provider_job_id = $1`, e2eJobID); got != "failed_closed" {
+		t.Fatalf("assignment state = %q", got)
+	}
+	if got := queryString(t, pool, `SELECT state FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID); got != "failed_closed" {
+		t.Fatalf("intent state = %q", got)
+	}
+	if got := queryString(t, pool, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "sandbox_failed" {
+		t.Fatalf("demand state = %q", got)
+	}
+	if got := queryString(t, pool, `SELECT problem_count::text || ':' || primary_problem_code FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "1:assignment.sandbox_failed" {
+		t.Fatalf("demand problem = %q", got)
+	}
+	if got := queryString(t, pool, `SELECT count(*)::text FROM github_provider_demand_problems WHERE provider_job_id = $1 AND problem_code = 'assignment.sandbox_failed'`, e2eJobID); got != "1" {
+		t.Fatalf("problem history rows = %q", got)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE github_job_intents SET state = 'requeued' WHERE provider_job_id = $1`, e2eJobID); err == nil {
+		t.Fatal("post-migration intent accepted the retired requeued state")
+	}
 }
 
 func startE2EControlPlane(t *testing.T) *e2eControlPlane {
@@ -524,7 +607,7 @@ func TestIntegrityFailureFailsClosedAndRefillsPool(t *testing.T) {
 	})
 }
 
-func TestMemberCrashRequeuesSameJobToReplacement(t *testing.T) {
+func TestMemberCrashFailsAcquiredJobClosedAndRefillsPool(t *testing.T) {
 	control := startE2EControlPlane(t)
 	_, vms, _, _ := startE2EHost(t, control.server.URL)
 	waitFor(t, "registered listeners", func() bool {
@@ -569,50 +652,18 @@ func TestMemberCrashRequeuesSameJobToReplacement(t *testing.T) {
 	if err := vms.Destroy(context.Background(), first.ID); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "first assignment requeued", func() bool {
-		return queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE member_id = $1`, first.Incarnation) == "requeued"
+	waitFor(t, "first assignment failed closed", func() bool {
+		return queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE member_id = $1`, first.Incarnation) == "failed_closed"
 	})
 	waitFor(t, "replacement listener", func() bool {
 		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening' AND member_id <> $1`, first.Incarnation) == "2"
 	})
-	statuses, err = vms.List(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	if got := queryString(t, control.pool, `SELECT count(*)::text FROM runner_job_assignments WHERE provider_job_id = $1`, e2eJobID); got != "1" {
+		t.Fatalf("assignment attempts = %s, want 1", got)
 	}
-	var replacement vm.Status
-	for _, status := range statuses {
-		if status.Phase == vm.PhaseListening && status.Incarnation != first.Incarnation {
-			replacement = status
-			break
-		}
-	}
-	if replacement.ID == "" {
-		t.Fatal("no replacement listener")
-	}
-	replacementRunner := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, replacement.Incarnation)
-	identity.RunnerName = replacementRunner
-	if !vms.MarkAssigned(replacement.ID, vm.Assignment{
-		RequestID: "request-retry", JobID: "protocol-job-retry", CheckRunID: e2eCheckRunID, RunnerName: replacementRunner,
-		JobDisplayName: "build", Identity: identity,
-	}) {
-		t.Fatal("assign replacement listener")
-	}
-	var replacementAssignment string
-	waitFor(t, "replacement rendezvous", func() bool {
-		rendezvous, found := vms.RendezvousFor(replacement.ID)
-		replacementAssignment = rendezvous.AssignmentID
-		return found && replacementAssignment != ""
-	})
-	if got := queryString(t, control.pool, `SELECT count(*)::text FROM runner_job_assignments WHERE provider_job_id = $1`, e2eJobID); got != "2" {
-		t.Fatalf("assignment attempts = %s, want 2", got)
-	}
-	waitFor(t, "retry remains bound", func() bool {
-		state := queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE assignment_id::text = $1`, replacementAssignment)
-		return state == "observed" || state == "binding"
-	})
 }
 
-func TestOfflineHostRequeuesActiveAssignment(t *testing.T) {
+func TestOfflineHostFailsAcquiredAssignmentClosed(t *testing.T) {
 	control := startE2EControlPlane(t)
 	_, vms, _, stop := startE2EHost(t, control.server.URL)
 	waitFor(t, "registered listeners", func() bool {
@@ -654,11 +705,14 @@ func TestOfflineHostRequeuesActiveAssignment(t *testing.T) {
 	if recovered != 1 {
 		t.Fatalf("recovered assignments = %d, want 1", recovered)
 	}
-	if got := queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE member_id = $1`, selected.Incarnation); got != "requeued" {
+	if got := queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE member_id = $1`, selected.Incarnation); got != "failed_closed" {
 		t.Fatalf("assignment state = %q", got)
 	}
-	if got := queryString(t, control.pool, `SELECT state FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID); got != "requeued" {
+	if got := queryString(t, control.pool, `SELECT state FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID); got != "failed_closed" {
 		t.Fatalf("intent state = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "sandbox_failed" {
+		t.Fatalf("demand state = %q", got)
 	}
 	if got := queryString(t, control.pool, `SELECT state FROM runner_pool_members WHERE member_id = $1`, selected.Incarnation); got != "lost" {
 		t.Fatalf("member state = %q", got)

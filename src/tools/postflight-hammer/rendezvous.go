@@ -49,11 +49,14 @@ const (
 	eventRestoreDigestCompleted            = "restore_digest_completed"
 	eventRestoreCRIUStarted                = "restore_criu_started"
 	eventRestoreCRIUCompleted              = "restore_criu_completed"
+	eventRestoreBoundaryStarted            = "restore_boundary_started"
+	eventRestoreBoundaryCompleted          = "restore_boundary_completed"
 	eventRestoreCleanupStarted             = "restore_cleanup_started"
 	eventRestoreCleanupCompleted           = "restore_cleanup_completed"
 	eventCRIURestoreCompleted              = "criu_restore_completed"
 	eventColdCapsuleStartStarted           = "cold_capsule_start_started"
 	eventColdCapsuleStartCompleted         = "cold_capsule_start_completed"
+	eventColdCapsuleStartFailed            = "cold_capsule_start_failed"
 	eventGenerationRestoreCompleted        = "generation_restore_completed"
 	eventGenerationRestoreFailed           = "generation_restore_failed"
 	eventGenerationRecycleRequired         = "generation_recycle_required"
@@ -70,7 +73,7 @@ const (
 	eventJobHookReleased                   = "job_hook_released"
 	eventRunnerExited                      = "runner_exited"
 	eventRunnerExitObserved                = "runner_exit_observed"
-	eventAssignmentRequeued                = "assignment_requeued"
+	eventAssignmentAborted                 = "assignment_aborted"
 	eventAssignmentFailedClosed            = "assignment_failed_closed"
 	eventCheckpointStarted                 = "checkpoint_started"
 	eventQuiesceRPCStarted                 = "quiesce_rpc_started"
@@ -125,8 +128,10 @@ var allowedTraceEvents = map[string]bool{
 	eventRestoreVersionStarted: true, eventRestoreVersionCompleted: true,
 	eventRestoreDigestStarted: true, eventRestoreDigestCompleted: true,
 	eventRestoreCRIUStarted: true, eventRestoreCRIUCompleted: true,
+	eventRestoreBoundaryStarted: true, eventRestoreBoundaryCompleted: true,
 	eventRestoreCleanupStarted: true, eventRestoreCleanupCompleted: true,
 	eventColdCapsuleStartStarted: true, eventColdCapsuleStartCompleted: true,
+	eventColdCapsuleStartFailed: true,
 	eventGenerationRestoreCompleted: true, eventGenerationRestoreFailed: true,
 	eventGenerationRecycleRequired: true,
 	eventMountsReady:               true,
@@ -136,7 +141,7 @@ var allowedTraceEvents = map[string]bool{
 	eventRunnerWorkerExecFailed: true, eventJobHookValidated: true,
 	eventCustomerStepsReleased: true, eventJobHookReleased: true,
 	eventRunnerExited: true, eventRunnerExitObserved: true,
-	eventAssignmentRequeued:     true,
+	eventAssignmentAborted:      true,
 	eventAssignmentFailedClosed: true,
 	eventCheckpointStarted:      true, eventQuiesceRPCStarted: true,
 	eventQuiesceReceived: true, eventQuiesceMountsChecked: true,
@@ -159,6 +164,13 @@ var preAssignmentEvents = map[string]bool{
 	eventGuestHelloObserved: true, eventListenerPrepareStarted: true,
 	eventListenerPrepareSent: true, eventListenerPrepareReceived: true,
 	eventRunnerRegistered: true, eventPoolReady: true,
+}
+
+var repeatableTraceEvents = map[string]bool{
+	eventRestoreCleanupStarted:   true,
+	eventRestoreCleanupCompleted: true,
+	eventColdCapsuleStartStarted: true,
+	eventColdCapsuleStartFailed:  true,
 }
 
 var concernCodes = map[string]bool{
@@ -377,7 +389,7 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 		if event.WallTime.IsZero() {
 			violate("event %s at seq %d has no wall_time", event.Event, event.Seq)
 		}
-		if seen[event.Event] != nil && event.Event != eventIssueObserved {
+		if seen[event.Event] != nil && event.Event != eventIssueObserved && !repeatableTraceEvents[event.Event] {
 			violate("event %s appears more than once", event.Event)
 		} else if event.Event != eventIssueObserved {
 			seen[event.Event] = event
@@ -421,7 +433,7 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 			if event.Restore == nil {
 				violate("mounts_ready requires process restore evidence")
 			}
-		case eventAssignmentRequeued, eventAssignmentFailedClosed:
+		case eventAssignmentAborted, eventAssignmentFailedClosed:
 			validateExactAssignment(*event, violate)
 			if event.FailureReason == "" {
 				violate("%s requires failure_reason", event.Event)
@@ -492,7 +504,7 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 		report.ClockSkewBoundNS = validateClock(clock.Clock, report.ProcessMode == "restored", concern, violate)
 	}
 
-	terminalFailure := seen[eventAssignmentRequeued]
+	terminalFailure := seen[eventAssignmentAborted]
 	if failedClosed := seen[eventAssignmentFailedClosed]; failedClosed != nil {
 		terminalFailure = failedClosed
 		if seen[eventCustomerStepsReleased] != nil {
@@ -542,7 +554,10 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 				}
 			}
 		case "restored":
-			required = append(required, eventCRIURestoreStarted, eventCRIURestoreCompleted)
+			required = append(required,
+				eventCRIURestoreStarted, eventRestoreBoundaryStarted,
+				eventRestoreBoundaryCompleted, eventCRIURestoreCompleted,
+			)
 			for _, forbidden := range []string{eventColdCapsuleStartStarted, eventColdCapsuleStartCompleted} {
 				if seen[forbidden] != nil {
 					violate("warm rendezvous unexpectedly contains %s", forbidden)
@@ -550,7 +565,8 @@ func validateRendezvousTraceScope(events []rendezvousEvent, throughRelease bool)
 			}
 		case "cold-fallback":
 			required = append(required,
-				eventCRIURestoreStarted, eventGenerationRestoreFailed,
+				eventCRIURestoreStarted, eventRestoreBoundaryStarted,
+				eventRestoreBoundaryCompleted, eventGenerationRestoreFailed,
 				eventRestoreCleanupStarted, eventRestoreCleanupCompleted,
 				eventColdCapsuleStartStarted, eventColdCapsuleStartCompleted,
 			)
@@ -918,6 +934,7 @@ func deriveDurations(out map[string]int64, seen map[string]*rendezvousEvent) {
 		"restore_version_validation":         {eventRestoreVersionStarted, eventRestoreVersionCompleted},
 		"restore_digest_validation":          {eventRestoreDigestStarted, eventRestoreDigestCompleted},
 		"restore_criu":                       {eventRestoreCRIUStarted, eventRestoreCRIUCompleted},
+		"restore_boundary":                   {eventRestoreBoundaryStarted, eventRestoreBoundaryCompleted},
 		"restore_cleanup":                    {eventRestoreCleanupStarted, eventRestoreCleanupCompleted},
 		"cold_capsule_start":                 {eventColdCapsuleStartStarted, eventColdCapsuleStartCompleted},
 		"assignment_publication":             {eventGuestAssignmentReceived, eventGuestAssignmentPublished},

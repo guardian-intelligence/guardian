@@ -109,12 +109,11 @@ const (
 	AssignmentExited       AssignmentState = "exited"
 	AssignmentSealed       AssignmentState = "sealed"
 	AssignmentCompleted    AssignmentState = "completed"
-	AssignmentRequeued     AssignmentState = "requeued"
 	AssignmentFailedClosed AssignmentState = "failed-closed"
 )
 
 func (s AssignmentState) Terminal() bool {
-	return s == AssignmentSealed || s == AssignmentCompleted || s == AssignmentRequeued || s == AssignmentFailedClosed
+	return s == AssignmentSealed || s == AssignmentCompleted || s == AssignmentFailedClosed
 }
 
 type AssignmentReport struct {
