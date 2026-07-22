@@ -219,8 +219,9 @@ func (g *VsockGuest) read(id ID, channel *guestChannel) {
 			})
 			g.notify(id)
 		case guestproto.KindRunnerStatus:
-			channel.fold(*message.RunnerStatus)
-			g.notify(id)
+			if channel.fold(*message.RunnerStatus) {
+				g.notify(id)
+			}
 		case guestproto.KindQuiesced:
 			channel.resolveQuiesce(*message.Quiesced, nil)
 		case guestproto.KindQuiesceFailed:
@@ -310,9 +311,10 @@ func (c *guestChannel) markHello() {
 	}
 }
 
-func (c *guestChannel) fold(status guestproto.RunnerStatus) {
+func (c *guestChannel) fold(status guestproto.RunnerStatus) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	changed := status.State != guestproto.RunnerProgress || status.Restore != nil
 	switch status.State {
 	case guestproto.RunnerProgress:
 	case guestproto.RunnerRegistered:
@@ -368,6 +370,7 @@ func (c *guestChannel) fold(status guestproto.RunnerStatus) {
 		c.observation.Restore = &restore
 	}
 	c.observation.Timing = append(c.observation.Timing, status.Timing...)
+	return changed
 }
 
 func (c *guestChannel) foldAssignment(assignment guestproto.Assignment, received guestproto.TimingPoint) {

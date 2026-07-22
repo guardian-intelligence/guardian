@@ -141,7 +141,13 @@ func (s *syncServer) syncError(w http.ResponseWriter, hostID, operation string, 
 
 func (s *syncServer) desiredState(ctx context.Context, request syncproto.SyncRequest) (syncproto.SyncResponse, error) {
 	response := syncproto.SyncResponse{BootID: request.BootID}
-	members, err := s.st.ListDesiredMembers(ctx, request.HostID)
+	reportedMembers := make([]string, 0, len(request.Members))
+	for _, member := range request.Members {
+		if member.MemberID != "" {
+			reportedMembers = append(reportedMembers, member.MemberID)
+		}
+	}
+	members, err := s.st.ListDesiredMembers(ctx, request.HostID, reportedMembers)
 	if err != nil {
 		return response, err
 	}

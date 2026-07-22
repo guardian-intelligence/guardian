@@ -24,6 +24,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/controlplane/pgtest"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/agent"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
@@ -360,6 +361,34 @@ func queryString(t *testing.T, pool *pgxpool.Pool, query string, args ...any) st
 		return ""
 	}
 	return value
+}
+
+func postHostSync(t *testing.T, origin string, request syncproto.SyncRequest) syncproto.SyncResponse {
+	t.Helper()
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpRequest, err := http.NewRequest(http.MethodPost, origin+syncproto.SyncPath, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpRequest.Header.Set("Authorization", "Bearer "+e2eSyncSecret)
+	httpRequest.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(httpRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		detail, _ := io.ReadAll(response.Body)
+		t.Fatalf("host sync returned %s: %s", response.Status, detail)
+	}
+	var desired syncproto.SyncResponse
+	if err := json.NewDecoder(response.Body).Decode(&desired); err != nil {
+		t.Fatal(err)
+	}
+	return desired
 }
 
 func TestWarmPoolLocalAssignmentAndRecoverableRestoreEndToEnd(t *testing.T) {
@@ -716,6 +745,32 @@ func TestOfflineHostFailsAcquiredAssignmentClosed(t *testing.T) {
 	}
 	if got := queryString(t, control.pool, `SELECT state FROM runner_pool_members WHERE member_id = $1`, selected.Incarnation); got != "lost" {
 		t.Fatalf("member state = %q", got)
+	}
+	desired := postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: "host-e2e", BootID: "recovered-boot",
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 2, Listening: 1}},
+		Members: []syncproto.PoolMemberReport{{
+			MemberID: selected.Incarnation, VMID: string(selected.ID), Class: string(selected.Class),
+			Image: selected.Image, State: syncproto.MemberListening,
+		}},
+	})
+	foundRecycle := false
+	for _, member := range desired.Members {
+		if member.MemberID == selected.Incarnation {
+			foundRecycle = member.State == syncproto.DesiredMemberRecycle
+		}
+	}
+	if !foundRecycle {
+		t.Fatalf("lost local member was not returned for recycle: %+v", desired.Members)
+	}
+	desired = postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: "host-e2e", BootID: "recovered-boot",
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 2}},
+	})
+	for _, member := range desired.Members {
+		if member.MemberID == selected.Incarnation {
+			t.Fatalf("absent lost member remained in desired state: %+v", desired.Members)
+		}
 	}
 }
 

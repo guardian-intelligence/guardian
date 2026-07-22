@@ -3,10 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +21,93 @@ import (
 )
 
 const testRunnerClass = vm.Class("postflight-4-ubuntu-24.04-github-confidential")
+
+type updateFloodDriver struct {
+	*vm.Fake
+	updates chan vm.ID
+}
+
+func (d *updateFloodDriver) Updates() <-chan vm.ID { return d.updates }
+
+func TestRunPeriodicSyncCannotBePostponedByVMUpdates(t *testing.T) {
+	var requests atomic.Int32
+	first := make(chan struct{})
+	second := make(chan struct{})
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var report syncproto.SyncRequest
+		if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
+			t.Errorf("decode sync report: %v", err)
+			http.Error(w, "invalid report", http.StatusBadRequest)
+			return
+		}
+		switch requests.Add(1) {
+		case 1:
+			close(first)
+		case 2:
+			close(second)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(syncproto.SyncResponse{
+			BootID: report.BootID, PoolTargets: map[string]int{string(testRunnerClass): 0},
+		}); err != nil {
+			t.Errorf("encode sync response: %v", err)
+		}
+	}))
+	defer controlPlane.Close()
+
+	driver := &updateFloodDriver{Fake: vm.NewFake(), updates: make(chan vm.ID)}
+	agent, err := New(Config{
+		HostID: "host-a", ControlPlaneOrigin: controlPlane.URL,
+		Slots: map[vm.Class]int{testRunnerClass: 1}, Images: map[vm.Class]string{testRunnerClass: "golden"},
+		SyncInterval: 20 * time.Millisecond, CheckoutGuestOrigin: "http://host.invalid",
+		TraceDir: t.TempDir(), Platform: PlatformFingerprint{
+			QEMUVersion: "QEMU 11.0.2", KernelRelease: "6.8.0", OSImageID: "ubuntu-24.04",
+			MachineType: "pc-q35-11.0", CPUModel: "EPYC-v4", CRIUVersion: "Version: 4.2",
+		},
+	}, zvol.NewFake(), driver, "credential", make([]byte, 32), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- agent.Run(ctx) }()
+	select {
+	case <-first:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("initial control-plane sync did not arrive")
+	}
+
+	floodDone := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case driver.updates <- "noise":
+			case <-floodDone:
+				return
+			}
+		}
+	}()
+	select {
+	case <-second:
+	case <-time.After(500 * time.Millisecond):
+		close(floodDone)
+		cancel()
+		t.Fatal("continuous VM updates postponed periodic control-plane sync")
+	}
+	close(floodDone)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("agent run: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("agent did not stop")
+	}
+}
 
 func newTestAgent(t *testing.T, slots int) (*Agent, *vm.Fake, *zvol.Fake) {
 	t.Helper()
