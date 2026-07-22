@@ -1,11 +1,14 @@
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_clippy", "rust_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 rust_binary(
     name = "postflight",
     srcs = glob(["src/**/*.rs"]),
     edition = "2024",
     rustc_env = {
-        # Replaced by release stamping once the release lane exists.
+        # Binaries carry only the crate version: commit provenance lives in the
+        # OCI annotations and Fulcio certificate so identical sources rebuild
+        # byte-identically and the edge lane can dedup by content.
         "CARGO_PKG_VERSION": "0.1.0",
     },
     visibility = ["//visibility:public"],
@@ -32,6 +35,19 @@ rust_clippy(
     deps = [
         ":postflight",
         ":postflight_test",
+    ],
+)
+
+sh_test(
+    name = "toolchain_lockstep_test",
+    srcs = ["toolchain_lockstep_test.sh"],
+    args = [
+        "$(location rust.MODULE.bazel)",
+        "$(location rust-toolchain.toml)",
+    ],
+    data = [
+        "rust.MODULE.bazel",
+        "rust-toolchain.toml",
     ],
 )
 

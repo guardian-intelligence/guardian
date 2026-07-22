@@ -1,0 +1,175 @@
+name: postflight-cli-image
+
+# Edge lane for the postflight CLI: cross-compiles all release targets from a
+# single Linux runner (zig provides the C toolchain for ring on every target),
+# signs each binary keylessly, and publishes one OCI artifact to
+# ghcr.io/guardian-intelligence/postflight-cli:edge for Kargo to promote
+# through nightly/rc/stable. Binaries are byte-reproducible (paths remapped,
+# no commit stamped into them), so the lane skips the push entirely when the
+# built bytes match what :edge already holds — every Kargo Freight therefore
+# represents a real change. Commit provenance lives in the manifest annotations
+# and the Fulcio certificate, not in the binary.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/products/postflight-cli/**"
+      - ".github/workflows/postflight-cli-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: postflight-cli-image
+  cancel-in-progress: false
+
+env:
+  IMAGE_REPO: ghcr.io/guardian-intelligence/postflight-cli
+  TARGETS: x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin
+  ZIG_VERSION: 0.15.2
+  ZIG_SHA256: 02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
+  CARGO_ZIGBUILD_VERSION: v0.23.0
+  CARGO_ZIGBUILD_SHA256: f0aa9cc8220a84788c6e4a9b6d80422f041659227b680fdef982d5a8ddffddb4
+  CRANE_VERSION: v0.21.7
+  CRANE_SHA256: 1a57bc98207fa1c0d04bf760699099e26f8383499bfd55b99c1b919a928a7230
+
+jobs:
+  edge:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Install pinned zig, cargo-zigbuild, and crane
+        run: |
+          curl -fsSLo zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+          echo "${ZIG_SHA256}  zig.tar.xz" | sha256sum -c -
+          mkdir -p "$HOME/.local/zig" && tar -xJf zig.tar.xz -C "$HOME/.local/zig" --strip-components=1
+          echo "$HOME/.local/zig" >> "$GITHUB_PATH"
+
+          curl -fsSLo cargo-zigbuild.tar.xz "https://github.com/rust-cross/cargo-zigbuild/releases/download/${CARGO_ZIGBUILD_VERSION}/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz"
+          echo "${CARGO_ZIGBUILD_SHA256}  cargo-zigbuild.tar.xz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xJf cargo-zigbuild.tar.xz -C "$HOME/.local/bin" --strip-components=1 \
+            cargo-zigbuild-x86_64-unknown-linux-musl/cargo-zigbuild
+
+          curl -fsSLo crane.tar.gz "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum -c -
+          tar -xzf crane.tar.gz -C "$HOME/.local/bin" crane
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          rm zig.tar.xz cargo-zigbuild.tar.xz crane.tar.gz
+
+      - name: Build release binaries for every target
+        working-directory: src/products/postflight-cli
+        run: |
+          # rustup reads rust-toolchain.toml: the pinned toolchain plus its
+          # target list.
+          rustup toolchain install
+          # Erase build-machine paths so identical sources rebuild to identical
+          # bytes; the dedup below depends on it.
+          export RUSTFLAGS="--remap-path-prefix=$PWD=/build --remap-path-prefix=$HOME/.cargo=/cargo"
+          for target in $TARGETS; do
+            cargo zigbuild --release --locked --target "$target"
+          done
+
+      - name: Compute content digest and compare against the current edge
+        id: dedup
+        working-directory: src/products/postflight-cli
+        run: |
+          digest="$(for target in $TARGETS; do
+            sha256sum "target/$target/release/postflight" | cut -d' ' -f1
+          done | sha256sum | cut -d' ' -f1)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+          echo "${{ secrets.GITHUB_TOKEN }}" | crane auth login ghcr.io -u "${{ github.actor }}" --password-stdin
+          current="$(crane manifest "$IMAGE_REPO:edge" 2>/dev/null \
+            | jq -r '.annotations["org.guardian.binaries-digest"] // empty' || true)"
+          if [[ -n "$current" && "$current" == "$digest" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "edge already holds binaries digest $digest — skipping push, no new Freight" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "binaries digest $digest (edge holds '${current:-none}') — pushing" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+        if: steps.dedup.outputs.changed == 'true'
+
+      - name: Sign each binary
+        if: steps.dedup.outputs.changed == 'true'
+        working-directory: src/products/postflight-cli
+        run: |
+          mkdir -p stage
+          for target in $TARGETS; do
+            mkdir -p "stage/$target"
+            cp "target/$target/release/postflight" "stage/$target/postflight"
+            cosign sign-blob --yes \
+              --bundle "stage/$target/postflight.sigstore.json" \
+              "stage/$target/postflight"
+          done
+
+      - name: Push the edge artifact
+        if: steps.dedup.outputs.changed == 'true'
+        id: push
+        working-directory: src/products/postflight-cli
+        run: |
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' \
+            -cf layer.tar -C stage .
+          crane append -f layer.tar -t "$IMAGE_REPO:sha-${GITHUB_SHA}"
+          crane mutate \
+            --annotation "org.opencontainers.image.source=https://github.com/guardian-intelligence/guardian" \
+            --annotation "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --annotation "org.guardian.binaries-digest=${{ steps.dedup.outputs.digest }}" \
+            --tag "$IMAGE_REPO:edge" \
+            "$IMAGE_REPO:sha-${GITHUB_SHA}"
+          digest="$(crane digest "$IMAGE_REPO:edge")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "pushed $IMAGE_REPO:edge @ $digest" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        if: steps.dedup.outputs.changed == 'true'
+        id: syft
+
+      - name: Sign the artifact and attest its SBOM
+        if: steps.dedup.outputs.changed == 'true'
+        working-directory: src/products/postflight-cli
+        run: |
+          image="$IMAGE_REPO@${{ steps.push.outputs.digest }}"
+          "${{ steps.syft.outputs.cmd }}" scan dir:. \
+            --exclude ./target --exclude ./stage --exclude ./layer.tar \
+            -o spdx-json=postflight-cli.spdx.json
+          test -s postflight-cli.spdx.json
+          cosign sign --yes "$image"
+          cosign attest --yes --type spdxjson --predicate postflight-cli.spdx.json "$image"
+
+      - name: Verify everything as a consumer would
+        if: steps.dedup.outputs.changed == 'true'
+        working-directory: src/products/postflight-cli
+        env:
+          IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main
+          ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          image="$IMAGE_REPO@${{ steps.push.outputs.digest }}"
+          cosign verify --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer "$ISSUER" "$image" > /dev/null
+          cosign verify-attestation --type spdxjson \
+            --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer "$ISSUER" "$image" > /dev/null
+          for target in $TARGETS; do
+            cosign verify-blob \
+              --bundle "stage/$target/postflight.sigstore.json" \
+              --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              "stage/$target/postflight"
+          done
