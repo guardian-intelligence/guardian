@@ -257,9 +257,9 @@ func assertRunsGreenWithLogs(st *stateFile) assertionResult {
 	return res
 }
 
-// Assertion 2: slot accounting returns exactly to the pre-battery baseline.
+// Assertion 2: pool accounting returns exactly to the pre-battery baseline.
 func assertSlotBaseline(st *stateFile) assertionResult {
-	res := assertionResult{Name: "slot accounting back to baseline", Pass: true}
+	res := assertionResult{Name: "pool accounting back to baseline", Pass: true}
 	if st.Baseline == nil || st.DB == nil || st.DB.Final == nil {
 		return assertionResult{Name: res.Name, Skipped: true, Detail: "no database baseline/final snapshot (DATABASE_URL unset?)"}
 	}
@@ -280,8 +280,8 @@ func assertSlotBaseline(st *stateFile) assertionResult {
 			continue
 		}
 		if f != b {
-			problems = append(problems, fmt.Sprintf("%s: baseline total=%d warm=%d used=%d reserved=%d, final total=%d warm=%d used=%d reserved=%d",
-				k, b.Total, b.Warm, b.Used, b.Reserved, f.Total, f.Warm, f.Used, f.Reserved))
+			problems = append(problems, fmt.Sprintf("%s: baseline total=%d booting=%d listening=%d busy=%d, final total=%d booting=%d listening=%d busy=%d",
+				k, b.Total, b.Booting, b.Listening, b.Busy, f.Total, f.Booting, f.Listening, f.Busy))
 		}
 	}
 	for k := range final {
@@ -298,7 +298,7 @@ func assertSlotBaseline(st *stateFile) assertionResult {
 	return res
 }
 
-// Assertion 3: nothing leaked — no demand or lease is still non-terminal past
+// Assertion 3: nothing leaked — no demand or assignment is still non-terminal past
 // the deadline horizon. Host-disk orphans (zvols, VM state dirs) have no
 // database-visible signal yet; they are covered by hostd's own GC and
 // simulation tests.
@@ -314,16 +314,16 @@ func assertNoLeaks(st *stateFile) assertionResult {
 			problems = append(problems, fmt.Sprintf("demand job=%d stuck in %s since %s", d.ProviderJobID, d.State, d.CreatedAt.Format(time.RFC3339)))
 		}
 	}
-	for _, l := range st.DB.Leases {
-		if !terminalLeaseStates[l.State] && l.CreatedAt.Before(horizon) {
-			problems = append(problems, fmt.Sprintf("lease %s stuck in %s since %s", l.LeaseID, l.State, l.CreatedAt.Format(time.RFC3339)))
+	for _, assignment := range st.DB.Assignments {
+		if !terminalAssignmentStates[assignment.State] && assignment.CreatedAt.Before(horizon) {
+			problems = append(problems, fmt.Sprintf("assignment %s stuck in %s since %s", assignment.AssignmentID, assignment.State, assignment.CreatedAt.Format(time.RFC3339)))
 		}
 	}
 	if len(problems) > 0 {
 		res.Pass = false
 		res.Detail = summarize(problems)
 	} else {
-		res.Detail = fmt.Sprintf("%d demands, %d leases clean", len(st.DB.Demands), len(st.DB.Leases))
+		res.Detail = fmt.Sprintf("%d demands, %d assignments clean", len(st.DB.Demands), len(st.DB.Assignments))
 	}
 	return res
 }
@@ -414,12 +414,12 @@ func checkoutStepDuration(j jobRecord) (time.Duration, bool) {
 // whether the current hardware beats another provider.
 func assertWarmGeneration(st *stateFile) assertionResult {
 	res := assertionResult{Name: "warm runs clone a generation", Pass: true}
-	leaseByJob := map[int64]leaseRow{}
+	assignmentByJob := map[int64]assignmentRow{}
 	if st.DB != nil {
-		for _, l := range st.DB.Leases {
-			prev, seen := leaseByJob[l.ProviderJobID]
-			if !seen || l.CreatedAt.After(prev.CreatedAt) {
-				leaseByJob[l.ProviderJobID] = l
+		for _, assignment := range st.DB.Assignments {
+			prev, seen := assignmentByJob[assignment.ProviderJobID]
+			if !seen || assignment.CreatedAt.After(prev.CreatedAt) {
+				assignmentByJob[assignment.ProviderJobID] = assignment
 			}
 		}
 	}
@@ -432,11 +432,11 @@ func assertWarmGeneration(st *stateFile) assertionResult {
 		for _, w := range jobs[1:] {
 			warmChecked++
 			if st.DB != nil {
-				l, ok := leaseByJob[w.job.JobID]
+				assignment, ok := assignmentByJob[w.job.JobID]
 				if !ok {
-					problems = append(problems, fmt.Sprintf("%s: job %d has no lease row", scope, w.job.JobID))
-				} else if l.WorkspaceGeneration == "" {
-					problems = append(problems, fmt.Sprintf("%s: job %d ran cold (lease %s cloned no generation)", scope, w.job.JobID, l.LeaseID))
+					problems = append(problems, fmt.Sprintf("%s: job %d has no assignment row", scope, w.job.JobID))
+				} else if assignment.SourceGeneration == "" {
+					problems = append(problems, fmt.Sprintf("%s: job %d ran cold (assignment %s cloned no generation)", scope, w.job.JobID, assignment.AssignmentID))
 				}
 			}
 		}
@@ -591,7 +591,7 @@ func segmentFrom(name string, samples []time.Duration, observed bool) segmentSta
 }
 
 // measurePickup splits webhook-received -> job-in-progress by segment.
-// Authoritative boundaries come from the delivery ledger, demand/lease
+// Authoritative boundaries come from the delivery ledger, demand/assignment
 // created_at, and GitHub's started_at; the interior hostd boundaries are
 // watch observations at poll resolution.
 func measurePickup(st *stateFile) []segmentStats {
@@ -599,22 +599,14 @@ func measurePickup(st *stateFile) []segmentStats {
 		return nil
 	}
 	o := st.DB
-	leaseByJob := map[int64]leaseRow{}
-	for _, l := range o.Leases {
-		prev, seen := leaseByJob[l.ProviderJobID]
-		if !seen || l.CreatedAt.After(prev.CreatedAt) {
-			leaseByJob[l.ProviderJobID] = l
+	assignmentByJob := map[int64]assignmentRow{}
+	for _, assignment := range o.Assignments {
+		prev, seen := assignmentByJob[assignment.ProviderJobID]
+		if !seen || assignment.CreatedAt.After(prev.CreatedAt) {
+			assignmentByJob[assignment.ProviderJobID] = assignment
 		}
 	}
-	firstReported := map[string]time.Time{}
-	for _, t := range o.Transitions {
-		if t.Kind == "lease" && t.Field == "reported_state" {
-			if _, seen := firstReported[t.ID]; !seen {
-				firstReported[t.ID] = t.ObservedAt
-			}
-		}
-	}
-	var ingest, claim, jit, pickup, listening, assignment, total []time.Duration
+	var ingest, bind, rendezvous, total []time.Duration
 	collect := func(dst *[]time.Duration, from, to time.Time) {
 		if from.IsZero() || to.IsZero() {
 			return
@@ -635,21 +627,16 @@ func measurePickup(st *stateFile) []segmentStats {
 				key := fmt.Sprintf("%d", j.JobID)
 				recv := o.Deliveries[key]
 				demand, hasDemand := o.Demands[key]
-				lease, hasLease := leaseByJob[j.JobID]
+				assignment, hasAssignment := assignmentByJob[j.JobID]
 				if hasDemand {
 					collect(&ingest, recv, demand.CreatedAt)
 				}
-				if hasDemand && hasLease {
-					collect(&claim, demand.CreatedAt, lease.CreatedAt)
+				if hasDemand && hasAssignment {
+					collect(&bind, demand.CreatedAt, assignment.CreatedAt)
 				}
-				if hasLease {
-					assignedAt, _ := o.observedAt("lease", lease.LeaseID, "state", "assigned")
-					readyAt, _ := o.observedAt("lease", lease.LeaseID, "state", "ready")
-					pickupAt := firstReported[lease.LeaseID]
-					collect(&jit, lease.CreatedAt, assignedAt)
-					collect(&pickup, assignedAt, pickupAt)
-					collect(&listening, pickupAt, readyAt)
-					collect(&assignment, readyAt, j.StartedAt)
+				if hasAssignment {
+					runningAt, _ := o.observedAt("assignment", assignment.AssignmentID, "state", "running")
+					collect(&rendezvous, assignment.CreatedAt, runningAt)
 				}
 				collect(&total, recv, j.StartedAt)
 			}
@@ -657,11 +644,8 @@ func measurePickup(st *stateFile) []segmentStats {
 	}
 	return []segmentStats{
 		segmentFrom("ingest (webhook -> demand)", ingest, false),
-		segmentFrom("claim (demand -> lease)", claim, false),
-		segmentFrom("jit (lease -> assigned)", jit, true),
-		segmentFrom("hostd pickup (assigned -> reported)", pickup, true),
-		segmentFrom("runner listening (reported -> ready)", listening, true),
-		segmentFrom("github assignment (ready -> in_progress)", assignment, true),
+		segmentFrom("local bind (demand -> assignment)", bind, false),
+		segmentFrom("rendezvous (assignment -> running)", rendezvous, true),
 		segmentFrom("total (webhook -> in_progress)", total, false),
 	}
 }
@@ -693,18 +677,18 @@ func measureExec(st *stateFile) *execStats {
 }
 
 // measureSeal: runner exit to seal completion, from watch's observations of
-// hostd's reported lease states.
+// hostd's reported assignment states.
 func measureSeal(st *stateFile) *segmentStats {
 	if st.DB == nil {
 		return nil
 	}
 	var samples []time.Duration
-	for _, l := range st.DB.Leases {
-		exitedAt, ok := st.DB.observedAt("lease", l.LeaseID, "reported_state", "exited")
+	for _, assignment := range st.DB.Assignments {
+		exitedAt, ok := st.DB.observedAt("assignment", assignment.AssignmentID, "state", "exited")
 		if !ok {
 			continue
 		}
-		sealedAt, ok := st.DB.observedAt("lease", l.LeaseID, "reported_state", "sealed")
+		sealedAt, ok := st.DB.observedAt("assignment", assignment.AssignmentID, "state", "sealed")
 		if !ok {
 			continue
 		}

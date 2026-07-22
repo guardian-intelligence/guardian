@@ -16,7 +16,7 @@ import (
 //
 // Layout under Root (e.g. "guardian/postflight"):
 //
-//	<root>/ws/<lease>              writable workspace zvols
+//	<root>/ws/<assignment>         writable workspace zvols
 //	<root>/gen/<gen>               sealed workspace generations
 //	<root>/tool-state/{ws,gen}/... durable tool generations
 //	<root>/process-state/{ws,gen}  encrypted CRIU generations
@@ -85,8 +85,8 @@ func (e *Exec) timeout() time.Duration {
 	return defaultTimeout
 }
 
-func (e *Exec) workspaceDataset(lease LeaseID) string {
-	return e.Root + "/ws/" + string(lease)
+func (e *Exec) workspaceDataset(assignment AssignmentID) string {
+	return e.Root + "/ws/" + string(assignment)
 }
 
 func (e *Exec) generationDataset(generation GenerationID) string {
@@ -101,20 +101,20 @@ func (e *Exec) toolDriver() *Exec {
 	return &Exec{Root: e.Root + "/tool-state", Timeout: e.Timeout}
 }
 
-func (e *Exec) EnsureProcess(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (ProcessVolume, error) {
-	return e.processDriver().EnsureWorkspace(ctx, lease, generation, sizeBytes)
+func (e *Exec) EnsureProcess(ctx context.Context, assignment AssignmentID, generation GenerationID, sizeBytes int64) (ProcessVolume, error) {
+	return e.processDriver().EnsureWorkspace(ctx, assignment, generation, sizeBytes)
 }
 
-func (e *Exec) EnsureTool(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (ToolVolume, error) {
-	return e.toolDriver().EnsureWorkspace(ctx, lease, generation, sizeBytes)
+func (e *Exec) EnsureTool(ctx context.Context, assignment AssignmentID, generation GenerationID, sizeBytes int64) (ToolVolume, error) {
+	return e.toolDriver().EnsureWorkspace(ctx, assignment, generation, sizeBytes)
 }
 
-func (e *Exec) DestroyProcess(ctx context.Context, lease LeaseID) error {
-	return e.processDriver().DestroyWorkspace(ctx, lease)
+func (e *Exec) DestroyProcess(ctx context.Context, assignment AssignmentID) error {
+	return e.processDriver().DestroyWorkspace(ctx, assignment)
 }
 
-func (e *Exec) DestroyTool(ctx context.Context, lease LeaseID) error {
-	return e.toolDriver().DestroyWorkspace(ctx, lease)
+func (e *Exec) DestroyTool(ctx context.Context, assignment AssignmentID) error {
+	return e.toolDriver().DestroyWorkspace(ctx, assignment)
 }
 
 func (e *Exec) DestroyProcessGeneration(ctx context.Context, generation GenerationID) error {
@@ -219,11 +219,11 @@ func (e *Exec) readyWorkspace(ctx context.Context, dataset string, source Genera
 }
 
 // EnsureWorkspace implements Driver.
-func (e *Exec) EnsureWorkspace(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (WorkspaceVolume, error) {
-	if err := ValidateName("lease", string(lease)); err != nil {
+func (e *Exec) EnsureWorkspace(ctx context.Context, assignment AssignmentID, generation GenerationID, sizeBytes int64) (WorkspaceVolume, error) {
+	if err := ValidateName("assignment", string(assignment)); err != nil {
 		return WorkspaceVolume{}, err
 	}
-	dataset := e.workspaceDataset(lease)
+	dataset := e.workspaceDataset(assignment)
 	if ok, err := e.exists(ctx, dataset); err != nil {
 		return WorkspaceVolume{}, err
 	} else if ok {
@@ -254,7 +254,7 @@ func (e *Exec) EnsureWorkspace(ctx context.Context, lease LeaseID, generation Ge
 		// The control plane's scope pointer can outlive its generation
 		// (reaped, lost with a pool, retired by an operator). A missing
 		// clone source must degrade to a cold build, not wedge every
-		// future lease of the scope; the next seal advances the pointer.
+		// future assignment in the scope; the next seal advances the pointer.
 		if strings.Contains(err.Error(), "does not exist") && sizeBytes > 0 {
 			if _, cerr := e.run(ctx, "create", "-s", "-V", strconv.FormatInt(sizeBytes, 10), dataset); cerr != nil {
 				return WorkspaceVolume{}, cerr
@@ -304,8 +304,8 @@ func (e *Exec) origin(ctx context.Context, dataset string) (GenerationID, error)
 	return GenerationID(name), nil
 }
 
-func (e *Exec) sealPreparedVolume(ctx context.Context, lease LeaseID, generation GenerationID) (GenerationSnapshot, error) {
-	if err := ValidateName("lease", string(lease)); err != nil {
+func (e *Exec) sealPreparedVolume(ctx context.Context, assignment AssignmentID, generation GenerationID) (GenerationSnapshot, error) {
+	if err := ValidateName("assignment", string(assignment)); err != nil {
 		return GenerationSnapshot{}, err
 	}
 	if err := ValidateName("generation", string(generation)); err != nil {
@@ -322,7 +322,7 @@ func (e *Exec) sealPreparedVolume(ctx context.Context, lease LeaseID, generation
 		}
 		return GenerationSnapshot{Generation: generation, Snapshot: sealed, Bytes: bytes}, nil
 	}
-	workspace := e.workspaceDataset(lease)
+	workspace := e.workspaceDataset(assignment)
 	sealSnap := workspace + "@seal-" + string(generation)
 	if ok, err := e.exists(ctx, sealSnap); err != nil {
 		return GenerationSnapshot{}, err
@@ -363,9 +363,9 @@ func (e *Exec) sealPreparedVolume(ctx context.Context, lease LeaseID, generation
 	return GenerationSnapshot{Generation: generation, Snapshot: sealed, Bytes: bytes}, nil
 }
 
-func (e *Exec) sealProgress(ctx context.Context, lease LeaseID, generation GenerationID) (bool, error) {
+func (e *Exec) sealProgress(ctx context.Context, assignment AssignmentID, generation GenerationID) (bool, error) {
 	for _, candidate := range []string{
-		e.workspaceDataset(lease) + "@seal-" + string(generation),
+		e.workspaceDataset(assignment) + "@seal-" + string(generation),
 		e.generationDataset(generation),
 		e.generationDataset(generation) + "@sealed",
 	} {
@@ -382,8 +382,8 @@ func (e *Exec) sealProgress(ctx context.Context, lease LeaseID, generation Gener
 
 // SealSet implements Driver. The first ZFS command is a multi-dataset
 // snapshot, which OpenZFS commits under one transaction group.
-func (e *Exec) SealSet(ctx context.Context, lease LeaseID, generation GenerationID) (GenerationSet, error) {
-	if err := ValidateName("lease", string(lease)); err != nil {
+func (e *Exec) SealSet(ctx context.Context, assignment AssignmentID, generation GenerationID) (GenerationSet, error) {
+	if err := ValidateName("assignment", string(assignment)); err != nil {
 		return GenerationSet{}, err
 	}
 	if err := ValidateName("generation", string(generation)); err != nil {
@@ -391,38 +391,38 @@ func (e *Exec) SealSet(ctx context.Context, lease LeaseID, generation Generation
 	}
 	process := e.processDriver()
 	tool := e.toolDriver()
-	workspaceProgress, err := e.sealProgress(ctx, lease, generation)
+	workspaceProgress, err := e.sealProgress(ctx, assignment, generation)
 	if err != nil {
 		return GenerationSet{}, err
 	}
-	processProgress, err := process.sealProgress(ctx, lease, generation)
+	processProgress, err := process.sealProgress(ctx, assignment, generation)
 	if err != nil {
 		return GenerationSet{}, err
 	}
-	toolProgress, err := tool.sealProgress(ctx, lease, generation)
+	toolProgress, err := tool.sealProgress(ctx, assignment, generation)
 	if err != nil {
 		return GenerationSet{}, err
 	}
 	switch {
 	case !workspaceProgress && !toolProgress && !processProgress:
-		workspaceSnapshot := e.workspaceDataset(lease) + "@seal-" + string(generation)
-		toolSnapshot := tool.workspaceDataset(lease) + "@seal-" + string(generation)
-		processSnapshot := process.workspaceDataset(lease) + "@seal-" + string(generation)
+		workspaceSnapshot := e.workspaceDataset(assignment) + "@seal-" + string(generation)
+		toolSnapshot := tool.workspaceDataset(assignment) + "@seal-" + string(generation)
+		processSnapshot := process.workspaceDataset(assignment) + "@seal-" + string(generation)
 		if _, err := e.run(ctx, "snapshot", workspaceSnapshot, toolSnapshot, processSnapshot); err != nil {
 			return GenerationSet{}, err
 		}
 	case !(workspaceProgress && toolProgress && processProgress):
 		return GenerationSet{}, errors.New("zvol: incomplete generation seal")
 	}
-	workspace, err := e.sealPreparedVolume(ctx, lease, generation)
+	workspace, err := e.sealPreparedVolume(ctx, assignment, generation)
 	if err != nil {
 		return GenerationSet{}, err
 	}
-	toolSnapshot, err := tool.sealPreparedVolume(ctx, lease, generation)
+	toolSnapshot, err := tool.sealPreparedVolume(ctx, assignment, generation)
 	if err != nil {
 		return GenerationSet{}, err
 	}
-	processSnapshot, err := process.sealPreparedVolume(ctx, lease, generation)
+	processSnapshot, err := process.sealPreparedVolume(ctx, assignment, generation)
 	if err != nil {
 		return GenerationSet{}, err
 	}
@@ -438,13 +438,13 @@ func (e *Exec) referenced(ctx context.Context, snapshot string) (int64, error) {
 }
 
 // DestroyWorkspace implements Driver.
-func (e *Exec) DestroyWorkspace(ctx context.Context, lease LeaseID) error {
-	if err := ValidateName("lease", string(lease)); err != nil {
+func (e *Exec) DestroyWorkspace(ctx context.Context, assignment AssignmentID) error {
+	if err := ValidateName("assignment", string(assignment)); err != nil {
 		return err
 	}
 	// -r takes the workspace's own snapshots (seal markers) with it; it can
 	// never recurse past the workspace dataset itself.
-	_, err := e.run(ctx, "destroy", "-r", e.workspaceDataset(lease))
+	_, err := e.run(ctx, "destroy", "-r", e.workspaceDataset(assignment))
 	return err
 }
 

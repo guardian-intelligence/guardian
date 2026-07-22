@@ -1,119 +1,88 @@
-// Package syncproto is the sync wire contract between hostd and the control
-// plane — the single source of truth both sides compile against. The
-// exchange is level-triggered in both directions: the request carries a
-// host's full observed state, the response carries the full desired state
-// for that host. Either side can restart at any point and the next exchange
-// converges. The control plane acknowledges a terminal lease by omitting it
-// from the next response, which licenses hostd to forget it and reclaim its
-// resources.
+// Package syncproto is the level-triggered wire contract between hostd and
+// the control plane. Pool capacity, GitHub job intent, local runner
+// assignment, and durable generation selection remain separate identities.
 package syncproto
 
-// SyncPath is the control-plane endpoint hostd POSTs the exchange to.
 const SyncPath = "/api/v1/hostd/sync"
 
-// SyncRequest is what hostd reports.
 type SyncRequest struct {
-	HostID string `json:"host_id"`
-	// BootID changes when hostd restarts, so the control plane can tell a
-	// fresh process from a silent one.
-	BootID string        `json:"boot_id"`
-	Slots  []SlotReport  `json:"slots"`
-	Leases []LeaseReport `json:"leases"`
-	// Generations is the observed inventory of sealed generations resident
-	// on this host — the hints-vs-truth channel for the catalog.
+	HostID      string             `json:"host_id"`
+	BootID      string             `json:"boot_id"`
+	Platform    PlatformReport     `json:"platform"`
+	Slots       []SlotReport       `json:"slots"`
+	Members     []PoolMemberReport `json:"members"`
+	Assignments []AssignmentReport `json:"assignments"`
 	Generations []GenerationReport `json:"generations"`
-	// Workspaces lists lease workspace volumes present on disk, so the
-	// control plane can spot orphans hostd's own GC missed.
-	Workspaces []string `json:"workspaces"`
+	Workspaces  []string           `json:"workspaces"`
 }
 
-// SlotReport is per-class capacity: fixed totals from provisioning, and the
-// current occupancy split.
+type PlatformReport struct {
+	QEMUVersion   string `json:"qemu_version"`
+	KernelRelease string `json:"kernel_release"`
+	OSImageID     string `json:"os_image_id"`
+	MachineType   string `json:"machine_type"`
+	CPUModel      string `json:"cpu_model"`
+	CRIUVersion   string `json:"criu_version"`
+}
+
 type SlotReport struct {
-	Class string `json:"class"`
-	Total int    `json:"total"`
-	Warm  int    `json:"warm"`
-	Used  int    `json:"used"`
+	Class     string `json:"class"`
+	Total     int    `json:"total"`
+	Booting   int    `json:"booting"`
+	Listening int    `json:"listening"`
+	Busy      int    `json:"busy"`
 }
 
-// GenerationReport is one resident generation.
 type GenerationReport struct {
 	Generation string `json:"generation"`
 	Bytes      int64  `json:"bytes"`
 }
 
-// State is a lease's position in hostd's local lifecycle, as reported in the
-// sync request. hostd only ever advances on observed substrate state (a zvol
-// exists, a VM reports a phase), never on the assumption that an earlier
-// call worked.
-type State string
+type PoolMemberState string
 
 const (
-	// StatePending: accepted from the control plane, nothing done yet.
-	StatePending State = "pending"
-	// StateClaiming: waiting to claim a generic warm VM without tenant state.
-	StateClaiming State = "claiming"
-	// StateAssigning: listener configuration was delivered and the guest is
-	// bringing the fresh runner up without tenant state.
-	StateAssigning State = "assigning"
-	// StateListening: the fresh runner is registered and waiting for GitHub;
-	// no repository generation has been selected or attached.
-	StateListening State = "listening"
-	// StateHookBlocked: the job-start hook validated GitHub's identity and is
-	// waiting for hostd to observe the evidence before customer steps run.
-	StateHookBlocked State = "hook-blocked"
-	// StateBinding: local assignment selected one execution; the host is
-	// materializing and attaching its zvol tuple, then waiting for guest mount,
-	// process restore, and clock evidence.
-	StateBinding State = "binding"
-	// StateAuthorizing: bind/restore succeeded and the exact assignment was
-	// released to Runner.Worker; hostd is waiting for the job-start hook.
-	StateAuthorizing State = "authorizing"
-	// StateReady: the rendezvous is complete and customer steps may run.
-	StateReady State = "ready"
-	// StateExited: the runner finished; ExitCode is meaningful. The VM is
-	// destroyed on observation; the workspace volume is retained for a
-	// possible seal.
-	StateExited State = "exited"
-	// StateSealed: the control plane asked for a seal and it completed.
-	StateSealed State = "sealed"
-	// StateFailed: a step failed terminally or its deadline passed.
-	StateFailed State = "failed"
-	// StateCancelled: the control plane withdrew the lease before exit.
-	StateCancelled State = "cancelled"
+	MemberProvisioning PoolMemberState = "provisioning"
+	MemberWarm         PoolMemberState = "warm"
+	MemberPreparing    PoolMemberState = "preparing"
+	MemberListening    PoolMemberState = "listening"
+	MemberAssigned     PoolMemberState = "assigned"
+	MemberRendezvous   PoolMemberState = "rendezvous"
+	MemberRunning      PoolMemberState = "running"
+	MemberRecycling    PoolMemberState = "recycling"
+	MemberLost         PoolMemberState = "lost"
 )
 
-// Terminal states are reported until the control plane omits the lease from
-// the desired set, which is the ack that lets hostd forget it.
-func (s State) Terminal() bool {
-	return s == StateSealed || s == StateFailed || s == StateCancelled
+func (s PoolMemberState) Terminal() bool {
+	return s == MemberRecycling || s == MemberLost
 }
 
-// LeaseReport is one lease's status line in the sync request.
-type LeaseReport struct {
-	// LeaseID is the stable generic listener and VM identity.
-	LeaseID string `json:"lease_id"`
-	// ExecutionLeaseID owns the actual job, workspace, and completion. It
-	// can differ when GitHub routes a job to a listener minted for another
-	// queued job with the same labels.
-	ExecutionLeaseID string `json:"execution_lease_id"`
-	State            State  `json:"state"`
-	ExitCode         int    `json:"exit_code,omitempty"`
-	Reason           string `json:"reason,omitempty"`
-	// SealedGeneration confirms which generation a seal produced.
-	SealedGeneration string              `json:"sealed_generation,omitempty"`
-	Checkpoint       *CheckpointArtifact `json:"checkpoint,omitempty"`
-	Identity         *JobIdentityReport  `json:"identity,omitempty"`
+// PoolMemberReport is one physical VM incarnation and its generic, single-use
+// GitHub listener. MemberID changes whenever the VM is destroyed and refilled.
+type PoolMemberReport struct {
+	MemberID   string              `json:"member_id"`
+	VMID       string              `json:"vm_id"`
+	RunnerName string              `json:"runner_name,omitempty"`
+	Class      string              `json:"class"`
+	Image      string              `json:"image"`
+	State      PoolMemberState     `json:"state"`
+	Assignment *ObservedAssignment `json:"assignment,omitempty"`
+	Reason     string              `json:"reason,omitempty"`
 }
 
-// CheckpointArtifact identifies the process image in one durable generation.
-// The digest covers the complete CRIU image directory.
-type CheckpointArtifact struct {
-	Digest  string `json:"digest"`
-	Version string `json:"version"`
+// ObservedAssignment comes from Runner.Listener inside the selected guest,
+// before Runner.Worker dispatch. RequestID and JobID are GitHub runner-protocol
+// identities, not the numeric REST workflow-job ID.
+type ObservedAssignment struct {
+	RequestID      string        `json:"request_id"`
+	JobID          string        `json:"job_id"`
+	CheckRunID     int64         `json:"check_run_id"`
+	RunnerName     string        `json:"runner_name"`
+	JobDisplayName string        `json:"job_display_name"`
+	Identity       JobIdentity   `json:"identity"`
+	Timing         []TimingPoint `json:"timing,omitempty"`
 }
 
-type JobIdentityReport struct {
+type JobIdentity struct {
 	RunID       string `json:"run_id"`
 	RunAttempt  int    `json:"run_attempt"`
 	RunnerName  string `json:"runner_name"`
@@ -121,95 +90,125 @@ type JobIdentityReport struct {
 	WorkflowJob string `json:"workflow_job"`
 }
 
-// SyncResponse is the control plane's full desired state for one host.
-//
-// Full state cuts both ways: an authenticated response with zero leases
-// means "cancel everything on this host", by design — there is no separate
-// drain verb. The BootID echo is the guard that confines that power to
-// responses actually computed for this request: a stale, misrouted, or
-// default-constructed response fails the echo and is dropped whole.
-type SyncResponse struct {
-	// BootID must echo the request's boot_id; hostd drops the response
-	// otherwise.
-	BootID string         `json:"boot_id"`
-	Leases []DesiredLease `json:"leases"`
-	// Reap names generations to destroy. Reaping is exclusively a
-	// control-plane decision: node-local generations are the only copy.
-	Reap []string `json:"reap"`
-	// PoolTargets is the desired warm-VM count per class.
-	PoolTargets map[string]int `json:"pool_targets"`
-	// PollAfterMillis suggests when to sync next; 0 means the default.
-	PollAfterMillis int `json:"poll_after_millis"`
+type TimingPoint struct {
+	Event       string `json:"event"`
+	Source      string `json:"source"`
+	BootID      string `json:"boot_id"`
+	Sequence    uint64 `json:"sequence"`
+	MonotonicNS int64  `json:"monotonic_ns"`
+	UnixNS      int64  `json:"unix_ns"`
 }
 
-// DesiredState is what the control plane wants done with a lease.
-type DesiredState string
+type AssignmentState string
 
 const (
-	// DesiredRun: bring the lease to a running runner and report its exit.
-	DesiredRun DesiredState = "run"
-	// DesiredSeal: the exited workspace should be sealed as a generation.
-	DesiredSeal DesiredState = "seal"
-	// DesiredCancel: withdraw the lease; destroy its VM.
-	DesiredCancel DesiredState = "cancel"
+	AssignmentObserved     AssignmentState = "observed"
+	AssignmentBinding      AssignmentState = "binding"
+	AssignmentAuthorizing  AssignmentState = "authorizing"
+	AssignmentRunning      AssignmentState = "running"
+	AssignmentExited       AssignmentState = "exited"
+	AssignmentSealed       AssignmentState = "sealed"
+	AssignmentCompleted    AssignmentState = "completed"
+	AssignmentRequeued     AssignmentState = "requeued"
+	AssignmentFailedClosed AssignmentState = "failed-closed"
 )
 
-// DesiredLease is one lease as the control plane wants it on a host.
-type DesiredLease struct {
-	// LeaseID is the stable generic listener and VM identity.
-	LeaseID string `json:"lease_id"`
-	// ExecutionLeaseID owns the actual GitHub job and its durable volumes.
-	// Before assignment it equals LeaseID; after assignment it is routed
-	// from GitHub's observed runner_name.
-	ExecutionLeaseID string       `json:"execution_lease_id"`
-	State            DesiredState `json:"state"`
+func (s AssignmentState) Terminal() bool {
+	return s == AssignmentSealed || s == AssignmentCompleted || s == AssignmentRequeued || s == AssignmentFailedClosed
+}
 
-	// Identity, forwarded into the checkout endpoint's lease table.
-	ExecutionID        string `json:"execution_id"`
-	AttemptID          string `json:"attempt_id"`
-	OrgID              string `json:"org_id"`
-	InstallationID     int64  `json:"installation_id"`
-	RepositoryID       int64  `json:"repository_id"`
-	RepositoryFullName string `json:"repository_full_name"`
+type AssignmentReport struct {
+	AssignmentID     string              `json:"assignment_id"`
+	MemberID         string              `json:"member_id"`
+	RequestID        string              `json:"request_id"`
+	JobID            string              `json:"job_id"`
+	State            AssignmentState     `json:"state"`
+	ExitCode         int                 `json:"exit_code,omitempty"`
+	Reason           string              `json:"reason,omitempty"`
+	Restore          *RestoreReport      `json:"restore,omitempty"`
+	Checkpoint       *CheckpointArtifact `json:"checkpoint,omitempty"`
+	SealedGeneration string              `json:"sealed_generation,omitempty"`
+	Timing           []TimingPoint       `json:"timing,omitempty"`
+}
 
-	RunnerClass string `json:"runner_class"`
-	// JITConfig is the encoded single-use runner registration blob, minted
-	// by the control plane.
-	JITConfig string `json:"jit_config"`
+type RestoreReport struct {
+	Outcome            string `json:"outcome"`
+	ProcessInvalidated bool   `json:"process_invalidated,omitempty"`
+	FailureClass       string `json:"failure_class,omitempty"`
+	FailureCode        string `json:"failure_code,omitempty"`
+}
 
-	// Provider identity and RendezvousAuthorized are populated only from the
-	// control plane's independently observed GitHub assignment.
-	ProviderRunID        int64  `json:"provider_run_id,omitempty"`
-	ProviderJobID        int64  `json:"provider_job_id,omitempty"`
-	ProviderRunAttempt   int    `json:"provider_run_attempt,omitempty"`
-	JobDisplayName       string `json:"job_display_name,omitempty"`
-	AssignedRunnerName   string `json:"assigned_runner_name,omitempty"`
-	RendezvousAuthorized bool   `json:"rendezvous_authorized,omitempty"`
+type CheckpointArtifact struct {
+	Digest  string `json:"digest"`
+	Version string `json:"version"`
+}
+
+type SyncResponse struct {
+	BootID          string              `json:"boot_id"`
+	Members         []DesiredPoolMember `json:"members"`
+	Assignments     []DesiredAssignment `json:"assignments"`
+	Reap            []string            `json:"reap"`
+	PoolTargets     map[string]int      `json:"pool_targets"`
+	PollAfterMillis int                 `json:"poll_after_millis"`
+}
+
+type DesiredMemberState string
+
+const (
+	DesiredMemberListen  DesiredMemberState = "listen"
+	DesiredMemberRecycle DesiredMemberState = "recycle"
+)
+
+type DesiredPoolMember struct {
+	MemberID    string             `json:"member_id"`
+	VMID        string             `json:"vm_id"`
+	State       DesiredMemberState `json:"state"`
+	RunnerName  string             `json:"runner_name"`
+	RunnerClass string             `json:"runner_class"`
+	JITConfig   string             `json:"jit_config,omitempty"`
+}
+
+type DesiredAssignmentState string
+
+const (
+	DesiredAssignmentRun   DesiredAssignmentState = "run"
+	DesiredAssignmentSeal  DesiredAssignmentState = "seal"
+	DesiredAssignmentAbort DesiredAssignmentState = "abort"
+)
+
+// DesiredAssignment is immutable except for State and seal fields. hostd
+// accepts it only when every local protocol identity matches the selected
+// member's observed assignment.
+type DesiredAssignment struct {
+	AssignmentID string                 `json:"assignment_id"`
+	MemberID     string                 `json:"member_id"`
+	RequestID    string                 `json:"request_id"`
+	JobID        string                 `json:"job_id"`
+	CheckRunID   int64                  `json:"check_run_id"`
+	State        DesiredAssignmentState `json:"state"`
+
+	ExecutionID        string      `json:"execution_id"`
+	AttemptID          string      `json:"attempt_id"`
+	OrgID              string      `json:"org_id"`
+	InstallationID     int64       `json:"installation_id"`
+	RepositoryID       int64       `json:"repository_id"`
+	RepositoryFullName string      `json:"repository_full_name"`
+	RunnerClass        string      `json:"runner_class"`
+	Identity           JobIdentity `json:"identity"`
 
 	Workspace WorkspaceSpec `json:"workspace"`
 	Tool      WorkspaceSpec `json:"tool"`
 	Process   ProcessSpec   `json:"process"`
-	// SealGeneration names the generation a seal must produce; set when
-	// State is DesiredSeal.
-	SealGeneration string `json:"seal_generation,omitempty"`
-	// SealCheckpoint echoes the candidate reported at runner exit. It lets a
-	// restarted hostd finish sealing without trusting process-local memory.
+
+	SealGeneration string              `json:"seal_generation,omitempty"`
 	SealCheckpoint *CheckpointArtifact `json:"seal_checkpoint,omitempty"`
 }
 
-// WorkspaceSpec says how to materialize the workspace volume.
 type WorkspaceSpec struct {
-	// Generation to clone from; empty means a cache miss, which
-	// materializes an empty volume — never an error.
 	Generation string `json:"generation,omitempty"`
-	// SizeBytes for an empty volume; ignored for clones.
-	SizeBytes int64 `json:"size_bytes,omitempty"`
+	SizeBytes  int64  `json:"size_bytes,omitempty"`
 }
 
-// ProcessSpec says how to materialize the encrypted CRIU image volume.
-// A restore is selected only when Generation, ExpectedDigest, and
-// ExpectedVersion are all present; otherwise hostd creates an empty process
-// volume and performs a cold process start on the warm VM.
 type ProcessSpec struct {
 	Generation      string `json:"generation,omitempty"`
 	SizeBytes       int64  `json:"size_bytes,omitempty"`

@@ -359,6 +359,7 @@ type workflowJobRow struct {
 	RunnerClass            string
 	RunnerID               int64
 	RunnerName             string
+	CheckRunID             int64
 	HeadSHA                string
 	HeadBranch             string
 	WorkflowName           string
@@ -376,10 +377,10 @@ const sqlUpsertWorkflowJob = `
 INSERT INTO github_workflow_jobs (
     provider_job_id, provider_installation_id, provider_run_id, provider_run_attempt, provider_repository_id,
     repository_full_name, name, status, conclusion, labels_json, runner_class,
-    runner_id, runner_name, head_sha, head_branch, workflow_name,
+    runner_id, runner_name, check_run_id, head_sha, head_branch, workflow_name,
     started_at, completed_at, observed_from_api_at, terminal_observed_from_api_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-    CASE WHEN $19::timestamptz IS NOT NULL AND $8 = 'completed' THEN $19::timestamptz END)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+    CASE WHEN $20::timestamptz IS NOT NULL AND $8 = 'completed' THEN $20::timestamptz END)
 ON CONFLICT (provider_job_id) DO UPDATE SET
     provider_installation_id = EXCLUDED.provider_installation_id,
     provider_run_id        = EXCLUDED.provider_run_id,
@@ -393,6 +394,7 @@ ON CONFLICT (provider_job_id) DO UPDATE SET
     runner_class           = EXCLUDED.runner_class,
     runner_id              = EXCLUDED.runner_id,
     runner_name            = EXCLUDED.runner_name,
+    check_run_id           = CASE WHEN EXCLUDED.check_run_id > 0 THEN EXCLUDED.check_run_id ELSE github_workflow_jobs.check_run_id END,
     head_sha               = EXCLUDED.head_sha,
     head_branch            = EXCLUDED.head_branch,
     workflow_name          = EXCLUDED.workflow_name,
@@ -410,7 +412,7 @@ func (s *pgStore) UpsertWorkflowJob(ctx context.Context, j workflowJobRow) error
 	_, err = s.pool.Exec(ctx, sqlUpsertWorkflowJob,
 		j.ProviderJobID, j.ProviderInstallationID, j.ProviderRunID, j.ProviderRunAttempt, j.ProviderRepositoryID,
 		j.RepositoryFullName, j.Name, j.Status, j.Conclusion, string(labels), j.RunnerClass,
-		j.RunnerID, j.RunnerName, j.HeadSHA, j.HeadBranch, j.WorkflowName,
+		j.RunnerID, j.RunnerName, j.CheckRunID, j.HeadSHA, j.HeadBranch, j.WorkflowName,
 		j.StartedAt, j.CompletedAt, j.ObservedFromAPIAt)
 	return err
 }
@@ -548,20 +550,6 @@ ON CONFLICT (provider_job_id) DO UPDATE SET
     delivery_id   = EXCLUDED.delivery_id,
     observed_at   = EXCLUDED.observed_at,
     updated_at    = now()`
-
-	sqlAdoptAssignedExecution = `
-UPDATE host_leases execution
-SET state = 'ready', reported_state = 'assignment-routed',
-    assignment_deadline_at = NULL, updated_at = now()
-WHERE execution.provider_job_id = $1 AND execution.state = 'allocating'
-  AND EXISTS (
-      SELECT 1 FROM host_leases listener
-      WHERE listener.lease_id = $2
-        AND listener.host_id <> ''
-        AND listener.state IN ('assigned', 'ready')
-        AND listener.runner_class = execution.runner_class
-  )
-RETURNING host_id, runner_class`
 )
 
 func (s *pgStore) UpsertJobAssignment(ctx context.Context, a jobAssignment) error {
@@ -574,27 +562,6 @@ func (s *pgStore) UpsertJobAssignment(ctx context.Context, a jobAssignment) erro
 		return err
 	}
 	if _, err := tx.Exec(ctx, sqlUpsertJobAssignment, a.ProviderJobID, a.RunnerName, a.RunnerID, a.DeliveryID); err != nil {
-		return err
-	}
-	var hostID, class string
-	err = tx.QueryRow(ctx, sqlAdoptAssignedExecution,
-		a.ProviderJobID, a.RunnerName).Scan(&hostID, &class)
-	switch {
-	case err == nil:
-		// The job consumed an already-online listener before its own demand
-		// could claim capacity. Any in-flight claim on its execution row is
-		// returned; the selected listener's row already owns the real slot.
-		if hostID != "" {
-			if _, err := tx.Exec(ctx, sqlReleaseHostSlot, hostID, class); err != nil {
-				return err
-			}
-		}
-		if _, err := tx.Exec(ctx, sqlAdvanceDemand, a.ProviderJobID, demandAssigned,
-			[]string{demandRecorded, demandCapacityRequested}); err != nil {
-			return err
-		}
-	case errors.Is(err, pgx.ErrNoRows):
-	default:
 		return err
 	}
 	return tx.Commit(ctx)

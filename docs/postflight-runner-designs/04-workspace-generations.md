@@ -25,8 +25,8 @@ more lineages on NVMe — exactly what the hammer measures (06).
 
 ## States
 
-Generation: `candidate → committed → current → retained → reapable → reaped`,
-plus `discarded` (failed/skipped seals). Pointer: one
+Generation: `candidate → committed → retained → reapable → reaped`, plus
+`discarded` (failed/skipped seals). Pointer: one
 `current_generation_id` per scope, advanced only by CAS. The per-job
 operation journal on the host: `requested → mounted → sealed →
 committed | skipped | failed`.
@@ -45,14 +45,14 @@ the existing `hostd/sim` model):
 
 ## Lifecycle mechanics
 
-**Clone (at claim).** Scheduler claim records the scope's
-`observed_source_generation` on the lease (this exact value is the CAS
-guard later). hostd clones that generation's snapshot →
-`tank/postflight/ws/<lease>`; no generation ⇒ `zfs create -s` an empty
-zvol (cold path; the customer's first green run seeds the lineage).
+**Clone (after local assignment).** The immutable assignment records the
+scope's `source_generation` (this exact value is the CAS guard later).
+hostd clones that generation's snapshot into the assignment's workspace,
+tool, and process zvols; no generation creates an empty capsule (cold path;
+the customer's first green run seeds the lineage).
 
 **Seal (at runner exit 0).** guestd quiesces (01) → hostd
-`zfs snapshot ws/<lease>@sealed`, records `used/logicalused/written/
+`zfs snapshot ws/<assignment>@sealed`, records `used/logicalused/written/
 compressratio` (06 consumes these) → reports `sealed{snapshot_guid}` in the
 next sync. The VM is destroyed and the slot released immediately —
 occupancy never waits on GitHub. Exit ≠ 0: no snapshot, dataset destroyed,
@@ -60,7 +60,7 @@ operation `skipped`.
 
 **Commit + promote (controlplane).** The deadline/truth reconciler already
 observes attempt-specific job conclusions (`github.job.terminal.observed`).
-On `success` for a lease with a sealed candidate: mark `committed`, then
+On `success` for an assignment with a sealed candidate: mark `committed`, then
 
 ```sql
 UPDATE workspace_scopes
@@ -79,7 +79,7 @@ verbs already merged in `hostd/zvol` destroy `reapable` datasets on sync
 dispatch. Policy inputs (`last_used_at`, `bytes`, `pinned`, pool watermarks
 from host sync) are all live in the schema already.
 
-**Host journal.** Every ZFS mutation on the lease path writes an operation
+**Host journal.** Every ZFS mutation on the assignment path writes an operation
 row (id, verb, dataset, phase) *before* the effect — same
 meta-before-effects discipline as the vm state-dir. PG locks are never held
 across ZFS ops. Crash recovery classifies by (journal phase × dataset
@@ -87,20 +87,20 @@ existence) into: roll forward, roll back, or quarantine.
 
 ## Placement affinity (rendezvous)
 
-A clone is ~free on the host where the source generation lives and a
-full send away anywhere else. `workspace_scopes` gains `home_host_id`
-(set at promotion); `ClaimHostSlot` prefers the home host and falls back to
-any host with capacity (miss = cold clone, still correct). Single host today
-makes this trivially true — it exists now so multi-host later doesn't
-require a schema change mid-flight.
+A clone is ~free on the host where the source generation lives and a full
+send away anywhere else. `workspace_scopes.home_host_id` records residency.
+Pool placement can bias members toward that host before GitHub assigns a job;
+after local assignment, hostd must rendezvous the generation with that exact
+member. A remote miss becomes a cold capsule and remains correct.
 
-## Schema deltas (migration 003)
+## Schema
 
 - `workspace_scopes` (new): scope key dims, `current_generation_id`,
   `home_host_id`.
 - `workspace_generations` (exists): add `scope_id`, `state`,
   `parent_generation_id`, `snapshot_guid`, `sealed_at`, size stats columns.
-- `host_leases`: add `observed_source_generation_id`, `workspace_scope_id`.
+- `runner_job_assignments`: immutable local job/member binding,
+  `source_generation`, `workspace_scope_id`, restore outcome, and seal result.
 
 ## Pre-TEE scope
 

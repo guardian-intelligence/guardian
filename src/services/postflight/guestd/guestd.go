@@ -35,7 +35,7 @@ const WorkspaceMarker = guestproto.WorkspaceReadyMarker
 // SyntheticFailureExitCode reports a runner that never ran: mounts that
 // would not converge, or an exec that failed. The host destroys the slot
 // either way; the code only distinguishes "we failed" from a real runner
-// exit in the lease report.
+// exit in the assignment report.
 const SyntheticFailureExitCode = 254
 
 // Config is guestd's static shape.
@@ -297,10 +297,10 @@ func (s *Server) sendStatus(status guestproto.RunnerStatus) {
 func (s *Server) handlePrepare(prepare guestproto.Prepare) {
 	s.mu.Lock()
 	if s.prepared != nil {
-		duplicate := s.prepared.Lease == prepare.Lease
+		duplicate := s.prepared.MemberID == prepare.MemberID
 		s.mu.Unlock()
 		if !duplicate {
-			s.cfg.Logger.Error("conflicting preparation ignored", "lease", prepare.Lease)
+			s.cfg.Logger.Error("conflicting preparation ignored", "member_id", prepare.MemberID)
 		}
 		return
 	}
@@ -320,7 +320,7 @@ func (s *Server) run(prepare guestproto.Prepare, started guestproto.TimingPoint)
 		}
 	})
 	if err != nil {
-		s.cfg.Logger.Error("runner failed to run", "lease", prepare.Lease, "err", err)
+		s.cfg.Logger.Error("runner failed to run", "member_id", prepare.MemberID, "err", err)
 		point := guestTiming(s.cfg.Timing.Point("runner_exited"))
 		s.sendStatus(guestproto.RunnerStatus{
 			State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode,
@@ -337,16 +337,16 @@ func (s *Server) run(prepare guestproto.Prepare, started guestproto.TimingPoint)
 
 func (s *Server) handleRendezvous(rendezvous guestproto.Rendezvous) {
 	s.mu.Lock()
-	if s.assignment == nil || s.prepared == nil || s.prepared.Lease != rendezvous.Lease {
+	if s.assignment == nil || s.prepared == nil || s.prepared.MemberID != rendezvous.MemberID || rendezvous.AssignmentID == "" {
 		s.mu.Unlock()
-		s.cfg.Logger.Error("rendezvous arrived before local assignment", "lease", rendezvous.Lease)
+		s.cfg.Logger.Error("rendezvous arrived before local assignment", "member_id", rendezvous.MemberID, "assignment_id", rendezvous.AssignmentID)
 		return
 	}
 	if s.rendezvous != nil {
-		duplicate := s.rendezvous.Lease == rendezvous.Lease
+		duplicate := s.rendezvous.MemberID == rendezvous.MemberID && s.rendezvous.AssignmentID == rendezvous.AssignmentID
 		s.mu.Unlock()
 		if !duplicate {
-			s.cfg.Logger.Error("conflicting rendezvous ignored", "lease", rendezvous.Lease)
+			s.cfg.Logger.Error("conflicting rendezvous ignored", "member_id", rendezvous.MemberID, "assignment_id", rendezvous.AssignmentID)
 		}
 		return
 	}
@@ -367,7 +367,7 @@ func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 	}
 	recycle := func(stage string, err error, restore *guestproto.RestoreStatus) {
 		cancel()
-		s.cfg.Logger.Error(stage, "lease", rendezvous.Lease, "err", err)
+		s.cfg.Logger.Error(stage, "member_id", rendezvous.MemberID, "assignment_id", rendezvous.AssignmentID, "err", err)
 		failed := guestTiming(s.cfg.Timing.Point("generation_recycle_required"))
 		s.sendStatus(guestproto.RunnerStatus{
 			State: guestproto.RunnerRecycleRequired, Reason: err.Error(), Restore: restore,
@@ -444,17 +444,18 @@ func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 
 func (s *Server) handleAuthorize(authorize guestproto.Authorize) {
 	s.mu.Lock()
-	if s.prepared == nil || s.prepared.Lease != authorize.Lease || s.assignment == nil ||
+	if s.prepared == nil || s.prepared.MemberID != authorize.MemberID || s.assignment == nil ||
+		s.rendezvous == nil || s.rendezvous.AssignmentID != authorize.AssignmentID ||
 		s.assignment.RequestID != authorize.RequestID || authorize.Identity == nil || !s.bound || s.clock == nil {
 		s.mu.Unlock()
-		s.cfg.Logger.Error("authorization arrived before matching restored assignment", "lease", authorize.Lease)
+		s.cfg.Logger.Error("authorization arrived before matching restored assignment", "member_id", authorize.MemberID, "assignment_id", authorize.AssignmentID)
 		return
 	}
 	if s.authorized != nil {
-		duplicate := s.authorized.Lease == authorize.Lease
+		duplicate := s.authorized.MemberID == authorize.MemberID && s.authorized.AssignmentID == authorize.AssignmentID
 		s.mu.Unlock()
 		if !duplicate {
-			s.cfg.Logger.Error("conflicting authorization ignored", "lease", authorize.Lease)
+			s.cfg.Logger.Error("conflicting authorization ignored", "member_id", authorize.MemberID, "assignment_id", authorize.AssignmentID)
 		}
 		return
 	}

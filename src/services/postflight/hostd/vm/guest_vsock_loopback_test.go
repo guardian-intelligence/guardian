@@ -86,7 +86,7 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 	ran := make(chan string, 1)
 	assignmentSocket := filepath.Join(t.TempDir(), "assignment.sock")
 	identity := guestproto.JobIdentity{
-		RunID: "1", RunAttempt: 1, RunnerName: "lease-loop",
+		RunID: "1", RunAttempt: 1, RunnerName: "member-loop",
 		Repository: "acme/widget", WorkflowJob: "test",
 	}
 	var server *guestd.Server
@@ -96,7 +96,7 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 			ran <- jitConfig
 			event(guestd.EventListening)
 			assignment := guestproto.Assignment{
-				RequestID: "request-loop", JobID: "job-loop", RunnerName: "lease-loop",
+				RequestID: "request-loop", JobID: "job-loop", CheckRunID: 101, RunnerName: "member-loop",
 				JobDisplayName: "test", Identity: &identity,
 			}
 			if err := guestd.PublishRunnerAssignment(context.Background(), assignmentSocket, assignment); err != nil {
@@ -156,7 +156,7 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 
 	deliverCtx, deliverCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer deliverCancel()
-	prepare := guestproto.Prepare{Lease: "lease-loop", JITConfig: "jit-blob"}
+	prepare := guestproto.Prepare{MemberID: "member-loop", JITConfig: "jit-blob"}
 	if err := transport.Prepare(deliverCtx, id, vsock.Local, prepare); err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 		return observed.Assignment != nil && observed.Assignment.RequestID == "request-loop", err
 	})
 	rendezvous := guestproto.Rendezvous{
-		Lease:  "lease-loop",
+		MemberID: "member-loop", AssignmentID: "assignment-loop",
 		Mounts: []guestproto.Mount{{Serial: "workspace", Filesystem: "ext4", Mountpoint: "/work", Options: []string{"discard"}}},
 	}
 	if err := transport.Rendezvous(deliverCtx, id, vsock.Local, rendezvous); err != nil {
@@ -180,7 +180,7 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 		return observed.MountsReady, err
 	})
 	if err := transport.Authorize(deliverCtx, id, vsock.Local, guestproto.Authorize{
-		Lease: "lease-loop", RequestID: "request-loop", Identity: &identity,
+		MemberID: "member-loop", AssignmentID: "assignment-loop", RequestID: "request-loop", Identity: &identity,
 	}); err != nil {
 		t.Fatalf("authorize: %v", err)
 	}

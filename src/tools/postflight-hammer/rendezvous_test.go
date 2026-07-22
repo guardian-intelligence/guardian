@@ -22,13 +22,13 @@ func (b *traceBuilder) add(name, source string) *rendezvousEvent {
 		Seq: seq, Source: source, BootID: "boot-1", OriginSeq: b.originSeq[source],
 		MonotonicNS: int64(b.originSeq[source]) * int64(time.Millisecond),
 		WallTime:    rendezvousT0.Add(time.Duration(seq) * time.Millisecond),
-		Repo:        "acme/repo", JobID: 42, RunAttempt: 3,
+		Repo:        "acme/repo", JobID: 42, CheckRunID: 4200, RunAttempt: 3,
 		RunnerName: "warm-runner-3", RequestID: "request-7", RunnerJobID: "runner-job-9",
-		VMID: "pool-vm-3", ListenerLeaseID: "warm-runner-3", ExecutionLeaseID: "job-42",
+		VMID: "pool-vm-3", MemberID: "pool-member-3", AssignmentID: "job-42",
 	}
 	if preAssignmentEvents[name] {
-		event.RunID, event.Repo, event.RequestID, event.RunnerJobID, event.ExecutionLeaseID = "", "", "", "", ""
-		event.JobID, event.RunAttempt = 0, 0
+		event.RunID, event.Repo, event.RequestID, event.RunnerJobID, event.AssignmentID = "", "", "", "", ""
+		event.JobID, event.CheckRunID, event.RunAttempt = 0, 0, 0
 	}
 	b.events = append(b.events, event)
 	return &b.events[len(b.events)-1]
@@ -232,13 +232,13 @@ func TestCrossedListenerBindsActualExecutionVolumes(t *testing.T) {
 		if preAssignmentEvents[events[index].Event] {
 			continue
 		}
-		events[index].ExecutionLeaseID = "job-99"
+		events[index].AssignmentID = "job-99"
 		for volumeIndex := range events[index].Volumes {
 			events[index].Volumes[volumeIndex].Dataset = strings.Replace(events[index].Volumes[volumeIndex].Dataset, "job-42", "job-99", 1)
 		}
 	}
 	report := validateRendezvousTraceScope(events, true)
-	if !report.TraceValid || report.ExecutionLeaseID != "job-99" || report.ListenerLeaseID != "warm-runner-3" {
+	if !report.TraceValid || report.AssignmentID != "job-99" || report.MemberID != "pool-member-3" {
 		t.Fatalf("crossed assignment trace = %+v", report)
 	}
 }
@@ -327,7 +327,7 @@ func TestUnsupportedWorkloadRequiresBothSupportedFallbacks(t *testing.T) {
 }
 
 func TestTraceReaderRejectsUnknownFieldsAndMultipleValues(t *testing.T) {
-	base := `{"schema_version":6,"run_id":"r","event":"classified","seq":1,"source":"collector","boot_id":"boot","origin_seq":1,"monotonic_ns":1,"wall_time":"2026-07-21T12:00:00Z"`
+	base := `{"schema_version":7,"run_id":"r","event":"classified","seq":1,"source":"collector","boot_id":"boot","origin_seq":1,"monotonic_ns":1,"wall_time":"2026-07-21T12:00:00Z"`
 	if _, err := readRendezvousTrace(strings.NewReader(base + `,"surprise":true}`)); err == nil {
 		t.Fatal("unknown trace field was accepted")
 	}

@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"sort"
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
@@ -14,310 +17,300 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
 
-// validateDesired guards the sync boundary: a desired lease the control
-// plane sends must be internally coherent and name only zfs-safe
-// identifiers before the agent acts on it.
-func validateDesired(d syncproto.DesiredLease) error {
-	if d.LeaseID == "" {
-		return fmt.Errorf("lease without an id")
-	}
-	if err := zvol.ValidateName("lease", d.LeaseID); err != nil {
+func validateMember(spec syncproto.DesiredPoolMember) error {
+	if err := zvol.ValidateName("member", spec.MemberID); err != nil {
 		return err
 	}
-	if d.ExecutionLeaseID == "" {
-		d.ExecutionLeaseID = d.LeaseID
+	if spec.VMID == "" || spec.RunnerClass == "" || spec.RunnerName == "" {
+		return errors.New("member VM, class, and runner name are required")
 	}
-	if err := zvol.ValidateName("execution lease", d.ExecutionLeaseID); err != nil {
-		return err
-	}
-	if d.Workspace.Generation != "" {
-		if err := zvol.ValidateName("generation", d.Workspace.Generation); err != nil {
-			return err
-		}
-	}
-	if d.Tool.Generation != "" {
-		if err := zvol.ValidateName("tool generation", d.Tool.Generation); err != nil {
-			return err
-		}
-		if d.Tool.Generation != d.Workspace.Generation {
-			return fmt.Errorf("lease %s: workspace and tool generations differ", d.LeaseID)
-		}
-	}
-	if d.Process.Generation != "" {
-		if err := zvol.ValidateName("process generation", d.Process.Generation); err != nil {
-			return err
-		}
-	}
-	if d.Process.ExpectedDigest != "" || d.Process.ExpectedVersion != "" {
-		if d.Process.ExpectedDigest == "" || d.Process.ExpectedVersion == "" {
-			return fmt.Errorf("lease %s: incomplete process checkpoint identity", d.LeaseID)
-		}
-		if d.Process.Generation == "" {
-			return fmt.Errorf("lease %s: checkpoint identity without a process generation", d.LeaseID)
-		}
-		if d.Process.Generation != d.Workspace.Generation {
-			return fmt.Errorf("lease %s: workspace and process generations differ", d.LeaseID)
-		}
-		if d.Tool.Generation != d.Workspace.Generation {
-			return fmt.Errorf("lease %s: checkpoint identity without the matching tool generation", d.LeaseID)
-		}
-	}
-	switch d.State {
-	case syncproto.DesiredRun, syncproto.DesiredSeal, syncproto.DesiredCancel:
-	default:
-		return fmt.Errorf("lease %s: unknown desired state %q", d.LeaseID, d.State)
-	}
-	if d.State == syncproto.DesiredSeal && d.SealGeneration == "" {
-		return fmt.Errorf("lease %s: seal without a generation", d.LeaseID)
-	}
-	if d.State == syncproto.DesiredSeal && (d.SealCheckpoint == nil || d.SealCheckpoint.Digest == "" || d.SealCheckpoint.Version == "") {
-		return fmt.Errorf("lease %s: seal without a process checkpoint", d.LeaseID)
-	}
-	if d.State == syncproto.DesiredRun {
-		if d.ExecutionID == "" || d.AttemptID == "" {
-			return fmt.Errorf("lease %s: missing execution identity", d.LeaseID)
-		}
-		if d.RunnerClass == "" {
-			return fmt.Errorf("lease %s: missing runner class", d.LeaseID)
-		}
-		if d.RepositoryFullName == "" {
-			return fmt.Errorf("lease %s: missing repository", d.LeaseID)
-		}
-		if d.RendezvousAuthorized {
-			if d.ProviderRunID <= 0 || d.ProviderJobID <= 0 || d.ProviderRunAttempt <= 0 {
-				return fmt.Errorf("lease %s: authorized without provider identity", d.LeaseID)
-			}
-			if d.AssignedRunnerName == "" {
-				return fmt.Errorf("lease %s: authorized without an assigned runner", d.LeaseID)
-			}
-		}
+	if spec.State != syncproto.DesiredMemberListen && spec.State != syncproto.DesiredMemberRecycle {
+		return fmt.Errorf("unknown member state %q", spec.State)
 	}
 	return nil
 }
 
-// buildReport assembles the sync request from current state. Callers hold
-// the agent lock.
-func (a *Agent) buildReport(ctx context.Context) (syncproto.SyncRequest, error) {
-	started := time.Now()
-	inventoryStarted := time.Now()
-	generations, workspaces, err := a.zvols.Inventory(ctx)
-	if err != nil {
-		return syncproto.SyncRequest{}, fmt.Errorf("inventory: %w", err)
-	}
-	inventoryElapsed := time.Since(inventoryStarted)
-	vmListStarted := time.Now()
-	vms, err := a.vms.List(ctx)
-	if err != nil {
-		return syncproto.SyncRequest{}, fmt.Errorf("listing vms: %w", err)
-	}
-	vmListElapsed := time.Since(vmListStarted)
-
-	request := syncproto.SyncRequest{HostID: a.cfg.HostID, BootID: a.bootID}
-	for _, g := range generations {
-		request.Generations = append(request.Generations, syncproto.GenerationReport{
-			Generation: string(g.Generation),
-			Bytes:      g.Bytes,
-		})
-	}
-	for _, w := range workspaces {
-		request.Workspaces = append(request.Workspaces, w.Name)
-	}
-	for id := range a.leases {
-		request.Leases = append(request.Leases, a.leases[id].report())
-	}
-
-	occupancy := map[vm.Class]*syncproto.SlotReport{}
-	for class, total := range a.cfg.Slots {
-		occupancy[class] = &syncproto.SlotReport{Class: string(class), Total: total}
-	}
-	for _, status := range vms {
-		slot, ok := occupancy[status.Class]
-		if !ok {
-			continue
-		}
-		switch status.Phase {
-		case vm.PhaseBooting, vm.PhaseWarm:
-			slot.Warm++
-		case vm.PhaseAssigned, vm.PhaseListening, vm.PhaseJobAssigned, vm.PhaseBound,
-			vm.PhaseWorkerReady, vm.PhaseHookBlocked, vm.PhaseReady, vm.PhaseExited:
-			slot.Used++
+func validateAssignment(spec syncproto.DesiredAssignment) error {
+	for label, value := range map[string]string{
+		"assignment": spec.AssignmentID, "member": spec.MemberID,
+	} {
+		if err := zvol.ValidateName(label, value); err != nil {
+			return err
 		}
 	}
-	for _, slot := range occupancy {
-		request.Slots = append(request.Slots, *slot)
+	if spec.RequestID == "" || spec.JobID == "" || spec.CheckRunID <= 0 || spec.RunnerClass == "" {
+		return errors.New("assignment protocol identity and class are required")
 	}
-	a.logger.Info("hostd.report.built",
-		"duration_ns", time.Since(started).Nanoseconds(),
-		"inventory_ns", inventoryElapsed.Nanoseconds(),
-		"vm_list_ns", vmListElapsed.Nanoseconds(),
-		"generations", len(generations), "workspaces", len(workspaces),
-		"vms", len(vms), "leases", len(a.leases))
-	return request, nil
+	if spec.State != syncproto.DesiredAssignmentRun && spec.State != syncproto.DesiredAssignmentSeal && spec.State != syncproto.DesiredAssignmentAbort {
+		return fmt.Errorf("unknown assignment state %q", spec.State)
+	}
+	if spec.Identity.RunID == "" || spec.Identity.RunAttempt <= 0 || spec.Identity.RunnerName == "" || spec.Identity.Repository == "" || spec.Identity.WorkflowJob == "" {
+		return errors.New("assignment runtime identity is incomplete")
+	}
+	if spec.RepositoryFullName == "" || spec.RepositoryFullName != spec.Identity.Repository {
+		return errors.New("assignment repository identity differs")
+	}
+	if spec.Process.ExpectedDigest != "" || spec.Process.ExpectedVersion != "" || spec.Process.Generation != "" {
+		if spec.Process.ExpectedDigest == "" || spec.Process.ExpectedVersion == "" || spec.Process.Generation == "" {
+			return errors.New("process snapshot identity is incomplete")
+		}
+	}
+	if spec.State == syncproto.DesiredAssignmentSeal && (spec.SealGeneration == "" || spec.SealCheckpoint == nil) {
+		return errors.New("seal assignment is incomplete")
+	}
+	return nil
 }
 
-// applyDesired ingests a sync response. Invalid leases are skipped and
-// counted, never partially applied. Callers hold the agent lock.
-func (a *Agent) applyDesired(response syncproto.SyncResponse) {
-	now := a.now()
-	desired := make(map[string]syncproto.DesiredLease, len(response.Leases))
-	quarantined := map[string]bool{}
-	for _, d := range response.Leases {
-		if existing, ok := a.leases[d.LeaseID]; ok && d.JITConfig == "" {
-			// A crossed job can complete the database row that originally
-			// minted this listener while the listener is still executing a
-			// different routed job. Its consumed JIT credential is scrubbed
-			// at rest; the running host keeps only its in-memory copy.
-			d.JITConfig = existing.spec.JITConfig
-		}
-		if err := validateDesired(d); err != nil {
-			// The control plane named this lease; we could not understand
-			// the spec (version skew is the realistic cause). Quarantine
-			// its ID so GC never mistakes a lease the control plane still
-			// wants for an orphan and destroys live customer state — a
-			// rejected input must never escalate to destruction.
-			a.logger.Error("rejecting desired lease", "err", err)
-			a.metrics.RejectedLeases.Add(1)
-			if d.LeaseID != "" {
-				quarantined[d.LeaseID] = true
-			}
-			continue
-		}
-		desired[d.LeaseID] = d
-		if existing, ok := a.leases[d.LeaseID]; ok {
-			incomingExecutionID := executionLeaseID(d)
-			currentExecutionID := existing.executionLeaseID()
-			controlPlaneLagsLocalRoute := existing.execution != nil && incomingExecutionID == d.LeaseID
-			if currentExecutionID != incomingExecutionID && !controlPlaneLagsLocalRoute && existing.volume.Name != "" {
-				a.logger.Error("rejecting execution reassignment after volume resolution",
-					"listener", d.LeaseID,
-					"from", executionLeaseID(existing.spec),
-					"to", executionLeaseID(d))
-				a.metrics.RejectedLeases.Add(1)
-				quarantined[d.LeaseID] = true
-				delete(desired, d.LeaseID)
-				continue
-			}
-			existing.spec = d
-			if existing.execution != nil && !controlPlaneLagsLocalRoute {
-				captured := d
-				existing.execution = &captured
-			}
-			if a.quarantined[d.LeaseID] {
-				// Quarantine froze the lifecycle; the time it consumed must
-				// not count against the state deadline, or the first
-				// parseable sync would execute a stale deadline against a
-				// healthy job.
-				existing.since = now
-			}
-			continue
-		}
-		record := &lease{spec: d}
-		record.enter(syncproto.StatePending, now)
-		a.leases[d.LeaseID] = record
-	}
-	a.desired = desired
-	a.quarantined = quarantined
+func sameImmutableAssignment(left, right syncproto.DesiredAssignment) bool {
+	return left.AssignmentID == right.AssignmentID && left.MemberID == right.MemberID &&
+		left.RequestID == right.RequestID && left.JobID == right.JobID && left.CheckRunID == right.CheckRunID &&
+		left.ExecutionID == right.ExecutionID && left.AttemptID == right.AttemptID &&
+		left.RepositoryFullName == right.RepositoryFullName && left.RunnerClass == right.RunnerClass &&
+		left.Identity == right.Identity && left.Workspace == right.Workspace &&
+		left.Tool == right.Tool && left.Process == right.Process
+}
 
+func (a *Agent) applyDesired(response syncproto.SyncResponse) {
+	if response.BootID != a.bootID {
+		a.logger.Error("dropping sync response with wrong boot id", "got", response.BootID, "want", a.bootID)
+		return
+	}
+	members := make(map[string]syncproto.DesiredPoolMember, len(response.Members))
+	quarantinedMembers := map[string]bool{}
+	for _, spec := range response.Members {
+		if err := validateMember(spec); err != nil {
+			a.metrics.RejectedMembers.Add(1)
+			quarantinedMembers[spec.MemberID] = true
+			a.logger.Error("rejecting desired pool member", "member_id", spec.MemberID, "err", err)
+			continue
+		}
+		if _, duplicate := members[spec.MemberID]; duplicate {
+			quarantinedMembers[spec.MemberID] = true
+			delete(members, spec.MemberID)
+			continue
+		}
+		members[spec.MemberID] = spec
+	}
+
+	desiredAssignments := make(map[string]syncproto.DesiredAssignment, len(response.Assignments))
+	quarantinedJobs := map[string]bool{}
+	for _, spec := range response.Assignments {
+		if err := validateAssignment(spec); err != nil {
+			a.metrics.RejectedAssignments.Add(1)
+			quarantinedJobs[spec.AssignmentID] = true
+			a.logger.Error("rejecting desired assignment", "assignment_id", spec.AssignmentID, "err", err)
+			continue
+		}
+		if _, duplicate := desiredAssignments[spec.AssignmentID]; duplicate {
+			quarantinedJobs[spec.AssignmentID] = true
+			delete(desiredAssignments, spec.AssignmentID)
+			continue
+		}
+		desiredAssignments[spec.AssignmentID] = spec
+		record := a.assignments[spec.AssignmentID]
+		if record == nil {
+			a.assignments[spec.AssignmentID] = &assignment{spec: spec, state: syncproto.AssignmentObserved, since: a.now()}
+			continue
+		}
+		if !sameImmutableAssignment(record.spec, spec) {
+			quarantinedJobs[spec.AssignmentID] = true
+			a.metrics.RejectedAssignments.Add(1)
+			a.logger.Error("rejecting mutation of immutable assignment", "assignment_id", spec.AssignmentID)
+			continue
+		}
+		record.spec.State = spec.State
+		record.spec.SealGeneration = spec.SealGeneration
+		record.spec.SealCheckpoint = spec.SealCheckpoint
+	}
+
+	a.desiredMembers = members
+	a.desiredAssignments = desiredAssignments
+	for id, record := range a.assignments {
+		if record.state == syncproto.AssignmentExited {
+			if _, stillDesired := desiredAssignments[id]; !stillDesired {
+				record.enter(syncproto.AssignmentCompleted, a.now())
+			}
+		}
+	}
+	a.quarantinedMembers = quarantinedMembers
+	a.quarantinedJobs = quarantinedJobs
 	a.reap = a.reap[:0]
 	for _, generation := range response.Reap {
 		if err := zvol.ValidateName("generation", generation); err != nil {
-			a.logger.Error("rejecting reap verb", "err", err)
+			a.logger.Error("rejecting reap generation", "generation", generation, "err", err)
 			continue
 		}
 		a.reap = append(a.reap, zvol.GenerationID(generation))
 	}
-
-	targets := make(map[vm.Class]int, len(response.PoolTargets))
+	a.poolTargets = map[vm.Class]int{}
 	for class, count := range response.PoolTargets {
-		if count < 0 {
-			continue
+		if count >= 0 {
+			a.poolTargets[vm.Class(class)] = count
 		}
-		targets[vm.Class(class)] = count
 	}
-	a.poolTargets = targets
 	a.synced = true
 }
 
-// syncOnce performs one report/desire exchange with the control plane.
+func (a *Agent) buildReport(ctx context.Context) (syncproto.SyncRequest, error) {
+	request := syncproto.SyncRequest{
+		HostID: a.cfg.HostID, BootID: a.bootID,
+		Platform: syncproto.PlatformReport{
+			QEMUVersion: a.cfg.Platform.QEMUVersion, KernelRelease: a.cfg.Platform.KernelRelease,
+			OSImageID: a.cfg.Platform.OSImageID, MachineType: a.cfg.Platform.MachineType,
+			CPUModel: a.cfg.Platform.CPUModel, CRIUVersion: a.cfg.Platform.CRIUVersion,
+		},
+	}
+	statuses, err := a.vms.List(ctx)
+	if err != nil {
+		return request, err
+	}
+	slots := map[vm.Class]*syncproto.SlotReport{}
+	for class, total := range a.cfg.Slots {
+		slots[class] = &syncproto.SlotReport{Class: string(class), Total: total}
+	}
+	for _, status := range statuses {
+		slot := slots[status.Class]
+		if slot == nil {
+			slot = &syncproto.SlotReport{Class: string(status.Class)}
+			slots[status.Class] = slot
+		}
+		switch status.Phase {
+		case vm.PhaseBooting, vm.PhaseWarm, vm.PhaseAssigned:
+			slot.Booting++
+		case vm.PhaseListening:
+			slot.Listening++
+		default:
+			slot.Busy++
+		}
+		if status.Incarnation == "" {
+			continue
+		}
+		member := syncproto.PoolMemberReport{
+			MemberID: status.Incarnation, VMID: string(status.ID), Class: string(status.Class),
+			Image: status.Image, State: memberState(status),
+		}
+		if desired, ok := a.desiredMembers[status.Incarnation]; ok {
+			member.RunnerName = desired.RunnerName
+		}
+		if status.Assignment.RequestID != "" {
+			member.RunnerName = status.Assignment.RunnerName
+			member.Assignment = observedAssignment(status.Assignment)
+		}
+		if status.Phase == vm.PhaseRecycleRequired {
+			member.Reason = status.FailureReason
+		}
+		request.Members = append(request.Members, member)
+	}
+	for _, slot := range slots {
+		request.Slots = append(request.Slots, *slot)
+	}
+	for _, record := range a.assignments {
+		request.Assignments = append(request.Assignments, record.report())
+	}
+	generations, workspaces, err := a.zvols.Inventory(ctx)
+	if err != nil {
+		return request, err
+	}
+	for _, generation := range generations {
+		request.Generations = append(request.Generations, syncproto.GenerationReport{Generation: string(generation.Generation), Bytes: generation.Bytes})
+	}
+	for _, workspace := range workspaces {
+		request.Workspaces = append(request.Workspaces, workspace.Name)
+	}
+	sort.Slice(request.Slots, func(i, j int) bool { return request.Slots[i].Class < request.Slots[j].Class })
+	sort.Slice(request.Members, func(i, j int) bool { return request.Members[i].MemberID < request.Members[j].MemberID })
+	sort.Slice(request.Assignments, func(i, j int) bool { return request.Assignments[i].AssignmentID < request.Assignments[j].AssignmentID })
+	sort.Slice(request.Generations, func(i, j int) bool { return request.Generations[i].Generation < request.Generations[j].Generation })
+	sort.Strings(request.Workspaces)
+	return request, nil
+}
+
+func memberState(status vm.Status) syncproto.PoolMemberState {
+	switch status.Phase {
+	case vm.PhaseBooting:
+		return syncproto.MemberProvisioning
+	case vm.PhaseWarm:
+		return syncproto.MemberWarm
+	case vm.PhaseAssigned:
+		return syncproto.MemberPreparing
+	case vm.PhaseListening:
+		return syncproto.MemberListening
+	case vm.PhaseJobAssigned:
+		return syncproto.MemberAssigned
+	case vm.PhaseBound, vm.PhaseWorkerReady, vm.PhaseHookBlocked:
+		return syncproto.MemberRendezvous
+	case vm.PhaseReady:
+		return syncproto.MemberRunning
+	case vm.PhaseRecycleRequired, vm.PhaseExited:
+		return syncproto.MemberRecycling
+	default:
+		return syncproto.MemberLost
+	}
+}
+
+func observedAssignment(input vm.Assignment) *syncproto.ObservedAssignment {
+	timing := make([]syncproto.TimingPoint, 0, len(input.Timing))
+	for _, point := range input.Timing {
+		timing = append(timing, syncproto.TimingPoint{
+			Event: point.Event, Source: point.Source, BootID: point.BootID, Sequence: point.Sequence,
+			MonotonicNS: point.MonotonicNS, UnixNS: point.UnixNS,
+		})
+	}
+	return &syncproto.ObservedAssignment{
+		RequestID: input.RequestID, JobID: input.JobID, CheckRunID: input.CheckRunID, RunnerName: input.RunnerName,
+		JobDisplayName: input.JobDisplayName,
+		Identity: syncproto.JobIdentity{
+			RunID: input.Identity.RunID, RunAttempt: input.Identity.RunAttempt,
+			RunnerName: input.Identity.RunnerName, Repository: input.Identity.Repository,
+			WorkflowJob: input.Identity.WorkflowJob,
+		},
+		Timing: timing,
+	}
+}
+
 func (a *Agent) syncOnce(ctx context.Context) (time.Duration, error) {
 	started := time.Now()
 	a.mu.Lock()
 	request, err := a.buildReport(ctx)
 	a.mu.Unlock()
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("build report: %w", err)
 	}
-	reportElapsed := time.Since(started)
-
-	encodeStarted := time.Now()
 	body, err := json.Marshal(request)
 	if err != nil {
-		return 0, fmt.Errorf("encoding sync request: %w", err)
+		return 0, err
 	}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.ControlPlaneOrigin+syncproto.SyncPath, bytes.NewReader(body))
+	endpoint, err := url.JoinPath(a.cfg.ControlPlaneOrigin, syncproto.SyncPath)
+	if err != nil {
+		return 0, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return 0, err
 	}
 	httpRequest.Header.Set("Authorization", "Bearer "+a.credential)
 	httpRequest.Header.Set("Content-Type", "application/json")
-	encodeElapsed := time.Since(encodeStarted)
-
-	roundTripStarted := time.Now()
-	httpResponse, err := a.httpClient.Do(httpRequest)
+	response, err := a.httpClient.Do(httpRequest)
 	if err != nil {
-		return 0, fmt.Errorf("sync: %w", err)
+		return 0, err
 	}
-	defer httpResponse.Body.Close()
-	if httpResponse.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(httpResponse.Body, 4096))
-		return 0, fmt.Errorf("sync: control plane returned %d", httpResponse.StatusCode)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		detail, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return 0, fmt.Errorf("control plane returned %s: %s", response.Status, detail)
 	}
-
-	var response syncproto.SyncResponse
-	decoder := json.NewDecoder(io.LimitReader(httpResponse.Body, maxSyncResponseBytes))
-	if err := decoder.Decode(&response); err != nil {
-		return 0, fmt.Errorf("decoding sync response: %w", err)
+	var desired syncproto.SyncResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&desired); err != nil {
+		return 0, err
 	}
-	if response.BootID != a.bootID {
-		// A full-state response with zero leases cancels every job on this
-		// host, so a response that was not computed for this exact request
-		// must never be applied.
-		return 0, fmt.Errorf("sync: response boot_id %q does not echo %q", response.BootID, a.bootID)
-	}
-	roundTripElapsed := time.Since(roundTripStarted)
-
-	applyStarted := time.Now()
 	a.mu.Lock()
-	a.applyDesired(response)
+	a.applyDesired(desired)
 	a.mu.Unlock()
-	applyElapsed := time.Since(applyStarted)
-	a.logger.Info("hostd.sync.completed",
-		"duration_ns", time.Since(started).Nanoseconds(),
-		"report_ns", reportElapsed.Nanoseconds(),
-		"encode_ns", encodeElapsed.Nanoseconds(),
-		"round_trip_ns", roundTripElapsed.Nanoseconds(),
-		"apply_ns", applyElapsed.Nanoseconds(),
-		"request_bytes", len(body), "desired_leases", len(response.Leases),
-		"poll_after_ms", response.PollAfterMillis)
-
-	if response.PollAfterMillis > 0 {
-		// Clamp both ways: a bad or hostile control-plane value must neither
-		// stall the tick loop long enough to starve deadline enforcement nor
-		// spin sync exchanges at machine speed.
-		poll := time.Duration(response.PollAfterMillis) * time.Millisecond
-		if poll > maxPollAfter {
-			poll = maxPollAfter
-		}
-		if poll < minPollAfter {
-			poll = minPollAfter
-		}
-		return poll, nil
+	a.logger.Info("postflight.hostd.sync.completed", "duration_ns", time.Since(started).Nanoseconds(),
+		"reported_members", len(request.Members), "reported_assignments", len(request.Assignments),
+		"desired_members", len(desired.Members), "desired_assignments", len(desired.Assignments))
+	if desired.PollAfterMillis > 0 {
+		return time.Duration(desired.PollAfterMillis) * time.Millisecond, nil
 	}
 	return 0, nil
 }
-
-const (
-	maxSyncResponseBytes = 4 << 20
-	maxPollAfter         = 30 * time.Second
-	minPollAfter         = 250 * time.Millisecond
-)

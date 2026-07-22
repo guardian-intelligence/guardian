@@ -333,21 +333,21 @@ func newWorld(t *testing.T, configure func(*Config), runner RunRunner) *world {
 
 func testPrepare() guestproto.Prepare {
 	return guestproto.Prepare{
-		Lease: "lease-1", JITConfig: "jit-blob",
+		MemberID: "member-1", JITConfig: "jit-blob",
 		Env: map[string]string{"POSTFLIGHT_POOL": "fixture"},
 	}
 }
 
 func testAssignment() guestproto.Assignment {
 	return guestproto.Assignment{
-		RequestID: "request-1", JobID: "job-1", RunnerName: "lease-1", JobDisplayName: "test",
+		RequestID: "request-1", JobID: "job-1", CheckRunID: 101, RunnerName: "member-1", JobDisplayName: "test",
 		Identity: testAuthorize().Identity,
 	}
 }
 
 func testRendezvous() guestproto.Rendezvous {
 	return guestproto.Rendezvous{
-		Lease: "lease-1",
+		MemberID: "member-1", AssignmentID: "assignment-1",
 		Mounts: []guestproto.Mount{{
 			Serial:     "workspace",
 			Filesystem: "ext4",
@@ -359,9 +359,9 @@ func testRendezvous() guestproto.Rendezvous {
 
 func testAuthorize() guestproto.Authorize {
 	return guestproto.Authorize{
-		Lease: "lease-1", RequestID: "request-1",
+		MemberID: "member-1", AssignmentID: "assignment-1", RequestID: "request-1",
 		Identity: &guestproto.JobIdentity{
-			RunID: "101", RunAttempt: 1, RunnerName: "lease-1",
+			RunID: "101", RunAttempt: 1, RunnerName: "member-1",
 			Repository: "acme/widget", WorkflowJob: "test",
 		},
 		Env: map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
@@ -577,9 +577,9 @@ func TestPreparationAndRendezvousRedeliveryAreDeduped(t *testing.T) {
 	host.expect(guestproto.KindHello)
 	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
 	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
-	// A different lease on a single-use VM is ignored, not executed.
+	// A different pool member identity on a single-use VM is ignored.
 	conflicting := testPrepare()
-	conflicting.Lease = "lease-2"
+	conflicting.MemberID = "member-2"
 	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: &conflicting})
 
 	host.expectStatus(guestproto.RunnerRegistered)

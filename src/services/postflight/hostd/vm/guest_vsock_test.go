@@ -99,7 +99,7 @@ func TestVsockGuestRecordsAssignmentReceiptOnHostClock(t *testing.T) {
 		_ = guestproto.NewEncoder(conn).Write(guestproto.Message{
 			Kind: guestproto.KindAssignment,
 			Assignment: &guestproto.Assignment{
-				RequestID: "request-1", JobID: "job-1", RunnerName: "runner-1",
+				RequestID: "request-1", JobID: "job-1", CheckRunID: 101, RunnerName: "runner-1",
 				JobDisplayName: "benchmark",
 				Identity: &guestproto.JobIdentity{
 					RunID: "1", RunAttempt: 1, RunnerName: "runner-1",
@@ -134,7 +134,7 @@ func TestVsockGuestRejectsOldProtocol(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := transport.Prepare(ctx, "vm-old", 3, guestproto.Prepare{Lease: "l1"}); err == nil ||
+	if err := transport.Prepare(ctx, "vm-old", 3, guestproto.Prepare{MemberID: "member-1"}); err == nil ||
 		!strings.Contains(err.Error(), "protocol version") {
 		t.Fatalf("old protocol prepare error = %v", err)
 	}
@@ -159,7 +159,7 @@ func TestVsockGuestDialFailureIsTheZeroObservation(t *testing.T) {
 	}
 
 	// Prepare, by contrast, must surface the failure.
-	if err := transport.Prepare(ctx, "vm-a", 3, guestproto.Prepare{Lease: "l1"}); err == nil {
+	if err := transport.Prepare(ctx, "vm-a", 3, guestproto.Prepare{MemberID: "member-1"}); err == nil {
 		t.Fatal("delivered over a dead channel")
 	}
 }
@@ -201,13 +201,13 @@ func TestVsockGuestPrepareWritesTheListener(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	prepare := guestproto.Prepare{Lease: "lease-1", JITConfig: "jit-blob"}
+	prepare := guestproto.Prepare{MemberID: "member-1", JITConfig: "jit-blob"}
 	if err := transport.Prepare(ctx, "vm-a", 3, prepare); err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
 	select {
 	case got := <-received:
-		if got.Lease != prepare.Lease || got.JITConfig != "jit-blob" {
+		if got.MemberID != prepare.MemberID || got.JITConfig != "jit-blob" {
 			t.Fatalf("guest received %+v", got)
 		}
 	case <-ctx.Done():

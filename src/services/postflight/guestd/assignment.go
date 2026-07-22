@@ -148,7 +148,7 @@ func (s *Server) runnerWorkerFailed(reason string) localReply {
 }
 
 func (s *Server) publishAssignment(assignment *guestproto.Assignment) localReply {
-	if assignment == nil || assignment.RequestID == "" || assignment.JobID == "" || assignment.RunnerName == "" ||
+	if assignment == nil || assignment.RequestID == "" || assignment.JobID == "" || assignment.CheckRunID <= 0 || assignment.RunnerName == "" ||
 		assignment.JobDisplayName == "" || assignment.Identity == nil || assignment.Identity.RunID == "" ||
 		assignment.Identity.RunAttempt <= 0 || assignment.Identity.RunnerName != assignment.RunnerName ||
 		assignment.Identity.Repository == "" || assignment.Identity.WorkflowJob == "" {
@@ -157,7 +157,7 @@ func (s *Server) publishAssignment(assignment *guestproto.Assignment) localReply
 	assignment.Timing = append(assignment.Timing, guestTiming(s.cfg.Timing.Point("guest_assignment_received")))
 	s.mu.Lock()
 	if s.assignment != nil {
-		duplicate := s.assignment.RequestID == assignment.RequestID && s.assignment.RunnerName == assignment.RunnerName
+		duplicate := s.assignment.RequestID == assignment.RequestID && s.assignment.CheckRunID == assignment.CheckRunID && s.assignment.RunnerName == assignment.RunnerName
 		s.mu.Unlock()
 		if !duplicate {
 			return localReply{Error: "conflicting assignment"}
@@ -312,17 +312,18 @@ func guestTiming(point timing.Point) guestproto.TimingPoint {
 // IsRunnerAssigned reports the short-lived command invoked by the patched
 // Runner.Listener before it dispatches the job to Runner.Worker.
 func IsRunnerAssigned(args []string) bool {
-	return len(args) == 10 && args[1] == "runner-assigned"
+	return len(args) == 11 && args[1] == "runner-assigned"
 }
 
 func RunRunnerAssigned(args []string) error {
 	if !IsRunnerAssigned(args) {
 		return errors.New("guestd: invalid runner-assigned invocation")
 	}
-	requestID, jobID, runnerName := args[2], args[3], args[4]
-	runID, rawAttempt, repository, workflowJob, jobDisplayName := args[5], args[6], args[7], args[8], args[9]
+	requestID, jobID, rawCheckRunID, runnerName := args[2], args[3], args[4], args[5]
+	runID, rawAttempt, repository, workflowJob, jobDisplayName := args[6], args[7], args[8], args[9], args[10]
+	checkRunID, checkRunErr := strconv.ParseInt(rawCheckRunID, 10, 64)
 	attempt, err := strconv.Atoi(rawAttempt)
-	if err != nil || attempt <= 0 ||
+	if checkRunErr != nil || checkRunID <= 0 || err != nil || attempt <= 0 ||
 		strings.ContainsAny(strings.Join(args[2:], ""), "\x00\r\n") ||
 		requestID == "" || jobID == "" || runnerName == "" || runID == "" || repository == "" || workflowJob == "" || jobDisplayName == "" {
 		return errors.New("guestd: unsafe assignment identity")
@@ -332,7 +333,7 @@ func RunRunnerAssigned(args []string) error {
 		return err
 	}
 	assignment := &guestproto.Assignment{
-		RequestID: requestID, JobID: jobID, RunnerName: runnerName, JobDisplayName: jobDisplayName,
+		RequestID: requestID, JobID: jobID, CheckRunID: checkRunID, RunnerName: runnerName, JobDisplayName: jobDisplayName,
 		Identity: &guestproto.JobIdentity{
 			RunID: runID, RunAttempt: attempt, RunnerName: runnerName,
 			Repository: repository, WorkflowJob: workflowJob,

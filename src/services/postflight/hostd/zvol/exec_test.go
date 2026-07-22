@@ -52,55 +52,55 @@ func TestExecLifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	// Empty workspace (cache miss).
-	first, err := driver.EnsureWorkspace(ctx, "lease-a", "", 64<<20)
+	first, err := driver.EnsureWorkspace(ctx, "assignment-a", "", 64<<20)
 	if err != nil {
 		t.Fatalf("empty workspace: %v", err)
 	}
-	if again, err := driver.EnsureWorkspace(ctx, "lease-a", "", 64<<20); err != nil || again.Name != first.Name {
+	if again, err := driver.EnsureWorkspace(ctx, "assignment-a", "", 64<<20); err != nil || again.Name != first.Name {
 		t.Fatalf("ensure not idempotent: %v %v", again, err)
 	}
 	if _, err := os.Stat(first.Device); err != nil {
 		t.Fatalf("workspace device is not ready: %v", err)
 	}
-	if _, err := driver.EnsureProcess(ctx, "lease-a", "", 64<<20); err != nil {
+	if _, err := driver.EnsureProcess(ctx, "assignment-a", "", 64<<20); err != nil {
 		t.Fatalf("empty process volume: %v", err)
 	}
-	if _, err := driver.EnsureTool(ctx, "lease-a", "", 64<<20); err != nil {
+	if _, err := driver.EnsureTool(ctx, "assignment-a", "", 64<<20); err != nil {
 		t.Fatalf("empty tool volume: %v", err)
 	}
 
 	// Seal the set as a generation; sealing twice is a no-op.
-	sealed, err := driver.SealSet(ctx, "lease-a", "gen-1")
+	sealed, err := driver.SealSet(ctx, "assignment-a", "gen-1")
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
-	if again, err := driver.SealSet(ctx, "lease-a", "gen-1"); err != nil || again.Workspace.Snapshot != sealed.Workspace.Snapshot || again.Tool.Snapshot != sealed.Tool.Snapshot || again.Process.Snapshot != sealed.Process.Snapshot {
+	if again, err := driver.SealSet(ctx, "assignment-a", "gen-1"); err != nil || again.Workspace.Snapshot != sealed.Workspace.Snapshot || again.Tool.Snapshot != sealed.Tool.Snapshot || again.Process.Snapshot != sealed.Process.Snapshot {
 		t.Fatalf("seal not idempotent: %v %v", again, err)
 	}
 
 	// The sealed workspace can die first (that is what promote buys).
-	if err := driver.DestroyWorkspace(ctx, "lease-a"); err != nil {
+	if err := driver.DestroyWorkspace(ctx, "assignment-a"); err != nil {
 		t.Fatalf("destroying sealed-from workspace: %v", err)
 	}
-	if err := driver.DestroyProcess(ctx, "lease-a"); err != nil {
+	if err := driver.DestroyProcess(ctx, "assignment-a"); err != nil {
 		t.Fatalf("destroying sealed-from process volume: %v", err)
 	}
-	if err := driver.DestroyTool(ctx, "lease-a"); err != nil {
+	if err := driver.DestroyTool(ctx, "assignment-a"); err != nil {
 		t.Fatalf("destroying sealed-from tool volume: %v", err)
 	}
 
 	// Clone the generation into a new workspace (cache hit).
-	clone, err := driver.EnsureWorkspace(ctx, "lease-b", "gen-1", 0)
+	clone, err := driver.EnsureWorkspace(ctx, "assignment-b", "gen-1", 0)
 	if err != nil {
 		t.Fatalf("clone: %v", err)
 	}
 	if clone.Source != "gen-1" {
 		t.Fatalf("clone source %q", clone.Source)
 	}
-	if _, err := driver.EnsureProcess(ctx, "lease-b", "gen-1", 0); err != nil {
+	if _, err := driver.EnsureProcess(ctx, "assignment-b", "gen-1", 0); err != nil {
 		t.Fatalf("process clone: %v", err)
 	}
-	if _, err := driver.EnsureTool(ctx, "lease-b", "gen-1", 0); err != nil {
+	if _, err := driver.EnsureTool(ctx, "assignment-b", "gen-1", 0); err != nil {
 		t.Fatalf("tool clone: %v", err)
 	}
 
@@ -122,13 +122,13 @@ func TestExecLifecycle(t *testing.T) {
 	}
 
 	// Clone gone → reap lands. Absent things report ErrNotFound.
-	if err := driver.DestroyWorkspace(ctx, "lease-b"); err != nil {
+	if err := driver.DestroyWorkspace(ctx, "assignment-b"); err != nil {
 		t.Fatal(err)
 	}
-	if err := driver.DestroyProcess(ctx, "lease-b"); err != nil {
+	if err := driver.DestroyProcess(ctx, "assignment-b"); err != nil {
 		t.Fatal(err)
 	}
-	if err := driver.DestroyTool(ctx, "lease-b"); err != nil {
+	if err := driver.DestroyTool(ctx, "assignment-b"); err != nil {
 		t.Fatal(err)
 	}
 	if err := driver.DestroyGeneration(ctx, "gen-1"); err != nil {
@@ -140,7 +140,7 @@ func TestExecLifecycle(t *testing.T) {
 	if err := driver.DestroyToolGeneration(ctx, "gen-1"); err != nil {
 		t.Fatalf("reap tool generation: %v", err)
 	}
-	if err := driver.DestroyWorkspace(ctx, "lease-b"); !isNotFound(err) {
+	if err := driver.DestroyWorkspace(ctx, "assignment-b"); !isNotFound(err) {
 		t.Fatalf("second destroy: %v", err)
 	}
 }
@@ -148,21 +148,21 @@ func TestExecLifecycle(t *testing.T) {
 func TestExecSealRetryAfterPartialSeal(t *testing.T) {
 	driver := execDriver(t)
 	ctx := context.Background()
-	if _, err := driver.EnsureWorkspace(ctx, "lease-c", "", 64<<20); err != nil {
+	if _, err := driver.EnsureWorkspace(ctx, "assignment-c", "", 64<<20); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := driver.EnsureProcess(ctx, "lease-c", "", 64<<20); err != nil {
+	if _, err := driver.EnsureProcess(ctx, "assignment-c", "", 64<<20); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := driver.EnsureTool(ctx, "lease-c", "", 64<<20); err != nil {
+	if _, err := driver.EnsureTool(ctx, "assignment-c", "", 64<<20); err != nil {
 		t.Fatal(err)
 	}
 	// Reproduce the crash window: snapshot, clone, and promote have run but
 	// the @sealed snapshot never landed. A retrying SealSet must
 	// finish the job instead of failing on the second promote.
-	workspace := driver.workspaceDataset("lease-c")
-	processWorkspace := driver.processDriver().workspaceDataset("lease-c")
-	toolWorkspace := driver.toolDriver().workspaceDataset("lease-c")
+	workspace := driver.workspaceDataset("assignment-c")
+	processWorkspace := driver.processDriver().workspaceDataset("assignment-c")
+	toolWorkspace := driver.toolDriver().workspaceDataset("assignment-c")
 	genDataset := driver.generationDataset("gen-2")
 	if _, err := driver.run(ctx, "snapshot", workspace+"@seal-gen-2", toolWorkspace+"@seal-gen-2", processWorkspace+"@seal-gen-2"); err != nil {
 		t.Fatal(err)
@@ -173,20 +173,20 @@ func TestExecSealRetryAfterPartialSeal(t *testing.T) {
 	if _, err := driver.run(ctx, "promote", genDataset); err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := driver.SealSet(ctx, "lease-c", "gen-2")
+	sealed, err := driver.SealSet(ctx, "assignment-c", "gen-2")
 	if err != nil {
 		t.Fatalf("seal retry after partial seal: %v", err)
 	}
 	if sealed.Workspace.Generation != "gen-2" || sealed.Tool.Generation != "gen-2" || sealed.Process.Generation != "gen-2" {
 		t.Fatalf("sealed %+v", sealed)
 	}
-	if err := driver.DestroyWorkspace(ctx, "lease-c"); err != nil {
+	if err := driver.DestroyWorkspace(ctx, "assignment-c"); err != nil {
 		t.Fatal(err)
 	}
-	if err := driver.DestroyProcess(ctx, "lease-c"); err != nil {
+	if err := driver.DestroyProcess(ctx, "assignment-c"); err != nil {
 		t.Fatal(err)
 	}
-	if err := driver.DestroyTool(ctx, "lease-c"); err != nil {
+	if err := driver.DestroyTool(ctx, "assignment-c"); err != nil {
 		t.Fatal(err)
 	}
 	if err := driver.DestroyGeneration(ctx, "gen-2"); err != nil {
@@ -202,12 +202,12 @@ func TestExecSealRetryAfterPartialSeal(t *testing.T) {
 
 func TestValidateNameRejectsHostileIdentifiers(t *testing.T) {
 	for _, hostile := range []string{"", "../up", "a/b", "a@b", "a b", "-leading", string(make([]byte, 200))} {
-		if err := ValidateName("lease", hostile); err == nil {
+		if err := ValidateName("assignment", hostile); err == nil {
 			t.Errorf("accepted %q", hostile)
 		}
 	}
-	for _, fine := range []string{"lease-1", "gen.2026.07", "A_b:c"} {
-		if err := ValidateName("lease", fine); err != nil {
+	for _, fine := range []string{"assignment-1", "gen.2026.07", "A_b:c"} {
+		if err := ValidateName("assignment", fine); err != nil {
 			t.Errorf("rejected %q: %v", fine, err)
 		}
 	}
@@ -246,8 +246,8 @@ func TestExecMissingCloneSourceFallsBackCold(t *testing.T) {
 	ctx := context.Background()
 
 	// The scope pointer can outlive its generation; a missing clone source
-	// must cold-build, not fail the lease.
-	volume, err := driver.EnsureWorkspace(ctx, "lease-cold", "gen-vanished", 64<<20)
+	// must cold-build, not fail the assignment.
+	volume, err := driver.EnsureWorkspace(ctx, "assignment-cold", "gen-vanished", 64<<20)
 	if err != nil {
 		t.Fatalf("fallback: %v", err)
 	}

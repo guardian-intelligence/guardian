@@ -8,11 +8,11 @@
 ## Goal
 
 Every design in this directory implemented in this repo, verified end-to-end
-with a real CI workload: the `postflight-nextjs-demo` build-and-test jobs
-dispatched repeatedly against the tracer host, completing green with zero
-manual steps, with full build-and-test logs observable in the test repo's
-Actions UI, and pickup/exec/seal timings plus NVMe usage recorded by the
-hammer harness.
+with real Bazel, JavaScript, JVM, Go, Envoy, and LLVM CI workloads dispatched
+through GitHub Actions against the tracer host. Each fixture must pass its
+ordinary CI before Postflight is introduced. The final artifact includes full
+job logs, assignment/rendezvous/restore timings, recovery classifications,
+execution timings, and NVMe usage.
 
 ## Component map
 
@@ -41,16 +41,19 @@ plane changes are inert behind the existing `SCHEDULER_ENABLED` /
 
 ## Standing rulings that constrain this pass
 
-- **Pre-TEE scope.** Plaintext zvols; generation identity is the ZFS
-  snapshot GUID. The SEV-SNP phase keeps that lifecycle and adds guest-side
-  LUKS2 keyed by the PSP-derived, measurement-bound key, per the security
-  model. Seams are specified where they land; nothing is implemented early.
-- **No vmstate anywhere.** Warmth, when it arrives, is a CRIU image inside
-  the encrypted workspace volume. Out of scope for this pass.
-- **Polling shape is accepted.** No interval tuning, no NOTIFY retrofits.
-  The full pipeline redesign happens after e2e is proven.
-- **Custom checkout is required for integration.** Stock `actions/checkout`
-  compatibility is a later lane with a version matrix.
+- **SEV-SNP first.** The product contract is an authenticated encrypted
+  workspace/tool/process generation bound to the guest platform fingerprint.
+  The tracer may exercise plaintext storage where hardware key release is not
+  yet available, but it must not weaken restore classification or identity.
+- **Process warmth is optional.** CRIU is the current process artifact. A
+  recoverable restore miss invalidates only that artifact and starts the same
+  assigned Worker in a cold capsule; an integrity failure recycles the VM.
+- **Assignment is local and exact.** A patched Runner.Listener publishes the
+  check-run, request, protocol-job, runner, and workflow identity before it
+  creates Runner.Worker. No job is predicted from labels or display names.
+- **Custom checkout accelerates source convergence.** Correct assignment and
+  rendezvous do not depend on the action; fixtures use it to measure the
+  durable workspace and delta-commit path.
 - **Workspace convergence is a documented customer tradeoff**, not a design
   constraint. No cleaning layers beyond what checkout needs to function; a
   divergence canary is a possible customer feature much later.
@@ -61,8 +64,8 @@ plane changes are inert behind the existing `SCHEDULER_ENABLED` /
 - [ ] `bazel test //...` green with all new packages
 - [ ] guestd + golden image v0 built and installed on the tracer host
 - [ ] `cmd/hostd` running under systemd on the tracer host, synced, slots visible in `host_slots`
-- [ ] Demo repo workflow using the custom checkout action
-- [ ] One dispatch → green with zero manual steps (webhook → demand → lease → JIT → VM → checkout → build+test → seal → promote)
+- [ ] Fixture workflows using the custom checkout action
+- [ ] One dispatch → green with zero manual steps (demand → warm listener → local assignment → rendezvous → checkout → build+test → seal → promote)
 - [ ] Second dispatch of the same job clones the promoted generation (warm checkout, zero bundle bytes served)
 - [ ] Hammer run: ≥50 dispatches across burst/sustained/cancel patterns, all assertions pass
 - [ ] Timings (pickup/exec/seal p50/p90/p100) and per-generation NVMe stats recorded in the hammer report

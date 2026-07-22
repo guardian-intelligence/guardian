@@ -14,7 +14,7 @@ import (
 )
 
 // Version is the protocol revision a Hello announces.
-const Version = 10
+const Version = 11
 
 // WorkspaceReadyMarker is the file guestd drops at a converged workspace
 // mountpoint's root once every declared mount is in place. It is the shared
@@ -91,8 +91,9 @@ type Hello struct {
 // Prepare carries a single-use runner registration into an otherwise empty
 // warm VM. The listener connects before any customer generation is attached.
 type Prepare struct {
-	// Lease names the listener. It is deliberately opaque to the guest.
-	Lease string `json:"lease"`
+	// MemberID names this single VM incarnation. It is deliberately opaque
+	// to the guest and carries no customer identity.
+	MemberID string `json:"member_id"`
 	// JITConfig is the encoded single-use runner registration blob. It
 	// exists only in guest RAM and the runner's process environment, never
 	// on any disk.
@@ -110,6 +111,7 @@ type Prepare struct {
 type Assignment struct {
 	RequestID      string        `json:"request_id"`
 	JobID          string        `json:"job_id"`
+	CheckRunID     int64         `json:"check_run_id"`
 	RunnerName     string        `json:"runner_name"`
 	JobDisplayName string        `json:"job_display_name"`
 	Identity       *JobIdentity  `json:"identity"`
@@ -120,16 +122,18 @@ type Assignment struct {
 // listener actually received. It restores the process capsule before the
 // Runner.Worker trampoline is allowed to enter it.
 type Rendezvous struct {
-	Lease      string             `json:"lease"`
-	Mounts     []Mount            `json:"mounts"`
-	Checkpoint *CheckpointRestore `json:"checkpoint,omitempty"`
+	MemberID     string             `json:"member_id"`
+	AssignmentID string             `json:"assignment_id"`
+	Mounts       []Mount            `json:"mounts"`
+	Checkpoint   *CheckpointRestore `json:"checkpoint,omitempty"`
 }
 
 type Authorize struct {
-	Lease     string            `json:"lease"`
-	RequestID string            `json:"request_id"`
-	Identity  *JobIdentity      `json:"identity,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
+	MemberID     string            `json:"member_id"`
+	AssignmentID string            `json:"assignment_id"`
+	RequestID    string            `json:"request_id"`
+	Identity     *JobIdentity      `json:"identity,omitempty"`
+	Env          map[string]string `json:"env,omitempty"`
 }
 
 // TimingPoint preserves the originating process's high-resolution clock.
@@ -242,13 +246,13 @@ const (
 
 // RunnerStatus reports the runner lifecycle up to the host.
 type RunnerStatus struct {
-	State    RunnerState   `json:"state"`
-	ExitCode int           `json:"exit_code,omitempty"`
-	Reason   string        `json:"reason,omitempty"`
-	Identity *JobIdentity  `json:"identity,omitempty"`
-	Clock    *ClockSample  `json:"clock,omitempty"`
+	State    RunnerState    `json:"state"`
+	ExitCode int            `json:"exit_code,omitempty"`
+	Reason   string         `json:"reason,omitempty"`
+	Identity *JobIdentity   `json:"identity,omitempty"`
+	Clock    *ClockSample   `json:"clock,omitempty"`
 	Restore  *RestoreStatus `json:"restore,omitempty"`
-	Timing   []TimingPoint `json:"timing,omitempty"`
+	Timing   []TimingPoint  `json:"timing,omitempty"`
 }
 
 type RestoreOutcome string
@@ -263,10 +267,10 @@ const (
 // RestoreStatus is durable evidence about the process component selected for
 // this assignment. FailureCode is a bounded machine code, never raw CRIU text.
 type RestoreStatus struct {
-	Outcome             RestoreOutcome `json:"outcome"`
-	ProcessInvalidated  bool           `json:"process_invalidated,omitempty"`
-	FailureClass        string         `json:"failure_class,omitempty"`
-	FailureCode         string         `json:"failure_code,omitempty"`
+	Outcome            RestoreOutcome `json:"outcome"`
+	ProcessInvalidated bool           `json:"process_invalidated,omitempty"`
+	FailureClass       string         `json:"failure_class,omitempty"`
+	FailureCode        string         `json:"failure_code,omitempty"`
 }
 
 // JobIdentity is the identity GitHub exposes to the synchronous runner hook.

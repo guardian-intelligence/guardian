@@ -4,13 +4,12 @@ go_library(
     name = "agent",
     srcs = [
         "agent.go",
+		"assignment.go",
         "checkout.go",
         "config.go",
         "converge.go",
         "gc.go",
-        "lease.go",
         "pool.go",
-        "rendezvous_trace.go",
         "snapshot.go",
         "sync.go",
     ],
@@ -29,9 +28,7 @@ go_library(
 go_test(
     name = "agent_test",
     srcs = [
-        "pool_test.go",
-        "rendezvous_trace_test.go",
-        "sync_test.go",
+		"agent_test.go",
     ],
     embed = [":agent"],
     deps = [

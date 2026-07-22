@@ -134,7 +134,7 @@ func (d *dispatcher) dispatchOne(ctx context.Context, workflow string, twin bool
 
 // serial waits for each run to complete before dispatching its successor.
 // For Postflight cache benchmarks, awaitPromotion additionally proves the
-// completed run's sealed generation is current before the next lease begins.
+// completed run's sealed generation is current before the next assignment begins.
 func (d *dispatcher) serial(ctx context.Context, workflow string, twin bool, n int, awaitPromotion bool) error {
 	known, err := d.knownRunIDs(ctx, workflow)
 	if err != nil {
@@ -405,13 +405,15 @@ func runPromoted(ctx context.Context, db *dbClient, since time.Time, runID int64
 		return false, "no provider demand observed", nil
 	}
 
-	leases, err := db.LeasesSince(ctx, since)
+	assignments, err := db.AssignmentsSince(ctx, since)
 	if err != nil {
 		return false, "", err
 	}
-	byJob := make(map[int64]leaseRow, len(leases))
-	for _, lease := range leases {
-		byJob[lease.ProviderJobID] = lease
+	byJob := make(map[int64]assignmentRow, len(assignments))
+	for _, assignment := range assignments {
+		if previous, ok := byJob[assignment.ProviderJobID]; !ok || assignment.CreatedAt.After(previous.CreatedAt) {
+			byJob[assignment.ProviderJobID] = assignment
+		}
 	}
 	scopes, err := db.Scopes(ctx)
 	if err != nil {
@@ -431,21 +433,21 @@ func runPromoted(ctx context.Context, db *dbClient, since time.Time, runID int64
 	}
 
 	for _, jobID := range jobIDs {
-		lease, ok := byJob[jobID]
+		assignment, ok := byJob[jobID]
 		if !ok {
-			return false, fmt.Sprintf("job %d has no lease", jobID), nil
+			return false, fmt.Sprintf("job %d has no assignment", jobID), nil
 		}
-		if lease.State != "completed" || lease.ReportedState != "sealed" {
-			return false, fmt.Sprintf("lease %s is %s/%s", lease.LeaseID, lease.State, lease.ReportedState), nil
+		if assignment.State != "sealed" {
+			return false, fmt.Sprintf("assignment %s is %s", assignment.AssignmentID, assignment.State), nil
 		}
-		if lease.SealGeneration == "" {
-			return false, fmt.Sprintf("lease %s has no seal generation", lease.LeaseID), nil
+		if assignment.SealGeneration == "" {
+			return false, fmt.Sprintf("assignment %s has no seal generation", assignment.AssignmentID), nil
 		}
-		if states[lease.SealGeneration] != "committed" {
-			return false, fmt.Sprintf("generation %s is %q", lease.SealGeneration, states[lease.SealGeneration]), nil
+		if states[assignment.SealGeneration] != "committed" {
+			return false, fmt.Sprintf("generation %s is %q", assignment.SealGeneration, states[assignment.SealGeneration]), nil
 		}
-		if !current[lease.SealGeneration] {
-			return false, fmt.Sprintf("generation %s is not current", lease.SealGeneration), nil
+		if !current[assignment.SealGeneration] {
+			return false, fmt.Sprintf("generation %s is not current", assignment.SealGeneration), nil
 		}
 	}
 	return true, "", nil

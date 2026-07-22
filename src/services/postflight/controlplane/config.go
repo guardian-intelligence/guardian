@@ -29,9 +29,8 @@ type config struct {
 	hostdSyncSecret   string
 	schedulerEnabled  bool
 	schedulerInterval time.Duration
-	allocateTimeout   time.Duration
-	assignmentTimeout time.Duration
-	// sealTimeout bounds how long a lease may wait for its host to confirm
+	runnerPoolSize    int
+	// sealTimeout bounds how long an assignment may wait for its host to confirm
 	// a requested workspace seal before the candidate is discarded.
 	sealTimeout time.Duration
 	// verdictTimeout bounds how long a sealed candidate may wait for its
@@ -40,7 +39,7 @@ type config struct {
 	// its dataset on the host) forever.
 	verdictTimeout time.Duration
 	// hostOfflineTimeout is how long a host may go without syncing before
-	// its ready leases are failed over (the host is presumed dead).
+	// its active assignments are requeued (the host is presumed dead).
 	hostOfflineTimeout time.Duration
 }
 
@@ -106,9 +105,8 @@ func loadConfig() (config, error) {
 		hostdSyncSecret:    os.Getenv("HOSTD_SYNC_SECRET"),
 		schedulerEnabled:   os.Getenv("SCHEDULER_ENABLED") == "true",
 		schedulerInterval:  duration("SCHEDULER_INTERVAL", "500ms"),
-		allocateTimeout:    duration("LEASE_ALLOCATE_TIMEOUT", "2s"),
-		assignmentTimeout:  duration("LEASE_ASSIGNMENT_TIMEOUT", "90s"),
-		sealTimeout:        duration("LEASE_SEAL_TIMEOUT", "10m"),
+		runnerPoolSize:     positiveInt("RUNNER_POOL_SIZE", "6"),
+		sealTimeout:        duration("ASSIGNMENT_SEAL_TIMEOUT", "10m"),
 		verdictTimeout:     duration("GENERATION_VERDICT_TIMEOUT", "1h"),
 		hostOfflineTimeout: duration("HOST_OFFLINE_TIMEOUT", "5m"),
 	}

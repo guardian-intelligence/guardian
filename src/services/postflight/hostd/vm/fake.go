@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
 )
 
 // Fake is the in-memory Driver for agent tests and the sim harness. VM
@@ -81,6 +83,7 @@ func (f *Fake) Launch(_ context.Context, id ID, class Class) error {
 	}
 	f.vms[id] = &fakeVM{status: Status{
 		ID: id, Class: class, Image: f.Images[class], Phase: PhaseBooting,
+		Incarnation: string(id) + "-incarnation",
 	}}
 	f.journal("launch %s class=%s", id, class)
 	f.notify(id)
@@ -99,16 +102,16 @@ func (f *Fake) Prepare(_ context.Context, id ID, preparation Preparation) error 
 		return ErrNotFound
 	}
 	if instance.preparation != nil {
-		if instance.preparation.Lease != preparation.Lease {
-			return fmt.Errorf("vm: %s already assigned to lease %s", id, instance.preparation.Lease)
+		if instance.preparation.MemberID != preparation.MemberID {
+			return fmt.Errorf("vm: %s already prepared as member %s", id, instance.preparation.MemberID)
 		}
-		return nil // same lease; idempotent
+		return nil // same member; idempotent
 	}
 	if instance.status.Phase != PhaseWarm {
 		return fmt.Errorf("vm: %s is not an idle warm VM", id)
 	}
 	instance.preparation = &preparation
-	instance.status.Lease = preparation.Lease
+	instance.status.MemberID = preparation.MemberID
 	instance.status.Phase = PhaseAssigned
 	f.journal("prepare %s", id)
 	f.notify(id)
@@ -129,17 +132,16 @@ func (f *Fake) Rendezvous(_ context.Context, id ID, rendezvous Rendezvous) error
 	if !ok {
 		return ErrNotFound
 	}
-	if instance.status.Lease != rendezvous.Lease || instance.status.Phase != PhaseJobAssigned {
-		return fmt.Errorf("vm: %s already carries lease %s", id, instance.status.Lease)
+	if instance.status.MemberID != rendezvous.MemberID || rendezvous.AssignmentID == "" || instance.status.Phase != PhaseJobAssigned {
+		return fmt.Errorf("vm: %s is not the selected member %s", id, rendezvous.MemberID)
 	}
 	if instance.rendezvous != nil {
-		if instance.rendezvous.Lease != rendezvous.Lease {
-			return fmt.Errorf("vm: %s already rendezvoused for lease %s", id, instance.rendezvous.Lease)
+		if instance.rendezvous.AssignmentID != rendezvous.AssignmentID {
+			return fmt.Errorf("vm: %s already rendezvoused for assignment %s", id, instance.rendezvous.AssignmentID)
 		}
 		return nil
 	}
 	instance.rendezvous = &rendezvous
-	instance.status.Lease = rendezvous.Lease
 	if f.OnAttach != nil {
 		f.OnAttach(rendezvous.WorkspaceDevice)
 		f.OnAttach(rendezvous.ToolDevice)
@@ -164,7 +166,8 @@ func (f *Fake) Authorize(_ context.Context, id ID, authorization Authorization) 
 	if !ok {
 		return ErrNotFound
 	}
-	if instance.status.Phase != PhaseBound || instance.status.Lease != authorization.Lease ||
+	if instance.status.Phase != PhaseBound || instance.status.MemberID != authorization.MemberID ||
+		instance.rendezvous == nil || instance.rendezvous.AssignmentID != authorization.AssignmentID ||
 		instance.status.Assignment.RequestID != authorization.RequestID {
 		return fmt.Errorf("vm: %s has no matching restored assignment", id)
 	}
@@ -249,6 +252,41 @@ func (f *Fake) AdvanceBoot(id ID) bool { return f.advance(id, PhaseBooting, Phas
 
 // MarkBound records completed mount and process restore.
 func (f *Fake) MarkBound(id ID) bool { return f.advance(id, PhaseJobAssigned, PhaseBound) }
+
+// MarkBoundWithRestore records completed binding plus the process restore
+// evidence guestd would report.
+func (f *Fake) MarkBoundWithRestore(id ID, restore guestproto.RestoreStatus) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	instance, ok := f.vms[id]
+	if !ok || instance.status.Phase != PhaseJobAssigned {
+		return false
+	}
+	instance.status.Phase = PhaseBound
+	copy := restore
+	instance.status.Restore = &copy
+	f.journal("phase %s %s->%s restore=%s", id, PhaseJobAssigned, PhaseBound, restore.Outcome)
+	f.notify(id)
+	return true
+}
+
+// MarkRecycleRequired records an unsafe guest-local restore outcome while
+// Worker remains blocked.
+func (f *Fake) MarkRecycleRequired(id ID, restore guestproto.RestoreStatus, reason string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	instance, ok := f.vms[id]
+	if !ok {
+		return false
+	}
+	instance.status.Phase = PhaseRecycleRequired
+	copy := restore
+	instance.status.Restore = &copy
+	instance.status.FailureReason = reason
+	f.journal("recycle-required %s", id)
+	f.notify(id)
+	return true
+}
 
 // MarkListening moves a prepared VM to a registered listener.
 func (f *Fake) MarkListening(id ID) bool { return f.advance(id, PhaseAssigned, PhaseListening) }

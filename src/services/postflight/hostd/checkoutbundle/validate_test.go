@@ -7,7 +7,7 @@ import (
 )
 
 func TestValidateRequest(t *testing.T) {
-	identity := LeaseIdentity{RepositoryFullName: "acme/widget"}
+	identity := AssignmentIdentity{RepositoryFullName: "acme/widget"}
 	valid := bundleRequest{
 		Repository:  "acme/widget",
 		Ref:         "refs/heads/main",
@@ -37,11 +37,11 @@ func TestValidateRequest(t *testing.T) {
 		}
 	})
 
-	t.Run("repository casing still matches lease", func(t *testing.T) {
+	t.Run("repository casing still matches assignment", func(t *testing.T) {
 		req := valid
 		req.Repository = "ACME/Widget"
 		if _, err := validateRequest(req, identity); err != nil {
-			t.Fatalf("case-insensitive lease match failed: %v", err)
+			t.Fatalf("case-insensitive assignment match failed: %v", err)
 		}
 	})
 
@@ -85,7 +85,7 @@ func TestValidateRequest(t *testing.T) {
 		})
 	}
 
-	t.Run("repository not covered by lease", func(t *testing.T) {
+	t.Run("repository not covered by assignment", func(t *testing.T) {
 		req := valid
 		req.Repository = "acme/other"
 		_, err := validateRequest(req, identity)

@@ -18,7 +18,7 @@ type Guest interface {
 	// checkpoint supervisor before the fresh runner is launched.
 	Rendezvous(ctx context.Context, id ID, cid uint32, rendezvous guestproto.Rendezvous) error
 	// Authorize releases the blocked job only after its observed identity
-	// matches the listener lease.
+	// matches the listener assignment.
 	Authorize(ctx context.Context, id ID, cid uint32, authorize guestproto.Authorize) error
 	// Observe reports what guestd has said about a VM. A guest that has said
 	// nothing (still booting, channel not up) is the zero observation, not
@@ -45,17 +45,17 @@ type GuestObservation struct {
 	// MountsReady follows local assignment and generation restore. Released
 	// follows the defense-in-depth hook authorization. Clock is meaningful
 	// once MountsReady is true.
-	MountsReady bool
-	WorkerReady bool
-	WorkerStarted bool
-	WorkerFailed bool
+	MountsReady     bool
+	WorkerReady     bool
+	WorkerStarted   bool
+	WorkerFailed    bool
 	RecycleRequired bool
-	Released    bool
-	Clock       guestproto.ClockSample
-	Restore     *guestproto.RestoreStatus
-	Timing      []guestproto.TimingPoint
+	Released        bool
+	Clock           guestproto.ClockSample
+	Restore         *guestproto.RestoreStatus
+	Timing          []guestproto.TimingPoint
 	// RunnerExited: the runner finished; ExitCode is meaningful.
-	RunnerExited bool
-	ExitCode     int
+	RunnerExited  bool
+	ExitCode      int
 	FailureReason string
 }

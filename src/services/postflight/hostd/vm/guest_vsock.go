@@ -138,7 +138,7 @@ func (g *VsockGuest) Quiesce(ctx context.Context, id ID, cid uint32, request gue
 		}
 		return result.reply, nil
 	case <-ctx.Done():
-		// Free the reply slot: the lease is failing anyway, and a stale
+		// Free the reply slot: the assignment is failing anyway, and a stale
 		// claim must not poison a later quiesce on this channel.
 		channel.abandonQuiesce(reply)
 		return guestproto.Quiesced{}, fmt.Errorf("vm: quiesce %s: %w", id, ctx.Err())

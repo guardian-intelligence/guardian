@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
 )
 
 // The conformance suite runs the real QEMU driver — ProcessLauncher, real
@@ -204,13 +206,24 @@ func TestConformanceLifecycle(t *testing.T) {
 	if err := driver.disks.Ensure(ctx, tool, driver.cfg.Classes[testClass].Image); err != nil {
 		t.Fatalf("cloning tool volume: %v", err)
 	}
-	preparation := Preparation{Lease: "lease-conf", JITConfig: "jit-blob"}
+	preparation := Preparation{MemberID: "member-conf", JITConfig: "jit-blob"}
 	rendezvous := Rendezvous{
-		Lease:               "lease-conf",
+		MemberID:            "member-conf",
+		AssignmentID:        "assignment-conf",
 		WorkspaceDevice:     zvolDevicePath(workspace),
 		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
 		ToolDevice:          zvolDevicePath(tool),
 		ProcessDevice:       zvolDevicePath(process),
+	}
+	if err := driver.Prepare(ctx, id, preparation); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	identity := &guestproto.JobIdentity{RunID: "101", RunAttempt: 1, RunnerName: "member-conf", Repository: "acme/widget", WorkflowJob: "test"}
+	guest.set(id, GuestObservation{Hello: true, RunnerRegistered: true, Assignment: &guestproto.Assignment{
+		RequestID: "request-conf", JobID: "job-conf", CheckRunID: 101, RunnerName: "member-conf", JobDisplayName: "test", Identity: identity,
+	}})
+	if status, err = driver.Status(ctx, id); err != nil || status.Phase != PhaseJobAssigned {
+		t.Fatalf("local assignment status=%+v err=%v", status, err)
 	}
 	attachStart := time.Now()
 	if err := driver.Rendezvous(ctx, id, rendezvous); err != nil {
@@ -220,10 +233,9 @@ func TestConformanceLifecycle(t *testing.T) {
 	if err := driver.Rendezvous(ctx, id, rendezvous); err != nil {
 		t.Fatalf("repeat rendezvous: %v", err)
 	}
-	guest.set(id, GuestObservation{Hello: true, MountsReady: true})
-	if err := driver.Prepare(ctx, id, preparation); err != nil {
-		t.Fatalf("prepare: %v", err)
-	}
+	guest.set(id, GuestObservation{Hello: true, MountsReady: true, Assignment: &guestproto.Assignment{
+		RequestID: "request-conf", JobID: "job-conf", CheckRunID: 101, RunnerName: "member-conf", JobDisplayName: "test", Identity: identity,
+	}})
 
 	client, err := dialQMP(ctx, qmpSocketPath(driver.stateDir(id)))
 	if err != nil {
@@ -240,7 +252,7 @@ func TestConformanceLifecycle(t *testing.T) {
 	client.Close()
 
 	deliveries := guest.rendezvouses(id)
-	if len(deliveries) == 0 || deliveries[0].Lease != "lease-conf" ||
+	if len(deliveries) == 0 || deliveries[0].MemberID != "member-conf" || deliveries[0].AssignmentID != "assignment-conf" ||
 		len(deliveries[0].Mounts) != 3 || deliveries[0].Mounts[0].Serial != toolNode || deliveries[0].Mounts[1].Serial != workspaceNode || deliveries[0].Mounts[2].Serial != processNode {
 		t.Fatalf("deliveries %+v", deliveries)
 	}
@@ -248,7 +260,7 @@ func TestConformanceLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Phase != PhaseAssigned || status.Lease != "lease-conf" {
+	if status.Phase != PhaseBound || status.MemberID != "member-conf" {
 		t.Fatalf("status %+v after assign", status)
 	}
 
@@ -307,7 +319,7 @@ func TestConformanceLifecycle(t *testing.T) {
 }
 
 // TestConformanceAdoption proves a restarted hostd adopts running VMs: a
-// brand-new driver instance over the same state root sees the VM, lease
+// brand-new driver instance over the same state root sees the VM, member
 // binding intact, and can destroy it.
 func TestConformanceAdoption(t *testing.T) {
 	first, _ := conformanceDriver(t)
@@ -326,7 +338,7 @@ func TestConformanceAdoption(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = first.disks.Destroy(context.Background(), workspace) })
-	if err := first.Prepare(ctx, id, Preparation{Lease: "lease-adopt", JITConfig: "jit"}); err != nil {
+	if err := first.Prepare(ctx, id, Preparation{MemberID: "member-adopt", JITConfig: "jit"}); err != nil {
 		t.Fatal(err)
 	}
 	originalMeta, err := first.readMeta(id)
@@ -358,7 +370,7 @@ func TestConformanceAdoption(t *testing.T) {
 		t.Fatalf("adopted %d vms, want 1: %+v", len(statuses), statuses)
 	}
 	adopted := statuses[0]
-	if adopted.ID != id || adopted.Lease != "lease-adopt" || adopted.Class != testClass || adopted.Phase != PhaseAssigned {
+	if adopted.ID != id || adopted.MemberID != "member-adopt" || adopted.Class != testClass || adopted.Phase != PhaseAssigned {
 		t.Fatalf("adopted %+v", adopted)
 	}
 	adoptedMeta, err := second.readMeta(id)

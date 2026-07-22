@@ -31,12 +31,14 @@ state as separate resources.
 
 - A **pool member** is one booted guest and one connected, generic, single-use
   GitHub runner listener. It owns no repository identity or customer volume.
-- A **job intent** is GitHub's exact scale-set `runnerRequestId` and protocol
-  `jobId`, plus the requested labels and workflow identity. Acquiring an intent
-  admits it to the pool; it does not bind a member.
+- A **job intent** is GitHub's numeric workflow job and check-run identity,
+  plus the requested labels and workflow identity. It admits demand to the
+  pool; it does not bind a member.
 - An **assignment** is the immutable binding created when the patched runner
-  listener reports that exact request and job from inside a particular guest,
-  before it creates Runner.Worker. That local observation is authoritative.
+  listener reports the check-run ID, runner request ID, and protocol job ID
+  from inside a particular guest before it creates Runner.Worker. The check-run
+  ID joins directly to the queued provider job; the local observation selects
+  the pool member.
 - A **durable generation** is an authenticated tuple of workspace, tool, root,
   and optional process snapshots with one compatibility and attestation
   manifest. Its process component can be invalidated without invalidating an

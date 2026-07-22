@@ -33,7 +33,7 @@ func (s *Service) handleBundle(w http.ResponseWriter, r *http.Request) {
 		s.Metrics.Rejected.Add(1)
 		status, message := http.StatusUnauthorized, "not authorized"
 		if errors.Is(err, errResolverUnavailable) {
-			status, message = http.StatusServiceUnavailable, "lease lookup is unavailable"
+			status, message = http.StatusServiceUnavailable, "assignment lookup is unavailable"
 			w.Header().Set("Retry-After", "2")
 		}
 		s.cfg.Logger.Info("checkout request rejected",
@@ -105,7 +105,7 @@ func (s *Service) handleBundle(w http.ResponseWriter, r *http.Request) {
 		"duration_ms", time.Since(start).Milliseconds())
 }
 
-func (s *Service) rejectSpec(w http.ResponseWriter, identity LeaseIdentity, err error) {
+func (s *Service) rejectSpec(w http.ResponseWriter, identity AssignmentIdentity, err error) {
 	status, message := classifyBundleError(err)
 	s.Metrics.Rejected.Add(1)
 	s.cfg.Logger.Info("checkout request rejected",
@@ -118,7 +118,7 @@ func (s *Service) rejectSpec(w http.ResponseWriter, identity LeaseIdentity, err 
 
 // classifyBundleError maps the pipeline's typed failures onto the status
 // vocabulary the action classifies: 400/404 terminal rejections, 403
-// lease-boundary violations, 413 size, 429 elsewhere, 502 retryable
+// assignment-boundary violations, 413 size, 429 elsewhere, 502 retryable
 // transport, 500 everything unexpected.
 func classifyBundleError(err error) (int, string) {
 	switch {

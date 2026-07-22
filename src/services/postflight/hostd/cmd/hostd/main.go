@@ -1,7 +1,7 @@
 // hostd is the per-host runner daemon: the sync/converge agent over real
 // substrate — zfs zvols, QEMU/KVM VMs in transient systemd scopes, the
 // vsock guestd channel — plus the host-local checkout-bundle endpoint backed
-// by the live lease table.
+// by the live assignment table.
 //
 // Configuration is environment-only:
 //
@@ -115,7 +115,6 @@ func run(logger *slog.Logger) error {
 		Images:              map[vm.Class]string{class: image},
 		SyncInterval:        cfg.syncInterval,
 		CheckoutGuestOrigin: cfg.checkoutGuestOrigin,
-		TraceDir:            filepath.Join(cfg.stateDir, "rendezvous"),
 		Platform:            platformFingerprint(cfg),
 	}, storage, vms, cfg.syncSecret, hostSecret, agent.Options{Logger: logger})
 	if err != nil {

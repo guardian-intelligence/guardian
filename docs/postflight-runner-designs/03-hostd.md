@@ -19,7 +19,7 @@ Env-configured main (mirroring the controlplane's config style):
 - `HOSTD_POOL` (`tank/postflight`), `HOSTD_SLOTS` (~4–8 on the tracer box),
   `HOSTD_CLASS` (`postflight-4cpu-ubuntu-2404`), `HOSTD_IMAGE_ID` — pool
   sizing and the image template to clone root disks from (02).
-- Wires: sync loop → lease executor (`agent/lease.go`) → vm driver +
+- Wires: sync loop → pool-member and assignment convergence → VM driver +
   zvol manager → guest transport. One process, systemd service on the host
   (`Restart=on-failure` — hostd itself may restart; VMs must survive it).
 
@@ -48,34 +48,31 @@ supervision properties, different cage:
 - Retry policy: dial failures during boot are expected (guest still coming
   up) — the boot deadline owns the ladder; no infinite retries.
 
-## Lease execution path (composition, mostly existing)
+## Durable assignment path
 
 ```
-sync: listener lease allocating
-  → claim an already-running warm VM (pool.go)
-  → prepare over vsock (JIT config and pool env; no customer data)
-  → generic runner registered and listening
-  → observe GitHub's actual job-to-runner assignment
-  → join that assignment to the selected listener lease
-  → synchronous job-start hook reports and blocks on the same identity
-  → resolve the actual execution lease's immutable generation tuple
-  → clone its workspace zvol (04; empty if no generation exists)
-  → QMP hot-attach every resolved zvol to that same QEMU
-  → rendezvous over vsock (execution lease, job env, mounts) [01]
-  → guest mounts, samples clock, and releases the hook
-  → runner-status stream → listener/execution reports
-  → on exit 0: quiesce → zfs snapshot (seal candidate)      [04]
-  → destroy VM, release slot, refill pool
+sync: generic VM is warm
+  → allocate a durable pool-member incarnation
+  → prepare over vsock (single-use JIT config; no customer data)
+  → generic runner registered and continuously listening
+  → Runner.Listener receives GitHub's encrypted job message
+  → publish check-run/request/protocol-job identity before Worker dispatch
+  → create one immutable job-to-member assignment in the control plane
+  → clone its workspace/tool/process generation (or empty cold capsule)
+  → QMP hot-attach that tuple to the already selected QEMU
+  → guest mounts and attempts the process restore
+  → recoverable restore miss tears out process state and cold-starts
+  → integrity or unprovable-cleanup failure recycles the VM fail-closed
+  → authorize the blocked Worker only after exact identity validation
+  → on exit 0: checkpoint and flush, destroy QEMU, seal all zvols
+  → refill the pool with a new member incarnation
 ```
 
-The listener lease identifies the physical VM and runner name. The execution
-lease identifies the job, workspace, and completion being run there. These
-are deliberately distinct: GitHub may assign two concurrent same-label jobs
-to each other's JIT listeners. hostd reacts to the observed runner name and
-routes the actual execution lease to that listener instead of predicting
-which registration GitHub will choose. The control plane accepts the route
-only for a live internal listener of the same runner class and preserves
-capacity accounting for displaced jobs.
+The member identifies one physical VM incarnation and runner name. The
+assignment identifies one GitHub job and its durable generation. GitHub first
+selects the member; the local Runner.Listener observation tells hostd which
+member was selected. The check-run ID joins exactly to provider truth, so
+concurrent jobs with identical labels and display names cannot cross-bind.
 
 The checkout-bundle server (`checkoutbundle`, merged) is wired in as-is:
 it serves repo bundles on the host-local network for the checkout action's
@@ -94,9 +91,9 @@ delta fetch.
 - Unit: launcher against a stub argv (`sleep`) asserting scope lifecycle,
   adoption, kill-grace; transport against a vsock loopback where available,
   fake elsewhere.
-- The existing e2e (real agent + real PG + fake drivers) gains a variant
-  with the real vsock transport against a guestd process on a local vsock —
-  no QEMU needed (vsock loopback), which keeps it hermetic.
+- The e2e boots real PostgreSQL and the control-plane HTTP server, drives a
+  real hostd agent over sync, and uses deterministic fake VM/ZFS drivers for
+  failure injection. The vsock transport has a separate loopback suite.
 - Hardware conformance on the tracer host extends the merged 4 cases with:
-  full lease path against a real VM, hostd kill/restart mid-lease
+  full assignment path against a real VM, hostd kill/restart mid-assignment
   (adoption), quiesce+seal.

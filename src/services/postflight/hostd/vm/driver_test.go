@@ -232,6 +232,22 @@ func newTestDriver(t *testing.T, stateRoot string) *testDriver {
 	return &testDriver{q: q, launcher: launcher, disks: disks, guest: guest}
 }
 
+func observeLocalAssignment(t *testing.T, driver *testDriver, id ID, memberID string) {
+	t.Helper()
+	identity := &guestproto.JobIdentity{
+		RunID: "101", RunAttempt: 1, RunnerName: memberID,
+		Repository: "acme/widget", WorkflowJob: "test",
+	}
+	driver.guest.set(id, GuestObservation{Hello: true, RunnerRegistered: true, Assignment: &guestproto.Assignment{
+		RequestID: "request-1", JobID: "job-1", CheckRunID: 101, RunnerName: memberID,
+		JobDisplayName: "test", Identity: identity,
+	}})
+	status, err := driver.q.Status(context.Background(), id)
+	if err != nil || status.Phase != PhaseJobAssigned {
+		t.Fatalf("observing local assignment: status=%+v err=%v", status, err)
+	}
+}
+
 // qemuHandler scripts the QMP surface Assign and detach use, tracking the
 // attachment state machine like a real QEMU would.
 type qemuHandler struct {
@@ -641,26 +657,26 @@ func TestBootDeadlineAdoptsMetadataWithoutCreatedTimestamp(t *testing.T) {
 
 func TestPrepareUnknownVM(t *testing.T) {
 	driver := newTestDriver(t, shortTempDir(t))
-	err := driver.q.Prepare(context.Background(), "vm-a", Preparation{Lease: "lease-1"})
+	err := driver.q.Prepare(context.Background(), "vm-a", Preparation{MemberID: "member-1"})
 	if err != ErrNotFound {
 		t.Fatalf("error %v, want ErrNotFound", err)
 	}
 }
 
-func TestPreparePersistsLeaseBeforeRendezvous(t *testing.T) {
+func TestPreparePersistsMemberBeforeRendezvous(t *testing.T) {
 	driver := newTestDriver(t, shortTempDir(t))
 	ctx := context.Background()
 	if err := driver.q.Launch(ctx, "vm-a", testClass); err != nil {
 		t.Fatal(err)
 	}
-	if err := driver.q.Prepare(ctx, "vm-a", Preparation{Lease: "lease-1", JITConfig: "jit"}); err != nil {
+	if err := driver.q.Prepare(ctx, "vm-a", Preparation{MemberID: "member-1", JITConfig: "jit"}); err != nil {
 		t.Fatal(err)
 	}
 	// No QMP server is running: the bind fails after the listener claim is
 	// durable — the ambiguous-failure shape the agent's failure path needs.
 	if err := driver.q.Rendezvous(ctx, "vm-a", Rendezvous{
-		Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1",
-		ToolDevice: "/dev/zvol/tank/tool/lease-1", ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
+		MemberID: "member-1", AssignmentID: "assignment-1", WorkspaceDevice: "/dev/zvol/tank/ws/assignment-1",
+		ToolDevice: "/dev/zvol/tank/tool/assignment-1", ProcessDevice: "/dev/zvol/tank/process/assignment-1", WorkspaceMountpoint: "/work",
 	}); err == nil {
 		t.Fatal("rendezvous succeeded without a QMP endpoint")
 	}
@@ -668,16 +684,16 @@ func TestPreparePersistsLeaseBeforeRendezvous(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.Lease != "lease-1" {
-		t.Fatalf("lease %q, want lease-1", record.Lease)
+	if record.MemberID != "member-1" {
+		t.Fatalf("member %q, want member-1", record.MemberID)
 	}
 }
 
 func TestRendezvousRejectsIncompleteCheckpointIdentity(t *testing.T) {
 	driver := newTestDriver(t, shortTempDir(t))
 	base := Rendezvous{
-		Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1",
-		ToolDevice: "/dev/zvol/tank/tool/lease-1", ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
+		MemberID: "member-1", AssignmentID: "assignment-1", WorkspaceDevice: "/dev/zvol/tank/ws/assignment-1",
+		ToolDevice: "/dev/zvol/tank/tool/assignment-1", ProcessDevice: "/dev/zvol/tank/process/assignment-1", WorkspaceMountpoint: "/work",
 	}
 	for name, mutate := range map[string]func(*Rendezvous){
 		"digest only":  func(r *Rendezvous) { r.CheckpointDigest = "sha256:checkpoint" },
@@ -702,19 +718,21 @@ func TestRendezvousAttachesDeliversAndConverges(t *testing.T) {
 	}
 	handler := &qemuHandler{running: true}
 	serveQEMU(t, driver, "vm-a", handler)
-	preparation := Preparation{Lease: "lease-1", JITConfig: "jit-blob"}
+	preparation := Preparation{MemberID: "member-1", JITConfig: "jit-blob"}
 	rendezvous := Rendezvous{
-		Lease:               "lease-1",
-		WorkspaceDevice:     "/dev/zvol/tank/ws/lease-1",
+		MemberID:            "member-1",
+		AssignmentID:        "assignment-1",
+		WorkspaceDevice:     "/dev/zvol/tank/ws/assignment-1",
 		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
-		ToolDevice:          "/dev/zvol/tank/tool/lease-1",
-		ProcessDevice:       "/dev/zvol/tank/process/lease-1",
+		ToolDevice:          "/dev/zvol/tank/tool/assignment-1",
+		ProcessDevice:       "/dev/zvol/tank/process/assignment-1",
 		CheckpointDigest:    "sha256:checkpoint",
 		CheckpointVersion:   "Version: 4.2",
 	}
 	if err := driver.q.Prepare(ctx, "vm-a", preparation); err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
+	observeLocalAssignment(t, driver, "vm-a", "member-1")
 	if err := driver.q.Rendezvous(ctx, "vm-a", rendezvous); err != nil {
 		t.Fatalf("rendezvous: %v", err)
 	}
@@ -770,8 +788,8 @@ func TestRendezvousAttachesDeliversAndConverges(t *testing.T) {
 	if driver.guest.cid("vm-a") != record.CID {
 		t.Fatalf("delivered to cid %d, meta says %d", driver.guest.cid("vm-a"), record.CID)
 	}
-	if err := driver.q.Prepare(ctx, "vm-a", Preparation{Lease: "lease-2"}); err == nil {
-		t.Fatal("reassigned a vm to a different lease")
+	if err := driver.q.Prepare(ctx, "vm-a", Preparation{MemberID: "member-2"}); err == nil {
+		t.Fatal("reassigned a vm to a different pool member")
 	}
 }
 
@@ -793,15 +811,17 @@ func TestQuiesceUsesTheAssignedMountpoint(t *testing.T) {
 	}
 	serveQEMU(t, driver, "vm-a", &qemuHandler{running: true})
 	rendezvous := Rendezvous{
-		Lease:               "lease-1",
-		WorkspaceDevice:     "/dev/zvol/tank/ws/lease-1",
+		MemberID:            "member-1",
+		AssignmentID:        "assignment-1",
+		WorkspaceDevice:     "/dev/zvol/tank/ws/assignment-1",
 		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
-		ToolDevice:          "/dev/zvol/tank/tool/lease-1",
-		ProcessDevice:       "/dev/zvol/tank/process/lease-1",
+		ToolDevice:          "/dev/zvol/tank/tool/assignment-1",
+		ProcessDevice:       "/dev/zvol/tank/process/assignment-1",
 	}
-	if err := driver.q.Prepare(ctx, "vm-a", Preparation{Lease: "lease-1", JITConfig: "jit"}); err != nil {
+	if err := driver.q.Prepare(ctx, "vm-a", Preparation{MemberID: "member-1", JITConfig: "jit"}); err != nil {
 		t.Fatal(err)
 	}
+	observeLocalAssignment(t, driver, "vm-a", "member-1")
 	if err := driver.q.Rendezvous(ctx, "vm-a", rendezvous); err != nil {
 		t.Fatal(err)
 	}
@@ -868,7 +888,7 @@ func TestStatusPhaseLadder(t *testing.T) {
 	driver.guest.set("vm-a", GuestObservation{Hello: true})
 	expect(PhaseWarm, 0)
 
-	if err := driver.q.Prepare(ctx, "vm-a", Preparation{Lease: "lease-1", JITConfig: "jit"}); err != nil {
+	if err := driver.q.Prepare(ctx, "vm-a", Preparation{MemberID: "member-1", JITConfig: "jit"}); err != nil {
 		t.Fatal(err)
 	}
 	expect(PhaseAssigned, 0)
@@ -876,7 +896,7 @@ func TestStatusPhaseLadder(t *testing.T) {
 	expect(PhaseListening, 0)
 	driver.guest.set("vm-a", GuestObservation{
 		Hello: true, RunnerRegistered: true, HookBlocked: true,
-		Identity: guestproto.JobIdentity{RunID: "1", RunAttempt: 1, RunnerName: "lease-1", Repository: "acme/widget"},
+		Identity: guestproto.JobIdentity{RunID: "1", RunAttempt: 1, RunnerName: "member-1", Repository: "acme/widget"},
 	})
 	expect(PhaseHookBlocked, 0)
 	driver.guest.set("vm-a", GuestObservation{
@@ -889,8 +909,8 @@ func TestStatusPhaseLadder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Lease != "lease-1" {
-		t.Fatalf("lease %q, want lease-1", status.Lease)
+	if status.MemberID != "member-1" {
+		t.Fatalf("member %q, want member-1", status.MemberID)
 	}
 	if !status.CustomerStepsReleased || status.FailureReason != "worker transport closed" {
 		t.Fatalf("exit lifecycle evidence = %+v", status)
@@ -917,7 +937,7 @@ func TestRestartedDriverAdoptsRunningVMs(t *testing.T) {
 	}
 	handler := &qemuHandler{running: true}
 	serveQEMU(t, first, "vm-a", handler)
-	if err := first.q.Prepare(ctx, "vm-a", Preparation{Lease: "lease-1", JITConfig: "jit"}); err != nil {
+	if err := first.q.Prepare(ctx, "vm-a", Preparation{MemberID: "member-1", JITConfig: "jit"}); err != nil {
 		t.Fatal(err)
 	}
 	originalMeta, err := first.q.readMeta("vm-a")
@@ -938,7 +958,7 @@ func TestRestartedDriverAdoptsRunningVMs(t *testing.T) {
 		t.Fatalf("adopted %d vms, want 1", len(statuses))
 	}
 	adopted := statuses[0]
-	if adopted.ID != "vm-a" || adopted.Lease != "lease-1" || adopted.Class != testClass {
+	if adopted.ID != "vm-a" || adopted.MemberID != "member-1" || adopted.Class != testClass {
 		t.Fatalf("adopted %+v", adopted)
 	}
 	if adopted.Phase != PhaseAssigned {
@@ -1033,12 +1053,13 @@ func TestDestroyDetachesBeforeQuit(t *testing.T) {
 	}
 	handler := &qemuHandler{running: true}
 	serveQEMU(t, driver, "vm-a", handler)
-	if err := driver.q.Prepare(ctx, "vm-a", Preparation{Lease: "lease-1", JITConfig: "jit"}); err != nil {
+	if err := driver.q.Prepare(ctx, "vm-a", Preparation{MemberID: "member-1", JITConfig: "jit"}); err != nil {
 		t.Fatal(err)
 	}
+	observeLocalAssignment(t, driver, "vm-a", "member-1")
 	if err := driver.q.Rendezvous(ctx, "vm-a", Rendezvous{
-		Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1",
-		ToolDevice: "/dev/zvol/tank/tool/lease-1", ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
+		MemberID: "member-1", AssignmentID: "assignment-1", WorkspaceDevice: "/dev/zvol/tank/ws/assignment-1",
+		ToolDevice: "/dev/zvol/tank/tool/assignment-1", ProcessDevice: "/dev/zvol/tank/process/assignment-1", WorkspaceMountpoint: "/work",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1075,12 +1096,13 @@ func TestDetachWaitsOutTheGuestAck(t *testing.T) {
 	handler := &lazyAckHandler{inner: &qemuHandler{running: true}, acksAfter: 3}
 	stateDir := driver.q.stateDir("vm-a")
 	startQMPServer(t, &qmpServer{socket: qmpSocketPath(stateDir), handle: handler.handle})
-	if err := driver.q.Prepare(ctx, "vm-a", Preparation{Lease: "lease-1", JITConfig: "jit"}); err != nil {
+	if err := driver.q.Prepare(ctx, "vm-a", Preparation{MemberID: "member-1", JITConfig: "jit"}); err != nil {
 		t.Fatal(err)
 	}
+	observeLocalAssignment(t, driver, "vm-a", "member-1")
 	if err := driver.q.Rendezvous(ctx, "vm-a", Rendezvous{
-		Lease: "lease-1", WorkspaceDevice: "/dev/zvol/tank/ws/lease-1",
-		ToolDevice: "/dev/zvol/tank/tool/lease-1", ProcessDevice: "/dev/zvol/tank/process/lease-1", WorkspaceMountpoint: "/work",
+		MemberID: "member-1", AssignmentID: "assignment-1", WorkspaceDevice: "/dev/zvol/tank/ws/assignment-1",
+		ToolDevice: "/dev/zvol/tank/tool/assignment-1", ProcessDevice: "/dev/zvol/tank/process/assignment-1", WorkspaceMountpoint: "/work",
 	}); err != nil {
 		t.Fatal(err)
 	}

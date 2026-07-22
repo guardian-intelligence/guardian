@@ -10,6 +10,7 @@ grep -Fq 'PublishPostflightAssignmentAsync(messageRef.RunnerRequestId' "${patch_
 grep -Fq 'jobDispatcher.Run(jobMessage' "${patch_file}"
 grep -Fq 'jobDispatcher.Run(jobRequestMessage' "${patch_file}"
 grep -Fq 'SystemVariable("system.github.job")' "${patch_file}"
+grep -Fq 'JobContextNumber("check_run_id")' "${patch_file}"
 grep -Fq 'RUNNER_SOURCE_COMMIT=' "${pins}"
 grep -Fq 'DOTNET_SDK_SHA512=' "${pins}"
 grep -Fq 'runner-listener.patch" >&2' "${build_sh}"

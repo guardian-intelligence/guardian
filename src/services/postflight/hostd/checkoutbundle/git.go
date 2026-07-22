@@ -45,7 +45,7 @@ type preparedBundle struct {
 // mutation for one repository is serialized behind its repo lock, so
 // concurrent same-SHA requests collapse into one fetch and the followers
 // take the cache path.
-func (s *Service) prepareBundle(ctx context.Context, identity LeaseIdentity, spec checkoutSpec) (preparedBundle, error) {
+func (s *Service) prepareBundle(ctx context.Context, identity AssignmentIdentity, spec checkoutSpec) (preparedBundle, error) {
 	repoKey := repositoryStoreKey(identity)
 	unlock := s.lockRepo(repoKey)
 	defer unlock()
@@ -60,9 +60,9 @@ func (s *Service) prepareBundle(ctx context.Context, identity LeaseIdentity, spe
 	}
 
 	mirrorDir := s.mirrorDir(repoKey)
-	// The clone URL is built from the lease's own repository name, never the
+	// The clone URL is built from the assignment's repository name, never the
 	// request string: validateRequest already proved the two equal under case
-	// folding, and the lease is the authority on which repository this host may
+	// folding, and the assignment is the authority on which repository this host may
 	// fetch.
 	if err := s.ensureMirror(ctx, mirrorDir, identity.RepositoryFullName); err != nil {
 		return preparedBundle{}, err
@@ -107,7 +107,7 @@ func (s *Service) bundlePath(repoKey, sha string) string {
 // repositoryStoreKey keys stores by immutable GitHub identity, not by name:
 // renames keep their mirror, and two tenants' repos can never collide on a
 // path.
-func repositoryStoreKey(identity LeaseIdentity) string {
+func repositoryStoreKey(identity AssignmentIdentity) string {
 	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%d", identity.InstallationID, identity.RepositoryID))
 	return hex.EncodeToString(sum[:])
 }

@@ -18,12 +18,13 @@ import (
 // control plane and appears in snapshot names, so it must be zfs-name safe.
 type GenerationID string
 
-// LeaseID names a lease; workspace volume names derive from it.
-type LeaseID string
+// AssignmentID names an immutable job assignment; writable volume names
+// derive from it.
+type AssignmentID string
 
 // WorkspaceVolume identifies a materialized (writable) workspace volume.
 type WorkspaceVolume struct {
-	// Name is the full dataset name, e.g. guardian/ws/<lease-id>.
+	// Name is the full dataset name, e.g. guardian/ws/<assignment-id>.
 	Name string
 	// Device is the block-device path the VM attaches, e.g. /dev/zvol/....
 	Device string
@@ -75,29 +76,29 @@ var (
 // destroy of an absent dataset returns ErrNotFound, which callers treat as
 // success.
 type Driver interface {
-	// EnsureWorkspace makes the workspace volume for a lease exist and
+	// EnsureWorkspace makes the workspace volume for an assignment exist and
 	// returns it. If generation is non-empty the volume is a clone of that
 	// generation's sealed snapshot (ErrNotFound if the generation is not
 	// resident); otherwise a fresh empty volume of sizeBytes. Calling it
 	// again with the same arguments returns the existing volume.
-	EnsureWorkspace(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (WorkspaceVolume, error)
+	EnsureWorkspace(ctx context.Context, assignment AssignmentID, generation GenerationID, sizeBytes int64) (WorkspaceVolume, error)
 
 	// EnsureProcess materializes the writable CRIU image volume paired with
 	// the workspace. A missing process generation is a cold process cache,
 	// just as a missing workspace generation is a cold filesystem cache.
-	EnsureProcess(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (ProcessVolume, error)
-	EnsureTool(ctx context.Context, lease LeaseID, generation GenerationID, sizeBytes int64) (ToolVolume, error)
+	EnsureProcess(ctx context.Context, assignment AssignmentID, generation GenerationID, sizeBytes int64) (ProcessVolume, error)
+	EnsureTool(ctx context.Context, assignment AssignmentID, generation GenerationID, sizeBytes int64) (ToolVolume, error)
 
 	// SealSet takes the workspace, tool, and stopped-process source snapshots
 	// in one ZFS transaction, then promotes every lineage. A generation can
 	// never be published from snapshots taken at different points in time.
-	SealSet(ctx context.Context, lease LeaseID, generation GenerationID) (GenerationSet, error)
+	SealSet(ctx context.Context, assignment AssignmentID, generation GenerationID) (GenerationSet, error)
 
-	// DestroyWorkspace removes a lease's workspace volume. ErrNotFound if
+	// DestroyWorkspace removes an assignment's workspace volume. ErrNotFound if
 	// already gone; ErrBusy if still attached.
-	DestroyWorkspace(ctx context.Context, lease LeaseID) error
-	DestroyTool(ctx context.Context, lease LeaseID) error
-	DestroyProcess(ctx context.Context, lease LeaseID) error
+	DestroyWorkspace(ctx context.Context, assignment AssignmentID) error
+	DestroyTool(ctx context.Context, assignment AssignmentID) error
+	DestroyProcess(ctx context.Context, assignment AssignmentID) error
 
 	// DestroyGeneration removes a sealed generation and its snapshot. Only
 	// ever called on a control-plane reap verb. ErrBusy if clones depend on
@@ -114,7 +115,7 @@ type Driver interface {
 var nameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$`)
 
 // ValidateName rejects identifiers that are unsafe to splice into a ZFS
-// dataset name. Both implementations apply it to lease and generation IDs so
+// dataset name. Both implementations apply it to assignment and generation IDs so
 // a hostile control-plane payload cannot traverse the dataset tree.
 func ValidateName(kind, value string) error {
 	if value == "" || len(value) > 128 || !nameRe.MatchString(value) {

@@ -20,16 +20,18 @@ assigned job's volumes are mounted and ready.
 
 ## Protocol (extends merged `hostd/guestproto`)
 
-Protocol version 2 separates generic listener preparation from customer
+Protocol version 11 separates generic listener preparation from customer
 rendezvous.
 
 | Verb | Direction | Payload | Semantics |
 | - | - | - | - |
 | `hello` | guest→host on accept | guestd version, boot id | Liveness + identity probe |
-| `prepare` | host→guest | listener lease, JIT config blob, pool env | Idempotently starts a generic runner with no customer identity or volume attached. |
-| `rendezvous` | host→guest | execution lease, job env, mounts: `[{serial, fstype, mountpoint, options}]` | After the hook reports the actual assignment, guestd converges the exact mounts, writes the job env exchange, records clock evidence, and releases the hook. Re-delivery after a partial apply converges rather than creating a second execution. |
-| `runner-status` | guest→host, streamed | state: `registered` / `hook-blocked` / `mounts-ready` / `released` / `exited{code}` | hostd folds these into listener and execution-lease reports. The blocked and later states carry the hook's GitHub identity. |
-| `quiesce` | host→guest | `{mountpoint}` | `sync` + unmount the workspace filesystem; reply `quiesced` or `quiesce-failed{reason}`. Precedes the host-side seal snapshot. |
+| `prepare` | host→guest | member ID, JIT config blob, pool env | Idempotently starts a generic runner with no customer identity or volume attached. |
+| `assignment` | guest→host | check-run ID, request ID, protocol job ID, runner and workflow identity | Published by Runner.Listener before Runner.Worker exists. |
+| `rendezvous` | host→guest | member ID, immutable assignment ID, mounts, optional checkpoint | Converges the exact generation and restores or cold-falls back while Worker remains blocked. |
+| `authorize` | host→guest | exact assignment identity and job env | Releases the Worker trampoline only after control-plane binding and rendezvous succeed. |
+| `runner-status` | guest→host, streamed | lifecycle, restore outcome, timing, exit | hostd folds this into member and assignment reports. |
+| `quiesce` | host→guest | mountpoints and checkpoint request | Checkpoints the allowlisted process capsule and flushes filesystems; reply `quiesced` or `quiesce-failed{reason}`. |
 
 ## Mount convergence (the invariant)
 
@@ -41,9 +43,10 @@ the requested options **always including `discard`** (TRIM must pass through
 to the sparse zvol or NVMe accounting measures garbage retention; the SNP
 phase preserves it with `--allow-discards`), and only then releases the
 blocked hook. A mount that cannot
-converge within its deadline is reported `runner-status: exited` with a
-synthetic failure code — hostd destroys the slot; the job is never started
-against a partial workspace.
+converge within its deadline keeps Worker blocked. A recoverable process-only
+failure tears down the partial process capsule, invalidates that artifact,
+and cold-starts the same Worker. An integrity or unprovable-cleanup failure
+requests VM recycling; the job is never started against a partial workspace.
 
 Once every mount has converged, guestd writes
 `.postflight-workspace` at the mounted workspace root and exposes its path
@@ -70,12 +73,10 @@ resolved Postflight mount rather than the image's underlying directory.
 
 ## Quiesce (why it exists)
 
-The host snapshots the workspace zvol while the guest is still alive —
-that is what lets the slot be released immediately instead of waiting for
-GitHub's conclusion to propagate. A live guest holds dirty pages, so the
-sequence is strict: runner exits → hostd sends `quiesce` → guestd syncs and
-unmounts → hostd snapshots → VM destroyed. Any quiesce failure is reported,
-skips the seal (ambiguity never promotes), and still destroys the VM.
+The sequence is strict: runner exits → hostd requests checkpoint and flush →
+guestd returns the process artifact → hostd destroys QEMU → hostd atomically
+seals the workspace, tool, and process zvols. Any quiesce failure skips the
+seal (ambiguity never promotes) and still destroys the VM.
 
 ## SNP seams
 
