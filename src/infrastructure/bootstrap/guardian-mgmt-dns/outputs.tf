@@ -22,3 +22,8 @@ output "public_ingress_ipv4s" {
   description = "Latitude public ingress origin IPs published behind Cloudflare Load Balancing."
   value       = local.public_ingress_ipv4s
 }
+
+output "rumi_engineering_zone_id" {
+  description = "Cloudflare zone id for the rumi.engineering product edge."
+  value       = data.cloudflare_zone.rumi_engineering.id
+}
