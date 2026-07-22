@@ -82,6 +82,10 @@ spec:
               image: ghcr.io/guardian-intelligence/canary-journeys@sha256:4bbf4f176bf850fb7fdcfe49eb12bcbdbd6fb2d17e4300675d06d539c04f7214
               imagePullPolicy: IfNotPresent
               env:
+                # Browser-launch stderr into the pod log while the shadow
+                # ring's Chromium hang is under diagnosis.
+                - name: DEBUG
+                  value: pw:browser
                 - name: POSTFLIGHT_URL
                   value: https://guardianintelligence.org/postflight
                 - name: CANARY_TIMEOUT

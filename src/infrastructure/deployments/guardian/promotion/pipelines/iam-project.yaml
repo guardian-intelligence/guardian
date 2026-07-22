@@ -24,6 +24,9 @@ spec:
     - stageSelector:
         name: login-canary-prod
       autoPromotionEnabled: true
+    - stageSelector:
+        name: journey-canary-prod
+      autoPromotionEnabled: true
 ---
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Warehouse
