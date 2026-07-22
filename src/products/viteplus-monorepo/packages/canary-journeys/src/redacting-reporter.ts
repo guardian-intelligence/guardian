@@ -34,6 +34,17 @@ export default class RedactingReporter implements Reporter {
     }
   }
 
+  // Worker stdout/stderr is captured by the runner and only reaches the pod
+  // log if a reporter forwards it — without this, the journey's step events
+  // vanish and a hang is a bare "Test timeout" with no location.
+  onStdOut(chunk: string | Buffer): void {
+    process.stdout.write(this.registry.scrub(chunk.toString()));
+  }
+
+  onStdErr(chunk: string | Buffer): void {
+    process.stdout.write(this.registry.scrub(chunk.toString()));
+  }
+
   onTestEnd(test: TestCase, result: TestResult): void {
     this.emit({
       event: "test",

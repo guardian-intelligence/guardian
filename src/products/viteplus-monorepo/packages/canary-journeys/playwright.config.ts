@@ -21,6 +21,10 @@ export default defineConfig({
     trace: "off",
     video: "off",
     screenshot: "off",
+    // Bounded so a hung navigation or action names itself instead of riding
+    // the whole test budget into a bare timeout.
+    actionTimeout: 15_000,
+    navigationTimeout: 30_000,
     // Debugging aid, off by default. Any HAR that gets recorded passes
     // through the sanitizing egress gate in globalTeardown before anything
     // can ship it.
