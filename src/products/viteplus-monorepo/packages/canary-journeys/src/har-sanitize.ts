@@ -52,7 +52,10 @@ function stripUrl(url: string): string {
     return url;
   }
   let changed = false;
-  for (const key of [...parsed.searchParams.keys()]) {
+  // Snapshot before mutating: setting params while iterating the live
+  // URLSearchParams iterator can skip entries.
+  const keys = Array.from(parsed.searchParams.keys());
+  for (const key of keys) {
     if (SENSITIVE_QUERY_PARAMS.has(key.toLowerCase())) {
       parsed.searchParams.set(key, STRIPPED);
       changed = true;
