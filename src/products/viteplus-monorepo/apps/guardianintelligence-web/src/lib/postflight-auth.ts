@@ -454,3 +454,24 @@ export async function endPostflightSession(request: Request): Promise<Response> 
     },
   });
 }
+
+const USER_CODE_PATTERN = /^[A-Z0-9-]{4,32}$/i;
+
+/**
+ * /postflight/device — the URL every shipped CLI prints for device-flow
+ * approval. Forwards to the issuer's verification page (code prefilled when
+ * well-formed); when the BFF-rendered approval page replaces this, released
+ * binaries keep working unchanged.
+ */
+export function deviceApprovalRedirect(request: Request): Response {
+  const cfg = configuration();
+  const target = new URL(`${cfg.issuer}/device`);
+  const userCode = new URL(request.url).searchParams.get("user_code");
+  if (userCode && USER_CODE_PATTERN.test(userCode)) {
+    target.searchParams.set("user_code", userCode);
+  }
+  return new Response(null, {
+    status: 303,
+    headers: { ...securityHeaders(), location: target.toString() },
+  });
+}

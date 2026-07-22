@@ -4,6 +4,7 @@ import {
   SESSION_COOKIE,
   beginPostflightLogin,
   completePostflightLogin,
+  deviceApprovalRedirect,
   endPostflightSession,
   postflightSessionResponse,
 } from "./postflight-auth";
@@ -232,5 +233,51 @@ describe("Postflight OIDC BFF", () => {
     expect(response.headers.get("location")).toBe(`${publicURL}/postflight`);
     expect(response.headers.get("set-cookie")).toContain(`${SESSION_COOKIE}=`);
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+});
+
+describe("device approval redirect", () => {
+  beforeEach(() => {
+    process.env.POSTFLIGHT_PUBLIC_URL = publicURL;
+    process.env.POSTFLIGHT_OIDC_ISSUER = issuer;
+    process.env.POSTFLIGHT_OIDC_CLIENT_SECRET = "client-secret";
+    process.env.POSTFLIGHT_SESSION_SECRET = "s".repeat(64);
+  });
+
+  afterEach(() => {
+    for (const name of [
+      "POSTFLIGHT_PUBLIC_URL",
+      "POSTFLIGHT_OIDC_ISSUER",
+      "POSTFLIGHT_OIDC_CLIENT_SECRET",
+      "POSTFLIGHT_SESSION_SECRET",
+    ]) {
+      delete process.env[name];
+    }
+  });
+
+  it("forwards to the issuer's device page with a well-formed code prefilled", () => {
+    const response = deviceApprovalRedirect(
+      new Request(`${publicURL}/postflight/device?user_code=WDJB-MJHT`),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${issuer}/device?user_code=WDJB-MJHT`);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("drops a malformed code instead of forwarding it", () => {
+    const response = deviceApprovalRedirect(
+      new Request(`${publicURL}/postflight/device?user_code=${encodeURIComponent("<script>x")}`),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${issuer}/device`);
+  });
+
+  it("redirects without a code when none is supplied", () => {
+    const response = deviceApprovalRedirect(new Request(`${publicURL}/postflight/device`));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${issuer}/device`);
   });
 });
