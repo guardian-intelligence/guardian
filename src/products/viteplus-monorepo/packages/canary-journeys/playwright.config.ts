@@ -25,6 +25,13 @@ export default defineConfig({
     // the whole test budget into a bare timeout.
     actionTimeout: 15_000,
     navigationTimeout: 30_000,
+    launchOptions: {
+      // Flag parity with the chromedp canary this journey replaces: both
+      // flags are proven against this cluster's pod environment, and their
+      // absence is the leading suspect for Chromium hanging where node's
+      // fetch succeeds (64Mi /dev/shm, no GPU device in the pod).
+      args: ["--disable-dev-shm-usage", "--disable-gpu"],
+    },
     // Debugging aid, off by default. Any HAR that gets recorded passes
     // through the sanitizing egress gate in globalTeardown before anything
     // can ship it.
