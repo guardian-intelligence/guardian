@@ -7,7 +7,7 @@ import { totp, totpBoundaryDelayMs } from "../src/totp.ts";
 // Step markers reach the pod log through the reporter's stdout forwarding;
 // a hung step is then named by the last marker emitted.
 function step(name: string): void {
-  console.log(JSON.stringify({ event: "step", name }));
+  process.stdout.write(`${JSON.stringify({ event: "step", name })}\n`);
 }
 
 interface SessionEnvelope {
