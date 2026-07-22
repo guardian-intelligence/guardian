@@ -209,6 +209,31 @@ func TestValidWarmRendezvousAndCheckpointPasses(t *testing.T) {
 	}
 }
 
+func TestRecorderRestartWithNewSourceIdentityPasses(t *testing.T) {
+	events := validRendezvousTrace(false, true)
+	postRestartSequence := uint64(0)
+	restarted := false
+	for index := range events {
+		if events[index].Event == eventHostAssignmentObserved {
+			restarted = true
+		}
+		if events[index].Source != "hostd-qemu" {
+			continue
+		}
+		if restarted {
+			postRestartSequence++
+			events[index].Source = "hostd-qemu:instance-b"
+			events[index].OriginSeq = postRestartSequence
+		} else {
+			events[index].Source = "hostd-qemu:instance-a"
+		}
+	}
+	report := validateRendezvousTrace(events)
+	if !report.TraceValid || report.Outcome != outcomePass {
+		t.Fatalf("trace across recorder restart = %+v", report)
+	}
+}
+
 func TestTerminalRestoreRetryEventsRemainValidEvidence(t *testing.T) {
 	b := &traceBuilder{originSeq: map[string]uint64{}}
 	b.add(eventPoolReady, "hostd-agent").Platform = &platformEvidence{

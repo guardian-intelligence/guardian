@@ -236,6 +236,25 @@ func newTestDriver(t *testing.T, stateRoot string) *testDriver {
 	return &testDriver{q: q, launcher: launcher, disks: disks, guest: guest}
 }
 
+func TestDefaultTimingRecorderHasProcessUniqueSource(t *testing.T) {
+	first := newTestDriver(t, filepath.Join(t.TempDir(), "first"))
+	second := newTestDriver(t, filepath.Join(t.TempDir(), "second"))
+	left := first.q.timing.Point("first")
+	right := second.q.timing.Point("second")
+	if left.Source == right.Source {
+		t.Fatalf("independent QEMU recorders reused source %q", left.Source)
+	}
+	if !strings.HasPrefix(left.Source, "hostd-qemu:") || !strings.HasPrefix(right.Source, "hostd-qemu:") {
+		t.Fatalf("unexpected recorder sources %q and %q", left.Source, right.Source)
+	}
+	if left.BootID != right.BootID {
+		t.Fatalf("recorders on one host changed clock domain from %q to %q", left.BootID, right.BootID)
+	}
+	if left.Sequence != 1 || right.Sequence != 1 {
+		t.Fatalf("process-local sequences = %d and %d", left.Sequence, right.Sequence)
+	}
+}
+
 func observeLocalAssignment(t *testing.T, driver *testDriver, id ID, memberID string) {
 	t.Helper()
 	identity := &guestproto.JobIdentity{
