@@ -147,6 +147,26 @@ INSERT INTO github_workflow_jobs (
     provider_job_id, provider_run_id, provider_run_attempt,
     provider_repository_id, provider_installation_id, repository_full_name,
     name, status, labels_json, runner_class, head_branch, check_run_id
+) VALUES ($1, $2, 1, $3, $4, $5, 'retired', 'completed', $6::jsonb, $7, 'main', $8)`,
+		e2eJobID-1, e2eRunID-1, e2eRepositoryID, e2eInstallationID, e2eRepo,
+		`["postflight-retired"]`, "postflight-retired", e2eCheckRunID-1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO github_provider_demands (
+    provider_job_id, provider_installation_id, provider_repository_id,
+    repository_full_name, provider_run_id, provider_run_attempt,
+    trust_class, runner_class, state
+) VALUES ($1, $2, $3, $4, $5, 1, $6, $7, 'completed')`,
+		e2eJobID-1, e2eInstallationID, e2eRepositoryID, e2eRepo, e2eRunID-1,
+		trustClassPR, "postflight-retired"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO github_workflow_jobs (
+    provider_job_id, provider_run_id, provider_run_attempt,
+    provider_repository_id, provider_installation_id, repository_full_name,
+    name, status, labels_json, runner_class, head_branch, check_run_id
 ) VALUES ($1, $2, 1, $3, $4, $5, 'build', 'queued', $6::jsonb, $7, 'main', $8)`,
 		e2eJobID, e2eRunID, e2eRepositoryID, e2eInstallationID, e2eRepo,
 		`["`+e2eClass+`"]`, e2eClass, e2eCheckRunID); err != nil {
