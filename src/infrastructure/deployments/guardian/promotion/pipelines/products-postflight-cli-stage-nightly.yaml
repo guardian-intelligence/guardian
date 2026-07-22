@@ -1,0 +1,61 @@
+# The postflight CLI ships to users through release channels, not clusters:
+# promoting this stage advances the nightly pin in the CLI's channels file,
+# which the in-cluster release reconciler turns into a GitHub Release carrying
+# the build-time signatures (nothing is re-signed on promotion).
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: postflight-cli-nightly
+  namespace: guardian-products
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: postflight-cli
+      sources:
+        direct: true
+  promotionTemplate:
+    spec:
+      vars:
+        - name: repoURL
+          value: https://github.com/guardian-intelligence/guardian.git
+        - name: imageRepo
+          value: ghcr.io/guardian-intelligence/postflight-cli
+      steps:
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.repoURL }}
+            checkout:
+              - branch: main
+                path: ./repo
+        - uses: yaml-update
+          config:
+            path: ./repo/src/products/postflight-cli/release/channels.yaml
+            updates:
+              - key: channels.nightly.image
+                value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-commit
+          as: commit
+          config:
+            path: ./repo
+            message: promote postflight-cli (nightly) to ${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-push
+          as: push
+          config:
+            path: ./repo
+            generateTargetBranch: true
+        - uses: git-open-pr
+          as: open-pr
+          config:
+            repoURL: ${{ vars.repoURL }}
+            provider: github
+            sourceBranch: ${{ outputs.push.branch }}
+            targetBranch: main
+            title: promote postflight-cli (nightly) to ${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-wait-for-pr
+          if: ${{ status('open-pr') == 'Succeeded' }}
+          config:
+            repoURL: ${{ vars.repoURL }}
+            prNumber: ${{ outputs['open-pr'].pr.id }}
