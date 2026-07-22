@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RedactionRegistry, registryFromEnv } from "../src/redact.ts";
+import { RedactionRegistry, registryFromEnv, scrubUrlParams } from "../src/redact.ts";
 
 describe("RedactionRegistry", () => {
   it("replaces every occurrence of a registered value", () => {
@@ -24,6 +24,16 @@ describe("RedactionRegistry", () => {
     expect(registry.scrub("raw gezd gnbv gy3t qojq")).toContain("[REDACTED:seed]");
     expect(registry.scrub("upper GEZDGNBVGY3TQOJQ")).toContain("[REDACTED:seed]");
     expect(registry.scrub("lower gezdgnbvgy3tqojq")).toContain("[REDACTED:seed]");
+  });
+
+  it("scrubs OAuth transaction params from URLs in text", () => {
+    const text =
+      'navigated to "https://guardianintelligence.org/broker/github/endpoint?code=6e308a9f463d&state=634Y8a-XlGn.abc&next=/console"';
+    const scrubbed = scrubUrlParams(text);
+    expect(scrubbed).not.toContain("6e308a9f463d");
+    expect(scrubbed).not.toContain("634Y8a");
+    expect(scrubbed).toContain("code=[REDACTED]");
+    expect(scrubbed).toContain("next=/console");
   });
 
   it("registers the honeytoken like a secret", () => {

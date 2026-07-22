@@ -34,6 +34,15 @@ export class RedactionRegistry {
   }
 }
 
+// OAuth transaction values ride URLs that Playwright echoes into error call
+// logs. Consumed codes are dead on arrival, but they never need to reach a
+// log sink at all.
+const URL_PARAM_PATTERN = /([?&](?:code|state|session_state|access_token|id_token)=)[^\s&"'…]+/gi;
+
+export function scrubUrlParams(text: string): string {
+  return text.replace(URL_PARAM_PATTERN, "$1[REDACTED]");
+}
+
 export function registryFromEnv(env: Record<string, string | undefined>): RedactionRegistry {
   const registry = new RedactionRegistry();
   registry.register("github-password", env.GITHUB_CANARY_PASSWORD);
