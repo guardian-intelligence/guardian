@@ -51,3 +51,16 @@ spec:
         repoURL: ghcr.io/guardian-intelligence/login-canary
         imageSelectionStrategy: Digest
         constraint: edge
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: canary-journeys
+  namespace: guardian-iam
+spec:
+  interval: 1m0s
+  subscriptions:
+    - image:
+        repoURL: ghcr.io/guardian-intelligence/canary-journeys
+        imageSelectionStrategy: Digest
+        constraint: edge

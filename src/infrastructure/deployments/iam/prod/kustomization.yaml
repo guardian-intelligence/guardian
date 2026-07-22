@@ -11,4 +11,5 @@ resources:
   - ingress.yaml
   - networkpolicy.yaml
   - login-canary.yaml
+  - journey-canary.yaml
   - observability.yaml
