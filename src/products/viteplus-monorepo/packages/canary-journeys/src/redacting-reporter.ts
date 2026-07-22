@@ -6,7 +6,7 @@ import type {
   TestError,
   TestResult,
 } from "@playwright/test/reporter";
-import { registryFromEnv, type RedactionRegistry } from "./redact.ts";
+import { registryFromEnv, scrubUrlParams, type RedactionRegistry } from "./redact.ts";
 
 // Emits one scrubbed JSON line per event. Playwright's stock reporters print
 // step call logs and error context that can carry typed values; this one
@@ -16,7 +16,7 @@ export default class RedactingReporter implements Reporter {
   private readonly registry: RedactionRegistry = registryFromEnv(process.env);
 
   private emit(event: Record<string, unknown>): void {
-    process.stdout.write(`${this.registry.scrub(JSON.stringify(event))}\n`);
+    process.stdout.write(`${scrubUrlParams(this.registry.scrub(JSON.stringify(event)))}\n`);
   }
 
   private formatError(error: TestError): string {
@@ -38,11 +38,11 @@ export default class RedactingReporter implements Reporter {
   // log if a reporter forwards it — without this, the journey's step events
   // vanish and a hang is a bare "Test timeout" with no location.
   onStdOut(chunk: string | Buffer): void {
-    process.stdout.write(this.registry.scrub(chunk.toString()));
+    process.stdout.write(scrubUrlParams(this.registry.scrub(chunk.toString())));
   }
 
   onStdErr(chunk: string | Buffer): void {
-    process.stdout.write(this.registry.scrub(chunk.toString()));
+    process.stdout.write(scrubUrlParams(this.registry.scrub(chunk.toString())));
   }
 
   onTestEnd(test: TestCase, result: TestResult): void {

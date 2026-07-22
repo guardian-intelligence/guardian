@@ -33,6 +33,19 @@ async function awaitGitHubRedirect(page: Page): Promise<void> {
     .toBe("github.com");
 }
 
+// GitHub's two-factor input auto-submits once the sixth digit lands, and a
+// granted consent page can navigate mid-click: the explicit click then races
+// the navigation it (or the fill before it) already caused. Best-effort
+// click — if the control is gone or the page has moved on, the state
+// ladder's next probe decides what happens.
+async function clickIfPresent(page: Page, selector: string): Promise<void> {
+  try {
+    await page.locator(selector).first().click({ timeout: 3_000 });
+  } catch {
+    // Raced a navigation or the control disappeared; the ladder continues.
+  }
+}
+
 async function finishGitHubAuthorization(page: Page, cfg: JourneyConfig): Promise<void> {
   const deadline = Date.now() + 75_000;
   let totpSent = false;
@@ -54,7 +67,7 @@ async function finishGitHubAuthorization(page: Page, cfg: JourneyConfig): Promis
         }
         const code = totp(cfg.githubTotpSeed, new Date());
         await page.locator(SELECTORS.totpInput).first().fill(code);
-        await page.locator(SELECTORS.githubSubmit).first().click();
+        await clickIfPresent(page, SELECTORS.githubSubmit);
         totpSent = true;
         break;
       }
@@ -63,7 +76,7 @@ async function finishGitHubAuthorization(page: Page, cfg: JourneyConfig): Promis
           await page.waitForTimeout(250);
           break;
         }
-        await page.locator(SELECTORS.grantEnabled).first().click();
+        await clickIfPresent(page, SELECTORS.grantEnabled);
         grantSent = true;
         break;
       }
