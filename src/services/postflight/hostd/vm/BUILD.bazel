@@ -30,6 +30,7 @@ go_test(
     name = "vm_test",
     srcs = [
         "conformance_test.go",
+        "disks_test.go",
         "driver_test.go",
         "fake_test.go",
         "guest_vsock_loopback_test.go",

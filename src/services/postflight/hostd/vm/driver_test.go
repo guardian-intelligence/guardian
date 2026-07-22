@@ -74,18 +74,22 @@ type fakeDisks struct {
 	ensured   map[string]string // dataset -> image
 	destroyed []string
 	onEnsure  func(dataset string)
+	device    string
 }
 
 func newFakeDisks() *fakeDisks { return &fakeDisks{ensured: map[string]string{}} }
 
-func (d *fakeDisks) Ensure(_ context.Context, dataset, image string) error {
+func (d *fakeDisks) Ensure(_ context.Context, dataset, image string) (string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.ensured[dataset] = image
 	if d.onEnsure != nil {
 		d.onEnsure(dataset)
 	}
-	return nil
+	if d.device != "" {
+		return d.device, nil
+	}
+	return zvolDevicePath(dataset), nil
 }
 
 func (d *fakeDisks) Destroy(_ context.Context, dataset string) error {
@@ -362,6 +366,26 @@ func TestLaunchPersistsMetaBeforeSideEffects(t *testing.T) {
 	}
 	if !metaAtEnsure {
 		t.Fatal("root disk materialized before meta.json was durable")
+	}
+}
+
+func TestLaunchPinsCanonicalRootDevice(t *testing.T) {
+	root := shortTempDir(t)
+	driver := newTestDriver(t, root)
+	driver.disks.device = "/dev/zd4242"
+	if err := driver.q.Launch(context.Background(), "vm-a", testClass); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	argv := driver.launcher.argv["vm-a"]
+	if got := strings.Join(argv, " "); !strings.Contains(got, "file.filename=/dev/zd4242") {
+		t.Fatalf("launcher argv did not pin canonical root device: %s", got)
+	}
+	record, err := driver.q.readMeta("vm-a")
+	if err != nil {
+		t.Fatalf("read meta: %v", err)
+	}
+	if got := strings.Join(record.Argv, " "); !strings.Contains(got, "file.filename=/dev/zd4242") {
+		t.Fatalf("durable argv did not pin canonical root device: %s", got)
 	}
 }
 

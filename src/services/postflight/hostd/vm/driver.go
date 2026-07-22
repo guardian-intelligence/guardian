@@ -304,7 +304,18 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 	if err := q.writeMeta(record); err != nil {
 		return err
 	}
-	if err := q.disks.Ensure(ctx, dataset, shape.Image); err != nil {
+	rootDevice, err := q.disks.Ensure(ctx, dataset, shape.Image)
+	if err != nil {
+		return err
+	}
+	// The durable pre-side-effect record above makes a crash during cloning
+	// collectable. Once udev has published the zvol, replace its mutable link
+	// with the canonical whole-disk path before QEMU can observe it.
+	spec.RootDevice = rootDevice
+	argv = spec.Argv()
+	record.Argv = argv
+	record.ArgvSHA256 = argvDigest(argv)
+	if err := q.writeMeta(record); err != nil {
 		return err
 	}
 	if err := q.cfg.Launcher.Start(ctx, id, dir, argv); err != nil {

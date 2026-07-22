@@ -195,25 +195,28 @@ func TestConformanceLifecycle(t *testing.T) {
 
 	// A real workspace: a zvol clone of the golden snapshot.
 	workspace := driver.cfg.DatasetRoot + "/ws-conf-lifecycle"
-	if err := driver.disks.Ensure(ctx, workspace, driver.cfg.Classes[testClass].Image); err != nil {
+	workspaceDevice, err := driver.disks.Ensure(ctx, workspace, driver.cfg.Classes[testClass].Image)
+	if err != nil {
 		t.Fatalf("cloning workspace: %v", err)
 	}
 	process := driver.cfg.DatasetRoot + "/process-conf-lifecycle"
-	if err := driver.disks.Ensure(ctx, process, driver.cfg.Classes[testClass].Image); err != nil {
+	processDevice, err := driver.disks.Ensure(ctx, process, driver.cfg.Classes[testClass].Image)
+	if err != nil {
 		t.Fatalf("cloning process volume: %v", err)
 	}
 	tool := driver.cfg.DatasetRoot + "/tool-conf-lifecycle"
-	if err := driver.disks.Ensure(ctx, tool, driver.cfg.Classes[testClass].Image); err != nil {
+	toolDevice, err := driver.disks.Ensure(ctx, tool, driver.cfg.Classes[testClass].Image)
+	if err != nil {
 		t.Fatalf("cloning tool volume: %v", err)
 	}
 	preparation := Preparation{MemberID: "member-conf", JITConfig: "jit-blob"}
 	rendezvous := Rendezvous{
 		MemberID:            "member-conf",
 		AssignmentID:        "assignment-conf",
-		WorkspaceDevice:     zvolDevicePath(workspace),
+		WorkspaceDevice:     workspaceDevice,
 		WorkspaceMountpoint: "/opt/actions-runner/_work/widget/widget",
-		ToolDevice:          zvolDevicePath(tool),
-		ProcessDevice:       zvolDevicePath(process),
+		ToolDevice:          toolDevice,
+		ProcessDevice:       processDevice,
 	}
 	if err := driver.Prepare(ctx, id, preparation); err != nil {
 		t.Fatalf("prepare: %v", err)
@@ -334,7 +337,7 @@ func TestConformanceAdoption(t *testing.T) {
 	waitFor(t, "QMP reports running", 60*time.Second, vmRunningViaQMP(ctx, first, id))
 
 	workspace := first.cfg.DatasetRoot + "/ws-conf-adopt"
-	if err := first.disks.Ensure(ctx, workspace, first.cfg.Classes[testClass].Image); err != nil {
+	if _, err := first.disks.Ensure(ctx, workspace, first.cfg.Classes[testClass].Image); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = first.disks.Destroy(context.Background(), workspace) })
