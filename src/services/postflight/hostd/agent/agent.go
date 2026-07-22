@@ -160,13 +160,19 @@ func (a *Agent) Run(ctx context.Context) error {
 				// Assignment is the latency-critical edge. Immediately publish
 				// it and consume the exact binding response instead of waiting for
 				// the periodic repair interval.
-				if _, err := a.syncOnce(ctx); err != nil {
+				pollAfter, err := a.syncOnce(ctx)
+				if err != nil {
 					a.metrics.SyncFailures.Add(1)
 					a.logger.Error("assignment sync", "vm", id, "err", err)
+				} else {
+					interval := a.cfg.SyncInterval
+					if pollAfter > 0 {
+						interval = pollAfter
+					}
+					resetTimer(timer, interval)
 				}
 			}
 			a.Tick(ctx)
-			resetTimer(timer, a.cfg.SyncInterval)
 		case <-timer.C:
 			interval := a.cfg.SyncInterval
 			if pollAfter, err := a.syncOnce(ctx); err != nil {

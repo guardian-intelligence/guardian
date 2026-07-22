@@ -556,15 +556,15 @@ type desiredMemberRow struct {
 	MemberID, VMID, RunnerName, RunnerClass, JITConfig, State string
 }
 
-func (s *pgStore) ListDesiredMembers(ctx context.Context, hostID string) ([]desiredMemberRow, error) {
+func (s *pgStore) ListDesiredMembers(ctx context.Context, hostID string, reportedMembers []string) ([]desiredMemberRow, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT member_id, vm_id, runner_name, runner_class, jit_config,
-       CASE WHEN state = 'recycling' THEN 'recycle' ELSE 'listen' END
+       CASE WHEN state IN ('recycling', 'lost') THEN 'recycle' ELSE 'listen' END
 FROM runner_pool_members
 WHERE host_id = $1 AND pool_id IS NOT NULL
-  AND state NOT IN ('lost')
-  AND (jit_config <> '' OR state = 'recycling')
-ORDER BY member_id`, hostID)
+  AND (state <> 'lost' OR member_id = ANY($2::text[]))
+  AND (jit_config <> '' OR state IN ('recycling', 'lost'))
+ORDER BY member_id`, hostID, reportedMembers)
 	if err != nil {
 		return nil, err
 	}

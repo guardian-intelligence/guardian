@@ -76,6 +76,64 @@ func TestVsockGuestProbeIsHelloWithinDeadline(t *testing.T) {
 	})
 }
 
+func TestVsockGuestProgressDoesNotEmitLifecycleUpdate(t *testing.T) {
+	progress := make(chan struct{})
+	registered := make(chan struct{})
+	release := make(chan struct{})
+	defer close(release)
+	transport, _ := pipeDialer(t, func(conn net.Conn) {
+		sendHello(t, conn)
+		encoder := guestproto.NewEncoder(conn)
+		<-progress
+		_ = encoder.Write(guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &guestproto.RunnerStatus{
+			State: guestproto.RunnerProgress,
+			Timing: []guestproto.TimingPoint{{Event: "mount_convergence_started"}},
+		}})
+		<-registered
+		_ = encoder.Write(guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &guestproto.RunnerStatus{
+			State: guestproto.RunnerRegistered,
+		}})
+		<-release
+		conn.Close()
+	})
+	if got := observation(t, transport, "vm-a", 3); !got.Hello {
+		t.Fatalf("observation %+v after hello", got)
+	}
+	select {
+	case id := <-transport.Updates():
+		if id != "vm-a" {
+			t.Fatalf("hello update for %s", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("hello did not emit an update")
+	}
+
+	close(progress)
+	waitFor(t, "progress timing folded", 2*time.Second, func() (bool, error) {
+		for _, point := range observation(t, transport, "vm-a", 3).Timing {
+			if point.Event == "mount_convergence_started" {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	select {
+	case id := <-transport.Updates():
+		t.Fatalf("timing-only progress emitted lifecycle update for %s", id)
+	case <-time.After(75 * time.Millisecond):
+	}
+
+	close(registered)
+	select {
+	case id := <-transport.Updates():
+		if id != "vm-a" {
+			t.Fatalf("registration update for %s", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("registration did not emit an update")
+	}
+}
+
 func TestVsockGuestFoldsWorkerTrampolineFailure(t *testing.T) {
 	transport, _ := pipeDialer(t, func(conn net.Conn) {
 		sendHello(t, conn)
