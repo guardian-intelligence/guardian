@@ -38,5 +38,11 @@ export function registryFromEnv(env: Record<string, string | undefined>): Redact
   const registry = new RedactionRegistry();
   registry.register("github-password", env.GITHUB_CANARY_PASSWORD);
   registry.registerSeed("github-totp-seed", env.GITHUB_CANARY_TOTP_SECRET);
+  // Not a secret: a synthetic marker registered like one. Every run pushes it
+  // through the scrubber (see the reporter's self-test event), and an alert
+  // on the raw marker ever reaching a log sink is the tripwire that the
+  // scrubber broke. Its shape deliberately matches no infrastructure-level
+  // redaction pattern so it exercises this registry alone.
+  registry.register("honeytoken", env.CANARY_HONEYTOKEN);
   return registry;
 }

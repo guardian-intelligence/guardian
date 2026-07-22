@@ -47,6 +47,15 @@ spec:
                   value: https://guardianintelligence.org/postflight
                 - name: CANARY_TIMEOUT
                   value: 2m30s
+                # Not a secret: a fixed synthetic marker the harness registers
+                # in its redaction registry and deliberately routes through
+                # the scrubber every run. The raw literal appearing in any log
+                # sink means the scrubber broke (its absence alert lives with
+                # the vmalert-vlogs rules). Shaped to match no
+                # infrastructure-level redaction pattern so it exercises the
+                # harness scrubber alone.
+                - name: CANARY_HONEYTOKEN
+                  value: guardian-canary-honeytoken-9f2e6c81d4b7
                 - name: GITHUB_CANARY_USERNAME
                   valueFrom:
                     secretKeyRef:

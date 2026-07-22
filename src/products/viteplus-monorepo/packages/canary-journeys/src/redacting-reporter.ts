@@ -25,6 +25,13 @@ export default class RedactingReporter implements Reporter {
 
   onBegin(_config: unknown, suite: Suite): void {
     this.emit({ event: "begin", tests: suite.allTests().length });
+    const honeytoken = process.env.CANARY_HONEYTOKEN;
+    if (honeytoken) {
+      // Deliberately routes the raw marker through the scrubber on every run.
+      // A healthy scrubber emits [REDACTED:honeytoken]; a broken one leaks
+      // the raw marker into the log sink, where its absence alert fires.
+      this.emit({ event: "redaction-selftest", payload: `marker=${honeytoken}` });
+    }
   }
 
   onTestEnd(test: TestCase, result: TestResult): void {
