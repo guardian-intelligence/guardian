@@ -1,0 +1,130 @@
+@import "tailwindcss";
+
+/*
+ * Tailwind v4 auto-detects source files in this app's directory tree but
+ * does not follow the module graph into sibling workspace packages. Any
+ * utility class referenced only inside @guardian/brand primitives must be
+ * registered here or it never reaches the final stylesheet.
+ */
+@source "../../../../packages/brand/src";
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist-Variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/GeistMono-Variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --color-night: #0a0a0e;
+  --color-night-raised: #101017;
+  --color-mist: #e8e6f0;
+  --color-mist-dim: #a3a0b5;
+  --color-mist-faint: #63607a;
+  --color-glow-warm: #ffedd8;
+  --color-glow-violet: #7d6bff;
+  --color-glow-teal: #3ec6c0;
+  --color-line: rgb(255 255 255 / 8%);
+  --color-line-strong: rgb(255 255 255 / 16%);
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
+}
+
+html {
+  background: var(--color-night);
+  color: var(--color-mist);
+}
+
+/* The stage lighting: a warm key light from above center, two colored fill
+   lights drifting slowly, and a grain wash that kills gradient banding.
+   Pure CSS — fixed layers behind everything, no WebGL, no images. */
+.stage-light {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(58% 42% at 50% -6%, rgb(255 237 216 / 13%), transparent 68%),
+    radial-gradient(34% 30% at 26% 4%, rgb(125 107 255 / 10%), transparent 70%),
+    radial-gradient(30% 26% at 76% 10%, rgb(62 198 192 / 7%), transparent 70%), var(--color-night);
+}
+
+.stage-light::before,
+.stage-light::after {
+  content: "";
+  position: absolute;
+  width: 44rem;
+  height: 44rem;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.16;
+}
+
+.stage-light::before {
+  background: var(--color-glow-violet);
+  top: -22rem;
+  left: -10rem;
+  animation: drift-a 26s ease-in-out infinite alternate;
+}
+
+.stage-light::after {
+  background: var(--color-glow-teal);
+  top: -26rem;
+  right: -14rem;
+  animation: drift-b 32s ease-in-out infinite alternate;
+}
+
+@keyframes drift-a {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(6rem, 3rem, 0);
+  }
+}
+
+@keyframes drift-b {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-5rem, 4rem, 0);
+  }
+}
+
+.stage-grain {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-light::before,
+  .stage-light::after {
+    animation: none;
+  }
+}
+
+.glass {
+  background: rgb(255 255 255 / 3%);
+  border: 1px solid var(--color-line);
+  border-radius: 16px;
+  backdrop-filter: blur(6px);
+}
+
+.glass-strong {
+  background: rgb(16 16 23 / 82%);
+  border: 1px solid var(--color-line-strong);
+  border-radius: 16px;
+}
