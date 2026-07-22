@@ -5,4 +5,4 @@
 # train — promote through Kargo instead.
 channels:
   nightly:
-    image: ""
+    image: ghcr.io/guardian-intelligence/postflight-cli@sha256:69b7beae2cd06a4aaae62d629e15be5d6e43a6d1a701b790e1ca3e80c13d4631
