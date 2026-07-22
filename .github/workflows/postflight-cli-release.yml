@@ -1,0 +1,142 @@
+name: postflight-cli-release
+
+# Release cutter for the postflight CLI: fires on the channel-pin merge commit
+# (the Kargo promotion PR advancing release/channels.yaml), verifies the full
+# signature chain of the pinned artifact, and publishes a GitHub Release with
+# the binaries and the cosign bundles minted at build time — nothing is
+# re-signed here. Cutting a GitHub Release is distribution to GitHub's own
+# platform, so the workflow's native GITHUB_TOKEN is the entire custody story.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/products/postflight-cli/release/channels.yaml"
+      - ".github/workflows/postflight-cli-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: postflight-cli-release
+  cancel-in-progress: false
+
+env:
+  IMAGE_REPO: ghcr.io/guardian-intelligence/postflight-cli
+  TARGETS: x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin
+  BUILD_IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main
+  ISSUER: https://token.actions.githubusercontent.com
+  CRANE_VERSION: v0.21.7
+  CRANE_SHA256: 1a57bc98207fa1c0d04bf760699099e26f8383499bfd55b99c1b919a928a7230
+
+jobs:
+  nightly:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Read the nightly pin
+        id: pin
+        run: |
+          image="$(grep -A1 '^  nightly:' src/products/postflight-cli/release/channels.yaml \
+            | grep -o 'ghcr.io/guardian-intelligence/postflight-cli@sha256:[a-f0-9]\{64\}' || true)"
+          if [[ -z "$image" ]]; then
+            echo "nightly pin is empty — nothing to release" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if this artifact is already released
+        if: steps.pin.outputs.image != ''
+        id: dedup
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          digest="${{ steps.pin.outputs.image }}"
+          digest="${digest##*@}"
+          if gh api "repos/${{ github.repository }}/releases" --paginate \
+              --jq '.[] | select(.tag_name | startswith("postflight-cli/nightly-")) | .body' \
+              | grep -q "$digest"; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "a nightly release for $digest already exists — skipping" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+        if: steps.pin.outputs.image != '' && steps.dedup.outputs.released == 'false'
+
+      - name: Verify the artifact before publishing
+        if: steps.pin.outputs.image != '' && steps.dedup.outputs.released == 'false'
+        id: verify
+        run: |
+          curl -fsSLo crane.tar.gz "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin" && tar -xzf crane.tar.gz -C "$HOME/.local/bin" crane
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+
+          image="${{ steps.pin.outputs.image }}"
+          cosign verify --certificate-identity "$BUILD_IDENTITY" \
+            --certificate-oidc-issuer "$ISSUER" "$image" > /dev/null
+
+          manifest="$(crane manifest "$image")"
+          revision="$(jq -r '.annotations["org.opencontainers.image.revision"]' <<<"$manifest")"
+          binaries_digest="$(jq -r '.annotations["org.guardian.binaries-digest"]' <<<"$manifest")"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "binaries_digest=$binaries_digest" >> "$GITHUB_OUTPUT"
+
+          mkdir stage && crane export "$image" - | tar -x -C stage
+          mkdir assets
+          for target in $TARGETS; do
+            cp "stage/$target/postflight" "assets/postflight-$target"
+            cp "stage/$target/postflight.sigstore.json" "assets/postflight-$target.sigstore.json"
+            cosign verify-blob \
+              --bundle "assets/postflight-$target.sigstore.json" \
+              --certificate-identity "$BUILD_IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              "assets/postflight-$target"
+          done
+          (cd assets && sha256sum postflight-* > checksums.txt)
+
+      - name: Cut the nightly release
+        if: steps.pin.outputs.image != '' && steps.dedup.outputs.released == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          image="${{ steps.pin.outputs.image }}"
+          revision="${{ steps.verify.outputs.revision }}"
+          day="$(date -u +%Y%m%d -d "@$(git log -1 --format=%ct)")"
+          tag="postflight-cli/nightly-$day"
+          if gh api "repos/${{ github.repository }}/git/ref/tags/$tag" > /dev/null 2>&1; then
+            tag="$tag-$(date -u +%H%M -d "@$(git log -1 --format=%ct)")"
+          fi
+          notes="Automated nightly release of the postflight CLI.
+
+          - Artifact: \`$image\`
+          - Source commit: $revision
+          - Binaries digest: \`${{ steps.verify.outputs.binaries_digest }}\`
+
+          Verify any binary before running it:
+
+          \`\`\`sh
+          cosign verify-blob --bundle postflight-<target>.sigstore.json \\
+            --certificate-identity $BUILD_IDENTITY \\
+            --certificate-oidc-issuer $ISSUER \\
+            postflight-<target>
+          \`\`\`"
+          gh release create "$tag" \
+            --target "$revision" \
+            --title "postflight CLI nightly $day" \
+            --prerelease \
+            --notes "$notes" \
+            assets/*
+          echo "released $tag from $image" >> "$GITHUB_STEP_SUMMARY"
