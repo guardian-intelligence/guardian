@@ -1,0 +1,8 @@
+# Channel pins for the postflight CLI release train. Kargo promotion PRs
+# advance these digests (ghcr.io/guardian-intelligence/postflight-cli); the
+# in-cluster release reconciler turns each pin move into a GitHub Release
+# reusing the signatures minted at build time. Edits by hand defeat the
+# train — promote through Kargo instead.
+channels:
+  nightly:
+    image: ""

@@ -1,0 +1,261 @@
+# cli-nightly-promoter: the postflight CLI's nightly cadence. Kargo's own
+# auto-promotion fires the moment Freight is discovered, which would make
+# "nightly" a lie — so the nightly stage has no promotion policy and this
+# CronJob promotes the latest edge Freight once a day instead. Promotion
+# itself stays entirely Kargo's: this job only creates the Promotion CR and
+# Kargo runs the template (pin-bump PR, automerge, reconciler).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cli-nightly-promoter
+  namespace: guardian-products
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cli-nightly-promoter
+  namespace: guardian-products
+rules:
+  - apiGroups: ["kargo.akuity.io"]
+    resources: ["freights"]
+    verbs: ["get", "list"]
+  # "promote" is Kargo's admission-webhook verb: creating a Promotion is
+  # denied unless the creator holds it on the target stage.
+  - apiGroups: ["kargo.akuity.io"]
+    resources: ["stages"]
+    verbs: ["get", "list", "promote"]
+  - apiGroups: ["kargo.akuity.io"]
+    resources: ["promotions"]
+    verbs: ["get", "list", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cli-nightly-promoter
+  namespace: guardian-products
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cli-nightly-promoter
+subjects:
+  - kind: ServiceAccount
+    name: cli-nightly-promoter
+    namespace: guardian-products
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cli-nightly-promoter
+  namespace: guardian-products
+  annotations:
+    # The script's shell variables must reach the pod verbatim, not be
+    # blanked by Flux's envsubst pass.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  promote.sh: |
+    #!/bin/bash
+    set -u
+    VMINSERT=http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus
+    NS=guardian-products
+    STAGE=postflight-cli-nightly
+    WAREHOUSE=postflight-cli
+
+    beat() {
+      curl -fsS --retry 3 --data-binary \
+        "guardian_cli_nightly_promoter_heartbeat{stage=\"${STAGE}\"} 1" \
+        "$VMINSERT"
+    }
+
+    latest=$(kubectl get freights -n "$NS" -o json | jq -r --arg w "$WAREHOUSE" \
+      '[.items[] | select(.origin.name==$w)]
+       | sort_by(.metadata.creationTimestamp) | last | .metadata.name // empty')
+    if [ -z "$latest" ]; then
+      echo "no freight discovered from $WAREHOUSE yet"
+      beat; exit 0
+    fi
+
+    current=$(kubectl get stage "$STAGE" -n "$NS" \
+      -o jsonpath='{.status.lastPromotion.freight.name}')
+    if [ "$latest" = "$current" ]; then
+      echo "nightly already at freight $latest"
+      beat; exit 0
+    fi
+
+    inflight=$(kubectl get promotions -n "$NS" -o json | jq -r --arg s "$STAGE" \
+      '[.items[] | select(.spec.stage==$s)
+        | select(.status.phase=="Pending" or .status.phase=="Running")] | length')
+    if [ "$inflight" != "0" ]; then
+      echo "a promotion for $STAGE is already in flight; not stacking another"
+      beat; exit 0
+    fi
+
+    name="${STAGE}-$(date -u +%Y%m%d)-${latest:0:7}"
+    echo "promoting $STAGE to freight $latest as $name"
+    kubectl create -f - <<EOF
+    apiVersion: kargo.akuity.io/v1alpha1
+    kind: Promotion
+    metadata:
+      name: ${name}
+      namespace: ${NS}
+    spec:
+      stage: ${STAGE}
+      freight: ${latest}
+    EOF
+    created=$?
+    if [ "$created" -ne 0 ]; then
+      echo "promotion create failed"
+      beat; exit 1
+    fi
+    curl -fsS --retry 3 --data-binary \
+      "guardian_cli_nightly_promotion_created{stage=\"${STAGE}\"} 1" \
+      "$VMINSERT"
+    beat
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cli-nightly-promoter
+  namespace: guardian-products
+  labels:
+    app.kubernetes.io/name: cli-nightly-promoter
+    app.kubernetes.io/part-of: guardian
+spec:
+  schedule: "0 8 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cli-nightly-promoter
+        spec:
+          serviceAccountName: cli-nightly-promoter
+          restartPolicy: Never
+          containers:
+            - name: promote
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/bash", "/scripts/promote.sh"]
+              env:
+                # kubectl needs a writable cache dir under restricted PSS.
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65534
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: scripts
+              configMap:
+                name: cli-nightly-promoter
+            - name: tmp
+              emptyDir: {}
+---
+# Promoter pod flows: DNS, the apiserver (freight/stage reads + promotion
+# create), vminsert (heartbeat metrics).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cli-nightly-promoter
+  namespace: guardian-products
+  labels:
+    app.kubernetes.io/name: cli-nightly-promoter
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: cli-nightly-promoter
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+# Ingress half: tenant-root's generated isolation does not admit other
+# namespaces (same reason as the remediator and kargo-state-metrics pairs).
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-cli-nightly-promoter
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: guardian-products
+            k8s:app.kubernetes.io/name: cli-nightly-promoter
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: cli-nightly-promoter
+  namespace: guardian-products
+  labels:
+    app.kubernetes.io/name: cli-nightly-promoter
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: cli-nightly-promoter.rules
+      interval: 60s
+      rules:
+        - alert: GuardianCliNightlyPromoterSilent
+          # The count_over_time guard keeps this from firing during bring-up,
+          # before the first scheduled run has ever pushed a sample.
+          expr: >-
+            absent_over_time(guardian_cli_nightly_promoter_heartbeat[26h])
+            and on() count_over_time(guardian_cli_nightly_promoter_heartbeat[8d]) > 0
+          labels:
+            severity: warning
+            guardian_component: cli-release-train
+          annotations:
+            summary: "cli-nightly-promoter has not run in 26h"
+            description: >-
+              The nightly promoter CronJob has pushed no heartbeat for over a
+              day: the CLI nightly channel is no longer advancing. Check the
+              newest cli-nightly-promoter Job logs in guardian-products and
+              Kargo's postflight-cli-nightly stage.

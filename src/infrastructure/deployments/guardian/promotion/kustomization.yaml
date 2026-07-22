@@ -7,3 +7,4 @@ resources:
   - kargo-state-metrics.yaml
   - kargo-alerts.yaml
   - remediator.yaml
+  - cli-nightly-promoter.yaml
