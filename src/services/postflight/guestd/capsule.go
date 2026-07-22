@@ -215,7 +215,7 @@ func waitCapsuleInit(ctx context.Context, pid int, name string, done <-chan erro
 		if err == nil && processIsNamespaceInit(raw, name) {
 			return nil
 		}
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err != nil && !transientCapsuleProcError(err) {
 			return err
 		}
 		select {
@@ -226,6 +226,10 @@ func waitCapsuleInit(ctx context.Context, pid int, name string, done <-chan erro
 		case <-ticker.C:
 		}
 	}
+}
+
+func transientCapsuleProcError(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
 }
 
 func processIsNamespaceInit(status []byte, name string) bool {

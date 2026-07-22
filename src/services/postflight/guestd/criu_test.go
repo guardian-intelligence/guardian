@@ -13,21 +13,30 @@ import (
 )
 
 type fakeCapsules struct {
-	journal  []string
-	resetErr error
-	startErr error
+	journal     []string
+	resetErr    error
+	startErr    error
+	startErrors []error
 }
 
 func (f *fakeCapsules) Start(context.Context) error {
 	f.journal = append(f.journal, "start")
+	if len(f.startErrors) > 0 {
+		err := f.startErrors[0]
+		f.startErrors = f.startErrors[1:]
+		return err
+	}
 	return f.startErr
 }
 func (f *fakeCapsules) Reset(context.Context) error {
 	f.journal = append(f.journal, "reset")
 	return f.resetErr
 }
-func (f *fakeCapsules) UseRestored(context.Context, int) error { return nil }
-func (f *fakeCapsules) RootPID() (int, error)                 { return 123, nil }
+func (f *fakeCapsules) UseRestored(_ context.Context, pid int) error {
+	f.journal = append(f.journal, "use-restored:"+strconv.Itoa(pid))
+	return nil
+}
+func (f *fakeCapsules) RootPID() (int, error)                      { return 123, nil }
 func (f *fakeCapsules) PrepareForCheckpoint(context.Context) error { return nil }
 
 func TestCRIUDumpAndRestoreContract(t *testing.T) {
@@ -157,6 +166,9 @@ func TestProcessRestoreFallsBackColdOnlyAfterCleanup(t *testing.T) {
 		CRIU: CRIU{
 			Path: versionBin, ImagesRoot: imagesRoot, WorkRoot: filepath.Join(imagesRoot, "work"),
 			RestoreRun: func(context.Context, string, ...string) (string, error) {
+				if strings.Join(capsules.journal, ",") != "reset" {
+					t.Fatalf("restore began without an empty capsule boundary: %v", capsules.journal)
+				}
 				return "", errors.New("unsupported descriptor")
 			},
 		},
@@ -168,7 +180,7 @@ func TestProcessRestoreFallsBackColdOnlyAfterCleanup(t *testing.T) {
 	if !result.ColdFallback || !result.ProcessInvalidated || result.FailureCode != "criu-rejected" {
 		t.Fatalf("fallback result = %+v", result)
 	}
-	if strings.Join(capsules.journal, ",") != "reset,start" {
+	if strings.Join(capsules.journal, ",") != "reset,reset,start" {
 		t.Fatalf("capsule operations = %v", capsules.journal)
 	}
 
@@ -178,14 +190,99 @@ func TestProcessRestoreFallsBackColdOnlyAfterCleanup(t *testing.T) {
 	if class != generation.RestoreIntegrity || code != "artifact-digest" {
 		t.Fatalf("integrity result = %s/%s: %v", class, code, err)
 	}
-	if strings.Join(capsules.journal, ",") != "reset" {
+	if strings.Join(capsules.journal, ",") != "reset,reset" {
 		t.Fatalf("integrity failure capsule operations = %v", capsules.journal)
+	}
+}
+
+func TestProcessRestoreEstablishesBoundaryBeforeAdoption(t *testing.T) {
+	root := t.TempDir()
+	imagesRoot := filepath.Join(root, "encrypted")
+	images := filepath.Join(imagesRoot, "images")
+	if err := os.MkdirAll(images, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(images, "inventory.img"), []byte("image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	versionBin := filepath.Join(root, "criu")
+	if err := os.WriteFile(versionBin, []byte("#!/bin/sh\necho 'Version: 4.2'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := digestDirectory(images)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capsules := &fakeCapsules{}
+	checkpoints := ProcessCheckpoints{
+		Capsules: capsules, ImagesRoot: imagesRoot,
+		CRIU: CRIU{
+			Path: versionBin, ImagesRoot: imagesRoot, WorkRoot: filepath.Join(imagesRoot, "work"),
+			RestoreRun: func(_ context.Context, _ string, args ...string) (string, error) {
+				if strings.Join(capsules.journal, ",") != "reset" {
+					t.Fatalf("restore began without an empty capsule boundary: %v", capsules.journal)
+				}
+				for index, arg := range args {
+					if arg == "--pidfile" && index+1 < len(args) {
+						return "", os.WriteFile(args[index+1], []byte("4321\n"), 0o600)
+					}
+				}
+				return "", errors.New("restore pidfile argument missing")
+			},
+		},
+	}
+	result, err := checkpoints.RestoreOrCold(context.Background(), images, digest, "Version: 4.2", []ExternalMount{{Key: "workspace", Path: "/work"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Restored || result.ColdFallback || strings.Join(capsules.journal, ",") != "reset,use-restored:4321" {
+		t.Fatalf("restore result = %+v, capsule operations = %v", result, capsules.journal)
+	}
+}
+
+func TestProcessRestoreRetriesColdStartOnlyAfterCleanup(t *testing.T) {
+	root := t.TempDir()
+	imagesRoot := filepath.Join(root, "encrypted")
+	images := filepath.Join(imagesRoot, "images")
+	if err := os.MkdirAll(images, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(images, "inventory.img"), []byte("image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	versionBin := filepath.Join(root, "criu")
+	if err := os.WriteFile(versionBin, []byte("#!/bin/sh\necho 'Version: 4.2'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := digestDirectory(images)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capsules := &fakeCapsules{startErrors: []error{errors.New("capsule startup raced"), nil}}
+	checkpoints := ProcessCheckpoints{
+		Capsules: capsules, ImagesRoot: imagesRoot,
+		CRIU: CRIU{
+			Path: versionBin, ImagesRoot: imagesRoot, WorkRoot: filepath.Join(imagesRoot, "work"),
+			RestoreRun: func(context.Context, string, ...string) (string, error) {
+				return "", errors.New("unsupported descriptor")
+			},
+		},
+	}
+	result, err := checkpoints.RestoreOrCold(context.Background(), images, digest, "Version: 4.2", []ExternalMount{{Key: "workspace", Path: "/work"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.ColdFallback || !result.ProcessInvalidated {
+		t.Fatalf("fallback result = %+v", result)
+	}
+	if strings.Join(capsules.journal, ",") != "reset,reset,start,reset,start" {
+		t.Fatalf("capsule operations = %v", capsules.journal)
 	}
 }
 
 func TestProcessRestoreCleanupFailureNeverStartsCold(t *testing.T) {
 	capsules := &fakeCapsules{resetErr: errors.New("still populated")}
-	checkpoints := ProcessCheckpoints{Capsules: capsules}
+	checkpoints := ProcessCheckpoints{Capsules: capsules, ImagesRoot: "/encrypted"}
 	checkpoints.CRIU = CRIU{Path: "/missing", ImagesRoot: "/encrypted", WorkRoot: "/encrypted/work"}
 	_, err := checkpoints.RestoreOrCold(context.Background(), "/encrypted/images", "sha256:"+strings.Repeat("0", 64), "Version: 4.2", []ExternalMount{{Key: "workspace", Path: "/work"}}, nil)
 	class, code := generation.RestoreFailureDetails(err)
@@ -243,13 +340,13 @@ func TestCRIUPathDiagnosticsClassifyWithoutDisclosingPaths(t *testing.T) {
 		field string
 		want  string
 	}{
-		"workspace":    {field: "</home/runner/_work/widget/widget/private.txt>", want: "<external:workspace>"},
-		"runner image": {field: "/opt/actions-runner/bin/Runner.Worker", want: "<runner-image>"},
-		"runner home":  {field: "/home/runner/.cache/secret", want: "<external:tool>"},
-		"capsule tmp":  {field: "/tmp/private", want: "<capsule-tmp>"},
-		"guest root":   {field: "/tenant/private/value", want: "<guest-root>"},
-		"relative workspace": {field: "home/runner/_work/widget/widget/private.txt", want: "<external:workspace>"},
-		"relative runner":    {field: "home/runner/_work/_actions/private.txt", want: "<external:tool>"},
+		"workspace":           {field: "</home/runner/_work/widget/widget/private.txt>", want: "<external:workspace>"},
+		"runner image":        {field: "/opt/actions-runner/bin/Runner.Worker", want: "<runner-image>"},
+		"runner home":         {field: "/home/runner/.cache/secret", want: "<external:tool>"},
+		"capsule tmp":         {field: "/tmp/private", want: "<capsule-tmp>"},
+		"guest root":          {field: "/tenant/private/value", want: "<guest-root>"},
+		"relative workspace":  {field: "home/runner/_work/widget/widget/private.txt", want: "<external:workspace>"},
+		"relative runner":     {field: "home/runner/_work/_actions/private.txt", want: "<external:tool>"},
 		"relative guest root": {field: "tenant/private/value", want: "<guest-root>"},
 	} {
 		t.Run(name, func(t *testing.T) {
