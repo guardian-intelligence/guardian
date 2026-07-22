@@ -4,8 +4,9 @@ name: postflight-cli-release
 # (the Kargo promotion PR advancing release/channels.yaml), verifies the full
 # signature chain of the pinned artifact, and publishes a GitHub Release with
 # the binaries and the cosign bundles minted at build time — nothing is
-# re-signed here. Cutting a GitHub Release is distribution to GitHub's own
-# platform, so the workflow's native GITHUB_TOKEN is the entire custody story.
+# re-signed here. The org denies release creation to GITHUB_TOKEN, so the
+# release is cut with a short-lived guardian-promotions App token (the same
+# identity that opens promotion PRs) minted only after the dedup check.
 
 on:
   push:
@@ -40,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
@@ -107,10 +108,17 @@ jobs:
           done
           (cd assets && sha256sum postflight-* > checksums.txt)
 
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        if: steps.pin.outputs.image != '' && steps.dedup.outputs.released == 'false'
+        id: app
+        with:
+          app-id: ${{ secrets.PROMOTIONS_APP_ID }}
+          private-key: ${{ secrets.PROMOTIONS_APP_PRIVATE_KEY }}
+
       - name: Cut the nightly release
         if: steps.pin.outputs.image != '' && steps.dedup.outputs.released == 'false'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
           image="${{ steps.pin.outputs.image }}"
           revision="${{ steps.verify.outputs.revision }}"
