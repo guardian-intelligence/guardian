@@ -98,8 +98,8 @@ data:
           }
         },
         {
-          "clientId": "guardian-cli",
-          "name": "Guardian CLI",
+          "clientId": "postflight-cli",
+          "name": "Postflight CLI",
           "enabled": true,
           "protocol": "openid-connect",
           "publicClient": true,
@@ -302,10 +302,10 @@ data:
         "post.logout.redirect.uris": "https://guardianintelligence.org/postflight"
       }
     }
-  guardian-cli.json: |
+  postflight-cli.json: |
     {
-      "clientId": "guardian-cli",
-      "name": "Guardian CLI",
+      "clientId": "postflight-cli",
+      "name": "Postflight CLI",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": true,
