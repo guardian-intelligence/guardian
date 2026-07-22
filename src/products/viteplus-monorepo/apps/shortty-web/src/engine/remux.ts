@@ -86,11 +86,15 @@ export async function executeRemux(
     await output.cancel();
     return null;
   }
+  // Re-base on the first copied packet, not the requested start: the
+  // keyframe tolerance means they can differ by a few centiseconds, and a
+  // negative first video timestamp desyncs A/V against the zero-clamped
+  // audio track.
+  const baseS = firstVideo.timestamp;
   let firstAdd = true;
   for await (const packet of videoSink.packets(firstVideo)) {
     if (packet.timestamp >= plan.endS) break;
-    // Re-base so the output starts at t=0.
-    const shifted = packet.clone({ timestamp: packet.timestamp - plan.startS });
+    const shifted = packet.clone({ timestamp: packet.timestamp - baseS });
     await videoSource.add(
       shifted,
       firstAdd && videoConfig !== null ? { decoderConfig: videoConfig } : undefined,
@@ -101,12 +105,12 @@ export async function executeRemux(
   if (opened.audioTrack && audioSource !== null) {
     const audioConfig = await opened.audioTrack.getDecoderConfig();
     const audioSink = new EncodedPacketSink(opened.audioTrack);
-    const firstAudio = await audioSink.getPacket(plan.startS);
+    const firstAudio = await audioSink.getPacket(baseS);
     if (firstAudio !== null) {
       let firstAudioAdd = true;
       for await (const packet of audioSink.packets(firstAudio)) {
         if (packet.timestamp >= plan.endS) break;
-        const shifted = packet.clone({ timestamp: Math.max(packet.timestamp - plan.startS, 0) });
+        const shifted = packet.clone({ timestamp: Math.max(packet.timestamp - baseS, 0) });
         await audioSource.add(
           shifted,
           firstAudioAdd && audioConfig !== null ? { decoderConfig: audioConfig } : undefined,
