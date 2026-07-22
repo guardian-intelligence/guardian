@@ -17,7 +17,7 @@ const VERSION: &str = match option_env!("CARGO_PKG_VERSION") {
 };
 
 const DEFAULT_ISSUER: &str = "https://guardianintelligence.org/realms/guardianintelligence.org";
-const DEFAULT_CLIENT_ID: &str = "postflight-cli";
+const DEFAULT_CLIENT_ID: &str = "guardian-cli";
 const DEFAULT_DEVICE_URL: &str = "https://guardianintelligence.org/postflight/device";
 
 #[derive(Parser)]
