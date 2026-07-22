@@ -420,15 +420,23 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				},
 			})
 		}
-		canaryUsername := strings.TrimSpace(env[prefix+"_GITHUB_LOGIN_CANARY_USERNAME"])
-		canaryPassword := env[prefix+"_GITHUB_LOGIN_CANARY_PASSWORD"]
-		canaryTOTP := strings.TrimSpace(env[prefix+"_GITHUB_LOGIN_CANARY_TOTP_SECRET"])
-		if canaryUsername != "" || canaryPassword != "" || canaryTOTP != "" {
+		// login-canary is the org-less returning-user account; org-canary
+		// owns a real GitHub organization for linking journeys.
+		for _, account := range []struct{ envInfix, path string }{
+			{"GITHUB_LOGIN_CANARY", "login-canary-github"},
+			{"GITHUB_ORG_CANARY", "org-canary-github"},
+		} {
+			canaryUsername := strings.TrimSpace(env[prefix+"_"+account.envInfix+"_USERNAME"])
+			canaryPassword := env[prefix+"_"+account.envInfix+"_PASSWORD"]
+			canaryTOTP := strings.TrimSpace(env[prefix+"_"+account.envInfix+"_TOTP_SECRET"])
+			if canaryUsername == "" && canaryPassword == "" && canaryTOTP == "" {
+				continue
+			}
 			if canaryUsername == "" || canaryPassword == "" || canaryTOTP == "" {
-				return nil, fmt.Errorf("%s_GITHUB_LOGIN_CANARY_USERNAME, %s_GITHUB_LOGIN_CANARY_PASSWORD, and %s_GITHUB_LOGIN_CANARY_TOTP_SECRET must be set together", prefix, prefix, prefix)
+				return nil, fmt.Errorf("%[1]s_%[2]s_USERNAME, %[1]s_%[2]s_PASSWORD, and %[1]s_%[2]s_TOTP_SECRET must be set together", prefix, account.envInfix)
 			}
 			writes = append(writes, secretWrite{
-				APIPath: base + "/login-canary-github",
+				APIPath: base + "/" + account.path,
 				Data: map[string]string{
 					"username":    canaryUsername,
 					"password":    canaryPassword,

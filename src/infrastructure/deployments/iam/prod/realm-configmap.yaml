@@ -434,10 +434,12 @@ data:
 # Enrollment into the canary group is config-only: a realm workflow joins a
 # brokered signup to canary-principals when its github_id is in the declared
 # fleet, so no runtime credential exists anywhere in the enrollment chain.
-# github_id:0 matches no GitHub account (real ids start at 1); the workflow
-# ships inert until fleet ids land here via reviewed PR. Workflows are
-# invisible to realm import/export, so the reconciler syncs them through the
-# /workflows API.
+# The fleet: guardian-login-canary-01 (306818769, org-less returning-user
+# account) and postflight-canary-001 (301926735, owns a real GitHub
+# organization for linking journeys). Enrollment fires only at user
+# creation; accounts that predate their fleet entry need a one-time
+# audit-logged group-add. Workflows are invisible to realm import/export,
+# so the reconciler syncs them through the /workflows API.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -454,7 +456,7 @@ data:
     {
       "name": "enroll-canary-principals",
       "on": "user-created",
-      "if": "has-user-attribute(github_id:0)",
+      "if": "has-user-attribute(github_id:306818769) or has-user-attribute(github_id:301926735)",
       "steps": [
         {
           "uses": "join-group",

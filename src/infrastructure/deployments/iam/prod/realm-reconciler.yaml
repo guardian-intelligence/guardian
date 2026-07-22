@@ -17,7 +17,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/realm-config: 058e5488a053fda779d3d1ea7f0ff095ebb387257b5682d5a51130db3a48d456
+        checksum/realm-config: 3036863fdbc103e9d8d0db3d5834649745675ba7e20a47fd2384362951561c43
       labels:
         app.kubernetes.io/name: keycloak-realm-reconciler
         app.kubernetes.io/part-of: guardian
