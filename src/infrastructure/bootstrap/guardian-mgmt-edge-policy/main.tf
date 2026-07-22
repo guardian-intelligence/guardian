@@ -81,3 +81,52 @@ resource "cloudflare_ruleset" "cache_policy" {
     },
   ]
 }
+
+# rumi.engineering (Shortty) carries the same origin-trust posture as the
+# apex: AOP on, strict origin TLS, no Bot Fight Mode (it would challenge the
+# first-party POST beacons), and no edge caching of /api/.
+data "cloudflare_zone" "rumi_engineering" {
+  filter = {
+    name = "rumi.engineering"
+    account = {
+      id = var.cloudflare_account_id
+    }
+  }
+}
+
+resource "cloudflare_authenticated_origin_pulls_settings" "rumi_engineering" {
+  zone_id = data.cloudflare_zone.rumi_engineering.id
+  enabled = true
+}
+
+resource "cloudflare_zone_setting" "rumi_origin_ssl" {
+  zone_id    = data.cloudflare_zone.rumi_engineering.id
+  setting_id = "ssl"
+  value      = "strict"
+}
+
+resource "cloudflare_bot_management" "rumi_engineering" {
+  zone_id    = data.cloudflare_zone.rumi_engineering.id
+  fight_mode = false
+}
+
+resource "cloudflare_ruleset" "rumi_cache_policy" {
+  zone_id = data.cloudflare_zone.rumi_engineering.id
+  name    = "shortty edge cache policy"
+  kind    = "zone"
+  phase   = "http_request_cache_settings"
+
+  rules = [
+    {
+      ref         = "bypass_api_cache"
+      description = "Never edge-cache /api/ (event beacons, RPCs)"
+      expression  = "(starts_with(http.request.uri.path, \"/api/\"))"
+      action      = "set_cache_settings"
+      enabled     = true
+
+      action_parameters = {
+        cache = false
+      }
+    },
+  ]
+}

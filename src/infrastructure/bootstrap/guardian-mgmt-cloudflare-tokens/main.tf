@@ -6,9 +6,11 @@
 # check below turns every routine plan into the renewal reminder.
 
 locals {
-  zone_id          = "c952fb5989d232593ec9cca71030cb58" # guardianintelligence.org
-  account_resource = "com.cloudflare.api.account.${var.cloudflare_account_id}"
-  zone_resource    = "com.cloudflare.api.account.zone.${local.zone_id}"
+  zone_id            = "c952fb5989d232593ec9cca71030cb58" # guardianintelligence.org
+  rumi_zone_id       = "034bf5d0a4ff33b0e9965f50be70d8d0" # rumi.engineering
+  account_resource   = "com.cloudflare.api.account.${var.cloudflare_account_id}"
+  zone_resource      = "com.cloudflare.api.account.zone.${local.zone_id}"
+  rumi_zone_resource = "com.cloudflare.api.account.zone.${local.rumi_zone_id}"
 
   # Stable identifiers from GET /accounts/<id>/tokens/permission_groups.
   permission_groups = {
@@ -69,7 +71,7 @@ resource "cloudflare_account_token" "dns_lb_provisioner" {
         { id = local.permission_groups.load_balancers_read },
         { id = local.permission_groups.load_balancers_write },
       ]
-      resources = jsonencode({ (local.zone_resource) = "*" })
+      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*" })
     },
   ]
 }
@@ -116,7 +118,7 @@ resource "cloudflare_account_token" "edge_policy_provisioner" {
         { id = local.permission_groups.ssl_certificates_write },
         { id = local.permission_groups.firewall_services_write },
       ]
-      resources = jsonencode({ (local.zone_resource) = "*" })
+      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*" })
     },
   ]
 }

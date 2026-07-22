@@ -137,3 +137,51 @@ check "cloudflare_load_balancer_origins" {
     error_message = "Cloudflare Load Balancing must publish all three guardian-mgmt ASH control-plane origins."
   }
 }
+
+# rumi.engineering — the Shortty product edge. Proxied A records straight to
+# the three ASH origins: no Cloudflare Load Balancer for this zone, so there
+# is no per-request origin health steering — an origin outage surfaces as
+# 1/3 of requests erroring until the record set is amended. Accepted for a
+# free product surface; upgrade to a Load Balancer when the traffic warrants
+# the per-zone spend.
+data "cloudflare_zone" "rumi_engineering" {
+  filter = {
+    name = "rumi.engineering"
+    account = {
+      id = var.cloudflare_account_id
+    }
+  }
+}
+
+resource "cloudflare_dns_record" "rumi_engineering_apex" {
+  for_each = local.public_ingress_origins
+
+  zone_id = data.cloudflare_zone.rumi_engineering.id
+  name    = "rumi.engineering"
+  type    = "A"
+  content = each.value.public_ipv4
+  ttl     = 1
+  proxied = true
+  comment = "shortty ${each.key} product edge"
+}
+
+# CAA policy for the zone, owned here rather than inherited from its
+# pre-Guardian life: Cloudflare edge certificates issue via Google Trust
+# Services or Let's Encrypt; nothing else may issue for this zone.
+resource "cloudflare_dns_record" "rumi_engineering_caa" {
+  for_each = {
+    letsencrypt = "letsencrypt.org"
+    google      = "pki.goog"
+  }
+
+  zone_id = data.cloudflare_zone.rumi_engineering.id
+  name    = "rumi.engineering"
+  type    = "CAA"
+  ttl     = 1
+  data = {
+    flags = 0
+    tag   = "issue"
+    value = each.value
+  }
+  comment = "shortty edge certificate issuance policy"
+}
