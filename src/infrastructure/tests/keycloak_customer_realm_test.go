@@ -484,6 +484,8 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		"realm reconciler must have a generated steady-state client secret")
 	assertTextContains(t, string(secrets), `name: keycloak-canary-janitor-client`,
 		"canary janitor must have a generated steady-state client secret")
+	assertTextContains(t, string(secrets), `keycloak/org-canary-github`,
+		"the org-owning canary account credentials must resolve from OpenBao")
 	assertTextNotContains(t, string(secrets), `keycloak-admin-bootstrap`,
 		"temporary Keycloak bootstrap administrators must not be steady-state secrets")
 

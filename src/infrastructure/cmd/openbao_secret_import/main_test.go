@@ -276,6 +276,34 @@ func TestImportPlanGitHubLoginCanary(t *testing.T) {
 	}
 }
 
+func TestImportPlanGitHubOrgCanary(t *testing.T) {
+	env := testImportEnv()
+	env["PROD_GITHUB_ORG_CANARY_USERNAME"] = "postflight-canary-001"
+	env["PROD_GITHUB_ORG_CANARY_PASSWORD"] = "org-canary-pass"
+	env["PROD_GITHUB_ORG_CANARY_TOTP_SECRET"] = "JBSWY3DPEHPK3PXP"
+
+	plan, err := importPlan(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPath := map[string]secretWrite{}
+	for _, w := range plan {
+		byPath[w.APIPath] = w
+	}
+	canary, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-prod/keycloak/org-canary-github"]
+	if !ok {
+		t.Fatal("prod org-canary-github write missing")
+	}
+	if canary.Data["username"] != "postflight-canary-001" || canary.Data["password"] != "org-canary-pass" {
+		t.Fatalf("org-canary-github data = %#v", canary.Data)
+	}
+
+	delete(env, "PROD_GITHUB_ORG_CANARY_TOTP_SECRET")
+	if _, err := importPlan(env); err == nil {
+		t.Fatal("importPlan accepted incomplete org-canary credentials")
+	}
+}
+
 func TestImportPlanMissingRequired(t *testing.T) {
 	_, err := importPlan(map[string]string{})
 	if err == nil {
