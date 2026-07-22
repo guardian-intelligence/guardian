@@ -18,8 +18,10 @@ import (
 // real implementation.
 type rootDisks interface {
 	// Ensure makes the dataset exist as a clone of image and its block
-	// device usable. Idempotent.
-	Ensure(ctx context.Context, dataset, image string) error
+	// device usable. The returned path is the canonical whole-disk device;
+	// callers must pin it instead of following a mutable udev symlink later.
+	// Idempotent.
+	Ensure(ctx context.Context, dataset, image string) (string, error)
 	// Destroy removes the dataset and its snapshots; absent datasets
 	// succeed. It absorbs the post-detach window where the kernel still
 	// holds the zvol open.
@@ -46,10 +48,10 @@ func (zfsDisks) run(ctx context.Context, args ...string) (string, string, error)
 }
 
 // Ensure implements rootDisks.
-func (d zfsDisks) Ensure(ctx context.Context, dataset, image string) error {
+func (d zfsDisks) Ensure(ctx context.Context, dataset, image string) (string, error) {
 	if _, _, err := d.run(ctx, "list", "-H", "-o", "name", dataset); err != nil {
 		if _, stderr, err := d.run(ctx, "clone", "-o", "volmode=dev", image, dataset); err != nil {
-			return fmt.Errorf("vm: cloning %s from %s: %s: %w", dataset, image, strings.TrimSpace(stderr), err)
+			return "", fmt.Errorf("vm: cloning %s from %s: %s: %w", dataset, image, strings.TrimSpace(stderr), err)
 		}
 	}
 	return d.waitDevice(ctx, dataset)
@@ -58,26 +60,29 @@ func (d zfsDisks) Ensure(ctx context.Context, dataset, image string) error {
 // waitDevice blocks until the zvol's device node exists and reports the full
 // volume size — the node appears via udev noticeably after the clone
 // returns, and briefly with a stale size.
-func (d zfsDisks) waitDevice(ctx context.Context, dataset string) error {
+func (d zfsDisks) waitDevice(ctx context.Context, dataset string) (string, error) {
 	out, stderr, err := d.run(ctx, "get", "-Hp", "-o", "value", "volsize", dataset)
 	if err != nil {
-		return fmt.Errorf("vm: reading volsize of %s: %s: %w", dataset, strings.TrimSpace(stderr), err)
+		return "", fmt.Errorf("vm: reading volsize of %s: %s: %w", dataset, strings.TrimSpace(stderr), err)
 	}
 	volsize, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
 	if err != nil {
-		return fmt.Errorf("vm: parsing volsize of %s: %w", dataset, err)
+		return "", fmt.Errorf("vm: parsing volsize of %s: %w", dataset, err)
 	}
 	device := zvolDevicePath(dataset)
 	deadline := time.Now().Add(zvolDeviceWait)
 	for {
-		if size, err := blockDeviceSize(device); err == nil && size == volsize {
-			return nil
+		resolved, resolveErr := resolveWholeBlockDevice(device, "/sys/class/block")
+		if resolveErr == nil {
+			if size, sizeErr := blockDeviceSize(resolved, "/sys/class/block"); sizeErr == nil && size == volsize {
+				return resolved, nil
+			}
 		}
 		if err := ctx.Err(); err != nil {
-			return err
+			return "", err
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("vm: device %s never became usable", device)
+			return "", fmt.Errorf("vm: device %s never became usable", device)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -110,14 +115,44 @@ func (d zfsDisks) Destroy(ctx context.Context, dataset string) error {
 
 func zvolDevicePath(dataset string) string { return "/dev/zvol/" + dataset }
 
-// blockDeviceSize resolves a (possibly symlinked) block device and reads its
-// size from sysfs.
-func blockDeviceSize(device string) (int64, error) {
+// resolveWholeBlockDevice pins the kernel device behind a zvol link. Ubuntu
+// 24.04's zvol_id reports the dataset name for both a zvol and partition 16,
+// so concurrent udev events can point /dev/zvol/<dataset> at zdXp16 after the
+// initial whole-disk event. In that case the partition's sysfs parent is the
+// canonical zvol device.
+func resolveWholeBlockDevice(device, sysClassBlock string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(device)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	raw, err := os.ReadFile("/sys/class/block/" + filepath.Base(resolved) + "/size")
+	entry := filepath.Join(sysClassBlock, filepath.Base(resolved))
+	if _, err := os.Stat(filepath.Join(entry, "partition")); err == nil {
+		realEntry, err := filepath.EvalSymlinks(entry)
+		if err != nil {
+			return "", err
+		}
+		parent := filepath.Base(filepath.Dir(realEntry))
+		if parent == "." || parent == string(filepath.Separator) || parent == filepath.Base(resolved) {
+			return "", fmt.Errorf("vm: partition device %s has no whole-disk parent", resolved)
+		}
+		resolved = filepath.Join(filepath.Dir(resolved), parent)
+		entry = filepath.Join(sysClassBlock, parent)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	if _, err := os.Stat(filepath.Join(entry, "partition")); err == nil {
+		return "", fmt.Errorf("vm: resolved root device %s is still a partition", resolved)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	if _, err := os.Stat(resolved); err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
+func blockDeviceSize(device, sysClassBlock string) (int64, error) {
+	raw, err := os.ReadFile(filepath.Join(sysClassBlock, filepath.Base(device), "size"))
 	if err != nil {
 		return 0, err
 	}

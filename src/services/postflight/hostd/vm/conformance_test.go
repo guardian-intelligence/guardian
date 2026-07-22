@@ -195,15 +195,15 @@ func TestConformanceLifecycle(t *testing.T) {
 
 	// A real workspace: a zvol clone of the golden snapshot.
 	workspace := driver.cfg.DatasetRoot + "/ws-conf-lifecycle"
-	if err := driver.disks.Ensure(ctx, workspace, driver.cfg.Classes[testClass].Image); err != nil {
+	if _, err := driver.disks.Ensure(ctx, workspace, driver.cfg.Classes[testClass].Image); err != nil {
 		t.Fatalf("cloning workspace: %v", err)
 	}
 	process := driver.cfg.DatasetRoot + "/process-conf-lifecycle"
-	if err := driver.disks.Ensure(ctx, process, driver.cfg.Classes[testClass].Image); err != nil {
+	if _, err := driver.disks.Ensure(ctx, process, driver.cfg.Classes[testClass].Image); err != nil {
 		t.Fatalf("cloning process volume: %v", err)
 	}
 	tool := driver.cfg.DatasetRoot + "/tool-conf-lifecycle"
-	if err := driver.disks.Ensure(ctx, tool, driver.cfg.Classes[testClass].Image); err != nil {
+	if _, err := driver.disks.Ensure(ctx, tool, driver.cfg.Classes[testClass].Image); err != nil {
 		t.Fatalf("cloning tool volume: %v", err)
 	}
 	preparation := Preparation{MemberID: "member-conf", JITConfig: "jit-blob"}
@@ -334,7 +334,7 @@ func TestConformanceAdoption(t *testing.T) {
 	waitFor(t, "QMP reports running", 60*time.Second, vmRunningViaQMP(ctx, first, id))
 
 	workspace := first.cfg.DatasetRoot + "/ws-conf-adopt"
-	if err := first.disks.Ensure(ctx, workspace, first.cfg.Classes[testClass].Image); err != nil {
+	if _, err := first.disks.Ensure(ctx, workspace, first.cfg.Classes[testClass].Image); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = first.disks.Destroy(context.Background(), workspace) })
