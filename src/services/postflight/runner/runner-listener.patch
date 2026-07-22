@@ -13,7 +13,7 @@ index e20eb62..8ca004d 100644
                                      // Dispatch
 +                                    await PublishPostflightAssignmentAsync(messageRef.RunnerRequestId, jobRequestMessage, settings, messageQueueLoopTokenSource.Token);
                                      jobDispatcher.Run(jobRequestMessage, runOnce);
-@@ -886,0 +891,80 @@ namespace GitHub.Runner.Listener
+@@ -886,0 +891,96 @@ namespace GitHub.Runner.Listener
 +        private async Task PublishPostflightAssignmentAsync(
 +            string requestId,
 +            Pipelines.AgentJobRequestMessage jobMessage,
@@ -49,6 +49,21 @@ index e20eb62..8ca004d 100644
 +                throw new InvalidOperationException($"Postflight assignment is missing {key}");
 +            }
 +
++            string JobContextNumber(string key)
++            {
++                if (jobMessage.ContextData != null &&
++                    jobMessage.ContextData.TryGetValue("job", out var context) &&
++                    context is Pipelines.ContextData.DictionaryContextData job &&
++                    job.TryGetValue(key, out var value) &&
++                    value is Pipelines.ContextData.NumberContextData number &&
++                    number.Value > 0)
++                {
++                    return Convert.ToInt64(number.Value).ToString(CultureInfo.InvariantCulture);
++                }
++
++                throw new InvalidOperationException($"Postflight assignment is missing job.{key}");
++            }
++
 +            var startInfo = new ProcessStartInfo("/usr/local/bin/guestd")
 +            {
 +                UseShellExecute = false,
@@ -58,6 +73,7 @@ index e20eb62..8ca004d 100644
 +                "runner-assigned",
 +                requestId,
 +                jobMessage.JobId.ToString("D"),
++                JobContextNumber("check_run_id"),
 +                settings.AgentName,
 +                GitHubContext("run_id"),
 +                GitHubContext("run_attempt"),

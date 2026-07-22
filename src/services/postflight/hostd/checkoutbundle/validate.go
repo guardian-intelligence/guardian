@@ -9,7 +9,7 @@ import (
 
 var (
 	errInvalid   = errors.New("checkout request is invalid")
-	errForbidden = errors.New("checkout request is not permitted for this lease")
+	errForbidden = errors.New("checkout request is not permitted for this assignment")
 
 	shaPattern = regexp.MustCompile(`\A[0-9a-f]{40}\z`)
 )
@@ -30,15 +30,14 @@ type checkoutSpec struct {
 	GitHubToken string
 }
 
-// validateRequest normalizes the body and enforces the lease boundary: the
-// request may only name the repository the lease was issued for.
-func validateRequest(req bundleRequest, identity LeaseIdentity) (checkoutSpec, error) {
+// validateRequest normalizes the body and enforces the assignment boundary.
+func validateRequest(req bundleRequest, identity AssignmentIdentity) (checkoutSpec, error) {
 	repository, err := normalizeRepository(req.Repository)
 	if err != nil {
 		return checkoutSpec{}, err
 	}
 	if !strings.EqualFold(repository, strings.TrimSpace(identity.RepositoryFullName)) {
-		return checkoutSpec{}, fmt.Errorf("%w: repository does not match the lease", errForbidden)
+		return checkoutSpec{}, fmt.Errorf("%w: repository does not match the assignment", errForbidden)
 	}
 	sha, err := normalizeSHA(req.SHA)
 	if err != nil {

@@ -1,82 +1,43 @@
 package main
 
-// The stage-(b) end-to-end proof: the REAL control plane (this package's
-// HTTP mux, worker, and scheduler over a real PostgreSQL) exchanging syncs
-// with the REAL hostd agent (its fake vm/zvol drivers standing in for the
-// substrate) across real HTTP. Webhook demand in, runner exit out:
-//
-//	webhook(queued) -> delivery worker -> demand_recorded -> scheduler
-//	  -> lease + CAS slot claim + JIT mint (fake GitHub) -> sync delivers
-//	  desired lease -> hostd materializes/assigns/reports -> ready ->
-//	  exited -> control plane completes, frees the slot, acks the terminal
-//	  lease by omission -> hostd collects everything.
-
 import (
-	"bytes"
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/controlplane/pgtest"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/agent"
-	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
 
 const (
-	e2eClass          = "postflight-4cpu-ubuntu-2404"
+	e2eClass          = "postflight-4-ubuntu-24.04-github-confidential"
 	e2eRepo           = "acme/widget"
-	e2eRepoID         = int64(4242)
 	e2eInstallationID = int64(123)
+	e2eRepositoryID   = int64(4242)
 	e2eRunID          = int64(777)
 	e2eJobID          = int64(9001)
+	e2eCheckRunID     = int64(8001)
 	e2eSyncSecret     = "e2e-sync-secret"
-	e2eWebhookSecret  = "e2e-webhook-secret"
 	e2eJITBlob        = "e2e-encoded-jit-config"
 )
-
-// fakeGitHub scripts the GitHub API surface the loop touches: token mint,
-// run + attempt-jobs reads for the worker, and the JIT config mint for the
-// scheduler. Runs and jobs are mutable so a test can move a job to its
-// terminal conclusion and let the refresh path observe it as API truth.
-type fakeGitHub struct {
-	t *testing.T
-
-	mu       sync.Mutex
-	jitMints []jitMintRequest
-	jobs     map[int64]*fakeGitHubJob
-}
-
-type fakeGitHubJob struct {
-	ID         int64
-	RunID      int64
-	Name       string
-	Status     string
-	Conclusion string
-	RunnerID   int64
-	RunnerName string
-}
 
 type jitMintRequest struct {
 	Name          string   `json:"name"`
@@ -84,101 +45,36 @@ type jitMintRequest struct {
 	Labels        []string `json:"labels"`
 }
 
-// addQueuedJob registers a queued job (and implicitly its push run).
-func (f *fakeGitHub) addQueuedJob(runID, jobID int64, name string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.jobs[jobID] = &fakeGitHubJob{ID: jobID, RunID: runID, Name: name, Status: "queued"}
+type fakeGitHub struct {
+	mu    sync.Mutex
+	mints []jitMintRequest
 }
 
-// assignJob records GitHub's authoritative runner selection as returned by
-// the attempt-jobs API.
-func (f *fakeGitHub) assignJob(jobID int64, runnerName string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.jobs[jobID].Status = "in_progress"
-	f.jobs[jobID].RunnerID = 7
-	f.jobs[jobID].RunnerName = runnerName
-}
-
-// concludeJob moves a job to completed with the given conclusion.
-func (f *fakeGitHub) concludeJob(jobID int64, conclusion string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.jobs[jobID].Status = "completed"
-	f.jobs[jobID].Conclusion = conclusion
-}
-
-func (f *fakeGitHub) jobJSON(j *fakeGitHubJob) map[string]any {
-	return map[string]any{
-		"id": j.ID, "run_id": j.RunID, "run_attempt": 1,
-		"name": j.Name, "status": j.Status, "conclusion": j.Conclusion,
-		"labels":      []string{e2eClass},
-		"runner_id":   j.RunnerID,
-		"runner_name": j.RunnerName,
-		"head_sha":    "abc123", "head_branch": "main", "workflow_name": "ci",
-	}
-}
-
-func (f *fakeGitHub) handler() http.Handler {
+func (f *fakeGitHub) handler(t *testing.T) http.Handler {
+	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc(fmt.Sprintf("POST /app/installations/%d/access_tokens", e2eInstallationID),
-		func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]string{"token": "e2e-installation-token"})
+	mux.HandleFunc(fmt.Sprintf("POST /app/installations/%d/access_tokens", e2eInstallationID), func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]string{"token": "installation-token"})
+	})
+	mux.HandleFunc("POST /orgs/acme/actions/runners/generate-jitconfig", func(w http.ResponseWriter, r *http.Request) {
+		var request jitMintRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode JIT request: %v", err)
+		}
+		f.mu.Lock()
+		f.mints = append(f.mints, request)
+		f.mu.Unlock()
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"runner": map[string]any{"id": 7}, "encoded_jit_config": e2eJITBlob,
 		})
-	mux.HandleFunc(fmt.Sprintf("GET /repos/%s/actions/runs/{run}", e2eRepo),
-		func(w http.ResponseWriter, r *http.Request) {
-			runID, _ := strconv.ParseInt(r.PathValue("run"), 10, 64)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": runID, "event": "push", "path": ".github/workflows/ci.yml",
-				"head_branch": "main", "head_sha": "abc123",
-				"run_attempt": 1, "pull_requests": []any{},
-				"head_repository": map[string]any{"full_name": e2eRepo},
-			})
-		})
-	mux.HandleFunc(fmt.Sprintf("GET /repos/%s/actions/runs/{run}/attempts/1/jobs", e2eRepo),
-		func(w http.ResponseWriter, r *http.Request) {
-			runID, _ := strconv.ParseInt(r.PathValue("run"), 10, 64)
-			f.mu.Lock()
-			jobs := []map[string]any{}
-			for _, j := range f.jobs {
-				if j.RunID == runID {
-					jobs = append(jobs, f.jobJSON(j))
-				}
-			}
-			f.mu.Unlock()
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"total_count": len(jobs),
-				"jobs":        jobs,
-			})
-		})
-	mux.HandleFunc("POST /orgs/acme/actions/runners/generate-jitconfig",
-		func(w http.ResponseWriter, r *http.Request) {
-			var mint jitMintRequest
-			if err := json.NewDecoder(r.Body).Decode(&mint); err != nil {
-				f.t.Errorf("jitconfig mint: %v", err)
-			}
-			f.mu.Lock()
-			f.jitMints = append(f.jitMints, mint)
-			f.mu.Unlock()
-			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"runner":             map[string]any{"id": 7},
-				"encoded_jit_config": e2eJITBlob,
-			})
-		})
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		f.t.Errorf("fake github: unexpected %s %s", r.Method, r.URL.Path)
+		t.Errorf("unexpected GitHub request %s %s", r.Method, r.URL.Path)
 		http.NotFound(w, r)
 	})
 	return mux
-}
-
-func (f *fakeGitHub) mints() []jitMintRequest {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]jitMintRequest(nil), f.jitMints...)
 }
 
 func testRSAKeyPEM(t *testing.T) string {
@@ -187,23 +83,18 @@ func testRSAKeyPEM(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(key),
-	}))
+	return string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
 }
 
-// controlPlane is the assembled system under test.
-type controlPlane struct {
+type e2eControlPlane struct {
 	pool   *pgxpool.Pool
 	server *httptest.Server
 	github *fakeGitHub
 }
 
-func startControlPlane(t *testing.T) *controlPlane {
+func startE2EControlPlane(t *testing.T) *e2eControlPlane {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-
 	pool, err := pgxpool.New(ctx, pgtest.Start(t))
 	if err != nil {
 		cancel()
@@ -214,95 +105,118 @@ func startControlPlane(t *testing.T) *controlPlane {
 		cancel()
 		t.Fatal(err)
 	}
+	seedE2EJob(t, pool)
 
-	github := &fakeGitHub{t: t, jobs: map[int64]*fakeGitHubJob{}}
-	github.addQueuedJob(e2eRunID, e2eJobID, "build")
-	githubServer := httptest.NewServer(github.handler())
+	fake := &fakeGitHub{}
+	githubServer := httptest.NewServer(fake.handler(t))
 	t.Cleanup(githubServer.Close)
-
 	cfg := config{
-		appID:              1,
-		webhookSecret:      e2eWebhookSecret,
-		privateKeyPEM:      testRSAKeyPEM(t),
-		apiBaseURL:         githubServer.URL,
-		runnerClassPrefix:  "postflight-",
-		workerInterval:     25 * time.Millisecond,
-		workerBatchSize:    16,
-		maxDeliveryTries:   8,
-		hostdSyncSecret:    e2eSyncSecret,
-		schedulerEnabled:   true,
-		schedulerInterval:  25 * time.Millisecond,
-		allocateTimeout:    10 * time.Second,
-		assignmentTimeout:  90 * time.Second,
-		sealTimeout:        10 * time.Second,
-		verdictTimeout:     time.Hour,
-		hostOfflineTimeout: 5 * time.Minute,
+		appID: 1, webhookSecret: "unused", privateKeyPEM: testRSAKeyPEM(t),
+		apiBaseURL: githubServer.URL, runnerClassPrefix: "postflight-",
+		workerInterval: time.Hour, workerBatchSize: 16, maxDeliveryTries: 8,
+		hostdSyncSecret: e2eSyncSecret, schedulerEnabled: true,
+		schedulerInterval: 10 * time.Millisecond, runnerPoolSize: 2, sealTimeout: 10 * time.Second,
+		verdictTimeout: time.Hour, hostOfflineTimeout: time.Minute,
 	}
-	gh, err := newGitHubClient(cfg)
+	client, err := newGitHubClient(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := &pgStore{pool: pool}
+	store := &pgStore{pool: pool}
 	tracer := noop.NewTracerProvider().Tracer("e2e")
-	ws := &webhookServer{secret: []byte(cfg.webhookSecret), inbox: st, tracer: tracer, now: time.Now}
-
-	server := httptest.NewServer(buildMux(cfg, st, ws, tracer))
+	webhook := &webhookServer{secret: []byte("unused"), inbox: store, tracer: tracer, now: time.Now}
+	server := httptest.NewServer(buildMux(cfg, store, webhook, tracer))
 	t.Cleanup(server.Close)
-
-	var loops sync.WaitGroup
-	loops.Add(2)
+	done := make(chan struct{})
 	go func() {
-		defer loops.Done()
-		(&worker{st: st, gh: gh, cfg: cfg, tracer: tracer}).run(ctx)
+		defer close(done)
+		(&scheduler{st: store, gh: client, cfg: cfg, tracer: tracer}).run(ctx)
 	}()
-	go func() {
-		defer loops.Done()
-		(&scheduler{st: st, gh: gh, cfg: cfg, tracer: tracer}).run(ctx)
-	}()
-	// Registered after the pool's Close so it runs first: the loops drain
-	// before the database goes away under them.
 	t.Cleanup(func() {
 		cancel()
-		loops.Wait()
+		<-done
 	})
-
-	return &controlPlane{pool: pool, server: server, github: github}
+	return &e2eControlPlane{pool: pool, server: server, github: fake}
 }
 
-// startHostd runs the real agent loop over fake substrate against the
-// control plane's HTTP server, with a pump that boots pool VMs the instant
-// they launch (the only substrate transition hostd cannot observe on its
-// own; runner readiness and exit stay in the test's hands).
-func startHostd(t *testing.T, origin, hostID string) (*agent.Agent, *vm.Fake, *zvol.Fake) {
+func seedE2EJob(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+INSERT INTO github_workflow_jobs (
+    provider_job_id, provider_run_id, provider_run_attempt,
+    provider_repository_id, provider_installation_id, repository_full_name,
+    name, status, labels_json, runner_class, head_branch, check_run_id
+) VALUES ($1, $2, 1, $3, $4, $5, 'build', 'queued', $6::jsonb, $7, 'main', $8)`,
+		e2eJobID, e2eRunID, e2eRepositoryID, e2eInstallationID, e2eRepo,
+		`["`+e2eClass+`"]`, e2eClass, e2eCheckRunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO github_provider_demands (
+    provider_job_id, provider_installation_id, provider_repository_id,
+    repository_full_name, provider_run_id, provider_run_attempt,
+    trust_class, runner_class, state
+) VALUES ($1, $2, $3, $4, $5, 1, $6, $7, 'demand_recorded')`,
+		e2eJobID, e2eInstallationID, e2eRepositoryID, e2eRepo, e2eRunID,
+		trustClassPR, e2eClass); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func startE2EHost(t *testing.T, origin string) (*agent.Agent, *vm.Fake, *zvol.Fake, context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	zvols := zvol.NewFake()
+	volumes := zvol.NewFake()
 	vms := vm.NewFake()
-	setAttached := func(device string, attached bool) {
-		if i := strings.LastIndex(device, "/ws/"); i >= 0 {
-			zvols.SetAttached(zvol.LeaseID(device[i+len("/ws/"):]), attached)
+	vms.Images[e2eClass] = "golden"
+	vms.OnAttach = func(device string) {
+		index := strings.LastIndex(device, "/ws/")
+		if index < 0 {
+			return
+		}
+		id := zvol.AssignmentID(device[index+len("/ws/"):])
+		switch {
+		case strings.Contains(device[:index], "/process-state"):
+			volumes.SetProcessAttached(id, true)
+		case strings.Contains(device[:index], "/tool-state"):
+			volumes.SetToolAttached(id, true)
+		default:
+			volumes.SetAttached(id, true)
 		}
 	}
-	vms.OnAttach = func(device string) { setAttached(device, true) }
-	vms.OnDetach = func(device string) { setAttached(device, false) }
-
+	vms.OnDetach = func(device string) {
+		index := strings.LastIndex(device, "/ws/")
+		if index < 0 {
+			return
+		}
+		id := zvol.AssignmentID(device[index+len("/ws/"):])
+		volumes.SetAttached(id, false)
+		volumes.SetProcessAttached(id, false)
+		volumes.SetToolAttached(id, false)
+	}
 	instance, err := agent.New(agent.Config{
-		HostID:              hostID,
-		ControlPlaneOrigin:  origin,
-		Slots:               map[vm.Class]int{e2eClass: 2},
-		SyncInterval:        25 * time.Millisecond,
-		CheckoutGuestOrigin: "http://198.51.100.1:8480",
-	}, zvols, vms, e2eSyncSecret, []byte("0123456789abcdef0123456789abcdef"), agent.Options{
+		HostID: "host-e2e", ControlPlaneOrigin: origin,
+		Slots: map[vm.Class]int{e2eClass: 2}, Images: map[vm.Class]string{e2eClass: "golden"},
+		SyncInterval: 20 * time.Millisecond, CheckoutGuestOrigin: "http://198.51.100.1:8480",
+	}, volumes, vms, e2eSyncSecret, make([]byte, 32), agent.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = instance.Run(ctx) }()
+	done := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(5 * time.Millisecond)
+		defer close(done)
+		_ = instance.Run(ctx)
+	}()
+	stop := func() {
+		cancel()
+		<-done
+	}
+	t.Cleanup(stop)
+	go func() {
+		ticker := time.NewTicker(2 * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			select {
@@ -310,463 +224,493 @@ func startHostd(t *testing.T, origin, hostID string) (*agent.Agent, *vm.Fake, *z
 				return
 			case <-ticker.C:
 			}
-			statuses, err := vms.List(ctx)
-			if err != nil {
-				continue
-			}
+			statuses, _ := vms.List(ctx)
 			for _, status := range statuses {
-				if status.Phase == vm.PhaseBooting {
+				switch status.Phase {
+				case vm.PhaseBooting:
 					vms.AdvanceBoot(status.ID)
+				case vm.PhaseAssigned:
+					vms.MarkListening(status.ID)
 				}
 			}
 		}
 	}()
-	return instance, vms, zvols
+	return instance, vms, volumes, stop
 }
 
-func waitFor(t *testing.T, what string, cond func() bool) {
+func waitFor(t *testing.T, description string, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		if cond() {
+		if condition() {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for %s", what)
+	t.Fatalf("timed out waiting for %s", description)
 }
 
-func (cp *controlPlane) queryString(t *testing.T, sql string, args ...any) string {
+func queryString(t *testing.T, pool *pgxpool.Pool, query string, args ...any) string {
 	t.Helper()
-	var out string
-	if err := cp.pool.QueryRow(context.Background(), sql, args...).Scan(&out); err != nil {
+	var value string
+	if err := pool.QueryRow(context.Background(), query, args...).Scan(&value); err != nil {
 		return ""
 	}
-	return out
+	return value
 }
 
-func (cp *controlPlane) postWebhook(t *testing.T, deliveryID string, payload []byte) {
-	t.Helper()
-	mac := hmac.New(sha256.New, []byte(e2eWebhookSecret))
-	mac.Write(payload)
-	req, err := http.NewRequest(http.MethodPost, cp.server.URL+"/api/v1/github/webhooks", bytes.NewReader(payload))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-GitHub-Event", "workflow_job")
-	req.Header.Set("X-GitHub-Delivery", deliveryID)
-	req.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("webhook responded %d: %s", resp.StatusCode, body)
-	}
-}
+func TestWarmPoolLocalAssignmentAndRecoverableRestoreEndToEnd(t *testing.T) {
+	control := startE2EControlPlane(t)
+	host, vms, volumes, _ := startE2EHost(t, control.server.URL)
 
-func workflowJobEventPayload(action string, runID, jobID int64, status string) []byte {
-	payload, _ := json.Marshal(map[string]any{
-		"action":       action,
-		"installation": map[string]any{"id": e2eInstallationID},
-		"repository":   map[string]any{"id": e2eRepoID, "full_name": e2eRepo},
-		"workflow_job": map[string]any{
-			"id": jobID, "run_id": runID, "run_attempt": 1,
-			"name": "build", "status": status, "labels": []string{e2eClass},
-			"head_sha": "abc123", "head_branch": "main", "workflow_name": "ci",
-		},
+	waitFor(t, "two registered listeners", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening'`) == "2"
 	})
-	return payload
-}
-
-func queuedJobPayload() []byte {
-	return workflowJobEventPayload("queued", e2eRunID, e2eJobID, "queued")
-}
-
-func completeLocalAssignment(
-	t *testing.T,
-	vms *vm.Fake,
-	vmID vm.ID,
-	listenerLease string,
-	executionLease string,
-	runID int64,
-	jobID int64,
-) vm.Rendezvous {
-	t.Helper()
-	identity := vm.JobIdentity{
-		RunID:       strconv.FormatInt(runID, 10),
-		RunAttempt:  1,
-		RunnerName:  listenerLease,
-		Repository:  e2eRepo,
-		WorkflowJob: "build",
+	const sourceGeneration = "generation-source"
+	const sourceProcessDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	scopeID, err := (&pgStore{pool: control.pool}).EnsureWorkspaceScope(context.Background(), workspaceScopeKey{
+		Org: "acme", Repo: "widget", ScopeRef: "main", WorkflowPath: ".github/workflows/ci.yml",
+		JobName: "build", RunnerClass: e2eClass,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	requestID := "request-" + strconv.FormatInt(jobID, 10)
-	if !vms.MarkAssigned(vmID, vm.Assignment{
-		RequestID:      requestID,
-		JobID:          "runner-job-" + strconv.FormatInt(jobID, 10),
-		RunnerName:     listenerLease,
-		JobDisplayName: "build",
-		Identity:       identity,
+	if _, err := control.pool.Exec(context.Background(), `UPDATE github_provider_demands SET workspace_scope_id = $2::uuid WHERE provider_job_id = $1`, e2eJobID, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(context.Background(), `
+INSERT INTO workspace_generations (
+    generation, host_id, runner_class, state, scope_id, process_digest, criu_version,
+    sealed_at
+) VALUES ($1, 'host-e2e', $2, 'committed', $3::uuid, $4, 'Version: 4.2', now())`, sourceGeneration, e2eClass, scopeID, sourceProcessDigest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(context.Background(), `
+UPDATE workspace_scopes SET current_generation_id = $1, home_host_id = 'host-e2e'
+WHERE scope_id = $2::uuid`, sourceGeneration, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	volumes.SeedGeneration(sourceGeneration, 1<<30)
+	statuses, err := vms.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected vm.Status
+	for _, status := range statuses {
+		if status.Phase == vm.PhaseListening {
+			selected = status
+			break
+		}
+	}
+	if selected.ID == "" {
+		t.Fatal("no listening VM")
+	}
+	runnerName := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, selected.Incarnation)
+	if runnerName == "" {
+		t.Fatal("pool member has no runner name")
+	}
+	if len(control.github.mints) != 2 {
+		t.Fatalf("JIT mints = %+v", control.github.mints)
+	}
+	if len(host.Snapshot()) != 0 {
+		t.Fatal("job assignment exists before GitHub selected a listener")
+	}
+
+	identity := vm.JobIdentity{
+		RunID: "777", RunAttempt: 1, RunnerName: runnerName,
+		Repository: e2eRepo, WorkflowJob: "build",
+	}
+	if !vms.MarkAssigned(selected.ID, vm.Assignment{
+		RequestID: "request-9001", JobID: "protocol-job-9001", CheckRunID: e2eCheckRunID, RunnerName: runnerName,
+		JobDisplayName: "build", Identity: identity,
+		Timing: []vm.TimingPoint{{
+			Event: "runner_assignment_received", Source: "runner-listener", BootID: "guest-boot",
+			Sequence: 1, MonotonicNS: 100, UnixNS: time.Now().UnixNano(),
+		}},
 	}) {
-		t.Fatalf("listener %s did not observe local assignment for execution %s", listenerLease, executionLease)
+		t.Fatal("local listener did not accept assignment")
 	}
 	var rendezvous vm.Rendezvous
-	waitFor(t, "hostd binding the locally assigned workspace", func() bool {
+	waitFor(t, "rendezvous", func() bool {
 		var found bool
-		rendezvous, found = vms.RendezvousFor(vmID)
+		rendezvous, found = vms.RendezvousFor(selected.ID)
 		return found
 	})
-	if rendezvous.Lease != listenerLease || rendezvous.WorkspaceDevice == "" {
-		t.Fatalf("listener %s rendezvous = %+v, want physical listener lease", listenerLease, rendezvous)
+	if rendezvous.MemberID != selected.Incarnation || rendezvous.AssignmentID == "" {
+		t.Fatalf("rendezvous = %+v", rendezvous)
 	}
-	if !vms.MarkBound(vmID) {
-		t.Fatalf("listener %s did not finish bind/restore", listenerLease)
+	if !volumes.HasWorkspace(zvol.AssignmentID(rendezvous.AssignmentID)) {
+		t.Fatal("assignment did not materialize durable workspace")
 	}
-	waitFor(t, "hostd authorizing the exact runner request", func() bool {
-		authorization, found := vms.AuthorizationFor(vmID)
-		return found && authorization.RequestID == requestID && authorization.Lease == listenerLease
+	if !vms.MarkBoundWithRestore(selected.ID, guestproto.RestoreStatus{
+		Outcome: guestproto.RestoreColdFallback, ProcessInvalidated: true,
+		FailureClass: "incompatible", FailureCode: "criu-rejected",
+	}) {
+		t.Fatal("recoverable restore did not reach cold capsule")
+	}
+	waitFor(t, "exact authorization", func() bool {
+		authorization, found := vms.AuthorizationFor(selected.ID)
+		return found && authorization.MemberID == selected.Incarnation &&
+			authorization.AssignmentID == rendezvous.AssignmentID &&
+			authorization.RequestID == "request-9001"
 	})
-	clock := vm.ClockSample{
-		UnixNS: time.Now().UnixNano(), Synchronized: true, Clocksource: "kvm-clock",
+	clock := vm.ClockSample{UnixNS: time.Now().UnixNano(), Synchronized: true, Clocksource: "kvm-clock"}
+	if !vms.MarkWorkerReady(selected.ID, clock) || !vms.MarkHookBlocked(selected.ID, identity) || !vms.MarkReady(selected.ID, clock) {
+		t.Fatal("customer worker was not released")
 	}
-	if !vms.MarkWorkerReady(vmID, clock) {
-		t.Fatalf("listener %s did not release Runner.Worker", listenerLease)
-	}
-	if !vms.MarkHookBlocked(vmID, identity) {
-		t.Fatalf("listener %s did not validate the defense-in-depth hook", listenerLease)
-	}
-	if !vms.MarkReady(vmID, clock) {
-		t.Fatalf("listener %s did not enter ready", listenerLease)
-	}
-	return rendezvous
-}
-
-func TestHostdSchedulerEndToEnd(t *testing.T) {
-	cp := startControlPlane(t)
-	hostd, vms, zvols := startHostd(t, cp.server.URL, "host-e2e")
-
-	// The host must be registered with free slots before demand arrives, or
-	// the allocate deadline measures sync latency instead of capacity.
-	waitFor(t, "host slot registration", func() bool {
-		return cp.queryString(t, `SELECT total::text FROM host_slots WHERE host_id = 'host-e2e' AND class = $1`, e2eClass) == "2"
+	waitFor(t, "running assignment", func() bool {
+		return queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE assignment_id::text = $1`, rendezvous.AssignmentID) == "running"
 	})
-
-	cp.postWebhook(t, "e2e-delivery-1", queuedJobPayload())
-
-	waitFor(t, "demand recorded and lease assigned", func() bool {
-		return cp.queryString(t, `SELECT state FROM host_leases WHERE provider_job_id = $1`, e2eJobID) == "assigned"
-	})
-	leaseID := cp.queryString(t, `SELECT lease_id FROM host_leases WHERE provider_job_id = $1`, e2eJobID)
-
-	// The desired lease reaches hostd over the sync exchange, carrying the
-	// minted JIT config into the guest assignment.
-	var vmID vm.ID
-	waitFor(t, "hostd assigning the lease to a warm VM", func() bool {
-		for _, snapshot := range hostd.Snapshot() {
-			if snapshot.LeaseID == leaseID && snapshot.VMID != "" {
-				vmID = vm.ID(snapshot.VMID)
-				return true
-			}
-		}
-		return false
-	})
-	preparation, ok := vms.Preparation(vmID)
-	if !ok || preparation.JITConfig != e2eJITBlob {
-		t.Fatalf("preparation did not carry the minted jit config: %+v (ok=%v)", preparation, ok)
+	if host.Metrics().ColdFallbacks.Load() != 1 {
+		t.Fatalf("cold fallback metric = %d", host.Metrics().ColdFallbacks.Load())
 	}
-	mints := cp.github.mints()
-	if len(mints) != 1 || mints[0].Name != leaseID || mints[0].RunnerGroupID != 1 ||
-		len(mints[0].Labels) != 1 || mints[0].Labels[0] != e2eClass {
-		t.Fatalf("jit mint request: %+v", mints)
+	if got := queryString(t, control.pool, `SELECT restore_outcome || ':' || process_invalidated::text FROM runner_job_assignments WHERE assignment_id::text = $1`, rendezvous.AssignmentID); got != "cold-fallback:true" {
+		t.Fatalf("restore telemetry = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT process_valid::text || ':' || process_invalidation_class || ':' || process_invalidation_code FROM workspace_generations WHERE generation = $1`, sourceGeneration); got != "false:incompatible:criu-rejected" {
+		t.Fatalf("source process invalidation = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT source_process_digest FROM runner_job_assignments WHERE assignment_id::text = $1`, rendezvous.AssignmentID); got != sourceProcessDigest {
+		t.Fatalf("immutable assignment lost selected process digest = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT timing_json->0->>'event' FROM runner_job_assignments WHERE assignment_id::text = $1`, rendezvous.AssignmentID); got != "runner_assignment_received" {
+		t.Fatalf("assignment timing = %q", got)
 	}
 
-	// The generic listener registers without customer state. The listener's
-	// local assignment notification is the authoritative hot-path signal;
-	// the webhook/API observation below is delayed deliberately to prove that
-	// the worker does not hairpin through the control plane before rendezvous.
-	if !vms.MarkListening(vmID) {
-		t.Fatal("prepared VM did not enter listening")
+	if !vms.MarkExited(selected.ID, 0) {
+		t.Fatal("runner did not exit")
 	}
-	waitFor(t, "control plane observing generic listener", func() bool {
-		return cp.queryString(t, `SELECT state FROM host_leases WHERE lease_id = $1`, leaseID) == "ready"
+	waitFor(t, "customer completion", func() bool {
+		return queryString(t, control.pool, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID) == "completed"
 	})
-	completeLocalAssignment(t, vms, vmID, leaseID, leaseID, e2eRunID, e2eJobID)
-	waitFor(t, "control plane observing ready", func() bool {
-		return cp.queryString(t, `SELECT state FROM host_leases WHERE lease_id = $1`, leaseID) == "ready"
-	})
-	cp.github.assignJob(e2eJobID, leaseID)
-	cp.postWebhook(t, "e2e-delivery-assigned",
-		workflowJobEventPayload("in_progress", e2eRunID, e2eJobID, "in_progress"))
-	waitFor(t, "eventual GitHub assignment observation", func() bool {
-		return cp.queryString(t, `SELECT runner_name FROM github_job_assignments WHERE provider_job_id = $1`, e2eJobID) == leaseID
+	waitFor(t, "assignment volume cleanup", func() bool {
+		return !volumes.HasWorkspace(zvol.AssignmentID(rendezvous.AssignmentID))
 	})
 
-	// Runner finishes: exited flows up, the control plane completes the
-	// lease, frees the slot, completes the demand, and acks the terminal
-	// lease by omitting it — which lets hostd collect the workspace and
-	// forget the lease entirely.
-	vms.MarkExited(vmID, 0)
-	waitFor(t, "lease completion", func() bool {
-		return cp.queryString(t, `SELECT state || ':' || exit_code::text FROM host_leases WHERE lease_id = $1`, leaseID) == "completed:0"
-	})
-	waitFor(t, "demand completion", func() bool {
-		return cp.queryString(t, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID) == "completed"
-	})
-	waitFor(t, "slot release", func() bool {
-		return cp.queryString(t, `SELECT reserved::text FROM host_slots WHERE host_id = 'host-e2e' AND class = $1`, e2eClass) == "0"
-	})
-	waitFor(t, "hostd forgetting the acked lease", func() bool {
-		return len(hostd.Snapshot()) == 0 && !zvols.HasWorkspace(zvol.LeaseID(leaseID))
-	})
-}
-
-// TestCrossedAssignmentsBindActualJobs proves the displacement case that a
-// serial test cannot expose: GitHub is free to send each same-label job to
-// the listener minted in response to the other job. The listener/VM identity
-// stays fixed while the execution lease and workspace follow GitHub's
-// observed assignment.
-func TestCrossedAssignmentsBindActualJobs(t *testing.T) {
-	const (
-		run2 = int64(778)
-		job2 = int64(9002)
-	)
-	cp := startControlPlane(t)
-	cp.github.addQueuedJob(run2, job2, "build")
-	hostd, vms, _ := startHostd(t, cp.server.URL, "host-crossed")
-
-	waitFor(t, "host slot registration", func() bool {
-		return cp.queryString(t, `SELECT total::text FROM host_slots WHERE host_id = 'host-crossed' AND class = $1`, e2eClass) == "2"
-	})
-	cp.postWebhook(t, "crossed-1-queued", queuedJobPayload())
-	cp.postWebhook(t, "crossed-2-queued",
-		workflowJobEventPayload("queued", run2, job2, "queued"))
-	waitFor(t, "both leases assigned", func() bool {
-		return cp.queryString(t, `SELECT count(*)::text FROM host_leases WHERE provider_job_id IN ($1, $2) AND state = 'assigned'`, e2eJobID, job2) == "2"
-	})
-	lease1 := cp.queryString(t, `SELECT lease_id FROM host_leases WHERE provider_job_id = $1`, e2eJobID)
-	lease2 := cp.queryString(t, `SELECT lease_id FROM host_leases WHERE provider_job_id = $1`, job2)
-
-	vmByListener := map[string]vm.ID{}
-	waitFor(t, "both listeners prepared", func() bool {
-		for _, snapshot := range hostd.Snapshot() {
-			if snapshot.VMID != "" {
-				vmByListener[snapshot.LeaseID] = vm.ID(snapshot.VMID)
-			}
-		}
-		return vmByListener[lease1] != "" && vmByListener[lease2] != ""
-	})
-	for listener, vmID := range vmByListener {
-		if !vms.MarkListening(vmID) {
-			t.Fatalf("listener %s did not become ready", listener)
-		}
+	const retryJobID = int64(9002)
+	const retryCheckRunID = int64(8002)
+	if _, err := control.pool.Exec(context.Background(), `
+INSERT INTO github_workflow_jobs (
+    provider_job_id, provider_run_id, provider_run_attempt,
+    provider_repository_id, provider_installation_id, repository_full_name,
+    name, status, labels_json, runner_class, head_branch, check_run_id
+) VALUES ($1, 778, 1, $2, $3, $4, 'build', 'queued', $5::jsonb, $6, 'main', $7)`,
+		retryJobID, e2eRepositoryID, e2eInstallationID, e2eRepo,
+		`["`+e2eClass+`"]`, e2eClass, retryCheckRunID); err != nil {
+		t.Fatal(err)
 	}
-	waitFor(t, "both generic listeners observed", func() bool {
-		return cp.queryString(t, `SELECT count(*)::text FROM host_leases WHERE provider_job_id IN ($1, $2) AND state = 'ready'`, e2eJobID, job2) == "2"
+	if _, err := control.pool.Exec(context.Background(), `
+INSERT INTO github_provider_demands (
+    provider_job_id, provider_installation_id, provider_repository_id,
+    repository_full_name, provider_run_id, provider_run_attempt,
+    trust_class, runner_class, workspace_scope_id, state
+) VALUES ($1, $2, $3, $4, 778, 1, $5, $6, $7::uuid, 'demand_recorded')`,
+		retryJobID, e2eInstallationID, e2eRepositoryID, e2eRepo,
+		trustClassPR, e2eClass, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&pgStore{pool: control.pool}).EnsureJobIntents(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "replacement listeners", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening'`) == "2"
 	})
-
-	// Cross the jobs locally before either in-progress webhook is delivered:
-	// listener 1 receives job 2 and listener 2 receives job 1.
-	rendezvous1 := completeLocalAssignment(t, vms, vmByListener[lease1], lease1, lease2, run2, job2)
-	rendezvous2 := completeLocalAssignment(t, vms, vmByListener[lease2], lease2, lease1, e2eRunID, e2eJobID)
-	if !strings.HasSuffix(rendezvous1.WorkspaceDevice, "/ws/"+lease2) {
-		t.Fatalf("listener %s bound %+v, want execution lease %s", lease1, rendezvous1, lease2)
-	}
-	if !strings.HasSuffix(rendezvous2.WorkspaceDevice, "/ws/"+lease1) {
-		t.Fatalf("listener %s bound %+v, want execution lease %s", lease2, rendezvous2, lease1)
-	}
-	cp.github.assignJob(e2eJobID, lease2)
-	cp.github.assignJob(job2, lease1)
-	cp.postWebhook(t, "crossed-1-assigned",
-		workflowJobEventPayload("in_progress", e2eRunID, e2eJobID, "in_progress"))
-	cp.postWebhook(t, "crossed-2-assigned",
-		workflowJobEventPayload("in_progress", run2, job2, "in_progress"))
-	waitFor(t, "eventual crossed GitHub assignments observed", func() bool {
-		return cp.queryString(t, `SELECT count(*)::text FROM github_job_assignments WHERE (provider_job_id = $1 AND runner_name = $3) OR (provider_job_id = $2 AND runner_name = $4)`, e2eJobID, job2, lease2, lease1) == "2"
-	})
-	vms.MarkExited(vmByListener[lease1], 1)
-	waitFor(t, "first crossed execution completed", func() bool {
-		return cp.queryString(t, `SELECT state FROM host_leases WHERE provider_job_id = $1`, job2) == "completed"
-	})
-	waitFor(t, "second crossed listener survives credential scrub", func() bool {
-		for _, snapshot := range hostd.Snapshot() {
-			if snapshot.LeaseID == lease2 {
-				return snapshot.State == syncproto.StateReady
-			}
-		}
-		return false
-	})
-	vms.MarkExited(vmByListener[lease2], 1)
-	waitFor(t, "actual execution leases completed", func() bool {
-		return cp.queryString(t, `SELECT count(*)::text FROM host_leases WHERE provider_job_id IN ($1, $2) AND state = 'completed' AND exit_code = 1`, e2eJobID, job2) == "2"
-	})
-	waitFor(t, "both physical listener slots released", func() bool {
-		return cp.queryString(t, `SELECT reserved::text FROM host_slots WHERE host_id = 'host-crossed' AND class = $1`, e2eClass) == "0"
-	})
-}
-
-// TestWorkspaceGenerationLifecycleEndToEnd drives the cache loop through
-// the real stack twice: the first green run cold-seeds the scope's lineage
-// (seal on the host, promotion once GitHub's success is observed from the
-// API), the second run clones the promoted generation, and its promotion
-// retires the first generation all the way to host-confirmed destruction.
-func TestWorkspaceGenerationLifecycleEndToEnd(t *testing.T) {
-	cp := startControlPlane(t)
-	hostd, vms, zvols := startHostd(t, cp.server.URL, "host-gen")
-
-	waitFor(t, "host slot registration", func() bool {
-		return cp.queryString(t, `SELECT total::text FROM host_slots WHERE host_id = 'host-gen' AND class = $1`, e2eClass) == "2"
-	})
-
-	// runGreenJob dispatches one queued job, walks it to a zero exit, waits
-	// for the host-confirmed seal, then feeds GitHub's success verdict to
-	// the refresh path and waits for the promotion CAS.
-	runGreenJob := func(delivery string, runID, jobID int64) (leaseID, generation string) {
-		t.Helper()
-		cp.github.addQueuedJob(runID, jobID, "build")
-		cp.postWebhook(t, delivery+"-queued", workflowJobEventPayload("queued", runID, jobID, "queued"))
-		waitFor(t, "lease assigned", func() bool {
-			return cp.queryString(t, `SELECT state FROM host_leases WHERE provider_job_id = $1`, jobID) == "assigned"
-		})
-		leaseID = cp.queryString(t, `SELECT lease_id FROM host_leases WHERE provider_job_id = $1`, jobID)
-		var vmID vm.ID
-		waitFor(t, "hostd assigning the lease to a warm VM", func() bool {
-			for _, snapshot := range hostd.Snapshot() {
-				if snapshot.LeaseID == leaseID && snapshot.VMID != "" {
-					vmID = vm.ID(snapshot.VMID)
-					return true
-				}
-			}
-			return false
-		})
-		if !vms.MarkListening(vmID) {
-			t.Fatal("prepared VM did not enter listening")
-		}
-		waitFor(t, "control plane observing generic listener", func() bool {
-			return cp.queryString(t, `SELECT state FROM host_leases WHERE lease_id = $1`, leaseID) == "ready"
-		})
-		cp.github.assignJob(jobID, leaseID)
-		completeLocalAssignment(t, vms, vmID, leaseID, leaseID, runID, jobID)
-		waitFor(t, "control plane observing ready", func() bool {
-			return cp.queryString(t, `SELECT state FROM host_leases WHERE lease_id = $1`, leaseID) == "ready"
-		})
-		cp.postWebhook(t, delivery+"-assigned",
-			workflowJobEventPayload("in_progress", runID, jobID, "in_progress"))
-		vms.MarkExited(vmID, 0)
-		waitFor(t, "seal confirmed and lease completed", func() bool {
-			return cp.queryString(t, `SELECT state || ':' || reported_state FROM host_leases WHERE lease_id = $1`, leaseID) == "completed:sealed"
-		})
-		generation = cp.queryString(t, `SELECT seal_generation FROM host_leases WHERE lease_id = $1`, leaseID)
-		if generation == "" {
-			t.Fatal("green branch-trust run completed without a sealed generation")
-		}
-		cp.github.concludeJob(jobID, "success")
-		cp.postWebhook(t, delivery+"-completed", workflowJobEventPayload("completed", runID, jobID, "completed"))
-		waitFor(t, "promotion CAS", func() bool {
-			return cp.queryString(t, `SELECT COALESCE(current_generation_id, '') FROM workspace_scopes`) == generation
-		})
-		return leaseID, generation
-	}
-
-	_, gen1 := runGreenJob("gen-e2e-1", 801, 8101)
-	if got := cp.queryString(t, `SELECT home_host_id FROM workspace_scopes`); got != "host-gen" {
-		t.Fatalf("scope home host = %q, want host-gen", got)
-	}
-	if !zvols.HasGeneration(zvol.GenerationID(gen1)) {
-		t.Fatal("promoted generation is not resident on the host")
-	}
-
-	lease2, gen2 := runGreenJob("gen-e2e-2", 802, 8102)
-	if got := cp.queryString(t, `SELECT workspace_generation FROM host_leases WHERE lease_id = $1`, lease2); got != gen1 {
-		t.Fatalf("second run's workspace cloned %q, want the promoted generation %q", got, gen1)
-	}
-	if got := cp.queryString(t, `SELECT COALESCE(observed_source_generation, '') FROM host_leases WHERE lease_id = $1`, lease2); got != gen1 {
-		t.Fatalf("second run's observed source = %q, want %q", got, gen1)
-	}
-
-	// The displaced generation retires: retained -> reapable -> reap verb ->
-	// host destroys it -> inventory absence confirms 'reaped'.
-	waitFor(t, "displaced generation reaped", func() bool {
-		return cp.queryString(t, `SELECT state FROM workspace_generations WHERE generation = $1`, gen1) == "reaped"
-	})
-	if zvols.HasGeneration(zvol.GenerationID(gen1)) {
-		t.Fatal("reaped generation is still resident on the host")
-	}
-	if !zvols.HasGeneration(zvol.GenerationID(gen2)) {
-		t.Fatal("current generation was destroyed")
-	}
-}
-
-// TestSyncRejectsBadBearer pins the endpoint's auth: a wrong credential is
-// a 401 before any state is touched.
-func TestSyncRejectsBadBearer(t *testing.T) {
-	cp := startControlPlane(t)
-	body, _ := json.Marshal(syncproto.SyncRequest{HostID: "host-x", BootID: "boot-x"})
-	req, err := http.NewRequest(http.MethodPost, cp.server.URL+syncproto.SyncPath, bytes.NewReader(body))
+	statuses, err = vms.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("Authorization", "Bearer not-the-secret")
-	resp, err := http.DefaultClient.Do(req)
+	var retryMember vm.Status
+	for _, status := range statuses {
+		if status.Phase == vm.PhaseListening {
+			retryMember = status
+			break
+		}
+	}
+	retryRunner := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, retryMember.Incarnation)
+	if !vms.MarkAssigned(retryMember.ID, vm.Assignment{
+		RequestID: "request-9002", JobID: "protocol-job-9002", CheckRunID: retryCheckRunID,
+		RunnerName: retryRunner, JobDisplayName: "build",
+		Identity: vm.JobIdentity{
+			RunID: "778", RunAttempt: 1, RunnerName: retryRunner,
+			Repository: e2eRepo, WorkflowJob: "build",
+		},
+	}) {
+		t.Fatal("replacement listener did not accept assignment")
+	}
+	var retryRendezvous vm.Rendezvous
+	waitFor(t, "workspace-warm process-cold rendezvous", func() bool {
+		var found bool
+		retryRendezvous, found = vms.RendezvousFor(retryMember.ID)
+		return found
+	})
+	if retryRendezvous.CheckpointDigest != "" || retryRendezvous.CheckpointVersion != "" {
+		t.Fatalf("invalidated process artifact was selected again: %+v", retryRendezvous)
+	}
+	_, workspaces, err := volumes.Inventory(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("sync with a bad bearer responded %d, want 401", resp.StatusCode)
+	var retriedWorkspace zvol.WorkspaceVolume
+	for _, workspace := range workspaces {
+		if strings.HasSuffix(workspace.Name, "/ws/"+retryRendezvous.AssignmentID) {
+			retriedWorkspace = workspace
+			break
+		}
 	}
-	if got := cp.queryString(t, `SELECT host_id FROM hosts WHERE host_id = 'host-x'`); got != "" {
-		t.Fatal("unauthenticated sync registered a host")
+	if retriedWorkspace.Source != zvol.GenerationID(sourceGeneration) {
+		t.Fatalf("valid workspace cache was discarded with process image: %+v", retriedWorkspace)
 	}
 }
 
-// TestBootIDEchoGuard proves the misrouting defense through the real stack:
-// a proxy rewrites the request's boot_id in flight, so the control plane's
-// (otherwise well-formed, authenticated) response echoes an id the agent
-// never sent — and the agent must drop it rather than apply full desired
-// state that was not computed for its request.
-func TestBootIDEchoGuard(t *testing.T) {
-	cp := startControlPlane(t)
-
-	tamper := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		var request map[string]any
-		if err := json.Unmarshal(body, &request); err == nil && r.URL.Path == syncproto.SyncPath {
-			request["boot_id"] = "not-the-boot-id"
-			body, _ = json.Marshal(request)
-		}
-		upstream, err := http.NewRequestWithContext(r.Context(), r.Method, cp.server.URL+r.URL.Path, bytes.NewReader(body))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		upstream.Header = r.Header.Clone()
-		resp, err := http.DefaultClient.Do(upstream)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		defer resp.Body.Close()
-		w.WriteHeader(resp.StatusCode)
-		_, _ = io.Copy(w, resp.Body)
-	}))
-	t.Cleanup(tamper.Close)
-
-	hostd, _, _ := startHostd(t, tamper.URL, "host-tampered")
-
-	// The control plane answers every exchange (the host even registers),
-	// but no response survives the echo check: the agent never considers
-	// itself synced, and every exchange counts as a failure.
-	waitFor(t, "agent dropping tampered responses", func() bool {
-		return hostd.Metrics().SyncFailures.Load() >= 3
+func TestIntegrityFailureFailsClosedAndRefillsPool(t *testing.T) {
+	control := startE2EControlPlane(t)
+	host, vms, _, _ := startE2EHost(t, control.server.URL)
+	waitFor(t, "registered listeners", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening'`) == "2"
 	})
-	if hostd.Synced() {
-		t.Fatal("agent applied a response whose boot_id did not echo its request")
+	statuses, _ := vms.List(context.Background())
+	selected := statuses[0]
+	if selected.Phase != vm.PhaseListening {
+		selected = statuses[1]
+	}
+	runnerName := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, selected.Incarnation)
+	identity := vm.JobIdentity{RunID: "777", RunAttempt: 1, RunnerName: runnerName, Repository: e2eRepo, WorkflowJob: "build"}
+	if !vms.MarkAssigned(selected.ID, vm.Assignment{
+		RequestID: "request-9001", JobID: "protocol-job-9001", CheckRunID: e2eCheckRunID, RunnerName: runnerName,
+		JobDisplayName: "build", Identity: identity,
+	}) {
+		t.Fatal("assign listener")
+	}
+	var assignmentID string
+	waitFor(t, "rendezvous", func() bool {
+		rendezvous, found := vms.RendezvousFor(selected.ID)
+		assignmentID = rendezvous.AssignmentID
+		return found
+	})
+	if !vms.MarkRecycleRequired(selected.ID, guestproto.RestoreStatus{
+		Outcome: guestproto.RestoreUnsafe, ProcessInvalidated: true,
+		FailureClass: "integrity", FailureCode: "artifact-digest",
+	}, "checkpoint digest mismatch") {
+		t.Fatal("mark integrity failure")
+	}
+	waitFor(t, "failed-closed report", func() bool {
+		return queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE assignment_id::text = $1`, assignmentID) == "failed_closed"
+	})
+	if host.Metrics().FailedClosedAssignments.Load() != 1 {
+		t.Fatalf("failed-closed metric = %d", host.Metrics().FailedClosedAssignments.Load())
+	}
+	waitFor(t, "replacement pool member", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening' AND member_id <> $1`, selected.Incarnation) == "2"
+	})
+}
+
+func TestMemberCrashRequeuesSameJobToReplacement(t *testing.T) {
+	control := startE2EControlPlane(t)
+	_, vms, _, _ := startE2EHost(t, control.server.URL)
+	waitFor(t, "registered listeners", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening'`) == "2"
+	})
+	statuses, err := vms.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first vm.Status
+	for _, status := range statuses {
+		if status.Phase == vm.PhaseListening {
+			first = status
+			break
+		}
+	}
+	if first.ID == "" {
+		t.Fatal("no first listener")
+	}
+	firstRunner := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, first.Incarnation)
+	identity := vm.JobIdentity{RunID: "777", RunAttempt: 1, RunnerName: firstRunner, Repository: e2eRepo, WorkflowJob: "build"}
+	if !vms.MarkAssigned(first.ID, vm.Assignment{
+		RequestID: "request-first", JobID: "protocol-job-first", CheckRunID: e2eCheckRunID, RunnerName: firstRunner,
+		JobDisplayName: "build", Identity: identity,
+	}) {
+		t.Fatal("assign first listener")
+	}
+	waitFor(t, "first rendezvous", func() bool {
+		_, found := vms.RendezvousFor(first.ID)
+		return found
+	})
+	if !vms.MarkBoundWithRestore(first.ID, guestproto.RestoreStatus{
+		Outcome: guestproto.RestoreColdFallback, ProcessInvalidated: true,
+		FailureClass: "incompatible", FailureCode: "missing-file",
+	}) {
+		t.Fatal("complete recoverable restore")
+	}
+	waitFor(t, "first authorization", func() bool {
+		_, found := vms.AuthorizationFor(first.ID)
+		return found
+	})
+	if err := vms.Destroy(context.Background(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "first assignment requeued", func() bool {
+		return queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE member_id = $1`, first.Incarnation) == "requeued"
+	})
+	waitFor(t, "replacement listener", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening' AND member_id <> $1`, first.Incarnation) == "2"
+	})
+	statuses, err = vms.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replacement vm.Status
+	for _, status := range statuses {
+		if status.Phase == vm.PhaseListening && status.Incarnation != first.Incarnation {
+			replacement = status
+			break
+		}
+	}
+	if replacement.ID == "" {
+		t.Fatal("no replacement listener")
+	}
+	replacementRunner := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, replacement.Incarnation)
+	identity.RunnerName = replacementRunner
+	if !vms.MarkAssigned(replacement.ID, vm.Assignment{
+		RequestID: "request-retry", JobID: "protocol-job-retry", CheckRunID: e2eCheckRunID, RunnerName: replacementRunner,
+		JobDisplayName: "build", Identity: identity,
+	}) {
+		t.Fatal("assign replacement listener")
+	}
+	var replacementAssignment string
+	waitFor(t, "replacement rendezvous", func() bool {
+		rendezvous, found := vms.RendezvousFor(replacement.ID)
+		replacementAssignment = rendezvous.AssignmentID
+		return found && replacementAssignment != ""
+	})
+	if got := queryString(t, control.pool, `SELECT count(*)::text FROM runner_job_assignments WHERE provider_job_id = $1`, e2eJobID); got != "2" {
+		t.Fatalf("assignment attempts = %s, want 2", got)
+	}
+	waitFor(t, "retry remains bound", func() bool {
+		state := queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE assignment_id::text = $1`, replacementAssignment)
+		return state == "observed" || state == "binding"
+	})
+}
+
+func TestOfflineHostRequeuesActiveAssignment(t *testing.T) {
+	control := startE2EControlPlane(t)
+	_, vms, _, stop := startE2EHost(t, control.server.URL)
+	waitFor(t, "registered listeners", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening'`) == "2"
+	})
+	statuses, err := vms.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected vm.Status
+	for _, status := range statuses {
+		if status.Phase == vm.PhaseListening {
+			selected = status
+			break
+		}
+	}
+	runnerName := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, selected.Incarnation)
+	if !vms.MarkAssigned(selected.ID, vm.Assignment{
+		RequestID: "request-offline", JobID: "protocol-job-offline", CheckRunID: e2eCheckRunID, RunnerName: runnerName,
+		JobDisplayName: "build",
+		Identity: vm.JobIdentity{
+			RunID: "777", RunAttempt: 1, RunnerName: runnerName,
+			Repository: e2eRepo, WorkflowJob: "build",
+		},
+	}) {
+		t.Fatal("assign listener")
+	}
+	waitFor(t, "assignment persisted", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_job_assignments WHERE member_id = $1`, selected.Incarnation) == "1"
+	})
+	stop()
+	if _, err := control.pool.Exec(context.Background(), `UPDATE hosts SET last_sync_at = now() - interval '1 hour' WHERE host_id = 'host-e2e'`); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := (&pgStore{pool: control.pool}).RecoverOfflineHosts(context.Background(), time.Now().Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered != 1 {
+		t.Fatalf("recovered assignments = %d, want 1", recovered)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE member_id = $1`, selected.Incarnation); got != "requeued" {
+		t.Fatalf("assignment state = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID); got != "requeued" {
+		t.Fatalf("intent state = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM runner_pool_members WHERE member_id = $1`, selected.Incarnation); got != "lost" {
+		t.Fatalf("member state = %q", got)
+	}
+}
+
+func TestConcurrentSameNameJobsBindByCheckRun(t *testing.T) {
+	control := startE2EControlPlane(t)
+	const secondJobID = int64(9002)
+	const secondCheckRunID = int64(8002)
+	if _, err := control.pool.Exec(context.Background(), `
+INSERT INTO github_workflow_jobs (
+    provider_job_id, provider_run_id, provider_run_attempt,
+    provider_repository_id, provider_installation_id, repository_full_name,
+    name, status, labels_json, runner_class, head_branch, check_run_id
+) VALUES ($1, $2, 1, $3, $4, $5, 'build', 'queued', $6::jsonb, $7, 'main', $8)`,
+		secondJobID, e2eRunID, e2eRepositoryID, e2eInstallationID, e2eRepo,
+		`["`+e2eClass+`"]`, e2eClass, secondCheckRunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(context.Background(), `
+INSERT INTO github_provider_demands (
+    provider_job_id, provider_installation_id, provider_repository_id,
+    repository_full_name, provider_run_id, provider_run_attempt,
+    trust_class, runner_class, state
+) VALUES ($1, $2, $3, $4, $5, 1, $6, $7, 'demand_recorded')`,
+		secondJobID, e2eInstallationID, e2eRepositoryID, e2eRepo, e2eRunID,
+		trustClassPR, e2eClass); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&pgStore{pool: control.pool}).EnsureJobIntents(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, vms, _, _ := startE2EHost(t, control.server.URL)
+	waitFor(t, "two listeners", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening'`) == "2"
+	})
+	statuses, err := vms.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkRuns := []int64{e2eCheckRunID, secondCheckRunID}
+	assigned := 0
+	for _, status := range statuses {
+		if status.Phase != vm.PhaseListening {
+			continue
+		}
+		runnerName := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, status.Incarnation)
+		if !vms.MarkAssigned(status.ID, vm.Assignment{
+			RequestID:  fmt.Sprintf("request-concurrent-%d", assigned),
+			JobID:      fmt.Sprintf("protocol-concurrent-%d", assigned),
+			CheckRunID: checkRuns[assigned], RunnerName: runnerName, JobDisplayName: "build",
+			Identity: vm.JobIdentity{
+				RunID: "777", RunAttempt: 1, RunnerName: runnerName,
+				Repository: e2eRepo, WorkflowJob: "build",
+			},
+		}) {
+			t.Fatalf("assign concurrent listener %d", assigned)
+		}
+		assigned++
+	}
+	if assigned != 2 {
+		t.Fatalf("assigned listeners = %d", assigned)
+	}
+	waitFor(t, "two exact bindings", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_job_assignments`) == "2"
+	})
+	for checkRunID, providerJobID := range map[int64]int64{
+		e2eCheckRunID: e2eJobID, secondCheckRunID: secondJobID,
+	} {
+		if got := queryString(t, control.pool, `SELECT provider_job_id::text FROM runner_job_assignments WHERE check_run_id = $1`, checkRunID); got != fmt.Sprint(providerJobID) {
+			t.Fatalf("check run %d bound provider job %q, want %d", checkRunID, got, providerJobID)
+		}
 	}
 }

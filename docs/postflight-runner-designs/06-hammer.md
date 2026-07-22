@@ -2,10 +2,10 @@
 
 > **EPHEMERAL.** Delete with this directory when the implementation pass completes.
 
-The repeatable proof. One command dispatches real Next.js CI jobs against
-the tracer host in configurable patterns, watches them to conclusion, and
-asserts the system's books balance afterward. This is also where every
-number the design promised gets measured instead of estimated.
+The repeatable proof. It dispatches the fixture repositories' real CI jobs
+through GitHub Actions against the tracer host in configurable patterns,
+watches them to conclusion, and asserts the system's books balance afterward.
+This is also where every number the design promised gets measured.
 
 ## Shape
 
@@ -20,7 +20,7 @@ four subcommands:
   (steady rate), `churn` (dispatch, cancel at a random point, re-run),
   `restart` (dispatch load, then `systemctl restart hostd` mid-flight).
 - `watch` — poll GitHub (runs/jobs, attempt-specific conclusions) and the
-  controlplane DB (demand/lease rows and timestamps) until every dispatched
+  controlplane DB (demand/assignment rows and timestamps) until every dispatched
   run is terminal.
 - `report` — join both sources and print the scoreboard.
 - `validate-rendezvous` — validate the append-only host/guest/runner JSONL
@@ -34,35 +34,37 @@ monotonic timestamps are compared only within one source, never between the
 host, guest, and GitHub.
 
 1. `pool_ready`: the QEMU VM is running and its generic runner is listening.
-   It names only the listener lease, runner, and VM; it carries no run,
-   execution lease, or customer volume.
-2. `assignment_observed`: GitHub's actual numeric job id, run attempt, and
-   selected runner name are observed. The trace now names the selected
-   listener lease and the job-owned execution lease separately.
-3. `job_hook_blocked`: the synchronous job-start hook holds the runner before
-   any customer step.
-4. `job_identity_reported`: the hook reports runner, job, and repository
-   identity to the host.
-5. `generation_resolved`: the control plane resolves one immutable workspace,
-   toolchain, data, and optional memory snapshot tuple for that exact job.
-6. `rendezvous_bound`: the host atomically hot-binds the generation set's
-   workspace and optional toolchain, data, and memory zvols to that exact
-   QEMU VM.
-7. `mounts_ready` and `clock_checked`: guestd mounts and verifies every
+   It names only the pool-member incarnation, runner, and VM; it carries no
+   run, assignment, or customer volume.
+2. `runner_assignment_received` through `assignment_update_received` and
+   `assignment_observed`: the local listener publishes GitHub's check-run,
+   request, protocol-job, run-attempt, and runner identity; the control plane
+   returns the immutable assignment for that selected member.
+3. `generation_materialization_started` and `generation_resolved`: hostd
+   materializes the immutable workspace/tool/process tuple for that exact job.
+4. `rendezvous_dispatched`: the host hot-binds all three zvols to the already
+   selected QEMU VM.
+5. `mounts_ready` and `clock_checked`: guestd mounts and verifies every
    resolved device by its stable serial, then records a bounded host/guest
-   realtime sample after memory restore when applicable.
-8. `job_hook_released`: only now may the Actions runner execute the job.
+   realtime sample after process restore when applicable.
+6. `worker_authorization_sent`, `job_hook_validated`, and
+   `job_hook_released`: only now may the Actions runner execute customer code.
 
-The validator rejects a changed job, run attempt, runner, listener lease,
-execution lease, VM, or generation-set identity,
+The validator rejects a changed job, check-run, run attempt, runner, member,
+assignment, VM, or generation-set identity,
 a pool VM that already knows customer identity or carries customer volumes,
-a workspace dataset that does not belong to the routed execution lease,
+a workspace dataset that does not belong to the assignment,
 a bound or mounted tuple that differs from the resolved snapshots, a missing
-workspace, a memory snapshot without its workspace, duplicate volume roles,
-and hook release before mounts and post-restore clock evidence. Deterministic
-assignment means reacting to GitHub's observed runner mapping, including
-same-label listener displacement; it does not mean predicting which JIT
-registration GitHub will select.
+workspace, a process snapshot from another workspace generation, duplicate
+volume roles, and hook release before mounts and post-restore clock evidence. A
+valid trace separately classifies workspace materialization (`cold`/`warm`) and
+process execution (`cold`/`restored`/`cold-fallback`). A recoverable process
+failure must prove failure, capsule cleanup, process invalidation, and cold
+capsule start; an integrity or unprovable-cleanup failure must prove fail-closed
+recycling. Deterministic
+assignment means accepting GitHub's local runner selection and joining the
+encrypted message's check-run ID to provider truth; labels and display names
+never choose a job.
 
 ## Snapshot discipline
 
@@ -74,9 +76,10 @@ Snapshot creation is a candidate protocol, separate from promotion:
   explicit benchmark seed, after the runner exits successfully;
 - Actions runner memory is prohibited. Only explicitly allowlisted build
   daemons may be captured;
-- durable filesystems are quiesced before their snapshots and the process
-  image and every volume in the bound generation set share one manifest
-  identity;
+- durable filesystems are quiesced before their snapshots and a newly sealed
+  workspace, tool, and process image share one manifest identity. If an older
+  process image is invalidated, later assignments may retain its workspace/tool
+  generation while starting with an empty process component;
 - the candidate is promoted only after GitHub reports attempt-scoped success.
   Every ambiguity or non-success conclusion discards it.
 
@@ -109,10 +112,10 @@ not turn a workload into a failure.
 1. Every non-cancelled dispatch reaches `success` on GitHub, and its full
    build-and-test logs are retrievable (`gh run view --log` non-empty for
    every step — the observability requirement is asserted, not eyeballed).
-2. Slot accounting returns exactly to baseline (`host_slots` reserved/used
-   counters, warm pool refilled).
+2. Pool accounting returns exactly to baseline (`host_slots`
+   booting/listening/busy counters, warm pool refilled).
 3. No leaks: zero orphan zvols under `ws/`, zero VM state dirs, zero
-   non-terminal leases/demands older than the deadline horizon.
+   non-terminal assignments/demands older than the deadline horizon.
 4. Deadlines fire: churn-cancelled jobs reach a terminal demand state within
    bound (today that bound is the 30m ready deadline — the recorded
    cancellation-propagation follow-up; the assertion encodes whatever the
@@ -120,7 +123,7 @@ not turn a workload into a failure.
 5. Warm-vs-cold checkout: after the first green run of a scope, a rerun of
    an already-fetched SHA serves zero bundle bytes, and a new-SHA run
    serves exactly one single-commit closure over the host-local link
-   (bundle-server bytes-served + cache-hit counters per lease attest it);
+   (bundle-server bytes-served + cache-hit counters per assignment attest it);
    GitHub egress is only the mirror's incremental fetch.
 6. Generation lifecycle: exactly one `current` per exercised scope, losers
    `retained`, every `sealed` candidate resolved (`committed`/`discarded`),
@@ -129,9 +132,10 @@ not turn a workload into a failure.
 ## Measurements (the report)
 
 - **Pickup**: webhook received → job `in_progress` on GitHub, p50/p90/p100,
-  split by segment (ingest, claim, JIT, hostd pickup, runner listening,
-  GitHub assignment) from lease/demand timestamps. Baseline to beat:
-  composed ~9.3s today, 2.0s GitHub floor with warm listeners.
+  with low-resolution database segments for ingest, local bind, and
+  rendezvous. The append-only host/guest/runner trace supplies the
+  high-resolution assignment, QMP, mount, restore, authorization, and
+  customer-release segments.
 - **Exec**: job duration vs the GitHub-hosted twin workflow (baseline: 25s
   vs 37s p50).
 - **Seal**: runner exit → snapshot done (quiesce included). Design claim:

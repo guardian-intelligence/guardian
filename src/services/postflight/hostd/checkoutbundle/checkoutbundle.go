@@ -2,14 +2,13 @@
 // checkout action running inside a job.
 //
 // The action POSTs {repository, ref, sha, github_token} to
-// /internal/sandbox/v1/github-checkout/bundle with a lease-scoped bearer token
+// /internal/sandbox/v1/github-checkout/bundle with an assignment-scoped bearer token
 // and receives the exact pack closure of one commit, materialized from a
 // host-local bare mirror. The mirror and a per-SHA pack cache make repeat
 // checkouts (matrix jobs, retries, warm workspaces) free of GitHub traffic.
 //
-// The package is transport-complete but host-agnostic: lease identity comes
-// through the IdentityResolver seam, which hostd backs with its live lease
-// table.
+// The package is transport-complete but host-agnostic: assignment identity
+// comes through the IdentityResolver seam, backed by hostd's live state.
 package checkoutbundle
 
 import (
@@ -45,7 +44,7 @@ type Config struct {
 	// StoreDir roots the mirror and bundle stores. Required.
 	StoreDir string
 
-	// HostSecret keys the lease-scoped bearer tokens. Per host, never shared
+	// HostSecret keys the assignment-scoped bearer tokens. Per host, never shared
 	// across hosts. Required.
 	HostSecret []byte
 
@@ -70,7 +69,7 @@ type Config struct {
 	// first once the budget is exceeded.
 	BundleBudgetBytes int64
 
-	// MirrorTTL ages out mirrors that no lease has used.
+	// MirrorTTL ages out mirrors that no assignment has used.
 	MirrorTTL time.Duration
 
 	Logger *slog.Logger
@@ -135,7 +134,7 @@ func New(cfg Config, resolver IdentityResolver) *Service {
 // lockRepo serializes mirror and cache mutation per repository. The lock map
 // is never pruned; its size is bounded by the number of distinct repositories
 // a host has ever served, which is small by construction (a host serves the
-// leases the control plane routes to it).
+// assignments the control plane routes to it).
 func (s *Service) lockRepo(repoKey string) func() {
 	s.repoLocksMu.Lock()
 	lock, ok := s.repoLocks[repoKey]

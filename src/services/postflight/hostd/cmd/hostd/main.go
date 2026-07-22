@@ -1,7 +1,7 @@
 // hostd is the per-host runner daemon: the sync/converge agent over real
 // substrate — zfs zvols, QEMU/KVM VMs in transient systemd scopes, the
 // vsock guestd channel — plus the host-local checkout-bundle endpoint backed
-// by the live lease table.
+// by the live assignment table.
 //
 // Configuration is environment-only:
 //

@@ -297,6 +297,7 @@ type apiWorkflowJob struct {
 	Labels       []string  `json:"labels"`
 	RunnerID     int64     `json:"runner_id"`
 	RunnerName   string    `json:"runner_name"`
+	CheckRunURL  string    `json:"check_run_url"`
 	HeadSHA      string    `json:"head_sha"`
 	HeadBranch   string    `json:"head_branch"`
 	WorkflowName string    `json:"workflow_name"`
@@ -344,7 +345,7 @@ func (c *githubClient) workflowRunAttemptJobs(ctx context.Context, installationI
 // generateJITConfig mints a single-use, pre-registered runner for one job:
 // POST /orgs/{org}/actions/runners/generate-jitconfig. The returned blob is
 // everything the guest needs to register; it is never persisted anywhere
-// but the lease row it was minted for.
+// but the pool member it was minted for.
 func (c *githubClient) generateJITConfig(ctx context.Context, installationID int64, org, name string, runnerGroupID int64, labels []string) (string, error) {
 	var out struct {
 		EncodedJITConfig string `json:"encoded_jit_config"`

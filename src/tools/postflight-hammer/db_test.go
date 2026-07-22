@@ -57,21 +57,35 @@ func seedBattery(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 	t.Helper()
 	stmts := []string{
 		`INSERT INTO hosts (host_id, boot_id, last_sync_at) VALUES ('h1', 'boot-1', now())`,
-		`INSERT INTO host_slots (host_id, class, total, warm, used, reserved)
-		 VALUES ('h1', 'postflight-4cpu-ubuntu-2404', 4, 4, 0, 0)`,
+		`INSERT INTO host_slots (host_id, class, total, booting, listening, busy)
+		 VALUES ('h1', 'postflight-4cpu-ubuntu-2404', 4, 0, 4, 0)`,
 		`INSERT INTO github_webhook_deliveries (delivery_id, event_name, state, payload_sha256, payload_json,
 		     provider_installation_id, provider_job_id, provider_run_id, received_at, verified_at)
 		 VALUES ('d1', 'workflow_job', 'processed', 'sha', '{}'::jsonb, 42, 101, 500, now() - interval '30 seconds', now() - interval '30 seconds')`,
 		`INSERT INTO github_workflow_jobs (provider_job_id, provider_installation_id, provider_run_id,
-		     provider_run_attempt, status, conclusion)
-		 VALUES (101, 42, 500, 1, 'completed', 'success')`,
+		     provider_run_attempt, status, conclusion, check_run_id)
+		 VALUES (101, 42, 500, 1, 'completed', 'success', 9101)`,
 		`INSERT INTO github_provider_demands (provider_job_id, provider_repository_id, repository_full_name,
 		     provider_installation_id, provider_run_id, provider_run_attempt, runner_class, state)
 		 VALUES (101, 9, 'acme/demo', 42, 500, 1, 'postflight-4cpu-ubuntu-2404', 'completed')`,
-		`INSERT INTO host_leases (lease_id, provider_job_id, execution_id, attempt_id, runner_class, state,
-		     reported_state, host_id, workspace_generation, seal_generation, exit_code, allocate_deadline_at)
-		 VALUES ('L1', 101, '101', '1', 'postflight-4cpu-ubuntu-2404', 'completed',
-		     'sealed', 'h1', '', 'gen-1', 0, now())`,
+		`INSERT INTO runner_pools (pool_id, org_id, installation_id, runner_class, desired_count)
+		 VALUES ('10000000-0000-0000-0000-000000000001', 'acme', 42,
+		     'postflight-4cpu-ubuntu-2404', 4)`,
+		`INSERT INTO runner_pool_members (member_id, host_id, vm_id, pool_id, runner_name,
+		     runner_class, state)
+		 VALUES ('member-1', 'h1', 'vm-1', '10000000-0000-0000-0000-000000000001',
+		     'postflight-member-1', 'postflight-4cpu-ubuntu-2404', 'recycling')`,
+		`INSERT INTO github_job_intents (provider_job_id, runner_class, repository_full_name,
+		     provider_run_id, provider_run_attempt, job_display_name, check_run_id, state,
+		     request_id, protocol_job_id)
+		 VALUES (101, 'postflight-4cpu-ubuntu-2404', 'acme/demo', 500, 1, 'build', 9101,
+		     'completed', 'request-1', 'job-1')`,
+		`INSERT INTO runner_job_assignments (assignment_id, member_id, provider_job_id, host_id,
+		     request_id, protocol_job_id, check_run_id, runner_name, job_display_name, run_id,
+		     run_attempt, repository, workflow_job, state, seal_generation, exit_code)
+		 VALUES ('20000000-0000-0000-0000-000000000001', 'member-1', 101, 'h1',
+		     'request-1', 'job-1', 9101, 'postflight-member-1', 'build', '500', 1,
+		     'acme/demo', 'build', 'sealed', 'gen-1', 0)`,
 		`INSERT INTO workspace_generations (generation, host_id, runner_class, state, bytes)
 		 VALUES ('gen-1', 'h1', 'postflight-4cpu-ubuntu-2404', 'committed', 1073741824)`,
 		`INSERT INTO workspace_scopes (org, repo, scope_ref, workflow_path, job_name, runner_class,
@@ -95,7 +109,7 @@ func TestQueriesAgainstRealSchema(t *testing.T) {
 	if err != nil || len(slots) != 1 {
 		t.Fatalf("slots: %v %+v", err, slots)
 	}
-	if slots[0].Total != 4 || slots[0].Warm != 4 {
+	if slots[0].Total != 4 || slots[0].Listening != 4 {
 		t.Fatalf("slot = %+v", slots[0])
 	}
 
@@ -107,13 +121,13 @@ func TestQueriesAgainstRealSchema(t *testing.T) {
 		t.Fatalf("demand = %+v", demands[0])
 	}
 
-	leases, err := db.LeasesSince(ctx, since)
-	if err != nil || len(leases) != 1 {
-		t.Fatalf("leases: %v %+v", err, leases)
+	assignments, err := db.AssignmentsSince(ctx, since)
+	if err != nil || len(assignments) != 1 {
+		t.Fatalf("assignments: %v %+v", err, assignments)
 	}
-	l := leases[0]
-	if l.LeaseID != "L1" || l.SealGeneration != "gen-1" || l.ExitCode == nil || *l.ExitCode != 0 {
-		t.Fatalf("lease = %+v", l)
+	assignment := assignments[0]
+	if assignment.AssignmentID != "20000000-0000-0000-0000-000000000001" || assignment.SealGeneration != "gen-1" || assignment.ExitCode == nil || *assignment.ExitCode != 0 {
+		t.Fatalf("assignment = %+v", assignment)
 	}
 
 	deliveries, err := db.DeliveriesSince(ctx, since)
@@ -195,11 +209,8 @@ func TestWatchObservesDatabase(t *testing.T) {
 	if _, ok := st.DB.observedAt("demand", "101", "state", "completed"); !ok {
 		t.Fatalf("demand transition not recorded: %+v", st.DB.Transitions)
 	}
-	if _, ok := st.DB.observedAt("lease", "L1", "state", "completed"); !ok {
-		t.Fatalf("lease transition not recorded: %+v", st.DB.Transitions)
-	}
-	if _, ok := st.DB.observedAt("lease", "L1", "reported_state", "sealed"); !ok {
-		t.Fatalf("reported_state transition not recorded: %+v", st.DB.Transitions)
+	if _, ok := st.DB.observedAt("assignment", "20000000-0000-0000-0000-000000000001", "state", "sealed"); !ok {
+		t.Fatalf("assignment transition not recorded: %+v", st.DB.Transitions)
 	}
 	if _, ok := st.DB.observedAt("generation", "gen-1", "state", "committed"); !ok {
 		t.Fatalf("generation transition not recorded: %+v", st.DB.Transitions)
@@ -214,10 +225,37 @@ func TestWatchObservesDatabase(t *testing.T) {
 		t.Fatalf("replayed observation added transitions: %d -> %d", transitions, len(st.DB.Transitions))
 	}
 
-	// A non-terminal lease breaks quiescence.
-	if _, err := conn.Exec(ctx, `INSERT INTO host_leases (lease_id, provider_job_id, execution_id, attempt_id,
-	        runner_class, state, allocate_deadline_at)
-	    VALUES ('L2', 102, '102', '1', 'postflight-4cpu-ubuntu-2404', 'allocating', now() + interval '2 seconds')`); err != nil {
+	// A non-terminal assignment breaks quiescence.
+	if _, err := conn.Exec(ctx, `INSERT INTO github_workflow_jobs (provider_job_id, provider_installation_id,
+	        provider_run_id, provider_run_attempt, status, check_run_id)
+	    VALUES (102, 42, 501, 1, 'in_progress', 9102)`); err != nil {
+		t.Fatalf("insert workflow job: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO github_provider_demands (provider_job_id,
+	        provider_repository_id, repository_full_name, provider_installation_id, provider_run_id,
+	        provider_run_attempt, runner_class, state)
+	    VALUES (102, 9, 'acme/demo', 42, 501, 1, 'postflight-4cpu-ubuntu-2404', 'assigned')`); err != nil {
+		t.Fatalf("insert demand: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO github_job_intents (provider_job_id, runner_class,
+	        repository_full_name, provider_run_id, provider_run_attempt, job_display_name,
+	        check_run_id, state, request_id, protocol_job_id)
+	    VALUES (102, 'postflight-4cpu-ubuntu-2404', 'acme/demo', 501, 1, 'build', 9102,
+	        'running', 'request-2', 'job-2')`); err != nil {
+		t.Fatalf("insert intent: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO runner_pool_members (member_id, host_id, vm_id,
+	        pool_id, runner_name, runner_class, state)
+	    VALUES ('member-2', 'h1', 'vm-2', '10000000-0000-0000-0000-000000000001',
+	        'postflight-member-2', 'postflight-4cpu-ubuntu-2404', 'assigned')`); err != nil {
+		t.Fatalf("insert member: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO runner_job_assignments (assignment_id, member_id,
+	        provider_job_id, host_id, request_id, protocol_job_id, check_run_id, runner_name,
+	        job_display_name, run_id, run_attempt, repository, workflow_job, state)
+	    VALUES ('20000000-0000-0000-0000-000000000002', 'member-2', 102, 'h1',
+	        'request-2', 'job-2', 9102, 'postflight-member-2', 'build', '501', 1,
+	        'acme/demo', 'build', 'running')`); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 	quiescent, err = w.observeDB(ctx)
@@ -225,7 +263,7 @@ func TestWatchObservesDatabase(t *testing.T) {
 		t.Fatalf("observeDB: %v", err)
 	}
 	if quiescent {
-		t.Fatal("allocating lease should break quiescence")
+		t.Fatal("running assignment should break quiescence")
 	}
 
 	if err := w.finalize(ctx); err != nil {

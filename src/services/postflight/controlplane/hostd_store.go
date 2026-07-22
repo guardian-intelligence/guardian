@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -10,21 +14,6 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 )
 
-// Control-plane lease states (host_leases.state). hostd's own lifecycle is
-// finer-grained; the control plane only tracks the placement arc.
-const (
-	leaseAllocating = "allocating"
-	leaseAssigned   = "assigned"
-	leaseReady      = "ready"
-	leaseSealing    = "sealing"
-	leaseCompleted  = "completed"
-	leaseFailed     = "failed"
-	leaseExpired    = "expired"
-)
-
-// Workspace generation states (workspace_generations.state). The scope
-// pointer only ever references a committed generation; candidates are on
-// their way in, everything else is on its way out.
 const (
 	genCandidate = "candidate"
 	genCommitted = "committed"
@@ -32,11 +21,7 @@ const (
 	genDiscarded = "discarded"
 	genReapable  = "reapable"
 	genReaped    = "reaped"
-)
 
-// Demand states the scheduler advances through (the full vocabulary is in
-// 001_initial.sql's github_provider_demands comment).
-const (
 	demandRecorded          = "demand_recorded"
 	demandCapacityRequested = "capacity_requested"
 	demandAssigned          = "assigned"
@@ -51,26 +36,16 @@ const (
 INSERT INTO hosts (host_id, boot_id, last_sync_at)
 VALUES ($1, $2, now())
 ON CONFLICT (host_id) DO UPDATE SET
-    boot_id      = EXCLUDED.boot_id,
-    last_sync_at = now(),
-    updated_at   = now()`
+    boot_id = EXCLUDED.boot_id, last_sync_at = now(), updated_at = now()`
 
 	sqlUpsertHostSlot = `
-INSERT INTO host_slots (host_id, class, total, warm, used)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO host_slots (host_id, class, total, booting, listening, busy)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (host_id, class) DO UPDATE SET
-    total      = EXCLUDED.total,
-    warm       = EXCLUDED.warm,
-    used       = EXCLUDED.used,
-    updated_at = now()`
-
-	sqlDeleteUnreportedSlots = `
-DELETE FROM host_slots WHERE host_id = $1 AND class <> ALL($2::text[])`
+    total = EXCLUDED.total, booting = EXCLUDED.booting,
+    listening = EXCLUDED.listening, busy = EXCLUDED.busy, updated_at = now()`
 )
 
-// UpsertHostSync records one sync request's host identity and replaces the
-// host's slot inventory (level-triggered full state; the control plane's
-// reserved counter is preserved).
 func (s *pgStore) UpsertHostSync(ctx context.Context, hostID, bootID string, slots []syncproto.SlotReport) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -82,532 +57,613 @@ func (s *pgStore) UpsertHostSync(ctx context.Context, hostID, bootID string, slo
 	}
 	classes := make([]string, 0, len(slots))
 	for _, slot := range slots {
-		if slot.Class == "" || slot.Total < 0 {
+		if slot.Class == "" || slot.Total < 0 || slot.Booting < 0 || slot.Listening < 0 || slot.Busy < 0 {
 			continue
 		}
 		classes = append(classes, slot.Class)
-		if _, err := tx.Exec(ctx, sqlUpsertHostSlot, hostID, slot.Class, slot.Total, slot.Warm, slot.Used); err != nil {
+		if _, err := tx.Exec(ctx, sqlUpsertHostSlot, hostID, slot.Class, slot.Total, slot.Booting, slot.Listening, slot.Busy); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, sqlDeleteUnreportedSlots, hostID, classes); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM host_slots WHERE host_id = $1 AND class <> ALL($2::text[])`, hostID, classes); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
-// sqlObserveGeneration: residency and size follow the host's report; state,
-// pinned, and last_used_at belong to the catalog's own lifecycle and are
-// never touched by observation.
 const sqlObserveGeneration = `
 INSERT INTO workspace_generations (generation, host_id, bytes, state)
 VALUES ($1, $2, $3, 'candidate')
 ON CONFLICT (generation) DO UPDATE SET
-    host_id    = EXCLUDED.host_id,
-    bytes      = EXCLUDED.bytes,
-    updated_at = now()`
-
-// sqlConfirmReapedGenerations: the inventory report is full state, so a
-// reapable generation the host no longer lists has actually been destroyed.
-// Only 'reapable' rows transition on absence — anything else missing from a
-// report is a catalog/host disagreement, not a confirmation.
-const sqlConfirmReapedGenerations = `
-UPDATE workspace_generations SET state = 'reaped', updated_at = now()
-WHERE host_id = $1 AND state = 'reapable' AND generation <> ALL($2::text[])`
+    host_id = EXCLUDED.host_id, bytes = EXCLUDED.bytes, updated_at = now()`
 
 func (s *pgStore) ObserveHostGenerations(ctx context.Context, hostID string, generations []syncproto.GenerationReport) error {
 	names := make([]string, 0, len(generations))
-	for _, g := range generations {
-		if g.Generation == "" {
+	for _, generation := range generations {
+		if generation.Generation == "" {
 			continue
 		}
-		names = append(names, g.Generation)
-		if _, err := s.pool.Exec(ctx, sqlObserveGeneration, g.Generation, hostID, g.Bytes); err != nil {
+		names = append(names, generation.Generation)
+		if _, err := s.pool.Exec(ctx, sqlObserveGeneration, generation.Generation, hostID, generation.Bytes); err != nil {
 			return err
 		}
 	}
-	_, err := s.pool.Exec(ctx, sqlConfirmReapedGenerations, hostID, names)
+	_, err := s.pool.Exec(ctx, `
+UPDATE workspace_generations SET state = 'reaped', updated_at = now()
+WHERE host_id = $1 AND state = 'reapable' AND generation <> ALL($2::text[])`, hostID, names)
 	return err
 }
 
-const sqlRecordLeaseReportedState = `
-UPDATE host_leases SET reported_state = $3, updated_at = now()
-WHERE lease_id = $1 AND host_id = $2 AND reported_state <> $3`
-
-func (s *pgStore) RecordLeaseReportedState(ctx context.Context, hostID, leaseID, reported string) error {
-	_, err := s.pool.Exec(ctx, sqlRecordLeaseReportedState, leaseID, hostID, reported)
-	return err
+// EnsureRunnerPools turns observed GitHub installations into continuously
+// registered capacity. The newest demand carries the current installation ID
+// after an app reinstall; an existing pool stays warm between jobs.
+func (s *pgStore) EnsureRunnerPools(ctx context.Context, desiredCount int) (int64, error) {
+	if desiredCount <= 0 {
+		return 0, fmt.Errorf("runner pool size must be positive")
+	}
+	tag, err := s.pool.Exec(ctx, `
+INSERT INTO runner_pools (org_id, installation_id, runner_class, desired_count)
+SELECT DISTINCT ON (split_part(repository_full_name, '/', 1), runner_class)
+       split_part(repository_full_name, '/', 1), provider_installation_id,
+       runner_class, $1
+FROM github_provider_demands
+WHERE provider_installation_id > 0
+  AND split_part(repository_full_name, '/', 1) <> ''
+  AND split_part(repository_full_name, '/', 2) <> ''
+ORDER BY split_part(repository_full_name, '/', 1), runner_class, updated_at DESC
+ON CONFLICT (org_id, runner_class) DO UPDATE SET
+    installation_id = EXCLUDED.installation_id,
+    desired_count = EXCLUDED.desired_count,
+    enabled = true,
+    updated_at = now()
+WHERE runner_pools.installation_id IS DISTINCT FROM EXCLUDED.installation_id
+   OR runner_pools.desired_count IS DISTINCT FROM EXCLUDED.desired_count
+   OR NOT runner_pools.enabled`, desiredCount)
+	return tag.RowsAffected(), err
 }
 
-const sqlMarkLeaseReady = `
-UPDATE host_leases
-SET state = 'ready', reported_state = 'ready', updated_at = now()
-WHERE lease_id = $1 AND host_id = $2 AND state = 'assigned'`
-
-func (s *pgStore) MarkLeaseReady(ctx context.Context, hostID, leaseID string) (bool, error) {
-	tag, err := s.pool.Exec(ctx, sqlMarkLeaseReady, leaseID, hostID)
-	return tag.RowsAffected() > 0, err
+// EnsureJobIntents converts provider truth into the durable queue consumed by
+// local runner assignments. It is idempotent and never rewinds an assignment.
+func (s *pgStore) EnsureJobIntents(ctx context.Context) (int64, error) {
+	tag, err := s.pool.Exec(ctx, `
+INSERT INTO github_job_intents (
+    provider_job_id, runner_class, repository_full_name, provider_run_id,
+    provider_run_attempt, job_display_name, check_run_id, state
+)
+SELECT d.provider_job_id, d.runner_class, d.repository_full_name,
+       d.provider_run_id, d.provider_run_attempt, j.name, j.check_run_id, 'queued'
+FROM github_provider_demands d
+JOIN github_workflow_jobs j ON j.provider_job_id = d.provider_job_id
+JOIN runner_classes c ON c.class = d.runner_class
+WHERE d.state IN ('demand_recorded', 'capacity_requested')
+  AND j.status IN ('queued', 'in_progress')
+  AND j.check_run_id > 0
+ON CONFLICT (provider_job_id) DO UPDATE SET
+    runner_class = EXCLUDED.runner_class,
+    repository_full_name = EXCLUDED.repository_full_name,
+    provider_run_id = EXCLUDED.provider_run_id,
+    provider_run_attempt = EXCLUDED.provider_run_attempt,
+    job_display_name = EXCLUDED.job_display_name,
+    check_run_id = EXCLUDED.check_run_id,
+    updated_at = now()
+WHERE github_job_intents.state IN ('queued', 'requeued')`)
+	return tag.RowsAffected(), err
 }
 
-// releaseHostSlot returns a claimed slot to the pool. GREATEST guards the
-// counter against going negative if a host's slot row was replaced between
-// claim and release.
-const sqlReleaseHostSlot = `
-UPDATE host_slots SET reserved = GREATEST(reserved - 1, 0), updated_at = now()
-WHERE host_id = $1 AND class = $2`
-
-const sqlAdvanceDemand = `
-UPDATE github_provider_demands SET state = $2, updated_at = now()
-WHERE provider_job_id = $1 AND state = ANY($3)`
-
-const sqlResetDisplacedListenerDemand = `
-UPDATE host_leases listener
-SET state = 'expired', reported_state = 'capacity-displaced',
-    reason = 'GitHub assigned another job to this listener',
-    jit_config = '', updated_at = now()
-WHERE listener.lease_id = $1
-  AND listener.provider_job_id <> $2
-  AND listener.state IN ('assigned', 'ready')
-  AND NOT EXISTS (
-      SELECT 1 FROM github_job_assignments assignment
-      WHERE assignment.provider_job_id = listener.provider_job_id
-  )
-RETURNING listener.provider_job_id`
-
-// failDemandTx moves a demand to a terminal failure state (guarded by its
-// current state) and appends the failure problems.
-func failDemandTx(ctx context.Context, tx pgx.Tx, jobID int64, state string, from []string, problems []problem) error {
-	for _, p := range problems {
-		if _, err := tx.Exec(ctx, sqlAppendDemandProblem,
-			jobID, phaseProcessing, p.typeURI(), p.Code, p.Title, p.Detail, p.Status, p.Retryable, p.Pointer); err != nil {
-			return err
-		}
-	}
-	_, err := tx.Exec(ctx, sqlAdvanceDemand, jobID, state, from)
-	return err
+type poolMemberForJIT struct {
+	MemberID       string
+	RunnerName     string
+	RunnerClass    string
+	OrgID          string
+	InstallationID int64
 }
 
-// Terminal transitions scrub jit_config: the encoded runner registration
-// credential must not accumulate at rest once the lease can no longer use it.
-const sqlCompleteLease = `
-UPDATE host_leases
-SET state = 'completed', reported_state = 'exited', exit_code = $2, jit_config = '', updated_at = now()
-WHERE lease_id = $1 AND state IN ('assigned', 'ready')
-RETURNING provider_job_id, runner_class`
-
-// sqlLeaseExitContext validates that the reporting listener belongs to this
-// host and either owns the execution directly or is GitHub's observed runner
-// for it. The execution row supplies job/cache policy; the listener row
-// supplies the physical slot being released.
-const sqlLeaseExitContext = `
-SELECT listener.runner_class, COALESCE(execution.workspace_scope_id::text, ''),
-    COALESCE(execution.observed_source_generation, ''), COALESCE(demand.trust_class, '')
-FROM host_leases listener
-JOIN host_leases execution ON execution.lease_id = $3
-LEFT JOIN github_job_assignments assignment
-    ON assignment.provider_job_id = execution.provider_job_id
-    AND assignment.runner_name = listener.lease_id
-LEFT JOIN github_provider_demands demand
-    ON demand.provider_job_id = execution.provider_job_id
-WHERE listener.lease_id = $1
-  AND listener.host_id = $2
-  AND listener.runner_class = execution.runner_class
-  AND execution.state IN ('assigned', 'ready')
-  AND (execution.lease_id = listener.lease_id OR assignment.provider_job_id IS NOT NULL)
-FOR UPDATE OF listener, execution`
-
-// sqlInsertSealGeneration mints the candidate the seal must produce; the id
-// is a UUID so it is zfs-name safe on the host.
-const sqlInsertSealGeneration = `
-INSERT INTO workspace_generations (generation, host_id, runner_class, state, scope_id, source_generation)
-VALUES (gen_random_uuid()::text, $1, $2, 'candidate', $3::uuid, NULLIF($4, ''))
-RETURNING generation`
-
-// sqlSealLease keeps the lease in the desired set as a seal request. The
-// slot is still released here — occupancy never waits on the seal, let
-// alone on GitHub.
-const sqlSealLease = `
-UPDATE host_leases
-SET state = 'sealing', reported_state = 'exited', exit_code = $2, jit_config = '',
-    seal_generation = $3, seal_deadline_at = $4,
-    checkpoint_digest = $5, checkpoint_version = $6, updated_at = now()
-WHERE lease_id = $1 AND state IN ('assigned', 'ready')
-RETURNING provider_job_id, runner_class`
-
-// CompleteLease is the exited-report transition: terminalize the lease (or,
-// for a zero exit on a branch-trust lease with a scope, hold it in 'sealing'
-// with a freshly minted candidate generation), free its slot, and complete
-// the demand — one transaction, guarded by the lease's current state so a
-// replayed report is a no-op. Only branch trust ever seals: PR workspaces
-// are read-only borrowers of the target branch's lineage.
-func (s *pgStore) CompleteLease(ctx context.Context, hostID, leaseID string, exitCode int, checkpoint *syncproto.CheckpointArtifact, sealDeadline time.Time) (jobID int64, sealGeneration string, done bool, err error) {
-	return s.CompleteRoutedLease(ctx, hostID, leaseID, leaseID, exitCode, checkpoint, sealDeadline)
-}
-
-// CompleteRoutedLease completes the execution GitHub actually sent to a
-// listener, while releasing that listener's physical slot. The two lease
-// IDs differ under same-label displacement.
-func (s *pgStore) CompleteRoutedLease(ctx context.Context, hostID, listenerLeaseID, executionLeaseID string, exitCode int, checkpoint *syncproto.CheckpointArtifact, sealDeadline time.Time) (jobID int64, sealGeneration string, done bool, err error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return 0, "", false, err
-	}
-	defer tx.Rollback(ctx)
-	var class, scopeID, observedSource, trustClass string
-	err = tx.QueryRow(ctx, sqlLeaseExitContext,
-		listenerLeaseID, hostID, executionLeaseID).
-		Scan(&class, &scopeID, &observedSource, &trustClass)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, "", false, nil
-	}
-	if err != nil {
-		return 0, "", false, err
-	}
-	if exitCode == 0 && trustClass == trustClassBranch && scopeID != "" && checkpoint != nil && checkpoint.Digest != "" && checkpoint.Version != "" {
-		if err := tx.QueryRow(ctx, sqlInsertSealGeneration, hostID, class, scopeID, observedSource).Scan(&sealGeneration); err != nil {
-			return 0, "", false, err
-		}
-		err = tx.QueryRow(ctx, sqlSealLease,
-			executionLeaseID, exitCode, sealGeneration, sealDeadline,
-			checkpoint.Digest, checkpoint.Version).
-			Scan(&jobID, &class)
-	} else {
-		err = tx.QueryRow(ctx, sqlCompleteLease,
-			executionLeaseID, exitCode).Scan(&jobID, &class)
-	}
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, "", false, nil
-	}
-	if err != nil {
-		return 0, "", false, err
-	}
-	if _, err := tx.Exec(ctx, sqlReleaseHostSlot, hostID, class); err != nil {
-		return 0, "", false, err
-	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE host_leases SET jit_config = '', updated_at = now() WHERE lease_id = $1`,
-		listenerLeaseID); err != nil {
-		return 0, "", false, err
-	}
-	if _, err := tx.Exec(ctx, sqlAdvanceDemand, jobID, demandCompleted,
-		[]string{demandCapacityRequested, demandAssigned}); err != nil {
-		return 0, "", false, err
-	}
-	var displacedJobID int64
-	err = tx.QueryRow(ctx, sqlResetDisplacedListenerDemand,
-		listenerLeaseID, jobID).Scan(&displacedJobID)
-	switch {
-	case err == nil:
-		if _, err := tx.Exec(ctx, sqlAdvanceDemand, displacedJobID, demandRecorded,
-			[]string{demandCapacityRequested, demandAssigned}); err != nil {
-			return 0, "", false, err
-		}
-	case errors.Is(err, pgx.ErrNoRows):
-	default:
-		return 0, "", false, err
-	}
-	return jobID, sealGeneration, true, tx.Commit(ctx)
-}
-
-const sqlRecordLeaseSealed = `
-UPDATE host_leases
-SET state = 'completed', reported_state = 'sealed', updated_at = now()
-WHERE lease_id = $1 AND state = 'sealing' AND seal_generation = $2
-  AND checkpoint_digest = $3 AND checkpoint_version = $4
-RETURNING provider_job_id`
-
-const sqlLeaseSealContext = `
-SELECT 1
-FROM host_leases listener
-JOIN host_leases execution ON execution.lease_id = $3
-LEFT JOIN github_job_assignments assignment
-    ON assignment.provider_job_id = execution.provider_job_id
-    AND assignment.runner_name = listener.lease_id
-WHERE listener.lease_id = $1
-  AND listener.host_id = $2
-  AND listener.runner_class = execution.runner_class
-  AND execution.state = 'sealing'
-  AND (execution.lease_id = listener.lease_id OR assignment.provider_job_id IS NOT NULL)
-FOR UPDATE OF listener, execution`
-
-const sqlMarkGenerationSealed = `
-UPDATE workspace_generations
-SET sealed_at = now(), process_digest = $2, criu_version = $3, updated_at = now()
-WHERE generation = $1 AND state = 'candidate'`
-
-// RecordLeaseSealed is the sealed-report transition: the host confirmed the
-// exact generation this lease was asked to produce, so the candidate becomes
-// promotable and the lease terminalizes (leaving the desired set, which lets
-// the host collect the workspace volume).
-func (s *pgStore) RecordLeaseSealed(ctx context.Context, hostID, leaseID, sealedGeneration string, checkpoint *syncproto.CheckpointArtifact) (int64, bool, error) {
-	return s.RecordRoutedLeaseSealed(ctx, hostID, leaseID, leaseID, sealedGeneration, checkpoint)
-}
-
-func (s *pgStore) RecordRoutedLeaseSealed(ctx context.Context, hostID, listenerLeaseID, executionLeaseID, sealedGeneration string, checkpoint *syncproto.CheckpointArtifact) (int64, bool, error) {
-	if checkpoint == nil || checkpoint.Digest == "" || checkpoint.Version == "" {
-		return 0, false, nil
-	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return 0, false, err
-	}
-	defer tx.Rollback(ctx)
-	var valid int
-	err = tx.QueryRow(ctx, sqlLeaseSealContext,
-		listenerLeaseID, hostID, executionLeaseID).Scan(&valid)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, err
-	}
-	var jobID int64
-	err = tx.QueryRow(ctx, sqlRecordLeaseSealed,
-		executionLeaseID, sealedGeneration, checkpoint.Digest, checkpoint.Version).Scan(&jobID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, err
-	}
-	if _, err := tx.Exec(ctx, sqlMarkGenerationSealed, sealedGeneration, checkpoint.Digest, checkpoint.Version); err != nil {
-		return 0, false, err
-	}
-	return jobID, true, tx.Commit(ctx)
-}
-
-const sqlFailSealingLease = `
-UPDATE host_leases
-SET state = 'failed', reported_state = $2, reason = $3, updated_at = now()
-WHERE lease_id = $1 AND state = 'sealing'
-RETURNING seal_generation`
-
-const sqlDiscardGeneration = `
-UPDATE workspace_generations SET state = 'discarded', updated_at = now()
-WHERE generation = $1 AND state = 'candidate'`
-
-// FailSealingLease handles a host-reported failure after the runner already
-// exited green: the candidate is discarded and the lease terminalizes. The
-// slot was released at the exited report and the demand already completed —
-// a failed seal is a lost cache write, never a job result change.
-func (s *pgStore) FailSealingLease(ctx context.Context, hostID, leaseID, reported, reason string) (bool, error) {
-	return s.FailRoutedSealingLease(ctx, hostID, leaseID, leaseID, reported, reason)
-}
-
-func (s *pgStore) FailRoutedSealingLease(ctx context.Context, hostID, listenerLeaseID, executionLeaseID, reported, reason string) (bool, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback(ctx)
-	var valid int
-	err = tx.QueryRow(ctx, sqlLeaseSealContext,
-		listenerLeaseID, hostID, executionLeaseID).Scan(&valid)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	var sealGeneration string
-	err = tx.QueryRow(ctx, sqlFailSealingLease,
-		executionLeaseID, reported, reason).Scan(&sealGeneration)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if _, err := tx.Exec(ctx, sqlDiscardGeneration, sealGeneration); err != nil {
-		return false, err
-	}
-	return true, tx.Commit(ctx)
-}
-
-const sqlFailLeaseFromHost = `
-UPDATE host_leases
-SET state = 'failed', reported_state = $2, reason = $3, jit_config = '', updated_at = now()
-WHERE lease_id = $1 AND state IN ('assigned', 'ready')
-RETURNING provider_job_id, runner_class`
-
-// FailLeaseFromHost is the failed/cancelled-report transition: terminalize,
-// free the slot, and fail the demand as sandbox_failed.
-func (s *pgStore) FailLeaseFromHost(ctx context.Context, hostID, leaseID, reported, reason string, problems []problem) (int64, bool, error) {
-	return s.FailRoutedLeaseFromHost(ctx, hostID, leaseID, leaseID, reported, reason, problems)
-}
-
-func (s *pgStore) FailRoutedLeaseFromHost(ctx context.Context, hostID, listenerLeaseID, executionLeaseID, reported, reason string, problems []problem) (int64, bool, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return 0, false, err
-	}
-	defer tx.Rollback(ctx)
-	var jobID int64
-	var class, scopeID, observedSource, trustClass string
-	err = tx.QueryRow(ctx, sqlLeaseExitContext,
-		listenerLeaseID, hostID, executionLeaseID).
-		Scan(&class, &scopeID, &observedSource, &trustClass)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, err
-	}
-	err = tx.QueryRow(ctx, sqlFailLeaseFromHost,
-		executionLeaseID, reported, reason).Scan(&jobID, &class)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, err
-	}
-	if _, err := tx.Exec(ctx, sqlReleaseHostSlot, hostID, class); err != nil {
-		return 0, false, err
-	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE host_leases SET jit_config = '', updated_at = now() WHERE lease_id = $1`,
-		listenerLeaseID); err != nil {
-		return 0, false, err
-	}
-	if err := failDemandTx(ctx, tx, jobID, demandSandboxFailed,
-		[]string{demandCapacityRequested, demandAssigned}, problems); err != nil {
-		return 0, false, err
-	}
-	var displacedJobID int64
-	err = tx.QueryRow(ctx, sqlResetDisplacedListenerDemand,
-		listenerLeaseID, jobID).Scan(&displacedJobID)
-	switch {
-	case err == nil:
-		if _, err := tx.Exec(ctx, sqlAdvanceDemand, displacedJobID, demandRecorded,
-			[]string{demandCapacityRequested, demandAssigned}); err != nil {
-			return 0, false, err
-		}
-	case errors.Is(err, pgx.ErrNoRows):
-	default:
-		return 0, false, err
-	}
-	return jobID, true, tx.Commit(ctx)
-}
-
-// desiredLeaseRow is one lease as projected into a host's desired set.
-type desiredLeaseRow struct {
-	LeaseID              string
-	ExecutionLeaseID     string
-	State                string
-	ExecutionID          string
-	AttemptID            string
-	OrgID                string
-	InstallationID       int64
-	RepositoryID         int64
-	RepositoryFullName   string
-	RunnerClass          string
-	JITConfig            string
-	Generation           string
-	SizeBytes            int64
-	ToolSizeBytes        int64
-	ProcessSizeBytes     int64
-	ProcessDigest        string
-	ProcessVersion       string
-	SealGeneration       string
-	SealProcessDigest    string
-	SealProcessVersion   string
-	ProviderRunID        int64
-	ProviderJobID        int64
-	ProviderRunAttempt   int64
-	JobDisplayName       string
-	AssignedRunnerName   string
-	RendezvousAuthorized bool
-}
-
-const sqlListDesiredLeases = `
-SELECT listener.lease_id,
-    COALESCE(execution.lease_id, listener.lease_id),
-    COALESCE(execution.state, listener.state),
-    COALESCE(execution.execution_id, listener.execution_id),
-    COALESCE(execution.attempt_id, listener.attempt_id),
-    COALESCE(execution.org_id, listener.org_id),
-    COALESCE(execution.installation_id, listener.installation_id),
-    COALESCE(execution.repository_id, listener.repository_id),
-    COALESCE(execution.repository_full_name, listener.repository_full_name),
-    listener.runner_class,
-    listener.jit_config,
-    COALESCE(execution.workspace_generation, listener.workspace_generation),
-    COALESCE(execution.workspace_size_bytes, listener.workspace_size_bytes),
-    class.tool_disk_bytes,
-    class.process_disk_bytes,
-    COALESCE(source.process_digest, ''),
-    COALESCE(source.criu_version, ''),
-    COALESCE(execution.seal_generation, listener.seal_generation),
-    COALESCE(execution.checkpoint_digest, listener.checkpoint_digest),
-    COALESCE(execution.checkpoint_version, listener.checkpoint_version),
-    job.provider_run_id,
-    COALESCE(execution.provider_job_id, listener.provider_job_id),
-    job.provider_run_attempt,
-    job.name,
-    CASE WHEN execution.runner_class = listener.runner_class THEN assignment.runner_name ELSE '' END,
-    COALESCE(
-        assignment.runner_name = listener.lease_id
-        AND execution.lease_id IS NOT NULL
-        AND execution.runner_class = listener.runner_class,
-        false
-    )
-FROM host_leases listener
-LEFT JOIN github_job_assignments assignment
-    ON assignment.runner_name = listener.lease_id
-LEFT JOIN LATERAL (
-    SELECT candidate.*
-    FROM host_leases candidate
-    WHERE candidate.provider_job_id = assignment.provider_job_id
-      AND candidate.runner_class = listener.runner_class
-    ORDER BY
-        (candidate.state IN ('allocating', 'assigned', 'ready', 'sealing')) DESC,
-        candidate.created_at DESC
-    LIMIT 1
-) execution ON true
-JOIN github_workflow_jobs job
-    ON job.provider_job_id = COALESCE(execution.provider_job_id, listener.provider_job_id)
-JOIN runner_classes class ON class.class = listener.runner_class
-LEFT JOIN workspace_generations source
-    ON source.generation = COALESCE(execution.workspace_generation, listener.workspace_generation)
-WHERE listener.host_id = $1
-  AND (
-      (execution.lease_id IS NULL AND listener.state IN ('assigned', 'ready', 'sealing'))
-      OR execution.state IN ('assigned', 'ready', 'sealing')
-  )
-ORDER BY listener.created_at, listener.lease_id`
-
-func (s *pgStore) ListDesiredLeases(ctx context.Context, hostID string) ([]desiredLeaseRow, error) {
-	rows, err := s.pool.Query(ctx, sqlListDesiredLeases, hostID)
+func (s *pgStore) ListPoolMembersNeedingJIT(ctx context.Context, limit int) ([]poolMemberForJIT, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT m.member_id, m.runner_name, m.runner_class, p.org_id, p.installation_id
+FROM runner_pool_members m
+JOIN runner_pools p ON p.pool_id = m.pool_id
+WHERE m.state = 'warm' AND m.jit_config = '' AND p.enabled
+ORDER BY m.created_at
+LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []desiredLeaseRow
+	var members []poolMemberForJIT
 	for rows.Next() {
-		var r desiredLeaseRow
-		if err := rows.Scan(&r.LeaseID, &r.ExecutionLeaseID, &r.State,
-			&r.ExecutionID, &r.AttemptID, &r.OrgID, &r.InstallationID,
-			&r.RepositoryID, &r.RepositoryFullName, &r.RunnerClass, &r.JITConfig,
-			&r.Generation, &r.SizeBytes, &r.ToolSizeBytes, &r.ProcessSizeBytes, &r.ProcessDigest,
-			&r.ProcessVersion, &r.SealGeneration, &r.SealProcessDigest,
-			&r.SealProcessVersion, &r.ProviderRunID,
-			&r.ProviderJobID, &r.ProviderRunAttempt, &r.JobDisplayName, &r.AssignedRunnerName,
-			&r.RendezvousAuthorized); err != nil {
+		var member poolMemberForJIT
+		if err := rows.Scan(&member.MemberID, &member.RunnerName, &member.RunnerClass, &member.OrgID, &member.InstallationID); err != nil {
 			return nil, err
 		}
-		out = append(out, r)
+		members = append(members, member)
 	}
-	return out, rows.Err()
+	return members, rows.Err()
 }
 
-// sqlListHostPoolTargets: warm VM ≡ slot, so every offered slot is a warm
-// target; assigned VMs occupy slots and bound the governor's refill on the
-// host side.
-const sqlListHostPoolTargets = `
-SELECT class, total FROM host_slots WHERE host_id = $1`
+func (s *pgStore) RecordPoolMemberJIT(ctx context.Context, memberID, jit string) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+UPDATE runner_pool_members
+SET jit_config = $2, state = 'preparing', updated_at = now()
+WHERE member_id = $1 AND state = 'warm' AND jit_config = ''`, memberID, jit)
+	return tag.RowsAffected() > 0, err
+}
+
+func (s *pgStore) FailPoolMemberJIT(ctx context.Context, memberID, reason string) error {
+	_, err := s.pool.Exec(ctx, `
+UPDATE runner_pool_members
+SET state = 'recycling', reported_reason = $2, jit_config = '', updated_at = now()
+WHERE member_id = $1`, memberID, reason)
+	return err
+}
+
+func (s *pgStore) ApplyHostMembers(ctx context.Context, hostID string, reports []syncproto.PoolMemberReport) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	seen := make([]string, 0, len(reports))
+	for _, report := range reports {
+		if report.MemberID == "" || report.VMID == "" || report.Class == "" {
+			continue
+		}
+		seen = append(seen, report.MemberID)
+		if _, err := tx.Exec(ctx, `
+INSERT INTO runner_pool_members (
+    member_id, host_id, vm_id, runner_class, image, state, reported_reason
+) VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (member_id) DO UPDATE SET
+    image = EXCLUDED.image,
+    state = CASE
+        WHEN runner_pool_members.state IN ('recycling', 'lost') THEN runner_pool_members.state
+        ELSE EXCLUDED.state
+    END,
+    reported_reason = CASE
+        WHEN runner_pool_members.state IN ('recycling', 'lost') THEN runner_pool_members.reported_reason
+        ELSE EXCLUDED.reported_reason
+    END,
+    last_seen_at = now(), updated_at = now()
+WHERE runner_pool_members.host_id = EXCLUDED.host_id
+  AND runner_pool_members.vm_id = EXCLUDED.vm_id
+  AND runner_pool_members.runner_class = EXCLUDED.runner_class`,
+			report.MemberID, hostID, report.VMID, report.Class, report.Image, string(report.State), report.Reason); err != nil {
+			return err
+		}
+		if err := allocateMemberPool(ctx, tx, report.MemberID, report.Class); err != nil {
+			return err
+		}
+		if report.Assignment != nil {
+			if err := bindObservedAssignment(ctx, tx, hostID, report); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE runner_pool_members
+SET state = 'lost', jit_config = '', updated_at = now()
+WHERE host_id = $1 AND state NOT IN ('lost', 'recycling')
+  AND member_id <> ALL($2::text[])`, hostID, seen); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func allocateMemberPool(ctx context.Context, tx pgx.Tx, memberID, class string) error {
+	var poolID string
+	err := tx.QueryRow(ctx, `
+SELECT p.pool_id::text
+FROM runner_pools p
+WHERE p.runner_class = $1 AND p.enabled
+  AND (SELECT count(*) FROM runner_pool_members m
+       WHERE m.pool_id = p.pool_id AND m.state NOT IN ('lost', 'recycling')) < p.desired_count
+ORDER BY p.updated_at, p.pool_id
+LIMIT 1`, class).Scan(&poolID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+UPDATE runner_pool_members
+SET pool_id = $2::uuid,
+    runner_name = 'postflight-' || left(replace(member_id, '-', ''), 40),
+    updated_at = now()
+WHERE member_id = $1 AND pool_id IS NULL`, memberID, poolID)
+	return err
+}
+
+func bindObservedAssignment(ctx context.Context, tx pgx.Tx, hostID string, member syncproto.PoolMemberReport) error {
+	observed := member.Assignment
+	if observed == nil || observed.RequestID == "" || observed.JobID == "" || observed.CheckRunID <= 0 ||
+		observed.RunnerName == "" || observed.Identity.RunID == "" || observed.Identity.RunAttempt <= 0 {
+		return nil
+	}
+	var runnerName, class, org string
+	var poolID string
+	err := tx.QueryRow(ctx, `
+SELECT m.runner_name, m.runner_class, p.pool_id::text, p.org_id
+FROM runner_pool_members m
+JOIN runner_pools p ON p.pool_id = m.pool_id
+WHERE m.member_id = $1 AND m.host_id = $2
+FOR UPDATE OF m`, member.MemberID, hostID).Scan(&runnerName, &class, &poolID, &org)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if runnerName != observed.RunnerName || observed.Identity.RunnerName != runnerName ||
+		!strings.HasPrefix(observed.Identity.Repository, org+"/") {
+		_, err := tx.Exec(ctx, `UPDATE runner_pool_members SET state = 'recycling', reported_reason = 'local assignment identity mismatch', updated_at = now() WHERE member_id = $1`, member.MemberID)
+		return err
+	}
+	if exists, err := assignmentExists(ctx, tx, member.MemberID); err != nil || exists {
+		return err
+	}
+	runID, err := strconv.ParseInt(observed.Identity.RunID, 10, 64)
+	if err != nil {
+		_, updateErr := tx.Exec(ctx, `UPDATE runner_pool_members SET state = 'recycling', reported_reason = 'invalid local run id', updated_at = now() WHERE member_id = $1`, member.MemberID)
+		return updateErr
+	}
+	rows, err := tx.Query(ctx, `
+SELECT i.provider_job_id
+FROM github_job_intents i
+WHERE i.runner_class = $1 AND i.repository_full_name = $2
+  AND i.provider_run_id = $3 AND i.provider_run_attempt = $4
+  AND i.check_run_id = $5
+  AND i.state IN ('queued', 'observed', 'requeued')
+  AND (i.request_id = '' OR i.request_id = $6)
+ORDER BY (i.request_id = $6) DESC, i.provider_job_id
+LIMIT 2
+FOR UPDATE`, class, observed.Identity.Repository, runID, observed.Identity.RunAttempt,
+		observed.CheckRunID, observed.RequestID)
+	if err != nil {
+		return err
+	}
+	var matches []int64
+	for rows.Next() {
+		var jobID int64
+		if err := rows.Scan(&jobID); err != nil {
+			rows.Close()
+			return err
+		}
+		matches = append(matches, jobID)
+	}
+	rows.Close()
+	if len(matches) == 0 {
+		return nil
+	}
+	if len(matches) != 1 {
+		_, err := tx.Exec(ctx, `UPDATE runner_pool_members SET state = 'recycling', reported_reason = $2, updated_at = now() WHERE member_id = $1`, member.MemberID, fmt.Sprintf("check run matched %d job intents", len(matches)))
+		return err
+	}
+	providerJobID := matches[0]
+	if _, err := tx.Exec(ctx, `
+UPDATE github_job_intents
+SET request_id = $2, protocol_job_id = $3, state = 'observed', updated_at = now()
+WHERE provider_job_id = $1`, providerJobID, observed.RequestID, observed.JobID); err != nil {
+		return err
+	}
+	timing, err := json.Marshal(observed.Timing)
+	if err != nil {
+		return err
+	}
+	var assignmentID string
+	if err := tx.QueryRow(ctx, `
+INSERT INTO runner_job_assignments (
+    member_id, provider_job_id, host_id, request_id, protocol_job_id, check_run_id,
+    runner_name, job_display_name, run_id, run_attempt, repository,
+    workflow_job, state, workspace_scope_id, source_generation,
+    source_process_digest, source_process_version, timing_json
+)
+SELECT $1, i.provider_job_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+       'observed', d.workspace_scope_id, COALESCE(s.current_generation_id, ''),
+       COALESCE(CASE WHEN g.process_valid THEN g.process_digest END, ''),
+       COALESCE(CASE WHEN g.process_valid THEN g.criu_version END, ''), $12::jsonb
+FROM github_job_intents i
+JOIN github_provider_demands d ON d.provider_job_id = i.provider_job_id
+LEFT JOIN workspace_scopes s ON s.scope_id = d.workspace_scope_id
+LEFT JOIN workspace_generations g ON g.generation = s.current_generation_id
+WHERE i.provider_job_id = $13
+RETURNING assignment_id::text`, member.MemberID, hostID, observed.RequestID, observed.JobID, observed.CheckRunID,
+		runnerName, observed.JobDisplayName, observed.Identity.RunID, observed.Identity.RunAttempt,
+		observed.Identity.Repository, observed.Identity.WorkflowJob, string(timing), providerJobID).Scan(&assignmentID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE runner_pool_members SET state = 'assigned', updated_at = now() WHERE member_id = $1`, member.MemberID)
+	return err
+}
+
+func assignmentExists(ctx context.Context, tx pgx.Tx, memberID string) (bool, error) {
+	var exists bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM runner_job_assignments WHERE member_id = $1)`, memberID).Scan(&exists)
+	return exists, err
+}
+
+func (s *pgStore) ApplyAssignmentReport(ctx context.Context, hostID string, report syncproto.AssignmentReport, sealDeadline time.Time) error {
+	if report.AssignmentID == "" || report.MemberID == "" || report.RequestID == "" || report.JobID == "" {
+		return nil
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var providerJobID int64
+	var state, trustClass, scopeID, sourceGeneration, class string
+	err = tx.QueryRow(ctx, `
+SELECT a.provider_job_id, a.state, COALESCE(d.trust_class, ''),
+       COALESCE(a.workspace_scope_id::text, ''), a.source_generation, m.runner_class
+FROM runner_job_assignments a
+JOIN runner_pool_members m ON m.member_id = a.member_id
+LEFT JOIN github_provider_demands d ON d.provider_job_id = a.provider_job_id
+WHERE a.assignment_id::text = $1 AND a.member_id = $2 AND a.host_id = $3
+  AND a.request_id = $4 AND a.protocol_job_id = $5
+FOR UPDATE OF a`, report.AssignmentID, report.MemberID, hostID, report.RequestID, report.JobID).
+		Scan(&providerJobID, &state, &trustClass, &scopeID, &sourceGeneration, &class)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if state == "completed" || state == "sealed" || state == "requeued" || state == "failed_closed" {
+		return nil
+	}
+	timing, err := json.Marshal(report.Timing)
+	if err != nil {
+		return err
+	}
+	restore := syncproto.RestoreReport{}
+	if report.Restore != nil {
+		restore = *report.Restore
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE runner_job_assignments SET
+    restore_outcome = $2, restore_failure_class = $3,
+    restore_failure_code = $4, process_invalidated = $5,
+    reason = $6,
+    timing_json = (
+        SELECT COALESCE(jsonb_agg(point ORDER BY first_seen), '[]'::jsonb)
+        FROM (
+            SELECT point, min(ordinality) AS first_seen
+            FROM jsonb_array_elements(timing_json || $7::jsonb)
+                 WITH ORDINALITY AS observations(point, ordinality)
+            GROUP BY point->>'source', point->>'boot_id', point->>'sequence', point
+        ) AS unique_observations
+    ),
+    updated_at = now()
+WHERE assignment_id::text = $1`, report.AssignmentID, restore.Outcome,
+		restore.FailureClass, restore.FailureCode, restore.ProcessInvalidated,
+		report.Reason, string(timing)); err != nil {
+		return err
+	}
+	if restore.ProcessInvalidated && sourceGeneration != "" {
+		if _, err := tx.Exec(ctx, `
+UPDATE workspace_generations SET
+    process_valid = false,
+    process_invalidated_at = COALESCE(process_invalidated_at, now()),
+    process_invalidation_class = CASE WHEN process_invalidation_class = '' THEN $2 ELSE process_invalidation_class END,
+    process_invalidation_code = CASE WHEN process_invalidation_code = '' THEN $3 ELSE process_invalidation_code END,
+    updated_at = now()
+WHERE generation = $1`, sourceGeneration, restore.FailureClass, restore.FailureCode); err != nil {
+			return err
+		}
+	}
+	switch report.State {
+	case syncproto.AssignmentObserved, syncproto.AssignmentBinding, syncproto.AssignmentAuthorizing, syncproto.AssignmentRunning:
+		if _, err := tx.Exec(ctx, `UPDATE runner_job_assignments SET state = $2, updated_at = now() WHERE assignment_id::text = $1 AND state NOT IN ('completed','sealed','requeued','failed_closed')`, report.AssignmentID, string(report.State)); err != nil {
+			return err
+		}
+		if report.State == syncproto.AssignmentRunning {
+			if _, err := tx.Exec(ctx, `UPDATE github_job_intents SET state = 'running', updated_at = now() WHERE provider_job_id = $1`, providerJobID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE github_provider_demands SET state = 'assigned', updated_at = now() WHERE provider_job_id = $1 AND state IN ('demand_recorded','capacity_requested')`, providerJobID); err != nil {
+				return err
+			}
+		}
+
+	case syncproto.AssignmentExited:
+		if report.ExitCode == 0 && report.Checkpoint != nil && scopeID != "" && trustClass == trustClassBranch {
+			var generation string
+			err := tx.QueryRow(ctx, `
+INSERT INTO workspace_generations (
+    generation, host_id, runner_class, state, scope_id, source_generation,
+    process_digest, criu_version
+) VALUES (gen_random_uuid()::text, $1, $2, 'candidate', $3::uuid, NULLIF($4,''), $5, $6)
+RETURNING generation`, hostID, class, scopeID, sourceGeneration,
+				report.Checkpoint.Digest, report.Checkpoint.Version).Scan(&generation)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `
+UPDATE runner_job_assignments
+SET state = 'sealing', exit_code = 0, seal_generation = $2,
+    checkpoint_digest = $3, checkpoint_version = $4,
+    seal_deadline_at = $5, updated_at = now()
+WHERE assignment_id::text = $1`, report.AssignmentID, generation,
+				report.Checkpoint.Digest, report.Checkpoint.Version, sealDeadline); err != nil {
+				return err
+			}
+		} else {
+			if err := completeAssignmentTx(ctx, tx, report.AssignmentID, providerJobID, report.ExitCode); err != nil {
+				return err
+			}
+		}
+
+	case syncproto.AssignmentSealed:
+		if report.SealedGeneration == "" || report.Checkpoint == nil {
+			return nil
+		}
+		tag, err := tx.Exec(ctx, `
+UPDATE workspace_generations
+SET sealed_at = now(), process_digest = $2, criu_version = $3, updated_at = now()
+WHERE generation = $1 AND state = 'candidate'`, report.SealedGeneration,
+			report.Checkpoint.Digest, report.Checkpoint.Version)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() > 0 {
+			if _, err := tx.Exec(ctx, `UPDATE runner_job_assignments SET state = 'sealed', updated_at = now() WHERE assignment_id::text = $1 AND seal_generation = $2`, report.AssignmentID, report.SealedGeneration); err != nil {
+				return err
+			}
+			if err := completeIntentTx(ctx, tx, providerJobID); err != nil {
+				return err
+			}
+		}
+
+	case syncproto.AssignmentCompleted:
+		if err := completeAssignmentTx(ctx, tx, report.AssignmentID, providerJobID, report.ExitCode); err != nil {
+			return err
+		}
+
+	case syncproto.AssignmentRequeued:
+		if _, err := tx.Exec(ctx, `UPDATE runner_job_assignments SET state = 'requeued', reason = $2, updated_at = now() WHERE assignment_id::text = $1`, report.AssignmentID, report.Reason); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE github_job_intents SET state = 'requeued', request_id = '', protocol_job_id = '', updated_at = now() WHERE provider_job_id = $1`, providerJobID); err != nil {
+			return err
+		}
+
+	case syncproto.AssignmentFailedClosed:
+		if _, err := tx.Exec(ctx, `UPDATE runner_job_assignments SET state = 'failed_closed', reason = $2, updated_at = now() WHERE assignment_id::text = $1`, report.AssignmentID, report.Reason); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE github_job_intents SET state = 'failed_closed', updated_at = now() WHERE provider_job_id = $1`, providerJobID); err != nil {
+			return err
+		}
+		if err := failDemandTx(ctx, tx, providerJobID, demandSandboxFailed,
+			[]string{demandRecorded, demandCapacityRequested, demandAssigned},
+			[]problem{problemSandboxFailed(report.Reason)}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func completeAssignmentTx(ctx context.Context, tx pgx.Tx, assignmentID string, providerJobID int64, exitCode int) error {
+	if _, err := tx.Exec(ctx, `UPDATE runner_job_assignments SET state = 'completed', exit_code = $2, updated_at = now() WHERE assignment_id::text = $1`, assignmentID, exitCode); err != nil {
+		return err
+	}
+	return completeIntentTx(ctx, tx, providerJobID)
+}
+
+func completeIntentTx(ctx context.Context, tx pgx.Tx, providerJobID int64) error {
+	if _, err := tx.Exec(ctx, `UPDATE github_job_intents SET state = 'completed', updated_at = now() WHERE provider_job_id = $1`, providerJobID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `UPDATE github_provider_demands SET state = 'completed', updated_at = now() WHERE provider_job_id = $1 AND state NOT IN ('capacity_failed','jit_failed','sandbox_failed')`, providerJobID)
+	return err
+}
+
+type desiredMemberRow struct {
+	MemberID, VMID, RunnerName, RunnerClass, JITConfig, State string
+}
+
+func (s *pgStore) ListDesiredMembers(ctx context.Context, hostID string) ([]desiredMemberRow, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT member_id, vm_id, runner_name, runner_class, jit_config,
+       CASE WHEN state = 'recycling' THEN 'recycle' ELSE 'listen' END
+FROM runner_pool_members
+WHERE host_id = $1 AND pool_id IS NOT NULL
+  AND state NOT IN ('lost')
+  AND (jit_config <> '' OR state = 'recycling')
+ORDER BY member_id`, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var desired []desiredMemberRow
+	for rows.Next() {
+		var row desiredMemberRow
+		if err := rows.Scan(&row.MemberID, &row.VMID, &row.RunnerName, &row.RunnerClass, &row.JITConfig, &row.State); err != nil {
+			return nil, err
+		}
+		desired = append(desired, row)
+	}
+	return desired, rows.Err()
+}
+
+type desiredAssignmentRow struct {
+	AssignmentID, MemberID, RequestID, ProtocolJobID    string
+	State                                               string
+	ProviderJobID, InstallationID, RepositoryID         int64
+	CheckRunID                                          int64
+	RunID                                               string
+	RunAttempt                                          int
+	RunnerName, Repository, WorkflowJob                 string
+	RunnerClass, ScopeGeneration                        string
+	WorkspaceBytes, ToolBytes, ProcessBytes             int64
+	ProcessDigest, ProcessVersion                       string
+	SealGeneration, CheckpointDigest, CheckpointVersion string
+}
+
+func (s *pgStore) ListDesiredAssignments(ctx context.Context, hostID string) ([]desiredAssignmentRow, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT a.assignment_id::text, a.member_id, a.request_id, a.protocol_job_id, a.check_run_id, a.state,
+       a.provider_job_id, d.provider_installation_id, d.provider_repository_id,
+       a.run_id, a.run_attempt, a.runner_name, a.repository, a.workflow_job,
+       m.runner_class, a.source_generation,
+       c.disk_bytes, c.tool_disk_bytes, c.process_disk_bytes,
+       a.source_process_digest, a.source_process_version,
+       a.seal_generation, a.checkpoint_digest, a.checkpoint_version
+FROM runner_job_assignments a
+JOIN runner_pool_members m ON m.member_id = a.member_id
+JOIN runner_classes c ON c.class = m.runner_class
+JOIN github_provider_demands d ON d.provider_job_id = a.provider_job_id
+WHERE a.host_id = $1 AND a.state IN
+    ('observed','binding','authorizing','running','exited','sealing')
+ORDER BY a.created_at`, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var desired []desiredAssignmentRow
+	for rows.Next() {
+		var row desiredAssignmentRow
+		if err := rows.Scan(
+			&row.AssignmentID, &row.MemberID, &row.RequestID, &row.ProtocolJobID, &row.CheckRunID, &row.State,
+			&row.ProviderJobID, &row.InstallationID, &row.RepositoryID,
+			&row.RunID, &row.RunAttempt, &row.RunnerName, &row.Repository, &row.WorkflowJob,
+			&row.RunnerClass, &row.ScopeGeneration,
+			&row.WorkspaceBytes, &row.ToolBytes, &row.ProcessBytes,
+			&row.ProcessDigest, &row.ProcessVersion,
+			&row.SealGeneration, &row.CheckpointDigest, &row.CheckpointVersion,
+		); err != nil {
+			return nil, err
+		}
+		desired = append(desired, row)
+	}
+	return desired, rows.Err()
+}
+
+func (s *pgStore) ListReapGenerations(ctx context.Context, hostID string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT generation FROM workspace_generations WHERE host_id = $1 AND state = 'reapable' ORDER BY generation`, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var generations []string
+	for rows.Next() {
+		var generation string
+		if err := rows.Scan(&generation); err != nil {
+			return nil, err
+		}
+		generations = append(generations, generation)
+	}
+	return generations, rows.Err()
+}
 
 func (s *pgStore) ListHostPoolTargets(ctx context.Context, hostID string) (map[string]int, error) {
-	rows, err := s.pool.Query(ctx, sqlListHostPoolTargets, hostID)
+	rows, err := s.pool.Query(ctx, `
+SELECT slots.class, LEAST(slots.total, COALESCE(sum(p.desired_count), 0))::integer
+FROM host_slots slots
+LEFT JOIN runner_pools p ON p.runner_class = slots.class AND p.enabled
+WHERE slots.host_id = $1
+GROUP BY slots.class, slots.total`, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -615,525 +671,190 @@ func (s *pgStore) ListHostPoolTargets(ctx context.Context, hostID string) (map[s
 	targets := map[string]int{}
 	for rows.Next() {
 		var class string
-		var total int
-		if err := rows.Scan(&class, &total); err != nil {
+		var count int
+		if err := rows.Scan(&class, &count); err != nil {
 			return nil, err
 		}
-		targets[class] = total
+		targets[class] = count
 	}
 	return targets, rows.Err()
 }
 
-const sqlListReapGenerations = `
-SELECT generation FROM workspace_generations
-WHERE host_id = $1 AND state = 'reapable' AND NOT pinned
-ORDER BY generation`
+func (s *pgStore) ExpireSealingAssignments(ctx context.Context, now time.Time) (int64, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `
+UPDATE runner_job_assignments
+SET state = 'completed', reason = 'snapshot seal not confirmed', updated_at = now()
+WHERE state = 'sealing' AND seal_deadline_at <= $1
+RETURNING seal_generation`, now)
+	if err != nil {
+		return 0, err
+	}
+	var generations []string
+	for rows.Next() {
+		var generation string
+		if err := rows.Scan(&generation); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		generations = append(generations, generation)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(generations) > 0 {
+		if _, err := tx.Exec(ctx, `UPDATE workspace_generations SET state = 'discarded', updated_at = now() WHERE generation = ANY($1::text[]) AND state = 'candidate'`, generations); err != nil {
+			return 0, err
+		}
+	}
+	return int64(len(generations)), tx.Commit(ctx)
+}
 
-func (s *pgStore) ListReapGenerations(ctx context.Context, hostID string) ([]string, error) {
-	rows, err := s.pool.Query(ctx, sqlListReapGenerations, hostID)
+func (s *pgStore) RecoverOfflineHosts(ctx context.Context, cutoff time.Time) (int64, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `
+SELECT a.assignment_id::text, a.provider_job_id
+FROM runner_job_assignments a
+JOIN hosts h ON h.host_id = a.host_id
+WHERE h.last_sync_at < $1
+  AND a.state IN ('observed','binding','authorizing','running','exited')
+FOR UPDATE OF a`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	var assignmentIDs []string
+	var providerJobIDs []int64
+	for rows.Next() {
+		var assignmentID string
+		var providerJobID int64
+		if err := rows.Scan(&assignmentID, &providerJobID); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		assignmentIDs = append(assignmentIDs, assignmentID)
+		providerJobIDs = append(providerJobIDs, providerJobID)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(assignmentIDs) > 0 {
+		if _, err := tx.Exec(ctx, `
+UPDATE runner_job_assignments
+SET state = 'requeued', reason = 'host stopped syncing', updated_at = now()
+WHERE assignment_id::text = ANY($1::text[])`, assignmentIDs); err != nil {
+			return 0, err
+		}
+		if _, err := tx.Exec(ctx, `
+UPDATE github_job_intents
+SET state = 'requeued', request_id = '', protocol_job_id = '', updated_at = now()
+WHERE provider_job_id = ANY($1::bigint[])`, providerJobIDs); err != nil {
+			return 0, err
+		}
+	}
+	sealingRows, err := tx.Query(ctx, `
+UPDATE runner_job_assignments a
+SET state = 'completed', reason = 'generation seal abandoned after host loss', updated_at = now()
+FROM hosts h
+WHERE h.host_id = a.host_id AND h.last_sync_at < $1 AND a.state = 'sealing'
+RETURNING a.provider_job_id, a.seal_generation`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	var sealedJobs []int64
+	var abandonedGenerations []string
+	for sealingRows.Next() {
+		var providerJobID int64
+		var generation string
+		if err := sealingRows.Scan(&providerJobID, &generation); err != nil {
+			sealingRows.Close()
+			return 0, err
+		}
+		sealedJobs = append(sealedJobs, providerJobID)
+		if generation != "" {
+			abandonedGenerations = append(abandonedGenerations, generation)
+		}
+	}
+	sealingRows.Close()
+	if err := sealingRows.Err(); err != nil {
+		return 0, err
+	}
+	if len(abandonedGenerations) > 0 {
+		if _, err := tx.Exec(ctx, `
+UPDATE workspace_generations
+SET state = 'discarded', updated_at = now()
+WHERE generation = ANY($1::text[]) AND state = 'candidate'`, abandonedGenerations); err != nil {
+			return 0, err
+		}
+	}
+	for _, providerJobID := range sealedJobs {
+		if err := completeIntentTx(ctx, tx, providerJobID); err != nil {
+			return 0, err
+		}
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE runner_pool_members m
+SET state = 'lost', jit_config = '', reported_reason = 'host stopped syncing', updated_at = now()
+FROM hosts h
+WHERE h.host_id = m.host_id AND h.last_sync_at < $1
+  AND m.state NOT IN ('lost', 'recycling')`, cutoff); err != nil {
+		return 0, err
+	}
+	return int64(len(assignmentIDs) + len(sealedJobs)), tx.Commit(ctx)
+}
+
+type sealedCandidate struct {
+	Generation, ScopeID, HostID, ObservedSource, AssignmentID, AssignmentAttemptID string
+	ProviderJobID, JobRunAttempt                                                   int64
+	JobConclusion                                                                  string
+}
+
+func (s *pgStore) ListSealedCandidates(ctx context.Context, batch int) ([]sealedCandidate, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT g.generation, g.scope_id::text, g.host_id, COALESCE(a.source_generation, ''),
+       a.assignment_id::text, a.run_attempt::text, a.provider_job_id,
+       j.provider_run_attempt, j.conclusion
+FROM workspace_generations g
+JOIN runner_job_assignments a ON a.seal_generation = g.generation
+JOIN github_workflow_jobs j ON j.provider_job_id = a.provider_job_id
+WHERE g.state = 'candidate' AND g.sealed_at IS NOT NULL AND g.scope_id IS NOT NULL
+  AND j.status = 'completed' AND j.terminal_observed_from_api_at IS NOT NULL
+ORDER BY g.updated_at LIMIT $1`, batch)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []string
+	var candidates []sealedCandidate
 	for rows.Next() {
-		var g string
-		if err := rows.Scan(&g); err != nil {
+		var candidate sealedCandidate
+		if err := rows.Scan(&candidate.Generation, &candidate.ScopeID, &candidate.HostID,
+			&candidate.ObservedSource, &candidate.AssignmentID, &candidate.AssignmentAttemptID,
+			&candidate.ProviderJobID, &candidate.JobRunAttempt, &candidate.JobConclusion); err != nil {
 			return nil, err
 		}
-		out = append(out, g)
+		candidates = append(candidates, candidate)
 	}
-	return out, rows.Err()
+	return candidates, rows.Err()
 }
 
-// schedulableDemand is one recorded demand whose class the control plane
-// serves (the runner_classes join is the class allowlist).
-type schedulableDemand struct {
-	ProviderJobID          int64
-	ProviderInstallationID int64
-	ProviderRepositoryID   int64
-	RepositoryFullName     string
-	ProviderRunAttempt     int64
-	RunnerClass            string
-	DiskBytes              int64
-	WorkspaceScopeID       string
-}
-
-const sqlListSchedulableDemands = `
-SELECT d.provider_job_id, d.provider_installation_id, d.provider_repository_id, d.repository_full_name,
-    d.provider_run_attempt, d.runner_class, rc.disk_bytes,
-    COALESCE(d.workspace_scope_id::text, '')
-FROM github_provider_demands d
-JOIN runner_classes rc ON rc.class = d.runner_class
-WHERE d.state = 'demand_recorded'
-ORDER BY d.created_at
-LIMIT $1`
-
-func (s *pgStore) ListSchedulableDemands(ctx context.Context, batch int) ([]schedulableDemand, error) {
-	rows, err := s.pool.Query(ctx, sqlListSchedulableDemands, batch)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []schedulableDemand
-	for rows.Next() {
-		var d schedulableDemand
-		if err := rows.Scan(&d.ProviderJobID, &d.ProviderInstallationID, &d.ProviderRepositoryID, &d.RepositoryFullName,
-			&d.ProviderRunAttempt, &d.RunnerClass, &d.DiskBytes, &d.WorkspaceScopeID); err != nil {
-			return nil, err
-		}
-		out = append(out, d)
-	}
-	return out, rows.Err()
-}
-
-// unknownClassDemand is a recorded demand whose runner_class has no
-// runner_classes row: the schedulable join above would filter it out
-// silently forever, so the scheduler terminalizes it with a problem instead.
-type unknownClassDemand struct {
-	ProviderJobID      int64
-	RepositoryFullName string
-	RunnerClass        string
-}
-
-const sqlListUnknownClassDemands = `
-SELECT d.provider_job_id, d.repository_full_name, d.runner_class
-FROM github_provider_demands d
-WHERE d.state = 'demand_recorded'
-  AND NOT EXISTS (SELECT 1 FROM runner_classes rc WHERE rc.class = d.runner_class)
-ORDER BY d.created_at
-LIMIT $1`
-
-func (s *pgStore) ListUnknownClassDemands(ctx context.Context, batch int) ([]unknownClassDemand, error) {
-	rows, err := s.pool.Query(ctx, sqlListUnknownClassDemands, batch)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []unknownClassDemand
-	for rows.Next() {
-		var d unknownClassDemand
-		if err := rows.Scan(&d.ProviderJobID, &d.RepositoryFullName, &d.RunnerClass); err != nil {
-			return nil, err
-		}
-		out = append(out, d)
-	}
-	return out, rows.Err()
-}
-
-const sqlInsertLease = `
-INSERT INTO host_leases (
-    provider_job_id, execution_id, attempt_id, org_id, installation_id,
-    repository_id, repository_full_name, runner_class, state,
-    workspace_size_bytes, allocate_deadline_at, workspace_scope_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'allocating', $9, $10, NULLIF($11, '')::uuid)
-RETURNING lease_id`
-
-// CreateLeaseForDemand advances a recorded demand to capacity_requested and
-// creates its allocating lease, atomically; created=false means another
-// scheduler pass claimed the demand first.
-func (s *pgStore) CreateLeaseForDemand(ctx context.Context, d schedulableDemand, executionID, attemptID, orgID string, installationID int64, allocateDeadline time.Time) (string, bool, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return "", false, err
-	}
-	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, sqlAdvanceDemand, d.ProviderJobID, demandCapacityRequested, []string{demandRecorded})
-	if err != nil {
-		return "", false, err
-	}
-	if tag.RowsAffected() == 0 {
-		return "", false, nil
-	}
-	var leaseID string
-	if err := tx.QueryRow(ctx, sqlInsertLease,
-		d.ProviderJobID, executionID, attemptID, orgID, installationID,
-		d.ProviderRepositoryID, d.RepositoryFullName, d.RunnerClass,
-		d.DiskBytes, allocateDeadline, d.WorkspaceScopeID).Scan(&leaseID); err != nil {
-		return "", false, err
-	}
-	return leaseID, true, tx.Commit(ctx)
-}
-
-type allocatingLease struct {
-	LeaseID        string
-	ProviderJobID  int64
-	RunnerClass    string
-	OrgID          string
-	InstallationID int64
-}
-
-const sqlListAllocatingLeases = `
-SELECT lease_id, provider_job_id, runner_class, org_id, installation_id
-FROM host_leases
-WHERE state = 'allocating'
-ORDER BY created_at
-LIMIT $1`
-
-func (s *pgStore) ListAllocatingLeases(ctx context.Context, batch int) ([]allocatingLease, error) {
-	rows, err := s.pool.Query(ctx, sqlListAllocatingLeases, batch)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []allocatingLease
-	for rows.Next() {
-		var l allocatingLease
-		if err := rows.Scan(&l.LeaseID, &l.ProviderJobID, &l.RunnerClass, &l.OrgID, &l.InstallationID); err != nil {
-			return nil, err
-		}
-		out = append(out, l)
-	}
-	return out, rows.Err()
-}
-
-// sqlClaimHostSlot is the CAS slot claim: exactly one free slot on a
-// recently-synced host offering the class is reserved — the lease's scope
-// home host first (a clone is ~free where the source generation lives),
-// then least-loaded. FOR UPDATE SKIP LOCKED makes concurrent claimers pick
-// disjoint rows, and the reserved < total guard inside the locked pick makes
-// double-assignment impossible. FOR UPDATE OF hs keeps the lock off the
-// outer-joined scope row, which PostgreSQL would reject.
-const sqlClaimHostSlot = `
-UPDATE host_slots s
-SET reserved = s.reserved + 1, updated_at = now()
-FROM (
-    SELECT hs.host_id, hs.class FROM host_slots hs
-    JOIN hosts h ON h.host_id = hs.host_id
-    LEFT JOIN host_leases cl ON cl.lease_id = $2
-    LEFT JOIN workspace_scopes sc ON sc.scope_id = cl.workspace_scope_id
-    WHERE hs.class = $1
-      AND hs.reserved < hs.total
-      AND h.last_sync_at > now() - interval '30 seconds'
-    ORDER BY (hs.host_id = sc.home_host_id) DESC NULLS LAST, hs.reserved, hs.host_id
-    FOR UPDATE OF hs SKIP LOCKED
-    LIMIT 1
-) pick
-WHERE s.host_id = pick.host_id AND s.class = pick.class
-RETURNING s.host_id`
-
-// sqlBindLeaseHost stamps the claimed host onto the allocating lease in the
-// claim's own transaction, together with the workspace this placement gets:
-// observed_source_generation records the scope pointer as read right now
-// (the promotion CAS guard), and workspace_generation is that pointer only
-// when its generation is resident on the chosen host — anywhere else the
-// clone source does not exist, so the lease runs cold (still correct; cache
-// is acceleration). The host_id = ” guard makes the binding bind-once: a
-// concurrent scheduler instance (deploy overlap) can never re-place a lease
-// whose claim is mid-mint elsewhere.
-const sqlBindLeaseHost = `
-UPDATE host_leases l
-SET host_id = $2,
-    observed_source_generation = src.pointer,
-    workspace_generation = COALESCE(src.resident, ''),
-    updated_at = now()
-FROM (
-    SELECT sc.current_generation_id AS pointer,
-        (SELECT g.generation FROM workspace_generations g
-         WHERE g.generation = sc.current_generation_id AND g.host_id = $2) AS resident
-    FROM host_leases cl
-    LEFT JOIN workspace_scopes sc ON sc.scope_id = cl.workspace_scope_id
-    WHERE cl.lease_id = $1
-) src
-WHERE l.lease_id = $1 AND l.state = 'allocating' AND l.host_id = ''`
-
-// sqlLockLeaseScope share-locks the lease's scope row for the rest of the
-// claim transaction. The promotion CAS updates that row, so it cannot commit
-// — and retire the generation the bind below is about to read as the scope
-// pointer — until this transaction's lease references are visible. Without
-// the lock, a promotion plus a retention sweep landing inside the claim's
-// commit window could mark the clone source reapable while no committed row
-// references it yet.
-const sqlLockLeaseScope = `
-SELECT 1 FROM host_leases cl
-JOIN workspace_scopes sc ON sc.scope_id = cl.workspace_scope_id
-WHERE cl.lease_id = $1
-FOR SHARE OF sc`
-
-// sqlTouchCloneSource stamps last_used_at on the generation the bound lease
-// clones (the retention policy's recency input); a cold bind touches nothing.
-const sqlTouchCloneSource = `
-UPDATE workspace_generations g
-SET last_used_at = now(), updated_at = now()
-FROM host_leases l
-WHERE l.lease_id = $1 AND l.workspace_generation = g.generation`
-
-// ClaimHostSlot reserves one free slot for the lease and binds the lease to
-// the chosen host, atomically. The bound lease row is what carries the
-// reservation through the JIT mint: every observer (the reconcile sweep, a
-// second control-plane instance) sees the claim as lease truth, and a crash
-// after the claim leaves a bound allocating lease whose allocate-deadline
-// expiry releases the slot.
-func (s *pgStore) ClaimHostSlot(ctx context.Context, leaseID, class string) (string, bool, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return "", false, err
-	}
-	defer tx.Rollback(ctx)
-	hostID, claimed, err := claimHostSlotTx(ctx, tx, leaseID, class)
-	if err != nil || !claimed {
-		return "", false, err
-	}
-	return hostID, true, tx.Commit(ctx)
-}
-
-func claimHostSlotTx(ctx context.Context, tx pgx.Tx, leaseID, class string) (string, bool, error) {
-	var hostID string
-	err := tx.QueryRow(ctx, sqlClaimHostSlot, class, leaseID).Scan(&hostID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	if _, err := tx.Exec(ctx, sqlLockLeaseScope, leaseID); err != nil {
-		return "", false, err
-	}
-	tag, err := tx.Exec(ctx, sqlBindLeaseHost, leaseID, hostID)
-	if err != nil {
-		return "", false, err
-	}
-	if tag.RowsAffected() == 0 {
-		// The lease left 'allocating' (or was bound elsewhere) concurrently;
-		// the rollback discards the reservation.
-		return "", false, nil
-	}
-	if _, err := tx.Exec(ctx, sqlTouchCloneSource, leaseID); err != nil {
-		return "", false, err
-	}
-	return hostID, true, nil
-}
-
-// sqlReconcileSlotReservations resets every slot row's reserved counter to
-// the count of leases actually holding a claim: assigned/ready leases plus
-// allocating leases bound to the host (a claim mid-JIT-mint). Because the
-// claim binds the lease in the same transaction as the counter bump, this
-// sweep can run at any time — including from an overlapping control-plane
-// instance — without erasing an in-flight claim; it only repairs genuine
-// counter drift (a host slot row replaced mid-lease, a double release).
-const sqlReconcileSlotReservations = `
-UPDATE host_slots s
-SET reserved = active.count, updated_at = now()
-FROM (
-    SELECT s2.host_id, s2.class,
-        (
-            SELECT COUNT(*)
-            FROM host_leases listener
-            LEFT JOIN github_job_assignments assignment
-                ON assignment.runner_name = listener.lease_id
-            LEFT JOIN LATERAL (
-                SELECT candidate.*
-                FROM host_leases candidate
-                WHERE candidate.provider_job_id = assignment.provider_job_id
-                  AND candidate.runner_class = listener.runner_class
-                ORDER BY
-                    (candidate.state IN ('allocating', 'assigned', 'ready', 'sealing')) DESC,
-                    candidate.created_at DESC
-                LIMIT 1
-            ) execution ON true
-            WHERE listener.host_id = s2.host_id
-              AND listener.runner_class = s2.class
-              AND (
-                  listener.state = 'allocating'
-                  OR (
-                      execution.lease_id IS NULL
-                      AND listener.state IN ('assigned', 'ready')
-                  )
-                  OR execution.state IN ('assigned', 'ready')
-              )
-        ) AS count
-    FROM host_slots s2
-) active
-WHERE s.host_id = active.host_id AND s.class = active.class
-  AND s.reserved <> active.count`
-
-func (s *pgStore) ReconcileSlotReservations(ctx context.Context) (int64, error) {
-	tag, err := s.pool.Exec(ctx, sqlReconcileSlotReservations)
-	return tag.RowsAffected(), err
-}
-
-const sqlAssignLease = `
-UPDATE host_leases
-SET state = 'assigned', jit_config = $3,
-    assignment_deadline_at = $4, updated_at = now()
-WHERE lease_id = $1 AND state = 'allocating' AND host_id = $2
-RETURNING provider_job_id`
-
-// AssignLease advances a claimed (host-bound) lease to assigned with the
-// minted JIT config; assigned=false means the lease left 'allocating'
-// concurrently — whichever transition took it released the claimed slot.
-func (s *pgStore) AssignLease(ctx context.Context, leaseID, hostID, jitConfig string, assignmentDeadline time.Time) (bool, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback(ctx)
-	var jobID int64
-	err = tx.QueryRow(ctx, sqlAssignLease, leaseID, hostID, jitConfig, assignmentDeadline).Scan(&jobID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if _, err := tx.Exec(ctx, sqlAdvanceDemand, jobID, demandAssigned, []string{demandCapacityRequested}); err != nil {
-		return false, err
-	}
-	return true, tx.Commit(ctx)
-}
-
-const sqlFailAllocatingLease = `
-UPDATE host_leases
-SET state = 'failed', reason = $2, jit_config = '', updated_at = now()
-WHERE lease_id = $1 AND state = 'allocating'
-RETURNING provider_job_id, host_id, runner_class`
-
-// FailAllocatingLease terminalizes a lease that never reached its host (JIT
-// mint failure), releases the claimed slot if one is bound, and fails the
-// demand as jit_failed — one transaction.
-func (s *pgStore) FailAllocatingLease(ctx context.Context, leaseID, reason string, problems []problem) (bool, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback(ctx)
-	var jobID int64
-	var hostID, class string
-	err = tx.QueryRow(ctx, sqlFailAllocatingLease, leaseID, reason).Scan(&jobID, &hostID, &class)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if hostID != "" {
-		if _, err := tx.Exec(ctx, sqlReleaseHostSlot, hostID, class); err != nil {
-			return false, err
+// failDemandTx moves a demand to a terminal failure state and appends its
+// structured problem history in the same transaction.
+func failDemandTx(ctx context.Context, tx pgx.Tx, jobID int64, state string, from []string, problems []problem) error {
+	for _, p := range problems {
+		if _, err := tx.Exec(ctx, sqlAppendDemandProblem,
+			jobID, phaseProcessing, p.typeURI(), p.Code, p.Title, p.Detail, p.Status, p.Retryable, p.Pointer); err != nil {
+			return err
 		}
 	}
-	if err := failDemandTx(ctx, tx, jobID, demandJITFailed,
-		[]string{demandRecorded, demandCapacityRequested}, problems); err != nil {
-		return false, err
-	}
-	return true, tx.Commit(ctx)
-}
-
-type overdueLease struct {
-	LeaseID       string
-	ProviderJobID int64
-	HostID        string
-	RunnerClass   string
-	State         string
-}
-
-// sqlListOverdueLeases sweeps the ways a lease can be stuck: past its
-// allocate deadline, past its assignment deadline, ready on a host that
-// stopped syncing (a ready lease has no control-plane deadline of its own —
-// hostd's ready bound only fires if the host is alive, so host death is the
-// absence this sweep must observe), or sealing past its deadline or on a
-// dead host.
-const sqlListOverdueLeases = `
-SELECT l.lease_id, l.provider_job_id, l.host_id, l.runner_class, l.state
-FROM host_leases l
-WHERE (l.state = 'allocating' AND l.allocate_deadline_at <= now())
-   OR (l.state = 'assigned' AND l.assignment_deadline_at <= now())
-   OR (l.state = 'ready' AND EXISTS (
-        SELECT 1 FROM hosts h
-        WHERE h.host_id = l.host_id AND h.last_sync_at <= $2))
-   OR (l.state = 'sealing' AND (l.seal_deadline_at <= now() OR EXISTS (
-        SELECT 1 FROM hosts h
-        WHERE h.host_id = l.host_id AND h.last_sync_at <= $2)))
-ORDER BY l.updated_at
-LIMIT $1`
-
-func (s *pgStore) ListOverdueLeases(ctx context.Context, batch int, hostDeadCutoff time.Time) ([]overdueLease, error) {
-	rows, err := s.pool.Query(ctx, sqlListOverdueLeases, batch, hostDeadCutoff)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []overdueLease
-	for rows.Next() {
-		var l overdueLease
-		if err := rows.Scan(&l.LeaseID, &l.ProviderJobID, &l.HostID, &l.RunnerClass, &l.State); err != nil {
-			return nil, err
-		}
-		out = append(out, l)
-	}
-	return out, rows.Err()
-}
-
-const sqlExpireLease = `
-UPDATE host_leases
-SET state = 'expired', reason = $3, jit_config = '', updated_at = now()
-WHERE lease_id = $1 AND state = $2
-RETURNING host_id, runner_class, provider_job_id`
-
-const sqlExpireSealingLease = `
-UPDATE host_leases
-SET state = 'expired', reason = $2, updated_at = now()
-WHERE lease_id = $1 AND state = 'sealing'
-RETURNING seal_generation`
-
-// expireSealingLease terminalizes a seal that was never confirmed and
-// discards its candidate. The slot was released and the demand completed at
-// the exited report, so neither is touched: an unconfirmed seal costs only
-// the cache write.
-func (s *pgStore) expireSealingLease(ctx context.Context, l overdueLease, reason string) (bool, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback(ctx)
-	var sealGeneration string
-	err = tx.QueryRow(ctx, sqlExpireSealingLease, l.LeaseID, reason).Scan(&sealGeneration)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if _, err := tx.Exec(ctx, sqlDiscardGeneration, sealGeneration); err != nil {
-		return false, err
-	}
-	return true, tx.Commit(ctx)
-}
-
-// ExpireLease terminalizes a stuck lease: the guarded transition, the slot
-// release (any lease bound to a host holds a reservation, including a claimed
-// allocating lease orphaned mid-mint), and the demand failure land in one
-// transaction.
-func (s *pgStore) ExpireLease(ctx context.Context, l overdueLease, reason string, problems []problem) (bool, error) {
-	if l.State == leaseSealing {
-		return s.expireSealingLease(ctx, l, reason)
-	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback(ctx)
-	var hostID, class string
-	var jobID int64
-	err = tx.QueryRow(ctx, sqlExpireLease, l.LeaseID, l.State, reason).Scan(&hostID, &class, &jobID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if hostID != "" {
-		if _, err := tx.Exec(ctx, sqlReleaseHostSlot, hostID, class); err != nil {
-			return false, err
-		}
-	}
-	demandState := demandCapacityFailed
-	demandFrom := []string{demandRecorded, demandCapacityRequested}
-	if l.State == leaseAssigned || l.State == leaseReady {
-		demandState = demandSandboxFailed
-		demandFrom = []string{demandCapacityRequested, demandAssigned}
-	}
-	if err := failDemandTx(ctx, tx, jobID, demandState, demandFrom, problems); err != nil {
-		return false, err
-	}
-	return true, tx.Commit(ctx)
+	_, err := tx.Exec(ctx, `UPDATE github_provider_demands SET state = $2, updated_at = now() WHERE provider_job_id = $1 AND state = ANY($3)`, jobID, state, from)
+	return err
 }

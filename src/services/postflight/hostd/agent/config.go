@@ -7,7 +7,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 )
 
-// Config is the agent's static shape. Everything dynamic (leases, pool
+// Config is the agent's static shape. Everything dynamic (members, assignments, pool
 // targets, reap verbs) arrives via sync; config is only what the host
 // itself is.
 type Config struct {
@@ -21,7 +21,7 @@ type Config struct {
 	// these totals.
 	Slots map[vm.Class]int
 	// Images maps each class to its immutable golden snapshot. Idle VMs from
-	// another image are destroyed and refilled before they can be leased.
+	// another image are destroyed and refilled before they can join a pool.
 	Images map[vm.Class]string
 	// SyncInterval is the default exchange cadence when the control plane
 	// does not suggest one.
@@ -32,10 +32,10 @@ type Config struct {
 	CheckoutGuestOrigin string
 	// CheckoutPath is the checkout endpoint's path prefix.
 	CheckoutPath string
-
-	// TraceDir receives one append-only JSONL rendezvous trace per listener.
-	// Empty disables evidence recording (tests and simulations).
+	// TraceDir receives one append-only JSONL trace per single-use runner.
+	// Empty disables the local evidence sink.
 	TraceDir string
+
 	Platform PlatformFingerprint
 }
 

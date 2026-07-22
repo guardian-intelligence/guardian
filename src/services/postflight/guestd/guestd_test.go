@@ -333,21 +333,21 @@ func newWorld(t *testing.T, configure func(*Config), runner RunRunner) *world {
 
 func testPrepare() guestproto.Prepare {
 	return guestproto.Prepare{
-		Lease: "lease-1", JITConfig: "jit-blob",
+		MemberID: "member-1", JITConfig: "jit-blob",
 		Env: map[string]string{"POSTFLIGHT_POOL": "fixture"},
 	}
 }
 
 func testAssignment() guestproto.Assignment {
 	return guestproto.Assignment{
-		RequestID: "request-1", JobID: "job-1", RunnerName: "lease-1", JobDisplayName: "test",
+		RequestID: "request-1", JobID: "job-1", CheckRunID: 101, RunnerName: "member-1", JobDisplayName: "test",
 		Identity: testAuthorize().Identity,
 	}
 }
 
 func testRendezvous() guestproto.Rendezvous {
 	return guestproto.Rendezvous{
-		Lease: "lease-1",
+		MemberID: "member-1", AssignmentID: "assignment-1",
 		Mounts: []guestproto.Mount{{
 			Serial:     "workspace",
 			Filesystem: "ext4",
@@ -359,9 +359,9 @@ func testRendezvous() guestproto.Rendezvous {
 
 func testAuthorize() guestproto.Authorize {
 	return guestproto.Authorize{
-		Lease: "lease-1", RequestID: "request-1",
+		MemberID: "member-1", AssignmentID: "assignment-1", RequestID: "request-1",
 		Identity: &guestproto.JobIdentity{
-			RunID: "101", RunAttempt: 1, RunnerName: "lease-1",
+			RunID: "101", RunAttempt: 1, RunnerName: "member-1",
 			Repository: "acme/widget", WorkflowJob: "test",
 		},
 		Env: map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
@@ -518,7 +518,7 @@ func TestMountConvergesThroughUdevLag(t *testing.T) {
 	}
 }
 
-func TestMountThatCannotConvergeReportsSyntheticExit(t *testing.T) {
+func TestMountThatCannotConvergeKeepsWorkerBlockedForRecycle(t *testing.T) {
 	w := newWorld(t, func(cfg *Config) { cfg.MountDeadline = 30 * time.Millisecond }, nil)
 	// No device ever appears.
 
@@ -528,14 +528,14 @@ func TestMountThatCannotConvergeReportsSyntheticExit(t *testing.T) {
 	host.expectStatus(guestproto.RunnerRegistered)
 	host.expect(guestproto.KindAssignment)
 	host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: ptr(testRendezvous())})
-	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != SyntheticFailureExitCode {
-		t.Fatalf("exit code %d, want the synthetic %d", status.ExitCode, SyntheticFailureExitCode)
+	status := host.expectStatus(guestproto.RunnerRecycleRequired)
+	if status.Reason == "" {
+		t.Fatal("recycle request has no diagnostic")
 	}
-	w.server.mu.Lock()
-	gateErr := w.server.gateErr
-	w.server.mu.Unlock()
-	if gateErr == nil {
-		t.Fatal("failed rendezvous did not reject Runner.Worker")
+	select {
+	case <-w.server.workerGate:
+		t.Fatal("unsafe rendezvous released Runner.Worker")
+	default:
 	}
 }
 
@@ -577,9 +577,9 @@ func TestPreparationAndRendezvousRedeliveryAreDeduped(t *testing.T) {
 	host.expect(guestproto.KindHello)
 	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
 	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
-	// A different lease on a single-use VM is ignored, not executed.
+	// A different pool member identity on a single-use VM is ignored.
 	conflicting := testPrepare()
-	conflicting.Lease = "lease-2"
+	conflicting.MemberID = "member-2"
 	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: &conflicting})
 
 	host.expectStatus(guestproto.RunnerRegistered)

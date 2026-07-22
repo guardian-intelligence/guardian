@@ -86,7 +86,7 @@ func runWatch(ctx context.Context, gh *ghClient, cfg watchConfig) error {
 }
 
 // tick performs one observation pass over GitHub and the database; done means
-// every dispatched run is terminal (logs captured) and no demand or lease is
+// every dispatched run is terminal (logs captured) and no demand or assignment is
 // still in flight.
 func (w *watcher) tick(ctx context.Context) (bool, error) {
 	runsDone, err := w.observeGitHub(ctx)
@@ -203,9 +203,9 @@ func (w *watcher) observeAttempts(ctx context.Context, rec *runRecord) error {
 func (w *watcher) observeDB(ctx context.Context) (bool, error) {
 	if w.st.DB == nil {
 		w.st.DB = &dbObservations{
-			Demands:    map[string]demandRow{},
-			Leases:     map[string]leaseRow{},
-			Deliveries: map[string]time.Time{},
+			Demands:     map[string]demandRow{},
+			Assignments: map[string]assignmentRow{},
+			Deliveries:  map[string]time.Time{},
 		}
 	}
 	o := w.st.DB
@@ -231,24 +231,24 @@ func (w *watcher) observeDB(ctx context.Context) (bool, error) {
 		}
 	}
 
-	leases, err := w.db.LeasesSince(ctx, since)
+	assignments, err := w.db.AssignmentsSince(ctx, since)
 	if err != nil {
 		return false, err
 	}
-	for _, l := range leases {
-		prev, seen := o.Leases[l.LeaseID]
-		if !seen || prev.State != l.State {
+	for _, assignment := range assignments {
+		prev, seen := o.Assignments[assignment.AssignmentID]
+		if !seen || prev.State != assignment.State {
 			o.Transitions = append(o.Transitions, transition{
-				Kind: "lease", ID: l.LeaseID, Field: "state", Value: l.State, ObservedAt: now,
+				Kind: "assignment", ID: assignment.AssignmentID, Field: "state", Value: assignment.State, ObservedAt: now,
 			})
 		}
-		if l.ReportedState != "" && (!seen || prev.ReportedState != l.ReportedState) {
+		if assignment.RestoreOutcome != "" && (!seen || prev.RestoreOutcome != assignment.RestoreOutcome) {
 			o.Transitions = append(o.Transitions, transition{
-				Kind: "lease", ID: l.LeaseID, Field: "reported_state", Value: l.ReportedState, ObservedAt: now,
+				Kind: "assignment", ID: assignment.AssignmentID, Field: "restore_outcome", Value: assignment.RestoreOutcome, ObservedAt: now,
 			})
 		}
-		o.Leases[l.LeaseID] = l
-		if !terminalLeaseStates[l.State] {
+		o.Assignments[assignment.AssignmentID] = assignment
+		if !terminalAssignmentStates[assignment.State] {
 			quiescent = false
 		}
 	}

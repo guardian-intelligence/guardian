@@ -15,11 +15,11 @@ func TestRoundTrip(t *testing.T) {
 	messages := []Message{
 		{Kind: KindHello, Hello: &Hello{Version: Version}},
 		{Kind: KindPrepare, Prepare: &Prepare{
-			Lease: "lease-1", JITConfig: "opaque-blob",
+			MemberID: "member-1", JITConfig: "opaque-blob",
 			Env: map[string]string{"POSTFLIGHT_RENDEZVOUS_DIR": "/run/postflight-rendezvous"},
 		}},
 		{Kind: KindRendezvous, Rendezvous: &Rendezvous{
-			Lease: "lease-1",
+			MemberID: "member-1", AssignmentID: "assignment-1",
 			Mounts: []Mount{{
 				Serial:     "workspace",
 				Filesystem: "ext4",
@@ -36,14 +36,15 @@ func TestRoundTrip(t *testing.T) {
 			},
 		}},
 		{Kind: KindAuthorize, Authorize: &Authorize{
-			Lease: "lease-1", Env: map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
+			MemberID: "member-1", AssignmentID: "assignment-1",
+			Env: map[string]string{"POSTFLIGHT_EXECUTION_ID": "exec-1"},
 		}},
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerProgress}},
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{State: RunnerRegistered}},
 		{Kind: KindRunnerStatus, RunnerStatus: &RunnerStatus{
 			State: RunnerHookBlocked,
 			Identity: &JobIdentity{
-				RunID: "1", RunAttempt: 1, RunnerName: "lease-1",
+				RunID: "1", RunAttempt: 1, RunnerName: "member-1",
 				Repository: "acme/widget", WorkflowJob: "test",
 			},
 		}},
@@ -131,7 +132,7 @@ func TestDecoderRejectsMalformedFrames(t *testing.T) {
 }
 
 func TestDecoderBoundsFrameSize(t *testing.T) {
-	frame := `{"kind":"prepare","prepare":{"lease":"` + strings.Repeat("a", MaxMessageBytes) + `"}}`
+	frame := `{"kind":"prepare","prepare":{"member_id":"` + strings.Repeat("a", MaxMessageBytes) + `"}}`
 	if _, err := NewDecoder(strings.NewReader(frame + "\n")).Read(); err == nil {
 		t.Fatal("accepted an oversized frame")
 	}
@@ -145,7 +146,7 @@ func TestEncoderRejectsInvalidMessages(t *testing.T) {
 	if err := encoder.Write(Message{Kind: Kind("boom"), Hello: &Hello{}}); err == nil {
 		t.Fatal("encoded an unknown kind")
 	}
-	huge := Message{Kind: KindPrepare, Prepare: &Prepare{Lease: strings.Repeat("a", MaxMessageBytes)}}
+	huge := Message{Kind: KindPrepare, Prepare: &Prepare{MemberID: strings.Repeat("a", MaxMessageBytes)}}
 	if err := encoder.Write(huge); err == nil {
 		t.Fatal("encoded an oversized frame")
 	}

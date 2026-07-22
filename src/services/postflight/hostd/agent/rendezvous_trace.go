@@ -1,16 +1,31 @@
 package agent
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
 
-const rendezvousTraceSchema = 6
+const rendezvousTraceSchema = 7
+
+type traceState struct {
+	memberID   string
+	runnerName string
+	vmID       string
+	seq        uint64
+	seen       map[string]bool
+	file       *os.File
+}
 
 type traceEvent struct {
 	SchemaVersion int       `json:"schema_version"`
@@ -18,13 +33,14 @@ type traceEvent struct {
 	Event         string    `json:"event"`
 	Seq           uint64    `json:"seq"`
 	Source        string    `json:"source"`
-	BootID        string    `json:"boot_id,omitempty"`
-	OriginSeq     uint64    `json:"origin_seq,omitempty"`
+	BootID        string    `json:"boot_id"`
+	OriginSeq     uint64    `json:"origin_seq"`
 	MonotonicNS   int64     `json:"monotonic_ns"`
 	WallTime      time.Time `json:"wall_time"`
 
 	Repo          string `json:"repo,omitempty"`
 	JobID         int64  `json:"job_id,omitempty"`
+	CheckRunID    int64  `json:"check_run_id,omitempty"`
 	RunAttempt    int    `json:"run_attempt,omitempty"`
 	RunnerName    string `json:"runner_name,omitempty"`
 	RequestID     string `json:"request_id,omitempty"`
@@ -33,45 +49,14 @@ type traceEvent struct {
 	GenerationSet string `json:"generation_set,omitempty"`
 	FailureReason string `json:"failure_reason,omitempty"`
 
-	ListenerLeaseID  string `json:"listener_lease_id,omitempty"`
-	ExecutionLeaseID string `json:"execution_lease_id,omitempty"`
+	MemberID     string `json:"member_id,omitempty"`
+	AssignmentID string `json:"assignment_id,omitempty"`
 
 	Volumes    []traceVolume    `json:"volumes,omitempty"`
 	Platform   *tracePlatform   `json:"platform,omitempty"`
 	Clock      *traceClock      `json:"clock,omitempty"`
 	Checkpoint *traceCheckpoint `json:"checkpoint,omitempty"`
-}
-
-func (a *Agent) appendOriginTiming(record *lease, points []vm.TimingPoint) {
-	for _, point := range points {
-		point := point
-		a.appendTrace(record, point.Event, func(event *traceEvent) {
-			event.Source = point.Source
-			event.BootID = point.BootID
-			event.OriginSeq = point.Sequence
-			event.MonotonicNS = point.MonotonicNS
-			event.WallTime = time.Unix(0, point.UnixNS).UTC()
-			if preAssignmentTiming(point.Event) {
-				event.RunID = ""
-				event.ExecutionLeaseID = ""
-				event.RunnerName = record.spec.LeaseID
-				event.VMID = record.vmID
-			} else {
-				traceAssignment(record, event)
-			}
-		})
-	}
-}
-
-func preAssignmentTiming(event string) bool {
-	switch event {
-	case "vm_launch_started", "qemu_started", "guest_hello_observed",
-		"listener_prepare_started", "listener_prepare_sent",
-		"listener_prepare_received", "runner_registered":
-		return true
-	default:
-		return false
-	}
+	Restore    *traceRestore    `json:"restore,omitempty"`
 }
 
 type traceVolume struct {
@@ -89,7 +74,7 @@ type tracePlatform struct {
 	OSImageID     string `json:"os_image_id"`
 	MachineType   string `json:"machine_type"`
 	CPUModel      string `json:"cpu_model"`
-	CRIUVersion   string `json:"criu_version,omitempty"`
+	CRIUVersion   string `json:"criu_version"`
 }
 
 type traceClock struct {
@@ -107,94 +92,187 @@ type traceCheckpoint struct {
 	Version string `json:"version"`
 }
 
-func (a *Agent) appendTrace(record *lease, event string, enrich func(*traceEvent)) {
-	if a.cfg.TraceDir == "" {
-		return
-	}
-	if record.traceSeen == nil {
-		record.traceSeen = map[string]bool{}
-	}
-	if record.traceSeen[event] {
-		return
-	}
-	record.traceSeq++
-	observation := a.newTraceEvent(record, event)
-	observation.Seq = record.traceSeq
-	if enrich != nil {
-		enrich(&observation)
-	}
-	raw, err := json.Marshal(observation)
-	if err != nil {
-		a.logger.Error("encoding rendezvous evidence", "lease", record.spec.LeaseID, "event", event, "err", err)
-		return
-	}
-	file, err := a.traceFile(record.spec.LeaseID)
-	if err == nil {
-		raw = append(raw, '\n')
-		_, err = file.Write(raw)
-	}
-	if err != nil {
-		a.logger.Error("writing rendezvous evidence", "lease", record.spec.LeaseID, "event", event, "err", err)
-		return
-	}
-	record.traceSeen[event] = true
-	a.logger.Info("rendezvous evidence", "lease", record.spec.LeaseID, "event", event, "seq", record.traceSeq)
+type traceRestore struct {
+	Outcome            string `json:"outcome"`
+	ProcessInvalidated bool   `json:"process_invalidated,omitempty"`
+	FailureClass       string `json:"failure_class,omitempty"`
+	FailureCode        string `json:"failure_code,omitempty"`
 }
 
-func (a *Agent) traceFile(leaseID string) (*os.File, error) {
-	if file := a.traceFiles[leaseID]; file != nil {
-		return file, nil
+func (a *Agent) traceFor(memberID, runnerName, vmID string) (*traceState, error) {
+	if a.cfg.TraceDir == "" {
+		return nil, nil
 	}
-	path := filepath.Join(a.cfg.TraceDir, leaseID+".jsonl")
+	if err := zvol.ValidateName("member", memberID); err != nil {
+		return nil, err
+	}
+	if err := zvol.ValidateName("runner", runnerName); err != nil {
+		return nil, err
+	}
+	if state := a.traces[memberID]; state != nil {
+		if state.runnerName != runnerName || (state.vmID != "" && vmID != "" && state.vmID != vmID) {
+			return nil, fmt.Errorf("trace identity changed for member %s", memberID)
+		}
+		if state.vmID == "" {
+			state.vmID = vmID
+		}
+		return state, nil
+	}
+	state := &traceState{
+		memberID: memberID, runnerName: runnerName, vmID: vmID,
+		seen: map[string]bool{},
+	}
+	path := filepath.Join(a.cfg.TraceDir, runnerName+".jsonl")
+	if err := state.adopt(path); err != nil {
+		return nil, err
+	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
 	if err != nil {
 		return nil, err
 	}
-	a.traceFiles[leaseID] = file
-	return file, nil
+	state.file = file
+	a.traces[memberID] = state
+	return state, nil
+}
+
+func (s *traceState) adopt(path string) error {
+	file, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for line := 1; scanner.Scan(); line++ {
+		decoder := json.NewDecoder(bytes.NewReader(scanner.Bytes()))
+		decoder.DisallowUnknownFields()
+		var event traceEvent
+		if err := decoder.Decode(&event); err != nil {
+			return fmt.Errorf("trace line %d: %w", line, err)
+		}
+		var extra any
+		if err := decoder.Decode(&extra); err != io.EOF {
+			return fmt.Errorf("trace line %d contains more than one JSON value", line)
+		}
+		if event.SchemaVersion != rendezvousTraceSchema || event.Seq <= s.seq || event.MemberID != s.memberID {
+			return fmt.Errorf("trace line %d has incompatible schema, sequence, or member", line)
+		}
+		if event.RunnerName != "" && event.RunnerName != s.runnerName {
+			return fmt.Errorf("trace line %d changes runner identity", line)
+		}
+		if event.VMID != "" && s.vmID != "" && event.VMID != s.vmID {
+			return fmt.Errorf("trace line %d changes VM identity", line)
+		}
+		s.seq = event.Seq
+		s.seen[event.Event] = true
+	}
+	return scanner.Err()
+}
+
+func (a *Agent) appendOriginTiming(state *traceState, record *assignment, points []vm.TimingPoint) {
+	for _, point := range points {
+		point := point
+		a.appendTrace(state, record, point.Event, func(event *traceEvent) {
+			event.Source = point.Source
+			event.BootID = point.BootID
+			event.OriginSeq = point.Sequence
+			event.MonotonicNS = point.MonotonicNS
+			event.WallTime = time.Unix(0, point.UnixNS).UTC()
+		})
+	}
+}
+
+func (a *Agent) appendBootstrapTiming(state *traceState, points []vm.TimingPoint) {
+	for _, point := range points {
+		if !preAssignmentTraceEvent(point.Event) {
+			continue
+		}
+		a.appendOriginTiming(state, nil, []vm.TimingPoint{point})
+	}
+}
+
+func preAssignmentTraceEvent(event string) bool {
+	switch event {
+	case "vm_launch_started", "qemu_started", "guest_hello_observed",
+		"listener_prepare_started", "listener_prepare_sent",
+		"listener_prepare_received", "runner_registered", "pool_ready":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *Agent) appendTrace(state *traceState, record *assignment, event string, enrich func(*traceEvent)) {
+	if state == nil || state.file == nil || state.seen[event] {
+		return
+	}
+	point := a.timing.Point(event)
+	observation := traceEvent{
+		SchemaVersion: rendezvousTraceSchema, Event: event, Seq: state.seq + 1,
+		Source: point.Source, BootID: point.BootID, OriginSeq: point.Sequence,
+		MonotonicNS: point.MonotonicNS, WallTime: time.Unix(0, point.UnixNS).UTC(),
+		RunnerName: state.runnerName, VMID: state.vmID, MemberID: state.memberID,
+	}
+	if record != nil && !preAssignmentTraceEvent(event) {
+		traceAssignment(record, &observation)
+	}
+	if enrich != nil {
+		enrich(&observation)
+	}
+	raw, err := json.Marshal(observation)
+	if err == nil {
+		raw = append(raw, '\n')
+		_, err = state.file.Write(raw)
+	}
+	if err != nil {
+		a.logger.Error("writing rendezvous evidence", "member_id", state.memberID, "assignment_id", observation.AssignmentID, "event", event, "err", err)
+		return
+	}
+	state.seq = observation.Seq
+	state.seen[event] = true
+	if event == "vm_destroy_completed" || event == "assignment_requeued" || event == "assignment_failed_closed" || event == "snapshot_seal_completed" {
+		if err := state.file.Sync(); err != nil {
+			a.logger.Error("syncing terminal rendezvous evidence", "member_id", state.memberID, "event", event, "err", err)
+		}
+	}
+	a.logger.Info("postflight.hostd.rendezvous.evidence", "member_id", state.memberID, "assignment_id", observation.AssignmentID, "event", event, "seq", state.seq)
 }
 
 func (a *Agent) closeTraceFiles() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for leaseID, file := range a.traceFiles {
-		if err := file.Close(); err != nil {
-			a.logger.Error("closing rendezvous evidence", "lease", leaseID, "err", err)
+	for memberID, state := range a.traces {
+		if state.file != nil {
+			if err := state.file.Close(); err != nil {
+				a.logger.Error("closing rendezvous evidence", "member_id", memberID, "err", err)
+			}
 		}
-		delete(a.traceFiles, leaseID)
+		delete(a.traces, memberID)
 	}
 }
 
-func (a *Agent) newTraceEvent(record *lease, event string) traceEvent {
-	wallTime := time.Now().UTC()
-	source := "host:" + a.cfg.HostID
-	bootID := ""
-	originSeq := uint64(0)
-	monotonicNS := time.Since(a.started).Nanoseconds() + 1
-	if a.timing != nil {
-		point := a.timing.Point(event)
-		source = point.Source
-		bootID = point.BootID
-		originSeq = point.Sequence
-		monotonicNS = point.MonotonicNS
-		wallTime = time.Unix(0, point.UnixNS).UTC()
+func (a *Agent) pruneTraces() {
+	live := make(map[string]bool, len(a.desiredMembers)+len(a.assignments))
+	for memberID := range a.desiredMembers {
+		live[memberID] = true
 	}
-	observation := traceEvent{
-		SchemaVersion:   rendezvousTraceSchema,
-		Event:           event,
-		Source:          source,
-		BootID:          bootID,
-		OriginSeq:       originSeq,
-		MonotonicNS:     monotonicNS,
-		WallTime:        wallTime,
-		ListenerLeaseID: record.spec.LeaseID,
+	for _, record := range a.assignments {
+		live[record.spec.MemberID] = true
 	}
-	if event != "pool_ready" && record.assignment != nil {
-		execution := record.executionSpec()
-		observation.RunID = strconv.FormatInt(execution.ProviderRunID, 10)
-		observation.ExecutionLeaseID = record.executionLeaseID()
+	for memberID, state := range a.traces {
+		if live[memberID] {
+			continue
+		}
+		if state.file != nil {
+			if err := state.file.Close(); err != nil {
+				a.logger.Error("closing retired rendezvous evidence", "member_id", memberID, "err", err)
+			}
+		}
+		delete(a.traces, memberID)
 	}
-	return observation
 }
 
 func (a *Agent) platformEvidence() *tracePlatform {
@@ -206,77 +284,65 @@ func (a *Agent) platformEvidence() *tracePlatform {
 	}
 }
 
-func traceIdentity(record *lease, event *traceEvent) {
-	execution := record.executionSpec()
-	event.JobID = execution.ProviderJobID
-	event.RunAttempt = execution.ProviderRunAttempt
-	if record.assignment != nil {
-		event.RunnerName = record.assignment.RunnerName
-	} else {
-		event.RunnerName = record.spec.LeaseID
-	}
-	event.VMID = record.vmID
-}
-
-func traceAssignment(record *lease, event *traceEvent) {
-	traceIdentity(record, event)
-	if record.assignment != nil {
-		event.RequestID = record.assignment.RequestID
-		event.RunnerJobID = record.assignment.JobID
+func traceAssignment(record *assignment, event *traceEvent) {
+	spec := record.spec
+	event.RunID = spec.Identity.RunID
+	event.JobID, _ = strconv.ParseInt(spec.ExecutionID, 10, 64)
+	event.CheckRunID = spec.CheckRunID
+	event.RunAttempt = spec.Identity.RunAttempt
+	event.RunnerName = spec.Identity.RunnerName
+	event.RequestID = spec.RequestID
+	event.RunnerJobID = spec.JobID
+	event.MemberID = spec.MemberID
+	event.AssignmentID = spec.AssignmentID
+	event.Repo = spec.RepositoryFullName
+	if record.vmID != "" {
+		event.VMID = record.vmID
 	}
 }
 
-func generationSet(record *lease) string {
-	if record.volume.Source == "" {
-		return "workspace:empty,tool:empty,process:empty"
-	}
-	tool := "tool:empty"
-	if record.toolVolume.Source != "" {
-		tool = "tool:" + string(record.toolVolume.Source) + ":" + record.toolVolume.SourceSnapshotGUID
-	}
-	process := "process:empty"
-	if record.processVolume.Source != "" {
-		process = "process:" + string(record.processVolume.Source) + ":" + record.processVolume.SourceSnapshotGUID
-	}
-	return "workspace:" + string(record.volume.Source) + ":" + record.volume.SourceSnapshotGUID + "," + tool + "," + process
+func generationSet(record *assignment) string {
+	return generationComponent("workspace", record.volume) + "," +
+		generationComponent("tool", record.toolVolume) + "," +
+		generationComponent("process", record.processVolume)
 }
 
-func traceVolumes(record *lease, bound bool) []traceVolume {
-	serial := ""
-	if bound {
-		serial = "workspace"
+func generationComponent(role string, volume zvol.WorkspaceVolume) string {
+	if volume.Source == "" {
+		return role + ":empty"
 	}
+	return role + ":" + string(volume.Source) + ":" + volume.SourceSnapshotGUID
+}
+
+func traceVolumes(record *assignment, bound bool) []traceVolume {
+	return []traceVolume{
+		traceVolumeFor("workspace", "workspace", record.volume, bound),
+		traceVolumeFor("tool", "tool", record.toolVolume, bound),
+		traceVolumeFor("process", "process", record.processVolume, bound),
+	}
+}
+
+func traceVolumeFor(role, serial string, volume zvol.WorkspaceVolume, bound bool) traceVolume {
 	materialization := "empty"
-	if record.volume.Source != "" {
+	if volume.Source != "" {
 		materialization = "clone"
 	}
-	processSerial := ""
-	if bound {
-		processSerial = "process"
+	if !bound {
+		serial = ""
 	}
-	processMaterialization := "empty"
-	if record.processVolume.Source != "" {
-		processMaterialization = "clone"
-	}
-	toolSerial := ""
-	if bound {
-		toolSerial = "tool"
-	}
-	toolMaterialization := "empty"
-	if record.toolVolume.Source != "" {
-		toolMaterialization = "clone"
-	}
-	return []traceVolume{{
-		Role: "workspace", Dataset: record.volume.Name, Materialization: materialization,
-		SnapshotGUID: record.volume.SourceSnapshotGUID, Generation: string(record.volume.Source),
+	return traceVolume{
+		Role: role, Dataset: volume.Name, Materialization: materialization,
+		SnapshotGUID: volume.SourceSnapshotGUID, Generation: string(volume.Source),
 		DeviceSerial: serial,
-	}, {
-		Role: "tool", Dataset: record.toolVolume.Name, Materialization: toolMaterialization,
-		SnapshotGUID: record.toolVolume.SourceSnapshotGUID, Generation: string(record.toolVolume.Source),
-		DeviceSerial: toolSerial,
-	}, {
-		Role: "process", Dataset: record.processVolume.Name, Materialization: processMaterialization,
-		SnapshotGUID: record.processVolume.SourceSnapshotGUID, Generation: string(record.processVolume.Source),
-		DeviceSerial: processSerial,
-	}}
+	}
+}
+
+func traceRestoreEvidence(report *syncproto.RestoreReport) *traceRestore {
+	if report == nil {
+		return nil
+	}
+	return &traceRestore{
+		Outcome: report.Outcome, ProcessInvalidated: report.ProcessInvalidated,
+		FailureClass: report.FailureClass, FailureCode: report.FailureCode,
+	}
 }

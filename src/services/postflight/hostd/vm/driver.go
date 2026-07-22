@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -27,7 +28,7 @@ import (
 // before any side effect), never in this struct: Status and List are
 // reconstructed from disk plus live probes (launcher liveness, QMP
 // query-status, guestd observation), so a restarted hostd adopts running
-// VMs — lease binding included — instead of leaking or killing them.
+// VMs — local assignment binding included — instead of leaking or killing them.
 type QEMU struct {
 	cfg   Config
 	disks rootDisks
@@ -169,11 +170,14 @@ func (q *QEMU) Updates() <-chan ID {
 // meta is a VM's durable identity. It is written before any side effect, so
 // everything the driver ever created is discoverable from disk alone.
 type meta struct {
-	ID            ID     `json:"id"`
-	Class         Class  `json:"class"`
-	Image         string `json:"image,omitempty"`
-	Lease         string `json:"lease,omitempty"`
-	CreatedUnixNS int64  `json:"created_unix_ns,omitempty"`
+	ID            ID          `json:"id"`
+	Class         Class       `json:"class"`
+	Image         string      `json:"image,omitempty"`
+	Incarnation   string      `json:"incarnation"`
+	MemberID      string      `json:"member_id,omitempty"`
+	Assignment    *Assignment `json:"assignment,omitempty"`
+	AssignmentID  string      `json:"assignment_id,omitempty"`
+	CreatedUnixNS int64       `json:"created_unix_ns,omitempty"`
 	// WorkspaceMountpoint is where the assignment told the guest to mount
 	// the workspace; Quiesce needs it after a restart.
 	WorkspaceMountpoint string `json:"workspace_mountpoint,omitempty"`
@@ -288,9 +292,13 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("vm: creating state dir for %s: %w", id, err)
 	}
+	incarnation, err := newIncarnation()
+	if err != nil {
+		return err
+	}
 	record := meta{
 		ID: id, Class: class, Image: shape.Image, CreatedUnixNS: time.Now().UnixNano(),
-		CID: cid, RootDataset: dataset, Argv: argv, ArgvSHA256: argvDigest(argv),
+		Incarnation: incarnation, CID: cid, RootDataset: dataset, Argv: argv, ArgvSHA256: argvDigest(argv),
 	}
 	q.recordTiming(id, "vm_launch_started")
 	if err := q.writeMeta(record); err != nil {
@@ -304,6 +312,14 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 	}
 	q.recordTiming(id, "qemu_started")
 	return nil
+}
+
+func newIncarnation() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", fmt.Errorf("vm: generating incarnation: %w", err)
+	}
+	return hex.EncodeToString(value[:]), nil
 }
 
 func argvDigest(argv []string) string {
@@ -346,8 +362,9 @@ func (q *QEMU) allocateCIDLocked() (uint32, error) {
 	return cid, nil
 }
 
-// Prepare implements Driver. The opaque listener lease is persisted before
-// delivery so recovery never mistakes a registered runner for an idle VM.
+// Prepare implements Driver. The opaque pool-member identity is persisted
+// before delivery so recovery never mistakes a registered runner for an idle
+// VM.
 func (q *QEMU) Prepare(ctx context.Context, id ID, preparation Preparation) error {
 	if err := validateID(id); err != nil {
 		return err
@@ -361,11 +378,11 @@ func (q *QEMU) Prepare(ctx context.Context, id ID, preparation Preparation) erro
 	if err != nil {
 		return err
 	}
-	if record.Lease != "" && record.Lease != preparation.Lease {
-		return fmt.Errorf("vm: %s already assigned to lease %s", id, record.Lease)
+	if record.MemberID != "" && record.MemberID != preparation.MemberID {
+		return fmt.Errorf("vm: %s already prepared as member %s", id, record.MemberID)
 	}
-	if record.Lease == "" {
-		record.Lease = preparation.Lease
+	if record.MemberID == "" {
+		record.MemberID = preparation.MemberID
 		if err := q.writeMeta(record); err != nil {
 			return err
 		}
@@ -374,7 +391,7 @@ func (q *QEMU) Prepare(ctx context.Context, id ID, preparation Preparation) erro
 	defer cancel()
 	q.recordTimingOnce(id, "listener_prepare_started")
 	if err := q.cfg.Guest.Prepare(deliverCtx, id, record.CID, guestproto.Prepare{
-		Lease: preparation.Lease, JITConfig: preparation.JITConfig, Env: preparation.Env,
+		MemberID: preparation.MemberID, JITConfig: preparation.JITConfig, Env: preparation.Env,
 	}); err != nil {
 		return err
 	}
@@ -407,11 +424,20 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 	if err != nil {
 		return err
 	}
-	if record.Lease != "" && record.Lease != rendezvous.Lease {
-		return fmt.Errorf("vm: %s carries lease %s, not %s", id, record.Lease, rendezvous.Lease)
+	if record.MemberID != rendezvous.MemberID || rendezvous.AssignmentID == "" {
+		return fmt.Errorf("vm: %s is member %s, not %s", id, record.MemberID, rendezvous.MemberID)
 	}
-	if record.Lease == "" {
-		record.Lease = rendezvous.Lease
+	if record.Assignment == nil {
+		return fmt.Errorf("vm: %s has no locally observed assignment", id)
+	}
+	if record.AssignmentID != "" && record.AssignmentID != rendezvous.AssignmentID {
+		return fmt.Errorf("vm: %s already bound to assignment %s", id, record.AssignmentID)
+	}
+	if record.AssignmentID == "" {
+		record.AssignmentID = rendezvous.AssignmentID
+		if err := q.writeMeta(record); err != nil {
+			return err
+		}
 	}
 	if record.WorkspaceMountpoint == "" {
 		record.WorkspaceMountpoint = rendezvous.WorkspaceMountpoint
@@ -445,7 +471,7 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 	deliverCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
 	defer cancel()
 	request := guestproto.Rendezvous{
-		Lease: rendezvous.Lease,
+		MemberID: rendezvous.MemberID, AssignmentID: rendezvous.AssignmentID,
 		Mounts: []guestproto.Mount{
 			{
 				Serial:     toolNode,
@@ -495,13 +521,14 @@ func (q *QEMU) Authorize(ctx context.Context, id ID, authorization Authorization
 	if err != nil {
 		return err
 	}
-	if record.Lease != authorization.Lease || record.WorkspaceMountpoint == "" {
-		return fmt.Errorf("vm: %s is not generation-bound for lease %s", id, authorization.Lease)
+	if record.MemberID != authorization.MemberID || record.AssignmentID != authorization.AssignmentID ||
+		record.Assignment == nil || record.Assignment.RequestID != authorization.RequestID || record.WorkspaceMountpoint == "" {
+		return fmt.Errorf("vm: %s is not generation-bound for member %s", id, authorization.MemberID)
 	}
 	deliverCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
 	defer cancel()
 	return q.cfg.Guest.Authorize(deliverCtx, id, record.CID, guestproto.Authorize{
-		Lease: authorization.Lease, RequestID: authorization.RequestID,
+		MemberID: authorization.MemberID, AssignmentID: authorization.AssignmentID, RequestID: authorization.RequestID,
 		Identity: &guestproto.JobIdentity{
 			RunID: authorization.Identity.RunID, RunAttempt: authorization.Identity.RunAttempt,
 			RunnerName: authorization.Identity.RunnerName, Repository: authorization.Identity.Repository,
@@ -712,9 +739,12 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 	}
 	status := Status{
 		ID: id, Class: record.Class, Image: record.Image,
-		Phase: PhaseBooting, Lease: record.Lease,
+		Phase: PhaseBooting, Incarnation: record.Incarnation, MemberID: record.MemberID,
 	}
-	if record.Lease != "" {
+	if record.Assignment != nil {
+		status.Assignment = *record.Assignment
+	}
+	if record.MemberID != "" {
 		status.Phase = PhaseAssigned
 	}
 	alive, err := q.cfg.Launcher.Alive(ctx, id, q.stateDir(id), record.Argv)
@@ -724,13 +754,13 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 	if !alive {
 		return Status{
 			ID: id, Class: record.Class, Image: record.Image,
-			Phase: PhaseGone, Lease: record.Lease,
+			Phase: PhaseGone, Incarnation: record.Incarnation, MemberID: record.MemberID,
 		}, true, nil
 	}
 	if !q.vmRunning(ctx, id) {
 		// QEMU exists but is not (yet) running the guest; nothing further
 		// can be trusted, so report the phase the meta alone supports.
-		if record.Lease == "" && q.bootExpired(id, record) {
+		if record.MemberID == "" && q.bootExpired(id, record) {
 			q.cfg.Logger.Error("guest boot deadline exceeded", "vm", id, "deadline", q.bootTimeout)
 			return Status{ID: id, Class: record.Class, Image: record.Image, Phase: PhaseGone}, true, nil
 		}
@@ -742,7 +772,7 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 	cancel()
 	if err != nil {
 		q.cfg.Logger.Warn("guest observation failed", "vm", id, "err", err)
-		if record.Lease == "" && q.bootExpired(id, record) {
+		if record.MemberID == "" && q.bootExpired(id, record) {
 			q.cfg.Logger.Error("guest boot deadline exceeded", "vm", id, "deadline", q.bootTimeout)
 			return Status{ID: id, Class: record.Class, Image: record.Image, Phase: PhaseGone}, true, nil
 		}
@@ -751,15 +781,37 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 	}
 	if observation.Hello {
 		q.recordTimingOnce(id, "guest_hello_observed")
-	} else if record.Lease == "" && q.bootExpired(id, record) {
+	} else if record.MemberID == "" && q.bootExpired(id, record) {
 		q.cfg.Logger.Error("guest boot deadline exceeded", "vm", id, "deadline", q.bootTimeout)
 		return Status{ID: id, Class: record.Class, Image: record.Image, Phase: PhaseGone}, true, nil
 	}
 	if observation.Assignment != nil {
 		q.recordTimingOnce(id, "host_assignment_observed")
-		status.Assignment = assignment(*observation.Assignment)
+		observed := assignment(*observation.Assignment)
+		if record.Assignment != nil && !sameAssignment(*record.Assignment, observed) {
+			status.Phase = PhaseRecycleRequired
+			status.FailureReason = "local assignment changed within one VM incarnation"
+			status.Timing = append(status.Timing, q.timings[id]...)
+			status.Timing = append(status.Timing, timingPoints(observation.Timing)...)
+			return status, false, nil
+		}
+		if record.Assignment == nil {
+			persisted := observed
+			record.Assignment = &persisted
+			if err := q.writeMeta(record); err != nil {
+				return Status{}, false, err
+			}
+		}
+		status.Assignment = observed
+	}
+	if observation.Restore != nil {
+		restore := *observation.Restore
+		status.Restore = &restore
 	}
 	switch {
+	case observation.RecycleRequired:
+		status.Phase = PhaseRecycleRequired
+		status.FailureReason = observation.FailureReason
 	case observation.RunnerExited:
 		status.Phase = PhaseExited
 		status.ExitCode = observation.ExitCode
@@ -790,7 +842,7 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 		status.Assignment = assignment(*observation.Assignment)
 	case observation.RunnerRegistered:
 		status.Phase = PhaseListening
-	case record.Lease != "":
+	case record.MemberID != "":
 		status.Phase = PhaseAssigned
 	case observation.Hello:
 		status.Phase = PhaseWarm
@@ -834,13 +886,20 @@ func clockSample(clock guestproto.ClockSample) ClockSample {
 
 func assignment(value guestproto.Assignment) Assignment {
 	result := Assignment{
-		RequestID: value.RequestID, JobID: value.JobID, RunnerName: value.RunnerName,
+		RequestID: value.RequestID, JobID: value.JobID, CheckRunID: value.CheckRunID, RunnerName: value.RunnerName,
 		JobDisplayName: value.JobDisplayName,
 	}
 	if value.Identity != nil {
 		result.Identity = jobIdentity(*value.Identity)
 	}
+	result.Timing = timingPoints(value.Timing)
 	return result
+}
+
+func sameAssignment(left, right Assignment) bool {
+	return left.RequestID == right.RequestID && left.JobID == right.JobID && left.CheckRunID == right.CheckRunID &&
+		left.RunnerName == right.RunnerName && left.JobDisplayName == right.JobDisplayName &&
+		left.Identity == right.Identity
 }
 
 func timingPoints(points []guestproto.TimingPoint) []TimingPoint {

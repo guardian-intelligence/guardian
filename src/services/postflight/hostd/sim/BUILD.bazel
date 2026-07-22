@@ -25,7 +25,7 @@ go_test(
     embed = [":sim"],
     deps = [
         "//src/services/postflight/hostd/agent",
-        "//src/services/postflight/hostd/checkoutbundle",
+        "//src/services/postflight/hostd/guestproto",
         "//src/services/postflight/hostd/syncproto",
         "//src/services/postflight/hostd/vm",
         "//src/services/postflight/hostd/zvol",

@@ -33,3 +33,4 @@ reality: an ADR whose related source no longer exists has expired.
 | [0010](0010-two-release-signatures-one-format-per-lane.md) | Two release signatures, one format per lane | Accepted | 2026-07-12 |
 | [0011](0011-three-replica-tigerbeetle.md) | TigerBeetle uses three production replicas | Accepted | 2026-07-17 |
 | [0012](0012-tigerbeetle-owns-credit-reservations.md) | TigerBeetle owns customer-credit reservations | Accepted | 2026-07-17 |
+| [0013](0013-bind-jobs-after-local-runner-assignment.md) | Bind jobs after local runner assignment | Accepted | 2026-07-21 |

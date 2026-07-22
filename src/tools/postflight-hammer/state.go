@@ -120,18 +120,18 @@ type dbSnapshot struct {
 }
 
 type dbObservations struct {
-	Demands     map[string]demandRow `json:"demands"`
-	Leases      map[string]leaseRow  `json:"leases"`
-	Deliveries  map[string]time.Time `json:"deliveries"`
-	Transitions []transition         `json:"transitions"`
-	Final       *dbSnapshot          `json:"final,omitempty"`
+	Demands     map[string]demandRow     `json:"demands"`
+	Assignments map[string]assignmentRow `json:"assignments"`
+	Deliveries  map[string]time.Time     `json:"deliveries"`
+	Transitions []transition             `json:"transitions"`
+	Final       *dbSnapshot              `json:"final,omitempty"`
 }
 
 // transition is the first time watch observed an entity's field holding a
 // value. Poll-resolution: the true transition happened at most one poll
 // interval earlier.
 type transition struct {
-	Kind       string    `json:"kind"` // demand | lease | generation
+	Kind       string    `json:"kind"` // demand | assignment | generation
 	ID         string    `json:"id"`
 	Field      string    `json:"field"`
 	Value      string    `json:"value"`

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,6 +63,7 @@ type workflowJobPayload struct {
 	Labels       []string
 	RunnerID     int64
 	RunnerName   string
+	CheckRunURL  string
 	HeadSHA      string
 	HeadBranch   string
 	WorkflowName string
@@ -97,6 +99,7 @@ type workflowJobWebhook struct {
 		Labels       []string  `json:"labels"`
 		RunnerID     int64     `json:"runner_id"`
 		RunnerName   string    `json:"runner_name"`
+		CheckRunURL  string    `json:"check_run_url"`
 		HeadSHA      string    `json:"head_sha"`
 		HeadBranch   string    `json:"head_branch"`
 		WorkflowName string    `json:"workflow_name"`
@@ -321,6 +324,7 @@ func (w *worker) handleWorkflowJob(ctx context.Context, d lockedDelivery) error 
 			Labels:       payload.WorkflowJob.Labels,
 			RunnerID:     payload.WorkflowJob.RunnerID,
 			RunnerName:   payload.WorkflowJob.RunnerName,
+			CheckRunURL:  payload.WorkflowJob.CheckRunURL,
 			HeadSHA:      payload.WorkflowJob.HeadSHA,
 			HeadBranch:   payload.WorkflowJob.HeadBranch,
 			WorkflowName: payload.WorkflowJob.WorkflowName,
@@ -658,6 +662,7 @@ func payloadFromAPIJob(j apiWorkflowJob) workflowJobPayload {
 		Labels:       j.Labels,
 		RunnerID:     j.RunnerID,
 		RunnerName:   j.RunnerName,
+		CheckRunURL:  j.CheckRunURL,
 		HeadSHA:      j.HeadSHA,
 		HeadBranch:   j.HeadBranch,
 		WorkflowName: j.WorkflowName,
@@ -685,6 +690,7 @@ func jobRowFrom(ev jobEvent, runnerClass string, observedFromAPIAt *time.Time) w
 		RunnerClass:            runnerClass,
 		RunnerID:               ev.Job.RunnerID,
 		RunnerName:             ev.Job.RunnerName,
+		CheckRunID:             parseCheckRunID(ev.Job.CheckRunURL),
 		HeadSHA:                ev.Job.HeadSHA,
 		HeadBranch:             ev.Job.HeadBranch,
 		WorkflowName:           ev.Job.WorkflowName,
@@ -692,6 +698,19 @@ func jobRowFrom(ev jobEvent, runnerClass string, observedFromAPIAt *time.Time) w
 		CompletedAt:            timePtr(ev.Job.CompletedAt),
 		ObservedFromAPIAt:      observedFromAPIAt,
 	}
+}
+
+func parseCheckRunID(rawURL string) int64 {
+	rawURL = strings.TrimRight(strings.TrimSpace(rawURL), "/")
+	index := strings.LastIndexByte(rawURL, '/')
+	if index < 0 || index == len(rawURL)-1 {
+		return 0
+	}
+	id, err := strconv.ParseInt(rawURL[index+1:], 10, 64)
+	if err != nil || id <= 0 {
+		return 0
+	}
+	return id
 }
 
 func firstNonEmpty(values ...string) string {

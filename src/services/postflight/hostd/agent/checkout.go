@@ -6,22 +6,20 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/checkoutbundle"
 )
 
-// ResolveActiveLease implements checkoutbundle.IdentityResolver over the
-// live lease table: a checkout token is valid exactly while its lease is
-// active on this host. Terminal leases stop resolving immediately — token
-// validity ≡ lease liveness, with no separate revocation machinery.
-func (a *Agent) ResolveActiveLease(_ context.Context, executionID, attemptID string) (checkoutbundle.LeaseIdentity, bool, error) {
+// ResolveActiveAssignment implements checkoutbundle.IdentityResolver over
+// immutable assignments. Token validity is exactly assignment liveness.
+func (a *Agent) ResolveActiveAssignment(_ context.Context, executionID, attemptID string) (checkoutbundle.AssignmentIdentity, bool, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for _, record := range a.leases {
+	for _, record := range a.assignments {
 		if record.state.Terminal() {
 			continue
 		}
-		spec := record.executionSpec()
+		spec := record.spec
 		if spec.ExecutionID != executionID || spec.AttemptID != attemptID {
 			continue
 		}
-		return checkoutbundle.LeaseIdentity{
+		return checkoutbundle.AssignmentIdentity{
 			ExecutionID:        spec.ExecutionID,
 			AttemptID:          spec.AttemptID,
 			OrgID:              spec.OrgID,
@@ -29,8 +27,8 @@ func (a *Agent) ResolveActiveLease(_ context.Context, executionID, attemptID str
 			RepositoryID:       spec.RepositoryID,
 			RepositoryFullName: spec.RepositoryFullName,
 			RunnerClass:        spec.RunnerClass,
-			RunnerName:         record.spec.LeaseID,
+			RunnerName:         spec.Identity.RunnerName,
 		}, true, nil
 	}
-	return checkoutbundle.LeaseIdentity{}, false, nil
+	return checkoutbundle.AssignmentIdentity{}, false, nil
 }

@@ -87,7 +87,7 @@ func newTestService(t *testing.T, upstreamRoot string, mutate func(*Config)) *Se
 	if mutate != nil {
 		mutate(&cfg)
 	}
-	return New(cfg, &StaticResolver{Leases: []LeaseIdentity{{
+	return New(cfg, &StaticResolver{Assignments: []AssignmentIdentity{{
 		ExecutionID:        testExecution,
 		AttemptID:          testAttempt,
 		InstallationID:     42,
@@ -243,7 +243,7 @@ func TestBundleAuthenticationFailures(t *testing.T) {
 		"tampered bearer":   func(r *http.Request) { r.Header.Set("Authorization", "Bearer forged-token-value") },
 		"missing execution": func(r *http.Request) { r.Header.Del(executionIDHeader) },
 		"missing attempt":   func(r *http.Request) { r.Header.Del(attemptIDHeader) },
-		"unknown lease": func(r *http.Request) {
+		"unknown assignment": func(r *http.Request) {
 			r.Header.Set(executionIDHeader, "no-such-execution")
 			r.Header.Set("Authorization", "Bearer "+DeriveCheckoutToken(testSecret, "no-such-execution", testAttempt))
 		},

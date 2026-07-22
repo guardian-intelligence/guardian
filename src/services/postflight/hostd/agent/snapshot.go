@@ -7,58 +7,44 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 )
 
-// LeaseSnapshot is one lease's full local state, for observability and the
-// sim harness's invariant checks.
-type LeaseSnapshot struct {
-	LeaseID          string
-	ExecutionLeaseID string
-	State            syncproto.State
+type AssignmentSnapshot struct {
+	AssignmentID     string
+	MemberID         string
+	RequestID        string
+	JobID            string
+	CheckRunID       int64
+	State            syncproto.AssignmentState
 	Since            time.Time
 	VMID             string
 	Device           string
 	ToolDevice       string
 	ProcessDevice    string
-	ExecutionID      string
-	AttemptID        string
 	ExitCode         int
 	Reason           string
+	Restore          *syncproto.RestoreReport
 	SealedGeneration string
-	// Quarantined marks a lease whose latest spec was rejected: its
-	// lifecycle (and therefore its deadlines) is frozen until a parseable
-	// spec arrives.
-	Quarantined bool
+	Quarantined      bool
 }
 
-// Snapshot returns every lease the agent currently tracks, ordered by ID.
-func (a *Agent) Snapshot() []LeaseSnapshot {
+func (a *Agent) Snapshot() []AssignmentSnapshot {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	snapshots := make([]LeaseSnapshot, 0, len(a.leases))
-	for _, record := range a.leases {
-		execution := record.executionSpec()
-		snapshots = append(snapshots, LeaseSnapshot{
-			LeaseID:          record.spec.LeaseID,
-			ExecutionLeaseID: record.executionLeaseID(),
-			State:            record.state,
-			Since:            record.since,
-			VMID:             record.vmID,
-			Device:           record.device,
-			ToolDevice:       record.toolDevice,
-			ProcessDevice:    record.processDevice,
-			ExecutionID:      execution.ExecutionID,
-			AttemptID:        execution.AttemptID,
-			ExitCode:         record.exit,
-			Reason:           record.reason,
-			SealedGeneration: record.sealGen,
-			Quarantined:      a.quarantined[record.spec.LeaseID],
+	snapshots := make([]AssignmentSnapshot, 0, len(a.assignments))
+	for _, record := range a.assignments {
+		snapshots = append(snapshots, AssignmentSnapshot{
+			AssignmentID: record.spec.AssignmentID, MemberID: record.spec.MemberID,
+			RequestID: record.spec.RequestID, JobID: record.spec.JobID, CheckRunID: record.spec.CheckRunID,
+			State: record.state, Since: record.since, VMID: record.vmID,
+			Device: record.device, ToolDevice: record.toolDevice, ProcessDevice: record.processDevice,
+			ExitCode: record.exit, Reason: record.reason, Restore: record.restore,
+			SealedGeneration: record.sealGen, Quarantined: a.quarantinedJobs[record.spec.AssignmentID],
 		})
 	}
-	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].LeaseID < snapshots[j].LeaseID })
+	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].AssignmentID < snapshots[j].AssignmentID })
 	return snapshots
 }
 
-// StateDeadline reports the bound on a state, if it has one.
-func StateDeadline(state syncproto.State) (time.Duration, bool) {
-	deadline, ok := stateDeadlines[state]
+func AssignmentDeadline(state syncproto.AssignmentState) (time.Duration, bool) {
+	deadline, ok := assignmentDeadlines[state]
 	return deadline, ok
 }

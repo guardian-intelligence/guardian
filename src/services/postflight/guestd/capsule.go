@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -27,6 +29,10 @@ type CapsuleManager struct {
 	InitPath   string
 	SleepPath  string
 	RunnerRoot string
+	// CgroupPath confines every cold or restored capsule. A failed restore may
+	// continue cold only after cgroup.kill followed by populated=0 proves that
+	// no partial process survived.
+	CgroupPath string
 
 	mu        sync.Mutex
 	rootPID   int
@@ -46,8 +52,43 @@ func (m *CapsuleManager) validate() error {
 		return errors.New("guestd: capsule sleep path must be absolute")
 	case m.RunnerRoot == "" || m.RunnerRoot[0] != '/':
 		return errors.New("guestd: capsule runner root must be absolute")
+	case !validCapsuleCgroup(m.CgroupPath):
+		return errors.New("guestd: capsule cgroup must be a non-root path below /sys/fs/cgroup")
 	}
 	return nil
+}
+
+func validCapsuleCgroup(path string) bool {
+	root := "/sys/fs/cgroup"
+	clean := filepath.Clean(path)
+	relative, err := filepath.Rel(root, clean)
+	return err == nil && filepath.IsAbs(clean) && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
+func (m *CapsuleManager) prepareCgroup() error {
+	if err := os.MkdirAll(m.CgroupPath, 0o755); err != nil {
+		return fmt.Errorf("guestd: creating capsule cgroup: %w", err)
+	}
+	if _, err := os.Stat(filepath.Join(m.CgroupPath, "cgroup.events")); err != nil {
+		return fmt.Errorf("guestd: capsule cgroup is not cgroup v2: %w", err)
+	}
+	return nil
+}
+
+func (m *CapsuleManager) attachCgroup(cmd *exec.Cmd) (func(), error) {
+	if err := m.prepareCgroup(); err != nil {
+		return nil, err
+	}
+	fd, err := unix.Open(m.CgroupPath, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("guestd: opening capsule cgroup: %w", err)
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.UseCgroupFD = true
+	cmd.SysProcAttr.CgroupFD = fd
+	return func() { _ = unix.Close(fd) }, nil
 }
 
 // Start creates the initial secretless namespace init for a cold generation.
@@ -69,6 +110,14 @@ func (m *CapsuleManager) Start(ctx context.Context) error {
 	cmd := exec.Command(m.BinaryPath, capsuleEnterArgument, m.InitPath, m.SleepPath)
 	cmd.Env = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWPID | syscall.CLONE_NEWNS, Setsid: true}
+	closeCgroup, err := m.attachCgroup(cmd)
+	if err != nil {
+		m.mu.Lock()
+		m.rootPID = 0
+		m.mu.Unlock()
+		return err
+	}
+	defer closeCgroup()
 	if err := cmd.Start(); err != nil {
 		m.mu.Lock()
 		m.rootPID = 0
@@ -103,6 +152,59 @@ func (m *CapsuleManager) Start(ctx context.Context) error {
 	m.rootReady = true
 	m.mu.Unlock()
 	return nil
+}
+
+// Reset destroys the complete capsule cgroup and proves it empty. It is the
+// transaction boundary between a failed warm restore and a cold start.
+func (m *CapsuleManager) Reset(ctx context.Context) error {
+	if err := m.validate(); err != nil {
+		return err
+	}
+	if err := m.prepareCgroup(); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(m.CgroupPath, "cgroup.kill"), []byte("1\n"), 0o200); err != nil {
+		return fmt.Errorf("guestd: killing capsule cgroup: %w", err)
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		empty, err := capsuleCgroupEmpty(m.CgroupPath)
+		if err != nil {
+			return err
+		}
+		if empty {
+			m.mu.Lock()
+			m.rootPID = 0
+			m.rootReady = false
+			m.command = nil
+			m.mu.Unlock()
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("guestd: capsule cgroup remained populated: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func capsuleCgroupEmpty(path string) (bool, error) {
+	raw, err := os.ReadFile(filepath.Join(path, "cgroup.events"))
+	if err != nil {
+		return false, fmt.Errorf("guestd: reading capsule cgroup events: %w", err)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if value, ok := strings.CutPrefix(line, "populated "); ok {
+			switch strings.TrimSpace(value) {
+			case "0":
+				return true, nil
+			case "1":
+				return false, nil
+			}
+		}
+	}
+	return false, errors.New("guestd: capsule cgroup has no populated event")
 }
 
 func waitCapsuleInit(ctx context.Context, pid int, name string, done <-chan error) error {

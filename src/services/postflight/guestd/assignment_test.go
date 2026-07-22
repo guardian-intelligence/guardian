@@ -56,7 +56,7 @@ func TestLocalAssignmentPublishesBeforeWorkerGateReleases(t *testing.T) {
 	}
 
 	assignment := &guestproto.Assignment{
-		RequestID: "request-7", JobID: "job-9", RunnerName: "runner-2", JobDisplayName: "benchmark",
+		RequestID: "request-7", JobID: "job-9", CheckRunID: 109, RunnerName: "runner-2", JobDisplayName: "benchmark",
 		Identity: &guestproto.JobIdentity{
 			RunID: "42", RunAttempt: 1, RunnerName: "runner-2",
 			Repository: "guardian-intelligence/turborepo-tuned", WorkflowJob: "benchmark",

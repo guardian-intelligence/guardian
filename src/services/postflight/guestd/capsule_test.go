@@ -1,6 +1,10 @@
 package guestd
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestProcessIsNamespaceInit(t *testing.T) {
 	running := []byte("Name:\ttini\nState:\tS (sleeping)\nNSpid:\t1084\t1\n")
@@ -17,6 +21,29 @@ func TestProcessIsNamespaceInit(t *testing.T) {
 				t.Fatal("invalid namespace init was accepted")
 			}
 		})
+	}
+}
+
+func TestCapsuleCgroupValidationAndObservation(t *testing.T) {
+	for _, path := range []string{"", "/sys/fs/cgroup", "/sys/fs/cgroup/../escape", "relative"} {
+		if validCapsuleCgroup(path) {
+			t.Fatalf("unsafe cgroup %q accepted", path)
+		}
+	}
+	if !validCapsuleCgroup("/sys/fs/cgroup/postflight/capsule") {
+		t.Fatal("capsule cgroup rejected")
+	}
+
+	root := t.TempDir()
+	events := filepath.Join(root, "cgroup.events")
+	for body, want := range map[string]bool{"populated 0\nfrozen 0\n": true, "populated 1\nfrozen 0\n": false} {
+		if err := os.WriteFile(events, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := capsuleCgroupEmpty(root)
+		if err != nil || got != want {
+			t.Fatalf("events %q = %v, %v; want %v", body, got, err, want)
+		}
 	}
 }
 

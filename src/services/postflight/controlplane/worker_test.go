@@ -5,6 +5,19 @@ import (
 	"time"
 )
 
+func TestParseCheckRunID(t *testing.T) {
+	for raw, want := range map[string]int64{
+		"https://api.github.com/repos/acme/widget/check-runs/12345":  12345,
+		"https://api.github.com/repos/acme/widget/check-runs/12345/": 12345,
+		"": 0,
+		"https://api.github.com/check-runs/not-a-number": 0,
+	} {
+		if got := parseCheckRunID(raw); got != want {
+			t.Errorf("parseCheckRunID(%q) = %d, want %d", raw, got, want)
+		}
+	}
+}
+
 func TestRetryDelayBoundaries(t *testing.T) {
 	cases := []struct {
 		attempt int32

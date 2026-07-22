@@ -9,15 +9,13 @@ import (
 // reconcilePool converges warm-VM counts toward the control plane's targets
 // within this host's fixed slot totals. Destroy-and-refill is the governor's
 // whole vocabulary: it launches fresh VMs and destroys idle ones, never
-// touches an assigned VM, and never reuses anything.
+// touches a busy member, and never reuses anything.
 func (a *Agent) reconcilePool(ctx context.Context, vms *vmView) {
 	// A host configuration can stop serving a class while idle VMs from its
-	// previous configuration still exist on disk. They are no longer counted
-	// against any configured slot total, so collect them before refilling the
-	// active classes. Assigned VMs are allowed to finish under their original
-	// class and are reclaimed by their lease lifecycle.
+	// previous configuration still exist on disk. Busy members finish under
+	// their original class and are reclaimed by their assignment lifecycle.
 	for id, status := range vms.byID {
-		if _, configured := a.cfg.Slots[status.Class]; configured || status.Lease != "" {
+		if _, configured := a.cfg.Slots[status.Class]; configured || status.MemberID != "" {
 			continue
 		}
 		if status.Phase != vm.PhaseWarm && status.Phase != vm.PhaseBooting {
@@ -36,12 +34,12 @@ func (a *Agent) reconcilePool(ctx context.Context, vms *vmView) {
 		if target > total {
 			target = total
 		}
-		// An image rollout never offers stale idle capacity to a lease. Old
+		// An image rollout never offers stale idle capacity to an assignment. Old
 		// metadata predating the image field also compares unequal and is
-		// replaced. Assigned VMs finish under the image they started with.
+		// replaced. Busy members finish under the image they started with.
 		if image := a.cfg.Images[class]; image != "" {
 			for id, status := range vms.byID {
-				if status.Class != class || status.Lease != "" || status.Image == image {
+				if status.Class != class || status.MemberID != "" || status.Image == image {
 					continue
 				}
 				if status.Phase != vm.PhaseWarm && status.Phase != vm.PhaseBooting {
@@ -69,7 +67,7 @@ func (a *Agent) reconcilePool(ctx context.Context, vms *vmView) {
 		// VMs count toward the target because they are refills in flight.
 		warmish := len(vms.warm[class])
 		for _, status := range vms.byID {
-			if status.Class == class && status.Lease == "" && status.Phase == vm.PhaseBooting {
+			if status.Class == class && status.MemberID == "" && status.Phase == vm.PhaseBooting {
 				warmish++
 			}
 		}

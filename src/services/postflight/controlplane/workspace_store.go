@@ -34,56 +34,8 @@ func (s *pgStore) EnsureWorkspaceScope(ctx context.Context, key workspaceScopeKe
 	return scopeID, err
 }
 
-// sealedCandidate is one host-confirmed seal whose GitHub verdict has been
-// observed from the API: everything the promotion pass needs to classify it.
-type sealedCandidate struct {
-	Generation     string
-	ScopeID        string
-	HostID         string
-	ObservedSource string // "" = the scope had no generation at claim
-	LeaseID        string
-	LeaseAttemptID string
-	ProviderJobID  int64
-	JobRunAttempt  int64
-	JobConclusion  string
-}
-
-// sqlListSealedCandidates: promotion inputs. Both gates are deliberate —
-// sealed_at proves the host confirmed the exact generation, and
-// terminal_observed_from_api_at proves an API read (never a webhook hint)
-// carried the completed status. A job not yet observed simply isn't listed:
-// ambiguity never advances anything.
-const sqlListSealedCandidates = `
-SELECT g.generation, g.scope_id::text, g.host_id, COALESCE(l.observed_source_generation, ''),
-    l.lease_id, l.attempt_id, l.provider_job_id, j.provider_run_attempt, j.conclusion
-FROM workspace_generations g
-JOIN host_leases l ON l.seal_generation = g.generation
-JOIN github_workflow_jobs j ON j.provider_job_id = l.provider_job_id
-WHERE g.state = 'candidate' AND g.sealed_at IS NOT NULL AND g.scope_id IS NOT NULL
-  AND j.status = 'completed' AND j.terminal_observed_from_api_at IS NOT NULL
-ORDER BY g.updated_at
-LIMIT $1`
-
-func (s *pgStore) ListSealedCandidates(ctx context.Context, batch int) ([]sealedCandidate, error) {
-	rows, err := s.pool.Query(ctx, sqlListSealedCandidates, batch)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []sealedCandidate
-	for rows.Next() {
-		var c sealedCandidate
-		if err := rows.Scan(&c.Generation, &c.ScopeID, &c.HostID, &c.ObservedSource,
-			&c.LeaseID, &c.LeaseAttemptID, &c.ProviderJobID, &c.JobRunAttempt, &c.JobConclusion); err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
-}
-
 // sqlPromoteScopePointer is THE compare-and-swap: the pointer advances only
-// if it still holds the exact value this lease cloned from (NULL included,
+// if it still holds the exact value this assignment cloned from (NULL included,
 // via IS NOT DISTINCT FROM — the cold-seed case). home_host_id follows the
 // winner's residency.
 const (
@@ -107,7 +59,7 @@ WHERE generation = $1 AND state = 'committed'`
 
 // PromoteGeneration runs one candidate's CAS. Winner: the pointer advances,
 // the candidate commits, and the displaced predecessor is demoted to
-// retained. Loser (something else advanced the pointer since this lease's
+// retained. Loser (something else advanced the pointer since this assignment's
 // claim): the candidate is retained — kept on disk until the retention
 // sweep proves it unreferenced. The row locks taken by the CAS serialize
 // concurrent promoters on the scope, so a raced duplicate promotion
@@ -145,13 +97,15 @@ func (s *pgStore) PromoteGeneration(ctx context.Context, c sealedCandidate) (pro
 // an unambiguous attempt-matching success. The previous current stays
 // authoritative.
 func (s *pgStore) DiscardGeneration(ctx context.Context, generation string) (bool, error) {
-	tag, err := s.pool.Exec(ctx, sqlDiscardGeneration, generation)
+	tag, err := s.pool.Exec(ctx, `
+UPDATE workspace_generations SET state = 'discarded', updated_at = now()
+WHERE generation = $1 AND state = 'candidate'`, generation)
 	return tag.RowsAffected() > 0, err
 }
 
 // sqlSweepReapableGenerations releases retained/discarded generations to the
 // reap dispatch once nothing references them: not the scope pointer, not a
-// pin, and not any live lease (as clone source, CAS guard, or pending seal
+// pin, and not any live assignment (as clone source, CAS guard, or pending seal
 // target). The host additionally refuses to destroy a dataset with live
 // clones, but the sweep is the invariant's owner.
 const sqlSweepReapableGenerations = `
@@ -162,11 +116,9 @@ WHERE g.state IN ('retained', 'discarded')
   AND NOT EXISTS (
       SELECT 1 FROM workspace_scopes s WHERE s.current_generation_id = g.generation)
   AND NOT EXISTS (
-      SELECT 1 FROM host_leases l
-      WHERE l.state IN ('allocating', 'assigned', 'ready', 'sealing')
-        AND (l.workspace_generation = g.generation
-          OR l.observed_source_generation = g.generation
-          OR l.seal_generation = g.generation))`
+      SELECT 1 FROM runner_job_assignments a
+      WHERE a.state IN ('observed', 'binding', 'authorizing', 'running', 'exited', 'sealing')
+        AND (a.source_generation = g.generation OR a.seal_generation = g.generation))`
 
 func (s *pgStore) SweepReapableGenerations(ctx context.Context) (int64, error) {
 	tag, err := s.pool.Exec(ctx, sqlSweepReapableGenerations)
@@ -177,7 +129,7 @@ func (s *pgStore) SweepReapableGenerations(ctx context.Context) (int64, error) {
 // lost completed delivery means no API read ever observes the verdict (the
 // missed-webhook reconciler only chases still-queued jobs), and an
 // inventory-adopted row has no job at all — either would otherwise pin its
-// dataset forever. Candidates still held by a sealing lease are excluded;
+// dataset forever. Candidates still held by a sealing assignment are excluded;
 // the seal deadline owns those. Adopted rows (never sealed) age from
 // creation.
 const sqlDiscardStaleCandidates = `
@@ -186,8 +138,8 @@ SET state = 'discarded', updated_at = now()
 WHERE g.state = 'candidate'
   AND COALESCE(g.sealed_at, g.created_at) <= $1
   AND NOT EXISTS (
-      SELECT 1 FROM host_leases l
-      WHERE l.state = 'sealing' AND l.seal_generation = g.generation)`
+      SELECT 1 FROM runner_job_assignments a
+      WHERE a.state = 'sealing' AND a.seal_generation = g.generation)`
 
 func (s *pgStore) DiscardStaleCandidates(ctx context.Context, cutoff time.Time) (int64, error) {
 	tag, err := s.pool.Exec(ctx, sqlDiscardStaleCandidates, cutoff)

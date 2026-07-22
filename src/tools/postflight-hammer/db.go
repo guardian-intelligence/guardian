@@ -18,20 +18,21 @@ var (
 		"jit_failed":      true,
 		"sandbox_failed":  true,
 	}
-	terminalLeaseStates = map[string]bool{
-		"completed": true,
-		"failed":    true,
-		"expired":   true,
+	terminalAssignmentStates = map[string]bool{
+		"sealed":        true,
+		"completed":     true,
+		"requeued":      true,
+		"failed_closed": true,
 	}
 )
 
 type slotRow struct {
-	HostID   string `json:"host_id"`
-	Class    string `json:"class"`
-	Total    int    `json:"total"`
-	Warm     int    `json:"warm"`
-	Used     int    `json:"used"`
-	Reserved int    `json:"reserved"`
+	HostID    string `json:"host_id"`
+	Class     string `json:"class"`
+	Total     int    `json:"total"`
+	Booting   int    `json:"booting"`
+	Listening int    `json:"listening"`
+	Busy      int    `json:"busy"`
 }
 
 type demandRow struct {
@@ -45,18 +46,18 @@ type demandRow struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-type leaseRow struct {
-	LeaseID             string    `json:"lease_id"`
-	ProviderJobID       int64     `json:"provider_job_id"`
-	State               string    `json:"state"`
-	ReportedState       string    `json:"reported_state"`
-	HostID              string    `json:"host_id"`
-	RunnerClass         string    `json:"runner_class"`
-	WorkspaceGeneration string    `json:"workspace_generation"`
-	SealGeneration      string    `json:"seal_generation"`
-	ExitCode            *int      `json:"exit_code,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+type assignmentRow struct {
+	AssignmentID     string    `json:"assignment_id"`
+	ProviderJobID    int64     `json:"provider_job_id"`
+	State            string    `json:"state"`
+	RestoreOutcome   string    `json:"restore_outcome"`
+	HostID           string    `json:"host_id"`
+	RunnerClass      string    `json:"runner_class"`
+	SourceGeneration string    `json:"source_generation"`
+	SealGeneration   string    `json:"seal_generation"`
+	ExitCode         *int      `json:"exit_code,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type scopeRow struct {
@@ -102,7 +103,7 @@ func openDB(ctx context.Context, dsn string) (*dbClient, error) {
 func (d *dbClient) Close() { d.pool.Close() }
 
 const sqlSnapshotSlots = `
-SELECT host_id, class, total, warm, used, reserved
+SELECT host_id, class, total, booting, listening, busy
 FROM host_slots ORDER BY host_id, class`
 
 func (d *dbClient) SnapshotSlots(ctx context.Context) ([]slotRow, error) {
@@ -114,7 +115,7 @@ func (d *dbClient) SnapshotSlots(ctx context.Context) ([]slotRow, error) {
 	var out []slotRow
 	for rows.Next() {
 		var s slotRow
-		if err := rows.Scan(&s.HostID, &s.Class, &s.Total, &s.Warm, &s.Used, &s.Reserved); err != nil {
+		if err := rows.Scan(&s.HostID, &s.Class, &s.Total, &s.Booting, &s.Listening, &s.Busy); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -147,24 +148,26 @@ func (d *dbClient) DemandsSince(ctx context.Context, since time.Time) ([]demandR
 	return out, rows.Err()
 }
 
-const sqlLeasesSince = `
-SELECT lease_id, provider_job_id, state, reported_state, host_id, runner_class,
-    workspace_generation, seal_generation, exit_code, created_at, updated_at
-FROM host_leases
-WHERE created_at >= $1
-ORDER BY created_at`
+const sqlAssignmentsSince = `
+SELECT a.assignment_id::text, a.provider_job_id, a.state, a.restore_outcome,
+    a.host_id, m.runner_class, a.source_generation, a.seal_generation,
+    a.exit_code, a.created_at, a.updated_at
+FROM runner_job_assignments a
+JOIN runner_pool_members m ON m.member_id = a.member_id
+WHERE a.created_at >= $1
+ORDER BY a.created_at`
 
-func (d *dbClient) LeasesSince(ctx context.Context, since time.Time) ([]leaseRow, error) {
-	rows, err := d.pool.Query(ctx, sqlLeasesSince, since)
+func (d *dbClient) AssignmentsSince(ctx context.Context, since time.Time) ([]assignmentRow, error) {
+	rows, err := d.pool.Query(ctx, sqlAssignmentsSince, since)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []leaseRow
+	var out []assignmentRow
 	for rows.Next() {
-		var r leaseRow
-		if err := rows.Scan(&r.LeaseID, &r.ProviderJobID, &r.State, &r.ReportedState, &r.HostID,
-			&r.RunnerClass, &r.WorkspaceGeneration, &r.SealGeneration, &r.ExitCode,
+		var r assignmentRow
+		if err := rows.Scan(&r.AssignmentID, &r.ProviderJobID, &r.State, &r.RestoreOutcome, &r.HostID,
+			&r.RunnerClass, &r.SourceGeneration, &r.SealGeneration, &r.ExitCode,
 			&r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}

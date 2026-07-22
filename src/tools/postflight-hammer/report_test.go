@@ -35,7 +35,7 @@ func greenLogs() map[string]int64 {
 }
 
 func greenState() *stateFile {
-	slots := []slotRow{{HostID: "h1", Class: "c4", Total: 4, Warm: 4, Used: 0, Reserved: 0}}
+	slots := []slotRow{{HostID: "h1", Class: "c4", Total: 4, Listening: 4}}
 	done := at(3 * time.Minute)
 	return &stateFile{
 		Repo: "acme/demo", Workflow: "ci.yml", StartedAt: t0,
@@ -59,18 +59,17 @@ func greenState() *stateFile {
 				"101": {ProviderJobID: 101, ProviderRunID: 500, RunAttempt: 1, State: "completed",
 					CreatedAt: at(time.Second), UpdatedAt: at(35 * time.Second)},
 			},
-			Leases: map[string]leaseRow{
-				"L1": {LeaseID: "L1", ProviderJobID: 101, State: "completed", ReportedState: "sealed",
+			Assignments: map[string]assignmentRow{
+				"A1": {AssignmentID: "A1", ProviderJobID: 101, State: "sealed", RestoreOutcome: "cold",
 					HostID: "h1", RunnerClass: "c4", SealGeneration: "gen-1",
 					CreatedAt: at(2 * time.Second), UpdatedAt: at(40 * time.Second)},
 			},
 			Deliveries: map[string]time.Time{"101": at(500 * time.Millisecond)},
 			Transitions: []transition{
-				{Kind: "lease", ID: "L1", Field: "state", Value: "assigned", ObservedAt: at(3 * time.Second)},
-				{Kind: "lease", ID: "L1", Field: "reported_state", Value: "claiming", ObservedAt: at(4 * time.Second)},
-				{Kind: "lease", ID: "L1", Field: "state", Value: "ready", ObservedAt: at(6 * time.Second)},
-				{Kind: "lease", ID: "L1", Field: "reported_state", Value: "exited", ObservedAt: at(35 * time.Second)},
-				{Kind: "lease", ID: "L1", Field: "reported_state", Value: "sealed", ObservedAt: at(36 * time.Second)},
+				{Kind: "assignment", ID: "A1", Field: "state", Value: "observed", ObservedAt: at(2 * time.Second)},
+				{Kind: "assignment", ID: "A1", Field: "state", Value: "running", ObservedAt: at(6 * time.Second)},
+				{Kind: "assignment", ID: "A1", Field: "state", Value: "exited", ObservedAt: at(35 * time.Second)},
+				{Kind: "assignment", ID: "A1", Field: "state", Value: "sealed", ObservedAt: at(36 * time.Second)},
 			},
 			Final: &dbSnapshot{
 				CapturedAt: at(2 * time.Minute),
@@ -109,7 +108,7 @@ func TestGreenBatteryPasses(t *testing.T) {
 	if r.Outcome != outcomePass {
 		t.Fatalf("outcome = %s, want %s", r.Outcome, outcomePass)
 	}
-	for _, name := range []string{"watch ran to completion", "runs green with full per-step logs", "slot accounting back to baseline", "no leaks beyond deadline horizon", "generation lifecycle invariants"} {
+	for _, name := range []string{"watch ran to completion", "runs green with full per-step logs", "pool accounting back to baseline", "no leaks beyond deadline horizon", "generation lifecycle invariants"} {
 		if a := assertionByName(t, r, name); !a.Pass || a.Skipped {
 			t.Fatalf("%s: %+v", name, a)
 		}
@@ -203,8 +202,8 @@ func TestLogsAssertionExemptsChurnCancelledAttempt(t *testing.T) {
 
 func TestSlotAssertionCatchesDrift(t *testing.T) {
 	st := greenState()
-	st.DB.Final.Slots = []slotRow{{HostID: "h1", Class: "c4", Total: 4, Warm: 3, Used: 1, Reserved: 1}}
-	a := assertionByName(t, buildReport(st, at(4*time.Minute)), "slot accounting back to baseline")
+	st.DB.Final.Slots = []slotRow{{HostID: "h1", Class: "c4", Total: 4, Listening: 3, Busy: 1}}
+	a := assertionByName(t, buildReport(st, at(4*time.Minute)), "pool accounting back to baseline")
 	if a.Pass || a.Skipped {
 		t.Fatalf("slot drift passed: %+v", a)
 	}
@@ -245,7 +244,7 @@ func TestChurnAssertionBoundsTerminalization(t *testing.T) {
 	}
 }
 
-// warmState adds a second green run of the same scope whose lease cloned the
+// warmState adds a second green run of the same scope whose assignment cloned the
 // generation the first run sealed.
 func warmState() *stateFile {
 	st := greenState()
@@ -265,8 +264,8 @@ func warmState() *stateFile {
 	}
 	st.DB.Demands["102"] = demandRow{ProviderJobID: 102, ProviderRunID: 501, RunAttempt: 1, State: "completed",
 		CreatedAt: at(time.Minute + time.Second), UpdatedAt: at(time.Minute + 40*time.Second)}
-	st.DB.Leases["L2"] = leaseRow{LeaseID: "L2", ProviderJobID: 102, State: "completed", ReportedState: "sealed",
-		HostID: "h1", RunnerClass: "c4", WorkspaceGeneration: "gen-1",
+	st.DB.Assignments["A2"] = assignmentRow{AssignmentID: "A2", ProviderJobID: 102, State: "sealed", RestoreOutcome: "warm",
+		HostID: "h1", RunnerClass: "c4", SourceGeneration: "gen-1",
 		CreatedAt: at(time.Minute + 2*time.Second), UpdatedAt: at(time.Minute + 40*time.Second)}
 	return st
 }
@@ -284,9 +283,9 @@ func TestWarmAssertionPassesOnClonedFasterRun(t *testing.T) {
 
 func TestWarmAssertionCatchesColdSecondRun(t *testing.T) {
 	st := warmState()
-	l := st.DB.Leases["L2"]
-	l.WorkspaceGeneration = ""
-	st.DB.Leases["L2"] = l
+	assignment := st.DB.Assignments["A2"]
+	assignment.SourceGeneration = ""
+	st.DB.Assignments["A2"] = assignment
 	a := assertionByName(t, buildReport(st, at(4*time.Minute)), "warm runs clone a generation")
 	if a.Pass {
 		t.Fatalf("uncloned warm run passed: %+v", a)
@@ -346,13 +345,10 @@ func TestGenerationInvariantsCatchBrokenPointersAndStaleCandidate(t *testing.T) 
 func TestMeasurePickupSegments(t *testing.T) {
 	segments := measurePickup(greenState())
 	want := map[string]float64{
-		"ingest (webhook -> demand)":               500,
-		"claim (demand -> lease)":                  1000,
-		"jit (lease -> assigned)":                  1000,
-		"hostd pickup (assigned -> reported)":      1000,
-		"runner listening (reported -> ready)":     2000,
-		"github assignment (ready -> in_progress)": 3000,
-		"total (webhook -> in_progress)":           8500,
+		"ingest (webhook -> demand)":         500,
+		"local bind (demand -> assignment)":  1000,
+		"rendezvous (assignment -> running)": 4000,
+		"total (webhook -> in_progress)":     8500,
 	}
 	for _, s := range segments {
 		expect, ok := want[s.Name]

@@ -15,6 +15,7 @@ go_library(
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/guestd",
     visibility = ["//visibility:public"],
     deps = [
+		"//src/services/postflight/generation",
         "//src/services/postflight/hostd/guestproto",
         "//src/services/postflight/hostd/vsock",
         "//src/services/postflight/timing",

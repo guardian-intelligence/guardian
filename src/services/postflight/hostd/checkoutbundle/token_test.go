@@ -38,8 +38,8 @@ func TestDeriveCheckoutTokenIsDeterministicAndScoped(t *testing.T) {
 
 type erroringResolver struct{}
 
-func (erroringResolver) ResolveActiveLease(context.Context, string, string) (LeaseIdentity, bool, error) {
-	return LeaseIdentity{}, false, errors.New("lease store is down")
+func (erroringResolver) ResolveActiveAssignment(context.Context, string, string) (AssignmentIdentity, bool, error) {
+	return AssignmentIdentity{}, false, errors.New("assignment store is down")
 }
 
 func TestAuthenticateResolverErrorIsRetryable(t *testing.T) {
@@ -57,14 +57,14 @@ func TestAuthenticateResolverErrorIsRetryable(t *testing.T) {
 
 func TestAuthenticate(t *testing.T) {
 	secret := []byte("0123456789abcdef0123456789abcdef")
-	lease := LeaseIdentity{
+	assignment := AssignmentIdentity{
 		ExecutionID:        "exec-1",
 		AttemptID:          "attempt-1",
 		RepositoryFullName: "acme/widget",
 	}
 	service := New(Config{StoreDir: t.TempDir(), HostSecret: secret},
-		&StaticResolver{Leases: []LeaseIdentity{lease}})
-	valid := DeriveCheckoutToken(secret, lease.ExecutionID, lease.AttemptID)
+		&StaticResolver{Assignments: []AssignmentIdentity{assignment}})
+	valid := DeriveCheckoutToken(secret, assignment.ExecutionID, assignment.AttemptID)
 
 	cases := []struct {
 		name      string
@@ -78,8 +78,8 @@ func TestAuthenticate(t *testing.T) {
 		{"missing attempt header", "exec-1", "", valid, false},
 		{"missing bearer", "exec-1", "attempt-1", "", false},
 		{"tampered bearer", "exec-1", "attempt-1", valid[:len(valid)-2] + "xx", false},
-		{"token for another lease", "exec-1", "attempt-1", DeriveCheckoutToken(secret, "exec-2", "attempt-1"), false},
-		{"valid token but no active lease", "exec-9", "attempt-9", DeriveCheckoutToken(secret, "exec-9", "attempt-9"), false},
+		{"token for another assignment", "exec-1", "attempt-1", DeriveCheckoutToken(secret, "exec-2", "attempt-1"), false},
+		{"valid token but no active assignment", "exec-9", "attempt-9", DeriveCheckoutToken(secret, "exec-9", "attempt-9"), false},
 		{"oversized identifier", strings.Repeat("x", maxIdentifierLength+1), "attempt-1", valid, false},
 	}
 	for _, tc := range cases {
@@ -101,8 +101,8 @@ func TestAuthenticate(t *testing.T) {
 			if !tc.wantOK && err == nil {
 				t.Fatal("expected rejection")
 			}
-			if tc.wantOK && identity.RepositoryFullName != lease.RepositoryFullName {
-				t.Fatalf("resolved wrong lease: %+v", identity)
+			if tc.wantOK && identity.RepositoryFullName != assignment.RepositoryFullName {
+				t.Fatalf("resolved wrong assignment: %+v", identity)
 			}
 		})
 	}

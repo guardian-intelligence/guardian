@@ -9,7 +9,7 @@ import (
 )
 
 // config is the full environment surface of hostd. Everything dynamic
-// (leases, pool targets, reap verbs) arrives over sync; the environment only
+// (members, assignments, pool targets, reap verbs) arrives over sync; the environment only
 // describes what this host is.
 type config struct {
 	hostID         string

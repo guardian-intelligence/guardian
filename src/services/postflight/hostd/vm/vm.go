@@ -11,6 +11,8 @@ package vm
 import (
 	"context"
 	"errors"
+
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
 )
 
 // ID names one VM instance on this host.
@@ -49,6 +51,9 @@ const (
 	PhaseReady Phase = "ready"
 	// PhaseExited: the runner finished (or died); ExitCode is meaningful.
 	PhaseExited Phase = "exited"
+	// PhaseRecycleRequired means the guest kept Worker blocked because restore
+	// evidence was unsafe. The only valid action is VM destruction.
+	PhaseRecycleRequired Phase = "recycle-required"
 	// PhaseGone: the VM no longer exists.
 	PhaseGone Phase = "gone"
 )
@@ -61,10 +66,10 @@ type Status struct {
 	// The pool governor uses it to roll idle listeners after an image change.
 	Image string
 	Phase Phase
-	// Lease is the lease this VM is assigned to, empty for pool VMs. The
-	// driver persists it with the VM (the real driver keeps it in the
-	// per-VM state dir) so a restarted hostd can rebind instead of leaking.
-	Lease                 string
+	// Incarnation changes on every destroy-and-refill. MemberID is set when
+	// the generic listener configuration is delivered and carries no job.
+	Incarnation           string
+	MemberID              string
 	ExitCode              int
 	FailureReason         string
 	CustomerStepsReleased bool
@@ -72,14 +77,17 @@ type Status struct {
 	Assignment            Assignment
 	Clock                 ClockSample
 	Timing                []TimingPoint
+	Restore               *guestproto.RestoreStatus
 }
 
 type Assignment struct {
 	RequestID      string
 	JobID          string
+	CheckRunID     int64
 	RunnerName     string
 	JobDisplayName string
 	Identity       JobIdentity
+	Timing         []TimingPoint
 }
 
 type TimingPoint struct {
@@ -109,14 +117,15 @@ type ClockSample struct {
 // Preparation turns a generic warm VM into a fresh GitHub listener without
 // selecting or attaching tenant state.
 type Preparation struct {
-	Lease     string
+	MemberID  string
 	JITConfig string
 	Env       map[string]string
 }
 
 // Rendezvous carries everything bound only after GitHub's actual assignment.
 type Rendezvous struct {
-	Lease string
+	MemberID     string
+	AssignmentID string
 	// WorkspaceDevice is the host block device to hot-attach; it appears in
 	// the guest under a stable serial so the mount is deterministic.
 	WorkspaceDevice string
@@ -137,9 +146,10 @@ type Rendezvous struct {
 }
 
 type Authorization struct {
-	Lease     string
-	RequestID string
-	Identity  JobIdentity
+	MemberID     string
+	AssignmentID string
+	RequestID    string
+	Identity     JobIdentity
 	// Env is written into the job environment by the still-blocked hook.
 	Env map[string]string
 }
@@ -156,8 +166,8 @@ var ErrNotFound = errors.New("vm: not found")
 // Driver is the hypervisor surface hostd needs. Launch and Assign start
 // asynchronous work; the agent advances on observed Status changes, never on
 // call returns. All methods are safe to repeat: relaunching a live ID with
-// its own class and re-assigning a VM's own lease converge to no-ops, while
-// a class or lease mismatch is an error. A Launch that finds its ID's
+// its own class and repeating a VM's immutable assignment converge to no-ops,
+// while an identity mismatch is an error. A Launch that finds its ID's
 // process dead collects the leftovers and boots fresh.
 type Driver interface {
 	// Launch boots a warm VM of a class under the given ID.

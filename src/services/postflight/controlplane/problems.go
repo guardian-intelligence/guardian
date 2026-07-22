@@ -162,15 +162,15 @@ func problemSyncUnavailable() problem {
 
 func problemCapacityTimeout(class string) problem {
 	return problem{
-		Code:   "lease.capacity_timeout",
+		Code:   "pool.capacity_timeout",
 		Title:  "no capacity for runner class",
-		Detail: fmt.Sprintf("no host offering class %q had a free slot before the allocate deadline", class),
+		Detail: fmt.Sprintf("no warm pool offering class %q had a listener before the capacity deadline", class),
 	}
 }
 
 func problemAssignmentTimeout() problem {
 	return problem{
-		Code:   "lease.assignment_timeout",
+		Code:   "assignment.timeout",
 		Title:  "runner never became ready",
 		Detail: "the assigned host did not report the runner ready before the assignment deadline",
 	}
@@ -178,7 +178,7 @@ func problemAssignmentTimeout() problem {
 
 func problemJITMintFailed(err error) problem {
 	return problem{
-		Code:   "lease.jit_mint_failed",
+		Code:   "pool.jit_mint_failed",
 		Title:  "JIT runner config mint failed",
 		Detail: err.Error(),
 	}
@@ -186,7 +186,7 @@ func problemJITMintFailed(err error) problem {
 
 func problemHostLost(hostID string) problem {
 	return problem{
-		Code:   "lease.host_lost",
+		Code:   "assignment.host_lost",
 		Title:  "runner host stopped responding",
 		Detail: fmt.Sprintf("host %q stopped syncing while the runner was registered", hostID),
 	}
@@ -202,8 +202,8 @@ func problemRunnerClassUnknown(class string) problem {
 
 func problemSandboxFailed(reason string) problem {
 	return problem{
-		Code:   "lease.sandbox_failed",
-		Title:  "host reported the lease failed",
+		Code:   "assignment.sandbox_failed",
+		Title:  "host reported the assignment failed",
 		Detail: reason,
 	}
 }

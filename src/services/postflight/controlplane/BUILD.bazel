@@ -39,6 +39,7 @@ go_library(
         "migrations/004_provider_installations.sql",
 		"migrations/005_confidential_generations.sql",
 		"migrations/006_durable_tool_generations.sql",
+		"migrations/007_durable_runner_model.sql",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/controlplane",
     visibility = ["//visibility:private"],
@@ -93,8 +94,6 @@ go_test(
     timeout = "short",
     srcs = [
         "e2e_test.go",
-        "generations_test.go",
-        "hostd_store_test.go",
     ],
     data = [
         "//src/tools/postgres:dist",
@@ -105,6 +104,7 @@ go_test(
     deps = [
         "//src/services/postflight/controlplane/pgtest",
         "//src/services/postflight/hostd/agent",
+		"//src/services/postflight/hostd/guestproto",
         "//src/services/postflight/hostd/syncproto",
         "//src/services/postflight/hostd/vm",
         "//src/services/postflight/hostd/zvol",

@@ -2,7 +2,7 @@
 // a durable delivery ledger, an async worker + reconciliation sweeper
 // (webhook payloads are hints, the GitHub API is truth), provider
 // demand/assignment records, a per-PR comment engine, the scheduler/sync
-// half of the kubelet-inspired split — demand becomes host leases with JIT
+// half of the kubelet-inspired split — demand binds to pre-registered pool members
 // runner configs, delivered to hostd agents over the level-triggered sync
 // exchange — and the workspace-generation cache: green branch-trust runs
 // seal generations that promote by CAS against GitHub's observed verdict.
