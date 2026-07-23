@@ -160,10 +160,11 @@ ghcr before their countersignature does, so the projector's steady-state
 work is moving signature material; at inversion it becomes the single —
 and verifying — writer at the boundary. Its estate is the release manifest
 (`release-manifest.yaml` in the same directory), the reviewable definition
-of what Guardian releases: promotions bump a lane in the same commit as
-the workload pin (the company-site Kargo pipelines carry the extra
-`yaml-update`; `TestReleaseManifestCoversRenderedReleases` holds hand-made
-bumps to the same rule). Per digest it verifies the countersignature in
+of what Guardian releases — the postflight CLI's release channels:
+promotions bump a lane in the same commit as the channel pin (the CLI
+nightly Kargo stage carries the extra `yaml-update`;
+`TestReleaseManifestCoversReleaseChannels` holds hand-made bumps to the
+same rule). Per digest it verifies the countersignature in
 zot against the committed public key
 (`bootstrap/bundle/guardian-images.pub.pem` — deliberately independent of
 Transit, so publication verification survives an OpenBao outage and a key

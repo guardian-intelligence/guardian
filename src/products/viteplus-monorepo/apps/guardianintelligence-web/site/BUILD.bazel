@@ -12,9 +12,7 @@ oci_load(
     repo_tags = ":repo_tags.txt",
 )
 
-# Pushed by CI (.github/workflows/company-site-image.yml) on merges to main,
-# after verifying the built digest matches the pin in
-# src/infrastructure/deployments/company/prod/web.yaml. ghcr.io is public and
+# Pushed by CI (.github/workflows/images.yml) on merges to main. ghcr.io is public and
 # survives cluster reimages, so cold boots need no registry repopulation.
 oci_push(
     name = "push",

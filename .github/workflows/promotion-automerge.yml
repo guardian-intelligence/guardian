@@ -4,12 +4,13 @@
 # declared lock and rendered refs (see //src/infrastructure/imageset), so a
 # pin move needs no lock edit. This workflow only arms automerge; the bot is
 # untrusted either way — the required checks and branch protection decide
-# whether the PR merges (the site-gate's provenance verification included).
+# whether the PR merges.
 #
 # Automerge is armed with the guardian-promotions App token, NOT
 # GITHUB_TOKEN: the eventual merge is attributed to the arming actor, and
 # pushes attributed to GITHUB_TOKEN do not trigger workflows — the main-push
-# workflows (image signing, images-lock-sign) must fire on the merge commit.
+# workflows (images, postflight-cli-release, images-lock-sign) must fire on
+# the merge commit.
 name: promotion-automerge
 
 on:

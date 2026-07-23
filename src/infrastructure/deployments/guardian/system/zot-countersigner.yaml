@@ -206,7 +206,7 @@ data:
     # The countersigning estate: the release manifest's pinned refs — the
     # same mounted definition the release projector enforces against, so
     # what gets signed and what gets projected cannot drift. Lane structure
-    # is for reviewers and Kargo, only the refs matter here. The no-match
+    # is for reviewers, only the refs matter here. The no-match
     # grep must not kill the run under pipefail: an empty manifest flows
     # through to the loud total=0 exit below instead of dying here with
     # nothing pushed and nothing logged.
@@ -230,12 +230,12 @@ data:
         signed=$((signed + 1))
         continue
       fi
-      # Per-workflow-file Fulcio identities (docs/supply-chain-design.md). A
-      # repo missing from this map stays unsigned and pages: onboarding a new
-      # first-party image includes teaching this map its identity.
+      # Fulcio identities of the release lanes (docs/supply-chain-design.md).
+      # A repo missing from this map stays unsigned and pages: onboarding a
+      # new released artifact includes teaching this map its identity.
       case "$name" in
-        cockpit|company-site|analytics-ingest|alert-relay|postflight-controlplane)
-          identity="https://github.com/guardian-intelligence/guardian/.github/workflows/${name}-image.yml@refs/heads/main"
+        postflight-cli)
+          identity="https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main"
           ;;
         *)
           echo "no Fulcio identity mapped for $name; leaving unsigned"

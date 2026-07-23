@@ -36,6 +36,16 @@ spec:
             updates:
               - key: channels.nightly.image
                 value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
+        # The release manifest's lane moves in the same commit as the channel
+        # pin — that is what puts the digest under the countersigner and the
+        # release projector; TestReleaseManifestCoversReleaseChannels keeps
+        # the PR red otherwise.
+        - uses: yaml-update
+          config:
+            path: ./repo/src/infrastructure/deployments/guardian/system/release-manifest.yaml
+            updates:
+              - key: releases.postflight-cli.nightly.image
+                value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
         - uses: git-commit
           as: commit
           config:

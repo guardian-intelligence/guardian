@@ -1,43 +1,18 @@
 # The release manifest: the reviewable definition of what Guardian releases
-# to public registries (docs/registry-design.md). The release projector
+# to public registries (docs/registry-design.md) — the artifacts users
+# consume, not the images the cluster happens to run. The release projector
 # verifies each digest's Guardian countersignature in zot against the
 # committed public key and projects it — signature included — to the ghcr
-# path in the ref. Lanes mirror the promotion stages so one promotion moves
-# one leaf: the company-site Kargo pipelines bump their lane in the same
-# commit as the workload pin, and TestReleaseManifestCoversRenderedReleases
-# holds every hand-made pin bump to the same rule.
+# path in the ref. Lanes mirror the CLI release channels: the nightly
+# promotion PR bumps this lane in the same commit as
+# src/products/postflight-cli/release/channels.yaml, and
+# TestReleaseManifestCoversReleaseChannels holds every hand-made bump to the
+# same rule.
 #
 # This file is a configMapGenerator input, not a Kubernetes resource; the
 # `image:` leaf keys are deliberate — the imageset extractor enforces digest
 # pinning on them and carries the refs into the image union.
 releases:
-  alert-relay:
-    prod:
-      image: ghcr.io/guardian-intelligence/alert-relay@sha256:9e64d1a5c21d6aa4c0b6bdb6548091a292abd672a4fd854d88958fe506fca6e5
-  analytics-ingest:
-    prod:
-      image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:32609f29de19880529e83322700caed66c20505ce6a37f3be49ad555a6e2e36f
-  authorization:
-    prod:
-      image: ghcr.io/guardian-intelligence/authorization@sha256:1ec7c52e497e3d3f378075cddd42d1929de073fc5a2e0af689b1daef8cda31df
-  cockpit:
-    prod:
-      image: ghcr.io/guardian-intelligence/cockpit@sha256:0589274466069f6c2e6df0f67ab38f7ac1288887d71d73085f80bce2b72e0ca2
-  company-site:
-    prod:
-      image: ghcr.io/guardian-intelligence/company-site@sha256:504d97a9a191be84ba39d512679819805d01bc635c99cf28dfbb9e714e03474c
-  journey-canary:
-    prod:
-      image: ghcr.io/guardian-intelligence/canary-journeys@sha256:4ba2c77a51557e63ff3b7ad2a72c57b102c2d4a0f70eadacb5edc20a2e7a44c1
-  shortty-web:
-    prod:
-      image: ghcr.io/guardian-intelligence/shortty-web@sha256:df1cc6102ff8edfbd2115999f9fc4b291527f4a57ede38f69b3cb6568bbf3505
-  postflight-controlplane:
-    prod:
-      image: ghcr.io/guardian-intelligence/postflight-controlplane@sha256:e5a7454d0bb3124e4f68556576a9409a76fac915b28af55bee9065f35caf659c
-  payments:
-    prod:
-      image: ghcr.io/guardian-intelligence/payments@sha256:9f0a28e4110c71568c8eea1ac8ed87cdf14dc1b79bc3798ef729a558ca852b40
-  payments-canary:
-    prod:
-      image: ghcr.io/guardian-intelligence/payments-canary@sha256:27aa46f19dc4476820b158c7218190f6993ef2eeb76aa0c0fc6f0f23ce6da5ce
+  postflight-cli:
+    nightly:
+      image: ghcr.io/guardian-intelligence/postflight-cli@sha256:69b7beae2cd06a4aaae62d629e15be5d6e43a6d1a701b790e1ca3e80c13d4631

@@ -1,56 +1,49 @@
 # Supply-chain design: signing, SBOM, and the trust model
 
-Status: active as of 2026-07-03 (PR for task: SBOM attestation + images.lock
-signing; updated same week for promotion decoupling — pin moves are
-provenance-verified, not rebuild-verified). Complements
+Status: active as of 2026-07-03; reshaped 2026-07-22 — signing follows the
+publication boundary, so only what Guardian releases to users (the
+postflight CLI) is signed; cluster-internal images are governed by the
+merge gate and the admission backstop, not signatures. Complements
 `adrs/0003-validate-rendered-manifests.md` (Git-time invariants),
 `adrs/0010-two-release-signatures-one-format-per-lane.md` (the release
 signing model) and the cold-boot runbook (offline consumption).
 
 ## The trust model in one paragraph
 
-The root of trust is Git plus CI as the canonical builder: a deployment pin
-may only move to a digest that CI built, pushed, and cosign-signed from
-reviewed main history, enforced by the `company-site-image` workflow — a
-pin-changing PR must name a digest carrying the canonical identity's
-signature (verified without a rebuild), and content PRs do not move pins at
-all. The signature is therefore the gate, not an add-on: a cosign keyless
-signature bound to the GitHub Actions OIDC workload identity via Fulcio and
-logged in Rekor, attesting "the reviewed main history of
-guardian-intelligence/guardian built this". There are no signing keys
-anywhere: nothing to store, rotate, leak, or
-custody. Registries (ghcr.io included) are untrusted distribution; a
-verifier checks the signature identity, not the registry it pulled from.
-Signing authority exists only at the merge boundary: the running system —
-a dark cold start included — only ever verifies. Bring-up needs no signing
-capability, just the pinned identities and the Sigstore trusted root,
-both of which travel with the drive.
+The root of trust is Git plus CI as the canonical builder: the only path to
+an `edge` tag on `ghcr.io/guardian-intelligence/*` is a merge to reviewed
+main history (the `images` workflow publishes on main pushes only), and the
+admission backstop requires every image the cluster runs to be digest-pinned
+from an allowlisted registry. Signatures exist where a consumer outside that
+loop needs them — the released postflight CLI: a cosign keyless signature
+bound to the GitHub Actions OIDC workload identity via Fulcio and logged in
+Rekor, attesting "the reviewed main history of
+guardian-intelligence/guardian built this", plus Guardian's own
+countersignature at the publication boundary. There are no signing keys in
+CI: nothing to store, rotate, leak, or custody. Registries (ghcr.io
+included) are untrusted distribution; a verifier checks the signature
+identity, not the registry it pulled from. The running system — a dark cold
+start included — only ever verifies. Bring-up needs no signing capability,
+just the pinned identities and the Sigstore trusted root, both of which
+travel with the drive.
 
 ## Canonical identities
 
 Verifiers MUST pin these exact identity strings (OIDC issuer
 `https://token.actions.githubusercontent.com` for both):
 
-- `company-site` image + SBOM attestations:
-  `https://github.com/guardian-intelligence/guardian/.github/workflows/company-site-image.yml@refs/heads/main`
-- `analytics-ingest` image + SBOM attestations:
-  `https://github.com/guardian-intelligence/guardian/.github/workflows/analytics-ingest-image.yml@refs/heads/main`
-- `alert-relay` image + SBOM attestations:
-  `https://github.com/guardian-intelligence/guardian/.github/workflows/alert-relay-image.yml@refs/heads/main`
-- `cockpit` image + SBOM attestations:
-  `https://github.com/guardian-intelligence/guardian/.github/workflows/cockpit-image.yml@refs/heads/main`
-- `postflight-controlplane` image + SBOM attestations:
-  `https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-controlplane-image.yml@refs/heads/main`
+- `postflight-cli` binaries, OCI artifact + SBOM attestations:
+  `https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main`
 - images.lock signature bundles:
   `https://github.com/guardian-intelligence/guardian/.github/workflows/images-lock-sign.yml@refs/heads/main`
 
 The in-cluster countersigner (`docs/registry-design.md`) carries the same
 list as its identity map: it refuses to countersign any digest that does not
-verify against its repo's canonical identity, so adding a first-party image
+verify against its repo's canonical identity, so adding a released artifact
 means updating this list, the countersigner map, and creating the new
 workflow file together.
 
-Identities are per-workflow-file by construction — a new first-party image
+Identities are per-workflow-file by construction — a new released artifact
 gets a new workflow file, never a stanza in an existing one, so no single
 identity can sign more than one artifact family.
 
@@ -58,10 +51,8 @@ identity can sign more than one artifact family.
 
 | Artifact | Producer | Signature/attestation | Location |
 |---|---|---|---|
-| `company-site` image | `company-site-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
-| `analytics-ingest` image | `analytics-ingest-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
-| `alert-relay` image | `alert-relay-image` workflow on main | cosign keyless signature + SPDX SBOM attestation (`--type spdxjson`) | ghcr.io, attached to the digest |
-| every released first-party digest | in-cluster countersigner (`docs/registry-design.md`) | Guardian release countersignature (`openbao://guardian-images`, Rekor-logged, inclusion proof embedded in the bundle) as an OCI 1.1 referrer, minted only after the digest's Fulcio signature re-verifies | zot, attached to the digest; projected to ghcr by the release projector |
+| `postflight-cli` binaries + OCI artifact | `postflight-cli-image` workflow on main | per-binary cosign keyless sign-blob bundles (travel inside the artifact layer), cosign keyless signature + SPDX SBOM attestation on the artifact digest | ghcr.io, attached to the digest; bundles republished with each GitHub Release |
+| every released digest (the release manifest) | in-cluster countersigner (`docs/registry-design.md`) | Guardian release countersignature (`openbao://guardian-images`, Rekor-logged, inclusion proof embedded in the bundle) as an OCI 1.1 referrer, minted only after the digest's Fulcio signature re-verifies | zot, attached to the digest; projected to ghcr by the release projector |
 | union images lock (generated) | `images-lock-sign` workflow on main pushes touching any union input (declared lock, manifest trees, the imageset tool) | derives the union with `//src/infrastructure/cmd/imageset`, then `cosign sign-blob --bundle` (embeds Fulcio cert + Rekor proof), pushed with `oras push` so the layer carries a filename title | `ghcr.io/guardian-intelligence/supply-chain:images.lock-<sha256>` (one tag per union hash, no floating tag; package stays private — only authenticated drive builds fetch it, dark bring-up reads it from the drive) |
 
 The artifact inventory itself is split and mostly generated:
@@ -108,35 +99,34 @@ and upstream-registry axes, not the operator.
 ## Promotion: how digests move
 
 Deployment pins are decoupled from content changes. A content PR never
-moves a pin; when it merges, CI on main builds, pushes, and signs the new
+moves a pin; when it merges, CI on main builds and pushes the new `edge`
 digest, which makes it *eligible* for promotion — nothing more. Promotion
 is a separate pin-only PR that bumps the manifest pin and nothing else:
 the inventory is the generated union, so the moved pin joins it by
-derivation, not by a second edit. The `site-gate` check verifies exactly
-two things on that PR: the proposed digest carries a cosign signature by
-the canonical image identity above (seconds, no rebuild — the gate
-classifies the diff and skips the build on pin-only PRs), and the
-conformance tests still pass.
+derivation, not by a second edit. The gate on that PR is the conformance
+suite plus the required `build` check — every digest behind `edge` came
+from reviewed main history by construction, so the pin move needs no
+per-digest verification.
 
-The promoter is Kargo (deployments/guardian/promotion): the Warehouse
-tracks the digest behind `company-site:edge`, and the prod Stage's
-promotion opens the pin-bump PR as the `guardian-promotions` GitHub App.
-The `promotion-automerge` workflow arms automerge on the bot's PRs; no
+The promoter is Kargo (deployments/guardian/promotion): a Warehouse tracks
+the digest behind each `edge` tag, and the Stage's promotion opens the
+pin-bump PR as the `guardian-promotions` GitHub App. The
+`promotion-automerge` workflow arms automerge on the bot's PRs; no
 inventory sync exists or is needed. The promoter is untrusted by
-construction: branch protection requires `build`
-and `site-gate` on main, so nothing reaches a pin that CI did not sign
-from main history, whether the PR was opened by a human or the bot. The
-required-checks + allow-auto-merge repo settings are the enforcement's
-load-bearing half and live outside Git — re-assert them when recreating
-the repo (exact commands in [TRIBAL_KNOWLEDGE.md](TRIBAL_KNOWLEDGE.md)).
+construction: branch protection requires `build` on main, so nothing
+reaches main that the conformance suite did not pass, whether the PR was
+opened by a human or the bot. The required-checks + allow-auto-merge repo
+settings are the enforcement's load-bearing half and live outside Git —
+re-assert them when recreating the repo (exact commands in
+[TRIBAL_KNOWLEDGE.md](TRIBAL_KNOWLEDGE.md)).
 
 This deliberately weakens the old invariant "pin == the digest CI builds
-from this same commit" to "pin ∈ digests the canonical identity has
-signed". What is bought: content merges stop requiring a round-trip repin
-commit, and promotion becomes an automatable, independently-gated step per
+from this same commit" to "pin ∈ digests published from main history".
+What is bought: content merges stop requiring a round-trip repin commit,
+and promotion becomes an automatable, independently-gated step per
 service. What is given up: Git alone no longer proves the pin is the
 *latest* build — freshness is the promoter's job — and pinning an older
-signed digest (rollback) remains a legitimate one-line operation rather
+published digest (rollback) remains a legitimate one-line operation rather
 than a violation.
 
 ## Verification
@@ -145,14 +135,14 @@ Online (any machine):
 
 ```sh
 cosign verify \
-  --certificate-identity "<image identity above>" \
+  --certificate-identity "<artifact identity above>" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/guardian-intelligence/company-site@sha256:<pinned>
+  ghcr.io/guardian-intelligence/postflight-cli@sha256:<pinned>
 
 cosign verify-attestation --type spdxjson \
-  --certificate-identity "<image identity above>" \
+  --certificate-identity "<artifact identity above>" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/guardian-intelligence/company-site@sha256:<pinned>
+  ghcr.io/guardian-intelligence/postflight-cli@sha256:<pinned>
 ```
 
 Offline (dark drive): the sign-blob bundle JSON embeds the certificate and

@@ -86,6 +86,7 @@ go_test(
         "//src/infrastructure/load:http_load_scripts",
         "//src/infrastructure/runbooks:docs",
         "//src/infrastructure/talm:chart",
+        "//src/products/postflight-cli/release:channels",
         "//src/tools:multitool.lock.json",
         "//tools/ops:spicedb-qualify",
     ],

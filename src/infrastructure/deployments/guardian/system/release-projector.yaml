@@ -145,7 +145,7 @@ data:
       > /tmp/docker/config.json
 
     # The released set is exactly the manifest's pinned refs; lane structure
-    # is for reviewers and Kargo, only the refs matter here. The no-match
+    # is for reviewers, only the refs matter here. The no-match
     # grep must not kill the run under pipefail: an empty manifest flows
     # through to the loud total=0 exit below instead of dying here with
     # nothing projected and nothing logged.
