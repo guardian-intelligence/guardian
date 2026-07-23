@@ -3,8 +3,6 @@ kind: Deployment
 metadata:
   name: company-site
   namespace: tenant-guardian-prod
-  annotations:
-    reloader.stakater.com/auto: "true"
   labels:
     app.kubernetes.io/name: company-site
     app.kubernetes.io/part-of: guardian
@@ -75,16 +73,17 @@ spec:
               value: http://keycloak.tenant-guardian-prod.svc/realms/guardianintelligence.org
             - name: POSTFLIGHT_OIDC_CLIENT_ID
               value: postflight-web
-            - name: POSTFLIGHT_OIDC_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: postflight-oidc-client
-                  key: password
-            - name: POSTFLIGHT_SESSION_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: postflight-session-seal
-                  key: password
+            # The BFF reads these files on every use, so a rotation lands via
+            # the kubelet's Secret-mount sync with no pod roll. Seal rotation
+            # ceremony: swap the two SESSION_SECRET paths (the standby becomes
+            # the sealer), then after the 30m session TTL force-sync the
+            # retired slot's generator.
+            - name: POSTFLIGHT_OIDC_CLIENT_SECRET_FILE
+              value: /auth-secrets/oidc-client-secret
+            - name: POSTFLIGHT_SESSION_SECRET_FILE
+              value: /auth-secrets/session-seal-slot-a
+            - name: POSTFLIGHT_SESSION_SECRET_STANDBY_FILE
+              value: /auth-secrets/session-seal-slot-b
             - name: GUARDIAN_DEPLOY_ID
               valueFrom:
                 fieldRef:
@@ -118,6 +117,29 @@ spec:
             capabilities:
               drop:
                 - ALL
+          volumeMounts:
+            - name: auth-secrets
+              mountPath: /auth-secrets
+              readOnly: true
+      volumes:
+        - name: auth-secrets
+          projected:
+            sources:
+              - secret:
+                  name: postflight-oidc-client
+                  items:
+                    - key: password
+                      path: oidc-client-secret
+              - secret:
+                  name: postflight-session-seal
+                  items:
+                    - key: password
+                      path: session-seal-slot-a
+              - secret:
+                  name: postflight-session-seal-slot-b
+                  items:
+                    - key: password
+                      path: session-seal-slot-b
 ---
 apiVersion: v1
 kind: Service
