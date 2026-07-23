@@ -5,6 +5,10 @@ import { inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
 const publicDirectory = join(dirname(fileURLToPath(import.meta.url)), "../../public");
+const badgeBoundingBoxAreaRatio = 0.184;
+const wingsBounds = { width: 102.174, height: 120.823 };
+const badgeViewBoxSide = 140;
+const foregroundChannelAverageFloor = 20;
 
 interface ManifestIcon {
   src: string;
@@ -62,13 +66,10 @@ function readRgbPngPixels(path: string) {
     const filter = filtered[sourceOffset] ?? -1;
     sourceOffset += 1;
     for (let x = 0; x < stride; x += 1) {
-      const left =
-        x >= bytesPerPixel ? (pixels[y * stride + x - bytesPerPixel] ?? 0) : 0;
+      const left = x >= bytesPerPixel ? (pixels[y * stride + x - bytesPerPixel] ?? 0) : 0;
       const above = y > 0 ? (pixels[(y - 1) * stride + x] ?? 0) : 0;
       const upperLeft =
-        y > 0 && x >= bytesPerPixel
-          ? (pixels[(y - 1) * stride + x - bytesPerPixel] ?? 0)
-          : 0;
+        y > 0 && x >= bytesPerPixel ? (pixels[(y - 1) * stride + x - bytesPerPixel] ?? 0) : 0;
       const paethBase = left + above - upperLeft;
       const leftDistance = Math.abs(paethBase - left);
       const aboveDistance = Math.abs(paethBase - above);
@@ -87,14 +88,71 @@ function readRgbPngPixels(path: string) {
         4: paeth,
       };
       const predictor = predictors[filter];
-      expect(predictor).toBeDefined();
-      pixels[y * stride + x] =
-        ((filtered[sourceOffset + x] ?? 0) + (predictor ?? 0)) & 0xff;
+      if (predictor === undefined) {
+        throw new Error(`Unsupported PNG filter ${filter}`);
+      }
+      pixels[y * stride + x] = ((filtered[sourceOffset + x] ?? 0) + predictor) & 0xff;
     }
     sourceOffset += stride;
   }
 
   return { width, height, pixels };
+}
+
+function foregroundBounds(path: string) {
+  const { width, height, pixels } = readRgbPngPixels(path);
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 3;
+      const red = pixels[offset] ?? 0;
+      const green = pixels[offset + 1] ?? 0;
+      const blue = pixels[offset + 2] ?? 0;
+      if ((red + green + blue) / 3 <= foregroundChannelAverageFloor) {
+        continue;
+      }
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  const foregroundWidth = maxX - minX + 1;
+  const foregroundHeight = maxY - minY + 1;
+  return {
+    widthRatio: foregroundWidth / width,
+    heightRatio: foregroundHeight / height,
+    areaRatio: (foregroundWidth * foregroundHeight) / (width * height),
+    centerXRatio: (minX + maxX + 1) / (2 * width),
+    centerYRatio: (minY + maxY + 1) / (2 * height),
+  };
+}
+
+function expectBadgeGeometry(svg: string) {
+  const scaleMatch = svg.match(/\bscale\(([^)]+)\)/);
+  expect(scaleMatch).not.toBeNull();
+  const scale = Number(scaleMatch?.[1]);
+  const widthRatio = (wingsBounds.width * scale) / badgeViewBoxSide;
+  const heightRatio = (wingsBounds.height * scale) / badgeViewBoxSide;
+
+  expect(svg).toContain("translate(175 176) scale(0.540495325) translate(-175.584 -176.6485)");
+  expect(widthRatio).toBeCloseTo(0.394461, 6);
+  expect(heightRatio).toBeCloseTo(0.466459, 6);
+  expect(widthRatio * heightRatio).toBeCloseTo(badgeBoundingBoxAreaRatio, 6);
+}
+
+function expectRasterBadgeGeometry(path: string) {
+  const bounds = foregroundBounds(path);
+  expect(bounds.widthRatio).toBeCloseTo(0.394461, 2);
+  expect(bounds.heightRatio).toBeCloseTo(0.466459, 2);
+  expect(bounds.areaRatio).toBeCloseTo(badgeBoundingBoxAreaRatio, 2);
+  expect(bounds.centerXRatio).toBeCloseTo(0.5, 2);
+  expect(bounds.centerYRatio).toBeCloseTo(0.5, 2);
 }
 
 describe("platform icons", () => {
@@ -104,6 +162,7 @@ describe("platform icons", () => {
     expect(favicon).toContain('viewBox="105 106 140 140"');
     expect(favicon).toContain('<rect x="105" y="106" width="140" height="140"');
     expect(favicon).not.toMatch(/\brx=/);
+    expectBadgeGeometry(favicon);
 
     expect(readPngHeader("apple-touch-icon.png")).toEqual({
       width: 180,
@@ -121,6 +180,7 @@ describe("platform icons", () => {
       pixelAt(0, height - 1),
       pixelAt(width - 1, height - 1),
     ]).toEqual([background, background, background, background]);
+    expectRasterBadgeGeometry("apple-touch-icon.png");
   });
 
   it("publishes opaque standard and maskable Android icons", () => {
@@ -132,8 +192,8 @@ describe("platform icons", () => {
     expect(manifest.background_color).toBe("#0a0a0e");
     expect(manifest.theme_color).toBe("#0a0a0e");
     expect(maskableIcon).toContain('<rect x="105" y="106" width="140" height="140"');
-    expect(maskableIcon).toContain("scale(.8)");
     expect(maskableIcon).not.toMatch(/\brx=/);
+    expectBadgeGeometry(maskableIcon);
     expect(manifest.icons).toEqual([
       {
         src: "/icon-192.png",
@@ -170,5 +230,8 @@ describe("platform icons", () => {
       height: 512,
       colorType: 2,
     });
+    for (const icon of ["icon-192.png", "icon-512.png", "icon-maskable-512.png"]) {
+      expectRasterBadgeGeometry(icon);
+    }
   });
 });
