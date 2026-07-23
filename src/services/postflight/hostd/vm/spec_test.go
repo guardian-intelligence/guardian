@@ -77,6 +77,34 @@ func TestArgvUserNetwork(t *testing.T) {
 	}
 }
 
+func TestArgvTapNetwork(t *testing.T) {
+	spec := LaunchSpec{
+		QEMUPath:     "/usr/bin/qemu-system-x86_64",
+		ID:           "pool-0001",
+		CPUs:         4,
+		MemoryMiB:    16384,
+		RootDevice:   "/dev/zvol/tank/postflight/vm-pool-0001",
+		Firmware:     "/usr/share/postflight/OVMF.fd",
+		StateDir:     "/var/lib/hostd/vms/pool-0001",
+		VsockCID:     3,
+		GuestNetwork: "tap",
+		TapUpScript:  "/usr/local/libexec/postflight-tap-up",
+	}
+	got := spec.Argv()
+	tail := strings.Join(got[len(got)-4:], "\n")
+	want := strings.Join([]string{
+		"-netdev", "tap,id=net0,ifname=pft22090518f15b,script=/usr/local/libexec/postflight-tap-up,downscript=no,vhost=on",
+		"-device", "virtio-net-pci,netdev=net0,mac=02:00:00:00:00:03",
+	}, "\n")
+	if tail != want {
+		t.Fatalf("tap NIC argv drifted:\n--- got ---\n%s\n--- want ---\n%s", tail, want)
+	}
+	ifname, mac := tapIdentity(spec.ID, spec.VsockCID)
+	if len(ifname) > 15 || ifname != "pft22090518f15b" || mac != "02:00:00:00:00:03" {
+		t.Fatalf("tap identity ifname=%q mac=%q", ifname, mac)
+	}
+}
+
 // TestArgvNoNetworkByDefault: an unset or none datapath attaches no NIC.
 func TestArgvNoNetworkByDefault(t *testing.T) {
 	for _, mode := range []string{"", "none"} {

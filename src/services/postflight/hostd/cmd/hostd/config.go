@@ -28,6 +28,8 @@ type config struct {
 	criuVersion    string
 	syncInterval   time.Duration
 	guestNetwork   string
+	guestBridge    string
+	tapUpScript    string
 
 	checkoutListenAddr  string
 	checkoutGuestOrigin string
@@ -85,13 +87,19 @@ func loadConfig() (config, error) {
 		criuVersion:         required("HOSTD_CRIU_VERSION"),
 		syncInterval:        duration("HOSTD_SYNC_INTERVAL", "2s"),
 		guestNetwork:        envOr("HOSTD_GUEST_NETWORK", "none"),
+		guestBridge:         os.Getenv("HOSTD_GUEST_BRIDGE"),
+		tapUpScript:         envOr("HOSTD_TAP_UP_SCRIPT", "/usr/local/libexec/postflight-tap-up"),
 		checkoutListenAddr:  envOr("HOSTD_CHECKOUT_LISTEN_ADDR", "127.0.0.1:8480"),
 		checkoutGuestOrigin: required("HOSTD_CHECKOUT_GUEST_ORIGIN"),
 	}
 	switch cfg.guestNetwork {
 	case "none", "user":
+	case "tap":
+		if cfg.guestBridge == "" {
+			errs = append(errs, errors.New("HOSTD_GUEST_BRIDGE is required for tap networking"))
+		}
 	default:
-		errs = append(errs, fmt.Errorf("HOSTD_GUEST_NETWORK: %q is not none or user", cfg.guestNetwork))
+		errs = append(errs, fmt.Errorf("HOSTD_GUEST_NETWORK: %q is not none, user, or tap", cfg.guestNetwork))
 	}
 	if len(errs) > 0 {
 		return cfg, errors.Join(errs...)
