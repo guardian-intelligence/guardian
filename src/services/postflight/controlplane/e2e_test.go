@@ -789,6 +789,49 @@ func TestOfflineHostFailsAcquiredAssignmentClosed(t *testing.T) {
 	}
 }
 
+func TestAbsentRecyclingMemberLeavesDesiredState(t *testing.T) {
+	control := startE2EControlPlane(t)
+	waitFor(t, "runner pool", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pools WHERE runner_class = $1`, e2eClass) == "1"
+	})
+
+	const (
+		hostID   = "host-recycling"
+		memberID = "member-recycling"
+		vmID     = "vm-recycling"
+	)
+	desired := postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: hostID, BootID: "boot-recycling",
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1, Busy: 1}},
+		Members: []syncproto.PoolMemberReport{{
+			MemberID: memberID, VMID: vmID, Class: e2eClass,
+			Image: "golden", State: syncproto.MemberRecycling,
+		}},
+	})
+	foundRecycle := false
+	for _, member := range desired.Members {
+		if member.MemberID == memberID {
+			foundRecycle = member.State == syncproto.DesiredMemberRecycle
+		}
+	}
+	if !foundRecycle {
+		t.Fatalf("reported recycling member was not returned for recycle: %+v", desired.Members)
+	}
+
+	desired = postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: hostID, BootID: "boot-recycling",
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1}},
+	})
+	if got := queryString(t, control.pool, `SELECT state FROM runner_pool_members WHERE member_id = $1`, memberID); got != "lost" {
+		t.Fatalf("absent recycling member state = %q", got)
+	}
+	for _, member := range desired.Members {
+		if member.MemberID == memberID {
+			t.Fatalf("absent recycling member remained in desired state: %+v", desired.Members)
+		}
+	}
+}
+
 func TestConcurrentSameNameJobsBindByCheckRun(t *testing.T) {
 	control := startE2EControlPlane(t)
 	const secondJobID = int64(9002)

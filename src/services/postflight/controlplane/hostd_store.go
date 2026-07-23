@@ -243,7 +243,7 @@ WHERE runner_pool_members.host_id = EXCLUDED.host_id
 	if _, err := tx.Exec(ctx, `
 UPDATE runner_pool_members
 SET state = 'lost', jit_config = '', updated_at = now()
-WHERE host_id = $1 AND state NOT IN ('lost', 'recycling')
+WHERE host_id = $1 AND state <> 'lost'
   AND member_id <> ALL($2::text[])`, hostID, seen); err != nil {
 		return err
 	}
