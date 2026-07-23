@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { EOL } from "node:os";
 import { spawn } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
@@ -160,13 +160,17 @@ export const makeGitLive = (options: GitLiveOptions = {}) => {
     );
   };
 
-  const markShallow = (target: CanonicalCheckoutTarget, sha: typeof CommitSha.Type) =>
+  const shallowFile = (target: CanonicalCheckoutTarget) =>
     checked("locate shallow file", target, ["rev-parse", "--git-path", "shallow"]).pipe(
-      Effect.flatMap((result) => {
-        const shallowOutput = result.stdout.trim();
-        const shallowPath = isAbsolute(shallowOutput)
-          ? shallowOutput
-          : resolve(target, shallowOutput);
+      Effect.map((result) => {
+        const output = result.stdout.trim();
+        return isAbsolute(output) ? output : resolve(target, output);
+      }),
+    );
+
+  const markShallow = (target: CanonicalCheckoutTarget, sha: typeof CommitSha.Type) =>
+    shallowFile(target).pipe(
+      Effect.flatMap((shallowPath) => {
         return Effect.tryPromise({
           try: async () => {
             let existing = "";
@@ -198,6 +202,37 @@ export const makeGitLive = (options: GitLiveOptions = {}) => {
               operation: "mark shallow commit",
             }),
         });
+      }),
+    );
+
+  const clearShallow = (target: CanonicalCheckoutTarget) =>
+    shallowFile(target).pipe(
+      Effect.flatMap((shallowPath) =>
+        Effect.tryPromise({
+          try: () => rm(shallowPath, { force: true }),
+          catch: (error) =>
+            new GitCommandFailed({
+              detail: safeFsDetail(error),
+              exitCode: null,
+              operation: "clear shallow boundary",
+            }),
+        }),
+      ),
+    );
+
+  const isShallow = (target: CanonicalCheckoutTarget) =>
+    checked("inspect shallow state", target, ["rev-parse", "--is-shallow-repository"]).pipe(
+      Effect.flatMap((result) => {
+        const value = result.stdout.trim();
+        if (value === "true") return Effect.succeed(true);
+        if (value === "false") return Effect.succeed(false);
+        return Effect.fail(
+          new GitCommandFailed({
+            detail: "git returned an invalid shallow-repository state",
+            exitCode: result.exitCode,
+            operation: "inspect shallow state",
+          }),
+        );
       }),
     );
 
@@ -247,6 +282,7 @@ export const makeGitLive = (options: GitLiveOptions = {}) => {
   return Layer.succeed(Git, {
     checkoutDetached: (target, sha) =>
       checked("checkout", target, ["checkout", "--force", "--detach", sha]).pipe(Effect.asVoid),
+    clearShallow,
     configureOrigin,
     configureSafeDirectory,
     head,
@@ -256,6 +292,7 @@ export const makeGitLive = (options: GitLiveOptions = {}) => {
       ),
     initialize: (target) => checked("initialize", target, ["init"]).pipe(Effect.asVoid),
     inspectHead,
+    isShallow,
     markShallow,
     resetTrackedFiles: (target) =>
       checked("reset tracked files", target, ["reset", "--hard", "HEAD"]).pipe(Effect.asVoid),

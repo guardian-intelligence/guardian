@@ -20,6 +20,7 @@ type bundleRequest struct {
 	Ref         string `json:"ref"`
 	SHA         string `json:"sha"`
 	Have        string `json:"have,omitempty"`
+	FetchDepth  *int   `json:"fetch_depth,omitempty"`
 	GitHubToken string `json:"github_token"`
 }
 
@@ -29,6 +30,7 @@ type checkoutSpec struct {
 	Ref         string
 	SHA         string
 	Have        string
+	FetchDepth  int
 	GitHubToken string
 }
 
@@ -60,7 +62,17 @@ func validateRequest(req bundleRequest, identity AssignmentIdentity) (checkoutSp
 	if err != nil {
 		return checkoutSpec{}, err
 	}
-	return checkoutSpec{Repository: repository, Ref: ref, SHA: sha, Have: have, GitHubToken: token}, nil
+	fetchDepth := 1
+	if req.FetchDepth != nil {
+		fetchDepth = *req.FetchDepth
+	}
+	if fetchDepth != 0 && fetchDepth != 1 {
+		return checkoutSpec{}, fmt.Errorf("%w: fetch depth must be 0 or 1", errInvalid)
+	}
+	return checkoutSpec{
+		Repository: repository, Ref: ref, SHA: sha, Have: have,
+		FetchDepth: fetchDepth, GitHubToken: token,
+	}, nil
 }
 
 func normalizeRepository(repository string) (string, error) {

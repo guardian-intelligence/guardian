@@ -27,6 +27,7 @@ export class Validated extends Data.TaggedClass("Validated")<{
 
 export class TargetPrepared extends Data.TaggedClass("TargetPrepared")<{
   readonly preexistingHead: Option.Option<CommitSha>;
+  readonly preexistingShallow: boolean;
   readonly runtime: ValidatedRuntimeConfiguration;
   readonly spec: CheckoutSpec;
   readonly target: CanonicalCheckoutTarget;

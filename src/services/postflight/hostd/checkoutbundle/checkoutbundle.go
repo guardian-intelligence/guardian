@@ -1,9 +1,9 @@
-// Package checkoutbundle serves single-commit git packfiles to the Postflight
+// Package checkoutbundle serves git packfiles to the Postflight
 // checkout action running inside a job.
 //
 // The action POSTs {repository, ref, sha, github_token} to
 // /internal/sandbox/v1/github-checkout/bundle with an assignment-scoped bearer token
-// and receives the exact pack closure of one commit, materialized from a
+// and receives the requested commit closure, materialized from a
 // host-local bare mirror. The mirror and a per-SHA pack cache make repeat
 // checkouts (matrix jobs, retries, warm workspaces) free of GitHub traffic.
 //
@@ -54,7 +54,7 @@ type Config struct {
 	GitHubWebBaseURL string
 
 	// MaxPackBytes rejects packs larger than this with 413. Matches the
-	// action's own 512 MiB ceiling by default.
+	// action's own 2 GiB ceiling by default.
 	MaxPackBytes int64
 
 	// MaxConcurrent bounds in-flight bundle requests; excess gets 429.
@@ -104,7 +104,7 @@ func New(cfg Config, resolver IdentityResolver) *Service {
 		cfg.GitHubWebBaseURL = "https://github.com"
 	}
 	if cfg.MaxPackBytes <= 0 {
-		cfg.MaxPackBytes = 512 << 20
+		cfg.MaxPackBytes = 2 << 30
 	}
 	if cfg.MaxConcurrent <= 0 {
 		cfg.MaxConcurrent = 8

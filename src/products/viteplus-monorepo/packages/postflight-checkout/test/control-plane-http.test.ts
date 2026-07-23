@@ -97,6 +97,7 @@ describe("checkout control-plane HTTP client", () => {
         throw new TypeError("checkout request body was not JSON text");
       }
       expect(JSON.parse(capturedInit.body)).toEqual({
+        fetch_depth: 1,
         github_token: "github-secret",
         ref: "refs/heads/main",
         repository: "guardian-intelligence/guardian",
@@ -142,6 +143,7 @@ describe("checkout control-plane HTTP client", () => {
         expect(receivedAuthorization).toBe("Bearer runner-secret");
         expect(receivedPath).toBe("/internal/sandbox/v1/github-checkout/bundle");
         expect(receivedBody).toEqual({
+          fetch_depth: 1,
           github_token: "github-secret",
           have: SHA,
           ref: "refs/heads/main",

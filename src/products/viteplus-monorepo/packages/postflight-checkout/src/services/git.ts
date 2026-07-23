@@ -19,6 +19,7 @@ export interface GitService {
   readonly configureSafeDirectory: (
     target: CanonicalCheckoutTarget,
   ) => Effect.Effect<void, GitCommandFailed>;
+  readonly clearShallow: (target: CanonicalCheckoutTarget) => Effect.Effect<void, GitCommandFailed>;
   readonly head: (target: CanonicalCheckoutTarget) => Effect.Effect<CommitSha, GitCommandFailed>;
   readonly importPack: (
     target: CanonicalCheckoutTarget,
@@ -28,6 +29,7 @@ export interface GitService {
   readonly inspectHead: (
     target: CanonicalCheckoutTarget,
   ) => Effect.Effect<Option.Option<CommitSha>, GitCommandFailed>;
+  readonly isShallow: (target: CanonicalCheckoutTarget) => Effect.Effect<boolean, GitCommandFailed>;
   readonly markShallow: (
     target: CanonicalCheckoutTarget,
     sha: CommitSha,

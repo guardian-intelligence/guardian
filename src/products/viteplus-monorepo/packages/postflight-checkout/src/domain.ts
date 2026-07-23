@@ -78,10 +78,13 @@ export type CleanPolicy = typeof CleanPolicy.Type;
 export const CacheHit = Schema.Literal(true, false, "unknown");
 export type CacheHit = typeof CacheHit.Type;
 
+export const FetchDepth = Schema.Literal(0, 1);
+export type FetchDepth = typeof FetchDepth.Type;
+
 export class CheckoutSpec extends Schema.Class<CheckoutSpec>("CheckoutSpec")({
   clean: CleanPolicy,
   expectedCommit: CommitSha,
-  fetchDepth: Schema.Literal(1),
+  fetchDepth: FetchDepth,
   ref: CheckoutRef,
   repository: RepositoryFullName,
   requestedPath: CheckoutPathInput,
