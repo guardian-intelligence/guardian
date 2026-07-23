@@ -32,8 +32,12 @@ or request in the ledger.
 - Confirm that the browser is signed in as an owner of
   `guardian-intelligence`. Stop if **Settings** or **Developer settings** is
   unavailable.
-- Never reveal or change a private key, client secret, webhook secret,
-  password, passkey, recovery code, or TOTP setting during this sweep.
+- Never reveal a private key, client secret, webhook secret, password,
+  passkey, recovery code, or TOTP setting during this sweep. The only secret
+  mutation this manual permits is re-entering Postflight's existing
+  OpenBao-held webhook secret into the GitHub App when the run explicitly
+  requests webhook-secret reconciliation. Keep the value out of chat, tool
+  output, argv, shell history, and files.
 - Do not generate credentials, change App ownership or visibility, list an App
   in Marketplace, suspend an installation, uninstall an App, or delete an
   App. Those are separate operations.
@@ -68,11 +72,38 @@ this table is **No access**.
 Additional invariants:
 
 - User authorization during installation and Device Flow are disabled for all
-  first-party Apps. Callback and setup URLs are empty.
+  first-party Apps.
+- `Postflight by Guardian` has these exact production General settings:
+  - Homepage URL: `https://guardianintelligence.org/postflight`
+  - Callback URLs: exactly
+    `https://guardianintelligence.org/postflight`, with every Verself callback
+    removed
+  - Request user authorization during installation: disabled
+  - Device Flow: disabled
+  - Setup URL: `https://guardianintelligence.org/postflight`
+  - Redirect on update: disabled
+- Postflight user sign-in does not use this GitHub App. The Guardian Keycloak
+  GitHub broker uses OAuth App client `Ov23li9wlYzzt3mcfJ7V`; Postflight uses
+  GitHub App client `Iv23liDpxGOmBSQwSJ5i`. Keep the App out of user OAuth and
+  retain the identity-keying ruling: `storeToken: false`, with no user-token
+  persistence.
+- Postflight's production webhook is active at
+  `https://guardianintelligence.org/api/v1/github/webhooks`. It is the
+  installation authority: the ingress routes to `postflight-controlplane`,
+  the controlplane verifies the HMAC, and the signed `installation.created`
+  event establishes organization linkage before the event is ledgered.
+  Callback and setup redirects are not authority.
+- Postflight's GitHub webhook secret must equal `webhookSecret` at OpenBao
+  `kv/guardian/guardian-mgmt/postflight-runner/github-app`, which is projected
+  as `GITHUB_WEBHOOK_SECRET` for the controlplane. GitHub does not reveal the
+  current App-side value, so an explicit reconciliation re-enters the
+  non-empty OpenBao value into GitHub; this is idempotent when already aligned
+  and guarantees alignment when a Verself-era secret remains. Never rotate
+  the OpenBao source merely to match an unknown App-side value.
+- Callback and setup URLs remain empty for the other first-party Apps unless
+  their baseline is explicitly amended.
 - Postflight production and staging are distinct Apps. If the staging App has
   not been created, record `not-created` and do not create it during a sweep.
-- Postflight's webhook URL and secret are not edited in this run. The separate
-  `configure-postflight-github-app` skill owns them.
 - `guardian-platform-app` does not receive Actions permission. GitHub App
   Packages write access does not replace the separately documented GHCR write
   exception.
@@ -130,21 +161,32 @@ On the **Owned Apps** tab, process one App at a time:
 
 1. Open **Edit** for the App and confirm the App ID and owner against the
    ledger.
-2. On **General**, confirm user authorization during installation and Device
-   Flow are disabled. Confirm callback and setup URLs are empty. Do not touch
-   keys, secrets, visibility, or ownership.
-3. Open **Permissions & events**.
-4. Under **Repository permissions**, set every named permission to the exact
+2. On **General**, reconcile the complete baseline above. For Postflight,
+   delete every Verself callback and set the Homepage, one callback, Setup,
+   OAuth, Device Flow, redirect-on-update, webhook URL, webhook activity, and
+   event settings exactly. For other Apps, confirm callback and setup URLs are
+   empty. Do not touch private keys, client secrets, visibility, or ownership.
+   Do not use callback or setup redirect success as installation-linkage
+   evidence; the signed webhook is authoritative.
+3. When the run explicitly includes Postflight webhook-secret reconciliation,
+   first confirm that the OpenBao `webhookSecret` property exists and is
+   non-empty. Transfer it directly into the GitHub **Webhook secret** field
+   without displaying or persisting it. Because the App-side value is
+   write-only, re-entering the OpenBao value is the comparison and repair.
+   Confirm the `postflight-runner/github-app` ExternalSecret is Ready after the
+   save and verify a signed delivery rather than printing either value.
+4. Open **Permissions & events**.
+5. Under **Repository permissions**, set every named permission to the exact
    baseline value. Set every other dropdown to **No access**.
-5. Under **Organization permissions**, do the same.
-6. Under **Account permissions**, set every permission, including Email
+6. Under **Organization permissions**, do the same.
+7. Under **Account permissions**, set every permission, including Email
    addresses, to **No access**.
-7. Under **Subscribe to events**, leave only the event in the baseline. For an
+8. Under **Subscribe to events**, leave only the event in the baseline. For an
    App with no events, disable the webhook and ensure no event is selected.
-8. Before saving, read the entire page again. Compare every non-**No access**
+9. Before saving, read the entire page again. Compare every non-**No access**
    row and every selected event with the baseline, not with the old state.
-9. Select **Save changes** once.
-10. Reload **Permissions & events** and record the rendered state. A toast is
+10. Select **Save changes** once.
+11. Reload **Permissions & events** and record the rendered state. A toast is
     not acceptance evidence.
 
 Removing access may take effect immediately. Adding access or an event can

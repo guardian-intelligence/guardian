@@ -15,11 +15,18 @@ description: Create or update the Postflight GitHub App for production or stagin
 4. Sign in as an owner of `guardian-intelligence`. Open the existing GitHub
    App settings page or **Organization settings → Developer settings → GitHub
    Apps → New GitHub App** if the app doesn't exist.
-5. Enter the exact name and homepage from step 2. Leave callback and setup
-   URLs empty; disable user authorization during installation and device
-   flow.
-6. Enable webhooks, set the exact webhook URL, generate one unique webhook
-   secret, and subscribe only to **Workflow job**.
+5. Enter the exact name and homepage from step 2. Set exactly one callback URL
+   and the setup URL to `https://${HOST}/postflight`; delete every Verself
+   callback. Disable user authorization during installation, device flow, and
+   redirect on update. These URLs are landing-page UX only: Keycloak's GitHub
+   broker uses its separate OAuth App, user tokens are not persisted, and the
+   signed installation webhook is the authority for organization linkage.
+6. Enable webhooks, set the exact webhook URL, and subscribe only to
+   **Workflow job**. For a new App, generate one unique webhook secret. For an
+   existing production App, re-enter the non-empty `webhookSecret` from
+   OpenBao `kv/guardian/guardian-mgmt/postflight-runner/github-app` so the App
+   exactly matches the `GITHUB_WEBHOOK_SECRET` consumed by the controlplane.
+   Never print or persist the value while transferring it.
 7. Set repository permissions to **Actions: read**, **Metadata: read**, and
    **Pull requests: read and write**. Set organization permissions to
    **Self-hosted runners: read and write**. Set every other permission to
