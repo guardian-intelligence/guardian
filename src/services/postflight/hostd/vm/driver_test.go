@@ -1059,6 +1059,15 @@ func TestStatusQEMUIOErrorRequiresRecycle(t *testing.T) {
 	if status.FailureReason != "qemu entered io-error: postflight-workspace=nospace" {
 		t.Fatalf("failure reason %q", status.FailureReason)
 	}
+	foundTiming := false
+	for _, point := range status.Timing {
+		if point.Event == "qmp_io_error_observed" {
+			foundTiming = true
+		}
+	}
+	if !foundTiming {
+		t.Fatalf("QMP io-error timing missing from %+v", status.Timing)
+	}
 	if got := strings.Join(handler.log(), ","); !strings.Contains(got, "query-status,query-block") {
 		t.Fatalf("QMP evidence commands = %s", got)
 	}

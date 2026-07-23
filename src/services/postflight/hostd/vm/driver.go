@@ -864,6 +864,7 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 	}
 	hypervisor := q.hypervisorStatus(ctx, id)
 	if hypervisor.Status == "io-error" {
+		q.recordTimingOnce(id, "qmp_io_error_observed")
 		status.Phase = PhaseRecycleRequired
 		status.FailureReason = hypervisor.failureReason()
 		status.Timing = append(status.Timing, q.timingFor(id)...)
