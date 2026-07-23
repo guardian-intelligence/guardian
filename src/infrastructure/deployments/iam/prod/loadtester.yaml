@@ -43,12 +43,6 @@ spec:
             - -port=8080
             - -log-level=info
             - -timeout=1h
-          env:
-            - name: TOKEN_GATE_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-token-gate
-                  key: password
           livenessProbe:
             httpGet:
               path: /healthz
@@ -79,11 +73,24 @@ spec:
             - name: probe-scripts
               mountPath: /gate
               readOnly: true
+            # Volume mount, not env: Keycloak reads this client secret from
+            # its live file-vault mount, so the gate must read a live copy
+            # too — an env var freezes the value at pod start and 401s after
+            # the next secret rotation.
+            - name: token-gate-secret
+              mountPath: /gate-secrets
+              readOnly: true
       volumes:
         - name: probe-scripts
           configMap:
             name: keycloak-probe-scripts
             defaultMode: 0555
+        - name: token-gate-secret
+          secret:
+            secretName: keycloak-token-gate
+            items:
+              - key: password
+                path: token-gate-client-secret
 ---
 apiVersion: v1
 kind: Service
@@ -140,7 +147,7 @@ data:
       token="$(curl -fsS --max-time 10 \
         -d grant_type=client_credentials \
         -d client_id=token-gate \
-        --data-urlencode "client_secret=${TOKEN_GATE_CLIENT_SECRET}" \
+        --data-urlencode "client_secret=$(cat /gate-secrets/token-gate-client-secret)" \
         "$base/realms/$realm/protocol/openid-connect/token" \
         | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p' || true)"
       if test -n "$token"; then

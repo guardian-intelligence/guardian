@@ -1,7 +1,27 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
+import * as v from "valibot";
+import { emitSpan } from "~/lib/telemetry/browser";
 import "~/styles/postflight.css";
+
+const postflightSearchSchema = v.fallback(
+  v.object({
+    auth_error: v.optional(v.string()),
+  }),
+  {},
+);
+
+const AUTH_ERROR_COPY: Record<string, string> = {
+  interrupted:
+    "That sign-in didn't finish — it was likely started in a different browser window. If you're approving a CLI sign-in, open the link from your terminal here and approve again.",
+  access_denied: "GitHub sign-in was cancelled or denied. Nothing was connected.",
+};
+
+function authErrorMessage(code: string | undefined): string | undefined {
+  if (!code) return undefined;
+  return AUTH_ERROR_COPY[code] ?? "Sign-in didn't complete. Please try again.";
+}
 
 type Session = {
   readonly authenticated: boolean;
@@ -32,18 +52,26 @@ const postflightAvailability = createServerFn({ method: "GET" }).handler(() => (
 function LoginCard({
   session,
   authEnabled,
+  authError,
 }: {
   readonly session: Session | null;
   readonly authEnabled: boolean;
+  readonly authError: string | undefined;
 }) {
   const signedIn = session?.authenticated;
   const label = session?.user?.name || session?.user?.username;
+  const errorMessage = authErrorMessage(authError);
   return (
     <div className="postflight-login-card" data-postflight-login-card>
       <div className="postflight-card-logo">
         <PostflightMark small />
       </div>
       <h2>{signedIn ? `Welcome, ${label}` : "Sign in to Postflight"}</h2>
+      {errorMessage ? (
+        <p className="postflight-auth-error" data-auth-error={authError}>
+          {errorMessage}
+        </p>
+      ) : null}
       <p>
         {signedIn
           ? "Your Guardian account is connected."
@@ -77,7 +105,13 @@ function LoginCard({
 
 function PostflightPage() {
   const { authEnabled } = Route.useLoaderData();
+  const search = Route.useSearch();
   const [session, setSession] = useState<Session | null>(null);
+  useEffect(() => {
+    if (search.auth_error) {
+      emitSpan("postflight.auth_error", { "auth.error": search.auth_error.slice(0, 64) });
+    }
+  }, [search.auth_error]);
   useEffect(() => {
     if (!authEnabled) return;
     let active = true;
@@ -123,7 +157,7 @@ function PostflightPage() {
           <p className="postflight-deck">
             Warm, isolated GitHub runners that turn CI from a queue into feedback.
           </p>
-          <LoginCard session={session} authEnabled={authEnabled} />
+          <LoginCard session={session} authEnabled={authEnabled} authError={search.auth_error} />
           <div className="postflight-orbit" aria-hidden="true">
             <span />
             <span />
@@ -193,6 +227,7 @@ function PostflightPage() {
 }
 
 export const Route = createFileRoute("/postflight")({
+  validateSearch: (search) => v.parse(postflightSearchSchema, search),
   component: PostflightPage,
   loader: async () => {
     const availability = await postflightAvailability();

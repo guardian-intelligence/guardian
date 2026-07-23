@@ -38,7 +38,7 @@ spec:
         # sha256 of bounce-theme.yaml's data block: Keycloak caches compiled
         # templates, so theme edits must roll the pods. Recompute with:
         # awk '/^data:/{f=1;next} f' bounce-theme.yaml | sha256sum
-        guardian.dev/bounce-theme-checksum: 324177d63fa4b48353424bf91739cff8ff696b3a64962cd4653fff7745135989
+        guardian.dev/bounce-theme-checksum: 8dec7b447e6ce060af24d25beeb6111dd2f91fc2d3ee53fbcd78bae181b1a97a
       labels:
         app.kubernetes.io/name: keycloak
         app.kubernetes.io/part-of: guardian
