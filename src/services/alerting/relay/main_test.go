@@ -173,31 +173,31 @@ func TestParseAlertaSummary(t *testing.T) {
 		{
 			name: "full summary with dashboard link",
 			text: "*[Open] PRODUCTION Guardian Critical* - _KubePodCrashLooping on tenant-root/openbao-0_ <http://alerta.tenant-root.svc/#/alert/9d4c8a1e-5b2f-4f4e-9c9f-1c2c3d4e5f6a|9d4c8a1e>",
-			want: alertaSummary{status: "Open", environment: "PRODUCTION", service: "Guardian", severity: "Critical", event: "KubePodCrashLooping", resource: "tenant-root/openbao-0"},
+			want: alertaSummary{status: "Open", environment: "PRODUCTION", service: "Guardian", severity: "Critical", event: "KubePodCrashLooping", resource: "tenant-root/openbao-0", dashboardLink: "http://alerta.tenant-root.svc/#/alert/9d4c8a1e-5b2f-4f4e-9c9f-1c2c3d4e5f6a"},
 			ok:   true,
 		},
 		{
 			name: "empty DASHBOARD_URL still emits the link wrapper",
 			text: "*[Ack] BETA Keycloak Major* - _HighErrorRate on guardian-iam-beta/keycloak-0_ </#/alert/9d4c8a1e-5b2f-4f4e-9c9f-1c2c3d4e5f6a|9d4c8a1e>",
-			want: alertaSummary{status: "Ack", environment: "BETA", service: "Keycloak", severity: "Major", event: "HighErrorRate", resource: "guardian-iam-beta/keycloak-0"},
+			want: alertaSummary{status: "Ack", environment: "BETA", service: "Keycloak", severity: "Major", event: "HighErrorRate", resource: "guardian-iam-beta/keycloak-0", dashboardLink: "/#/alert/9d4c8a1e-5b2f-4f4e-9c9f-1c2c3d4e5f6a"},
 			ok:   true,
 		},
 		{
 			name: "comma-joined service list with a space in a service name",
 			text: "*[Open] BETA Keycloak,Guardian Web Major* - _HighErrorRate on guardian-iam-beta/keycloak-0_ <http://a/#/alert/x|x>",
-			want: alertaSummary{status: "Open", environment: "BETA", service: "Keycloak,Guardian Web", severity: "Major", event: "HighErrorRate", resource: "guardian-iam-beta/keycloak-0"},
+			want: alertaSummary{status: "Open", environment: "BETA", service: "Keycloak,Guardian Web", severity: "Major", event: "HighErrorRate", resource: "guardian-iam-beta/keycloak-0", dashboardLink: "http://a/#/alert/x"},
 			ok:   true,
 		},
 		{
 			name: "empty service list renders adjacent spaces",
 			text: "*[Open] PRODUCTION  Critical* - _KubePodCrashLooping on tenant-root/openbao-0_ <http://a/#/alert/x|x>",
-			want: alertaSummary{status: "Open", environment: "PRODUCTION", service: "", severity: "Critical", event: "KubePodCrashLooping", resource: "tenant-root/openbao-0"},
+			want: alertaSummary{status: "Open", environment: "PRODUCTION", service: "", severity: "Critical", event: "KubePodCrashLooping", resource: "tenant-root/openbao-0", dashboardLink: "http://a/#/alert/x"},
 			ok:   true,
 		},
 		{
 			name: "event containing ' on ' splits at the last occurrence",
 			text: "*[Open] PRODUCTION Guardian Warning* - _FailedMount on startup on tenant-root/openbao-0_ <http://a/#/alert/x|x>",
-			want: alertaSummary{status: "Open", environment: "PRODUCTION", service: "Guardian", severity: "Warning", event: "FailedMount on startup", resource: "tenant-root/openbao-0"},
+			want: alertaSummary{status: "Open", environment: "PRODUCTION", service: "Guardian", severity: "Warning", event: "FailedMount on startup", resource: "tenant-root/openbao-0", dashboardLink: "http://a/#/alert/x"},
 			ok:   true,
 		},
 		{name: "free-form text does not match", text: "Canary analysis failed, rolling back."},
@@ -920,5 +920,149 @@ func TestParseRetryAfterClamps(t *testing.T) {
 		if got := parseRetryAfter(in); got != want {
 			t.Errorf("parseRetryAfter(%q) = %v, want %v", in, got, want)
 		}
+	}
+}
+
+func TestRenderTimeTokens(t *testing.T) {
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatalf("tzdata not embedded: %v", err)
+	}
+	cases := []struct {
+		name string
+		in   string
+		loc  *time.Location
+		want string
+	}{
+		{"summer renders PDT", "elevated since @pt:1784772381@", la, "elevated since 7:06:21 PM PDT"},
+		{"winter renders PST", "@pt:1768492800@", la, "8:00:00 AM PST"},
+		{"multiple tokens", "@pt:1768492800@ and @pt:1768492800@", la, "8:00:00 AM PST and 8:00:00 AM PST"},
+		{"malformed token passes through", "since @pt:notanumber@", la, "since @pt:notanumber@"},
+		{"nil location degrades to UTC", "@pt:1768492800@", nil, "4:00:00 PM UTC"},
+		{"no tokens untouched", "plain text", la, "plain text"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := renderTimeTokens(tc.in, tc.loc); got != tc.want {
+				t.Errorf("renderTimeTokens(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAlertaSummaryAlertID(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want string
+	}{
+		{"uuid from dashboard link",
+			alertaText("Open", "PRODUCTION", "Guardian", "Critical", "Thing", "ns/pod"),
+			"9d4c8a1e-5b2f-4f4e-9c9f-1c2c3d4e5f6a"},
+		{"no link", "*[Open] PRODUCTION Guardian Critical* - _Thing on ns/pod_", ""},
+		{"non-uuid path rejected",
+			`*[Open] PRODUCTION Guardian Critical* - _Thing on ns/pod_ <http://alerta/#/alert/../admin|x>`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sum, ok := parseAlertaSummary(tc.text)
+			if !ok {
+				t.Fatalf("summary did not parse: %q", tc.text)
+			}
+			if got := sum.alertID(); got != tc.want {
+				t.Errorf("alertID() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEnrichFromAlerta(t *testing.T) {
+	const alertText = "Elevated X-link resolve failures since @pt:1784772381@ (3 in 15m)."
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/api/alert/9d4c8a1e-5b2f-4f4e-9c9f-1c2c3d4e5f6a" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"alert":{"text":"` + alertText + `"},"status":"ok"}`))
+	}))
+	defer upstream.Close()
+
+	s := newTestServer(&fakeSink{})
+	s.cfg.alertaURL = upstream.URL
+	s.cfg.alertaAPIKey = "k3y"
+	s.client = upstream.Client()
+
+	base := notification{Title: "t", Body: alertaPayloadText(t)}
+	got := s.enrichFromAlerta(context.Background(), alertaPayloadText(t), base)
+	if !strings.HasPrefix(got.Body, alertText+"\n") {
+		t.Errorf("body not led by alert text: %q", got.Body)
+	}
+	if gotAuth != "Key k3y" {
+		t.Errorf("Authorization = %q, want %q", gotAuth, "Key k3y")
+	}
+	// Enriching again must not stack a duplicate line.
+	again := s.enrichFromAlerta(context.Background(), alertaPayloadText(t), got)
+	if strings.Count(again.Body, alertText) != 1 {
+		t.Errorf("alert text duplicated: %q", again.Body)
+	}
+}
+
+// alertaPayloadText extracts the text field of the canonical alertaPayload
+// fixture so enrichment tests parse exactly what production would.
+func alertaPayloadText(t *testing.T) string {
+	t.Helper()
+	var p slackPayload
+	if err := json.Unmarshal([]byte(alertaPayload), &p); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	return p.Text
+}
+
+func TestEnrichFromAlertaFailureLeavesPageIntact(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+
+	s := newTestServer(&fakeSink{})
+	s.cfg.alertaURL = upstream.URL
+	s.client = upstream.Client()
+
+	base := notification{Title: "t", Body: alertaPayloadText(t)}
+	got := s.enrichFromAlerta(context.Background(), alertaPayloadText(t), base)
+	if got.Body != base.Body || got.Title != base.Title {
+		t.Errorf("failed enrichment mutated the page: %+v", got)
+	}
+	if n := s.m.enrichFailures.Load(); n != 1 {
+		t.Errorf("enrichFailures = %d, want 1", n)
+	}
+}
+
+func TestHandleSlackEnrichesAndRendersTokens(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"alert":{"text":"Elevated X-link failures since @pt:1784772381@."}}`))
+	}))
+	defer upstream.Close()
+
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatalf("tzdata not embedded: %v", err)
+	}
+	out := &fakeSink{}
+	s := newTestServer(out)
+	s.cfg.alertaURL = upstream.URL
+	s.client = upstream.Client()
+	s.loc = la
+
+	w := httptest.NewRecorder()
+	s.handleSlack(w, httptest.NewRequest("POST", "/slack", strings.NewReader(alertaPayload)))
+	s.inflight.Wait()
+	if len(out.sent) != 1 {
+		t.Fatalf("forwarded %d notifications, want 1", len(out.sent))
+	}
+	if want := "Elevated X-link failures since 7:06:21 PM PDT."; !strings.HasPrefix(out.sent[0].Body, want+"\n") {
+		t.Errorf("body = %q, want prefix %q", out.sent[0].Body, want)
 	}
 }

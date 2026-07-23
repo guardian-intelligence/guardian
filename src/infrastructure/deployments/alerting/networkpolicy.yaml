@@ -51,6 +51,15 @@ spec:
         - ports:
             - port: "9093"
               protocol: TCP
+    # Same-namespace Alerta: the page-text enrichment fetch. Same label
+    # caveat as the ingress rule above — live pods carry app: alerta.
+    - toEndpoints:
+        - matchLabels:
+            app: alerta
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
     # The pager sink (ntfy.sh today). The sink URL is config (an OpenBao
     # secret), so world:443 is the honest scope — pinning a hostname here
     # would just be a second, staler copy of that config.

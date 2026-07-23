@@ -85,6 +85,18 @@ spec:
             # Alertmanager coordinate is declared here, not buried in code.
             - name: ALERTMANAGER_URL
               value: http://vmalertmanager-alertmanager.tenant-root.svc:9093
+            # Page-text enrichment: the slack plugin's summary line drops the
+            # alert's text attribute (the rule's description annotation), so
+            # the relay fetches it back from Alerta before delivering. The
+            # key is the same Secret the Alertmanager webhook authenticates
+            # with (mounted into VMAlertmanager via spec.secrets).
+            - name: ALERTA_URL
+              value: http://alerta.tenant-root.svc
+            - name: ALERTA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: alerta
+                  key: alerta-api-key
           ports:
             - name: http
               containerPort: 8080

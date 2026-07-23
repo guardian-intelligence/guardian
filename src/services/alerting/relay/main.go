@@ -41,6 +41,12 @@ import (
 	// bundle, used only when the system pool is empty — the bundle versions
 	// via go.mod like any other dependency.
 	_ "golang.org/x/crypto/x509roots/fallback"
+
+	// The image also ships no tzdata, and the pager renders wall-clock
+	// times in the on-call's zone (renderTimeTokens): without the embedded
+	// zone database LoadLocation fails and every page silently degrades to
+	// UTC.
+	_ "time/tzdata"
 )
 
 // slackPayload is the subset of the Slack incoming-webhook format the relay
@@ -139,6 +145,9 @@ type alertaSummary struct {
 	severity    string
 	event       string
 	resource    string
+	// dashboardLink is the raw URL from the trailing <url|short_id> segment;
+	// empty when the summary carried no link.
+	dashboardLink string
 }
 
 // The primary producer — Alerta's slack plugin (alerta-contrib
@@ -162,7 +171,7 @@ type alertaSummary struct {
 // encodes that choice — because the event itself can contain " on " (e.g.
 // "FailedMount on startup") while resources here are namespace/pod-style
 // paths that never do.
-var alertaSummaryRe = regexp.MustCompile(`^\*\[(?P<status>[^\]]+)\] +(?P<environment>\S+) +(?P<service>.*?) +(?P<severity>\S+)\* - _(?P<event>.+) on (?P<resource>.+?)_(?: <[^>]*>)?$`)
+var alertaSummaryRe = regexp.MustCompile(`^\*\[(?P<status>[^\]]+)\] +(?P<environment>\S+) +(?P<service>.*?) +(?P<severity>\S+)\* - _(?P<event>.+) on (?P<resource>.+?)_(?: <(?P<link>[^>|]*)(?:\|[^>]*)?>)?$`)
 
 // parseAlertaSummary attempts to recover the Alerta alert fields from the
 // first line of a text-only payload. A non-match reports ok=false and the
@@ -177,13 +186,28 @@ func parseAlertaSummary(text string) (alertaSummary, bool) {
 		return strings.TrimSpace(m[alertaSummaryRe.SubexpIndex(name)])
 	}
 	return alertaSummary{
-		status:      group("status"),
-		environment: group("environment"),
-		service:     group("service"),
-		severity:    group("severity"),
-		event:       group("event"),
-		resource:    group("resource"),
+		status:        group("status"),
+		environment:   group("environment"),
+		service:       group("service"),
+		severity:      group("severity"),
+		event:         group("event"),
+		resource:      group("resource"),
+		dashboardLink: group("link"),
 	}, true
+}
+
+// alertID extracts the Alerta alert id from the dashboard link's /#/alert/<id>
+// fragment. The id is only accepted in UUID shape: it is interpolated into a
+// request path against the Alerta API, and anything else in that position is
+// a payload playing games, not an alert.
+var alertaIDRe = regexp.MustCompile(`/#/alert/([0-9a-fA-F-]{8,64})$`)
+
+func (s alertaSummary) alertID() string {
+	m := alertaIDRe.FindStringSubmatch(s.dashboardLink)
+	if m == nil {
+		return ""
+	}
+	return m[1]
 }
 
 // notification maps a parsed summary onto the sink model through the same
@@ -321,12 +345,99 @@ func truncate(s string, n int) string {
 	return s[:n]
 }
 
+// ptTokenRe matches the @pt:<unix-seconds>@ tokens that rule annotations
+// embed via {{ $activeAt.Unix }}. vmalert's Go templates cannot construct a
+// *time.Location, so rules ship machine time and the relay — the one hop
+// with a zone database — owns turning it into the on-call's wall clock.
+var ptTokenRe = regexp.MustCompile(`@pt:(\d{1,19})@`)
+
+// renderTimeTokens replaces every @pt:<unix>@ token with the moment
+// formatted in loc (e.g. "7:06:21 PM PDT"). Unparseable tokens pass through
+// verbatim — a mangled annotation must never cost the page its text.
+func renderTimeTokens(s string, loc *time.Location) string {
+	if loc == nil {
+		loc = time.UTC
+	}
+	return ptTokenRe.ReplaceAllStringFunc(s, func(m string) string {
+		secs, err := strconv.ParseInt(m[len("@pt:"):len(m)-1], 10, 64)
+		if err != nil {
+			return m
+		}
+		return time.Unix(secs, 0).In(loc).Format("3:04:05 PM MST")
+	})
+}
+
+// pagerLocation resolves the on-call's zone once at startup; a failed load
+// degrades every timestamp to UTC rather than degrading delivery.
+func pagerLocation() *time.Location {
+	loc, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		slog.Error("pager timezone unavailable, timestamps render UTC", "err", err)
+		return time.UTC
+	}
+	return loc
+}
+
+// enrichFromAlerta fetches the alert's text attribute — where Alerta stores
+// the rule's description/summary annotation, which the slack plugin's
+// summary line drops — and leads the page body with it, so the page reads
+// as a sentence instead of an alertname. Strictly best-effort: any failure
+// is counted, logged, and the page goes out exactly as it would have.
+func (s *server) enrichFromAlerta(ctx context.Context, text string, n notification) notification {
+	sum, ok := parseAlertaSummary(text)
+	if !ok {
+		return n
+	}
+	id := sum.alertID()
+	if id == "" {
+		return n
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.cfg.alertaURL+"/api/alert/"+id, nil)
+	if err != nil {
+		return n
+	}
+	if s.cfg.alertaAPIKey != "" {
+		req.Header.Set("Authorization", "Key "+s.cfg.alertaAPIKey)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		s.m.enrichFailures.Add(1)
+		slog.Warn("alerta enrichment fetch failed", "err", err)
+		return n
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		s.m.enrichFailures.Add(1)
+		slog.Warn("alerta enrichment fetch failed", "status", resp.StatusCode)
+		return n
+	}
+	var payload struct {
+		Alert struct {
+			Text string `json:"text"`
+		} `json:"alert"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
+		s.m.enrichFailures.Add(1)
+		slog.Warn("alerta enrichment decode failed", "err", err)
+		return n
+	}
+	alertText := strings.TrimSpace(payload.Alert.Text)
+	if alertText == "" || strings.Contains(n.Body, alertText) {
+		return n
+	}
+	n.Body = truncate(alertText, 2048) + "\n" + n.Body
+	return n
+}
+
 type metrics struct {
 	forwarded         atomic.Uint64
 	forwardFailures   atomic.Uint64
 	selfAlertFailures atomic.Uint64
 	suppressed        atomic.Uint64
 	coalesced         atomic.Uint64
+	enrichFailures    atomic.Uint64
 	watchdogLastSeen  atomic.Int64
 	pipelineSilent    atomic.Int64
 }
@@ -347,6 +458,9 @@ func (m *metrics) render(w io.Writer) {
 	fmt.Fprintf(w, "# HELP relay_notifications_coalesced_total Notifications merged into a digest instead of sent individually.\n")
 	fmt.Fprintf(w, "# TYPE relay_notifications_coalesced_total counter\n")
 	fmt.Fprintf(w, "relay_notifications_coalesced_total %d\n", m.coalesced.Load())
+	fmt.Fprintf(w, "# HELP relay_alerta_enrichment_failures_total Pages delivered without Alerta text because the enrichment fetch failed.\n")
+	fmt.Fprintf(w, "# TYPE relay_alerta_enrichment_failures_total counter\n")
+	fmt.Fprintf(w, "relay_alerta_enrichment_failures_total %d\n", m.enrichFailures.Load())
 	fmt.Fprintf(w, "# HELP relay_watchdog_last_seen_timestamp_seconds Unix time an active Watchdog was last observed in Alertmanager.\n")
 	fmt.Fprintf(w, "# TYPE relay_watchdog_last_seen_timestamp_seconds gauge\n")
 	fmt.Fprintf(w, "relay_watchdog_last_seen_timestamp_seconds %d\n", m.watchdogLastSeen.Load())
@@ -651,6 +765,10 @@ type config struct {
 	ntfyURL         string
 	ntfyToken       string
 	alertmanagerURL string
+	// alertaURL enables page-text enrichment (enrichFromAlerta) when set;
+	// empty leaves pages exactly as the slack plugin rendered them.
+	alertaURL       string
+	alertaAPIKey    string
 	watchdogTimeout time.Duration
 	listenAddr      string
 }
@@ -667,6 +785,8 @@ func loadConfig() (config, error) {
 		ntfyURL:         os.Getenv("NTFY_URL"),
 		ntfyToken:       os.Getenv("NTFY_TOKEN"),
 		alertmanagerURL: envOr("ALERTMANAGER_URL", "http://vmalertmanager-alertmanager.tenant-root.svc:9093"),
+		alertaURL:       strings.TrimSuffix(os.Getenv("ALERTA_URL"), "/"),
+		alertaAPIKey:    os.Getenv("ALERTA_API_KEY"),
 		listenAddr:      envOr("LISTEN_ADDR", ":8080"),
 	}
 	if cfg.ntfyURL == "" {
@@ -688,6 +808,7 @@ type server struct {
 	cfg    config
 	m      *metrics
 	out    sink
+	loc    *time.Location
 	client *http.Client
 	// lookupHost resolves the Alertmanager hostname to per-replica
 	// addresses for the dead-man poll; injectable for tests.
@@ -736,6 +857,11 @@ func (s *server) handleSlack(w http.ResponseWriter, r *http.Request) {
 		defer s.inflight.Done()
 		dctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), deliveryBudget)
 		defer cancel()
+		if s.cfg.alertaURL != "" && parsed {
+			n = s.enrichFromAlerta(dctx, p.Text, n)
+		}
+		n.Title = renderTimeTokens(n.Title, s.loc)
+		n.Body = renderTimeTokens(n.Body, s.loc)
 		if err := s.out.deliver(dctx, n); err != nil {
 			// Counting failure to deliver this counter's own alert would keep
 			// the alert firing forever whenever the sink is rate-limited.
@@ -960,6 +1086,7 @@ func main() {
 			5*time.Second,
 			&m.coalesced,
 		),
+		loc:        pagerLocation(),
 		client:     &http.Client{Timeout: 10 * time.Second},
 		lookupHost: net.DefaultResolver.LookupHost,
 	}
