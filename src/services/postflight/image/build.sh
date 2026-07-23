@@ -396,14 +396,13 @@ rm -f "${mnt}"/etc/ssh/ssh_host_* "${mnt}/etc/ssh/sshd_config"
 rm -rf "${mnt}/etc/ssh/sshd_config.d"
 
 # Configuration never arrives over network or metadata, but the runner still
-# needs egress to GitHub, so any NIC the host attaches just DHCPs. Remove the
-# build VM's cloud-init netplan and configure networkd natively; matching by
-# link type catches the NIC whatever the host names it.
+# needs egress to GitHub, so the QEMU virtio NIC uses DHCP. Match its driver
+# instead of the device name without claiming workload-created veth devices.
 rm -f "${mnt}/etc/netplan/50-cloud-init.yaml"
 install -d -m 0755 "${mnt}/etc/systemd/network"
 cat >"${mnt}/etc/systemd/network/10-postflight.network" <<'EOF'
 [Match]
-Type=ether
+Driver=virtio_net
 
 [Network]
 DHCP=yes
