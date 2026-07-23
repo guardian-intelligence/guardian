@@ -5,7 +5,7 @@ import { Editor } from "~/components/editor";
 import { Header } from "~/components/header";
 import { LinkInput } from "~/components/link-input";
 import type { ShorttyEngine } from "~/engine/client";
-import type { ProbeSummary } from "~/engine/types";
+import type { MediaSource, ProbeSummary } from "~/engine/types";
 import { emitSpan } from "~/lib/telemetry/browser";
 
 export const Route = createFileRoute("/")({
@@ -15,7 +15,7 @@ export const Route = createFileRoute("/")({
 type Session =
   | { kind: "idle" }
   | { kind: "probing"; name: string }
-  | { kind: "ready"; file: File; summary: ProbeSummary }
+  | { kind: "ready"; source: MediaSource; summary: ProbeSummary }
   | { kind: "rejected"; message: string };
 
 function Home() {
@@ -31,20 +31,22 @@ function Home() {
 
   useEffect(() => () => engineRef.current?.dispose(), []);
 
-  const onFile = useCallback(
-    (file: File) => {
-      setSession({ kind: "probing", name: file.name });
-      emitSpan("shortty.file_dropped", {
-        bytes: String(file.size),
-        type: file.type,
-      });
+  const onSource = useCallback(
+    (source: MediaSource) => {
+      setSession({ kind: "probing", name: source.name });
+      if (source instanceof File) {
+        emitSpan("shortty.file_dropped", {
+          bytes: String(source.size),
+          type: source.type,
+        });
+      }
       warm();
       void (warmRef.current as Promise<typeof import("~/engine/client")>)
         .then(async (m) => {
           engineRef.current?.dispose();
           const engine = new m.ShorttyEngine();
           engineRef.current = engine;
-          const summary = await engine.probe(file);
+          const summary = await engine.probe(source);
           emitSpan("shortty.probed", {
             duration_s: summary.durationS.toFixed(2),
             width: String(summary.video.width),
@@ -52,7 +54,7 @@ function Home() {
             source_codec: summary.video.codec,
             keyframes: String(summary.keyframesS.length),
           });
-          setSession({ kind: "ready", file, summary });
+          setSession({ kind: "ready", source, summary });
         })
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : "Could not read this file.";
@@ -76,7 +78,7 @@ function Home() {
         {session.kind === "ready" && engineRef.current ? (
           <Editor
             engine={engineRef.current}
-            file={session.file}
+            source={session.source}
             summary={session.summary}
             onReset={reset}
           />
@@ -90,8 +92,8 @@ function Home() {
               byte over.
             </p>
             <div className="mt-10">
-              <Dropzone onFile={onFile} onWarm={warm} disabled={session.kind === "probing"} />
-              <LinkInput onFile={onFile} onWarm={warm} disabled={session.kind === "probing"} />
+              <Dropzone onFile={onSource} onWarm={warm} disabled={session.kind === "probing"} />
+              <LinkInput onSource={onSource} onWarm={warm} disabled={session.kind === "probing"} />
             </div>
             {session.kind === "probing" && (
               <p className="mt-4 text-center font-mono text-sm text-mist-faint">

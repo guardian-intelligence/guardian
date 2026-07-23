@@ -3,6 +3,7 @@
 
 import type {
   EncodeOutcome,
+  MediaSource,
   ProbeSummary,
   SelectionRange,
   WorkerRequest,
@@ -47,8 +48,8 @@ export class ShorttyEngine {
     this.pending.clear();
   }
 
-  probe(file: File): Promise<ProbeSummary> {
-    return this.call({ kind: "probe", file });
+  probe(source: MediaSource): Promise<ProbeSummary> {
+    return this.call({ kind: "probe", source });
   }
 
   thumbnails(

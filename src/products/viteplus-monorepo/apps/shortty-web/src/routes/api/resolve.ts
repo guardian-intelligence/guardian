@@ -27,7 +27,6 @@ function fail(code: ErrorCode, message: string, status: number): Response {
 interface SyndicationMedia {
   readonly type?: string;
   readonly video_info?: {
-    readonly duration_millis?: number;
     readonly variants?: readonly { content_type?: string; url?: string; bitrate?: number }[];
   };
 }
@@ -79,7 +78,6 @@ export const Route = createFileRoute("/api/resolve")({
           );
         }
 
-        let durationS: number | null = null;
         const variants: XVideoVariant[] = [];
         for (const media of tweet.mediaDetails ?? []) {
           if (media.type !== "video" && media.type !== "animated_gif") continue;
@@ -87,8 +85,6 @@ export const Route = createFileRoute("/api/resolve")({
             const variant = toVariant(v);
             if (variant) variants.push(variant);
           }
-          const ms = media.video_info?.duration_millis;
-          if (durationS === null && typeof ms === "number") durationS = ms / 1000;
           if (variants.length > 0) break;
         }
 
@@ -103,7 +99,7 @@ export const Route = createFileRoute("/api/resolve")({
           return fail("no_video", "That post doesn't have a video.", 422);
         }
 
-        return json({ kind: "ok", id, text: tweet.text ?? "", durationS, variants }, 200);
+        return json({ kind: "ok", id, text: tweet.text ?? "", variants }, 200);
       },
     },
   },

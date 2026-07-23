@@ -80,24 +80,11 @@ describe("pickVariant", () => {
     { url: "c", bitrate: 2_176_000, width: 1280, height: 720 },
   ];
 
-  it("takes the highest bitrate for a short video", () => {
-    expect(pickVariant(ladder, 60)?.url).toBe("b");
-  });
-
-  it("takes the highest bitrate when duration is unknown", () => {
-    expect(pickVariant(ladder, null)?.url).toBe("b");
-  });
-
-  it("steps down when the estimated download is unreasonable", () => {
-    // 10.4 Mbps over 30 minutes is ~2.3 GB; 2.2 Mbps lands just under the cap.
-    expect(pickVariant(ladder, 1800)?.url).toBe("c");
-  });
-
-  it("falls back to the smallest when everything is over the cap", () => {
-    expect(pickVariant(ladder, 100_000)?.url).toBe("a");
+  it("takes the highest bitrate", () => {
+    expect(pickVariant(ladder)?.url).toBe("b");
   });
 
   it("returns null for an empty ladder", () => {
-    expect(pickVariant([], 10)).toBeNull();
+    expect(pickVariant([])).toBeNull();
   });
 });

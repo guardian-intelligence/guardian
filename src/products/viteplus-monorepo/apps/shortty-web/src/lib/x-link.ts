@@ -17,7 +17,6 @@ export type ResolveResponse =
       readonly kind: "ok";
       readonly id: string;
       readonly text: string;
-      readonly durationS: number | null;
       readonly variants: readonly XVideoVariant[];
     }
   | {
@@ -82,20 +81,8 @@ export function toVariant(raw: {
   };
 }
 
-// Highest bitrate wins, except when the whole-file download it implies is
-// unreasonable for an in-browser session; then step down the ladder.
-const MAX_DOWNLOAD_BYTES = 500_000_000;
-
-export function pickVariant(
-  variants: readonly XVideoVariant[],
-  durationS: number | null,
-): XVideoVariant | null {
-  const sorted = [...variants].sort((a, b) => b.bitrate - a.bitrate);
-  const smallest = sorted[sorted.length - 1];
-  if (!smallest) return null;
-  if (durationS === null) return sorted[0] ?? null;
-  for (const v of sorted) {
-    if ((v.bitrate / 8) * durationS <= MAX_DOWNLOAD_BYTES) return v;
-  }
-  return smallest;
+// Highest bitrate wins: the engine streams only the ranges the clip needs,
+// so source size never argues against quality.
+export function pickVariant(variants: readonly XVideoVariant[]): XVideoVariant | null {
+  return [...variants].sort((a, b) => b.bitrate - a.bitrate)[0] ?? null;
 }

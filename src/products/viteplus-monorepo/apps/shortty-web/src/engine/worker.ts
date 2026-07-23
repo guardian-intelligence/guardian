@@ -30,7 +30,7 @@ async function dispatch(request: WorkerRequest): Promise<void> {
   try {
     switch (request.kind) {
       case "probe": {
-        opened = await openInput(request.file);
+        opened = await openInput(request.source);
         post({ kind: "probed", id: request.id, summary: opened.summary });
         break;
       }

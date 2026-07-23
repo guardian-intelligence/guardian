@@ -1,49 +1,38 @@
 import { useCallback, useState } from "react";
-import { importFromXLink, ResolveError } from "~/lib/x-download";
+import type { MediaSource } from "~/engine/types";
+import { resolveXVideo, ResolveError } from "~/lib/x-resolve";
 import { emitSpan } from "~/lib/telemetry/browser";
 
 export interface LinkInputProps {
-  readonly onFile: (file: File) => void;
+  readonly onSource: (source: MediaSource) => void;
   readonly onWarm: () => void;
   readonly disabled: boolean;
 }
 
-type Phase =
-  | { kind: "idle" }
-  | { kind: "working"; label: string }
-  | { kind: "failed"; message: string };
+type Phase = { kind: "idle" } | { kind: "resolving" } | { kind: "failed"; message: string };
 
 // Paste-a-link alternative to the dropzone: an X post URL resolves to its mp4
 // and drops into the same session path as a local file.
-export function LinkInput({ onFile, onWarm, disabled }: LinkInputProps) {
+export function LinkInput({ onSource, onWarm, disabled }: LinkInputProps) {
   const [link, setLink] = useState("");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
-  const busy = phase.kind === "working";
+  const busy = phase.kind === "resolving";
 
   const submit = useCallback(() => {
     const value = link.trim();
     if (value === "" || busy) return;
     onWarm();
-    setPhase({ kind: "working", label: "Looking up the post…" });
+    setPhase({ kind: "resolving" });
     emitSpan("shortty.link_submitted", {});
     const startedAt = performance.now();
-    importFromXLink(value, (fraction) => {
-      setPhase({
-        kind: "working",
-        label:
-          fraction === null
-            ? "Downloading the video…"
-            : `Downloading the video… ${Math.round(fraction * 100)}%`,
-      });
-    })
-      .then((file) => {
-        emitSpan("shortty.link_imported", {
-          bytes: String(file.size),
+    resolveXVideo(value)
+      .then((source) => {
+        emitSpan("shortty.link_resolved", {
           wall_ms: String(Math.round(performance.now() - startedAt)),
         });
         setPhase({ kind: "idle" });
         setLink("");
-        onFile(file);
+        onSource(source);
       })
       .catch((error: unknown) => {
         const code = error instanceof ResolveError ? error.code : "unknown";
@@ -51,7 +40,7 @@ export function LinkInput({ onFile, onWarm, disabled }: LinkInputProps) {
         emitSpan("shortty.link_failed", { code });
         setPhase({ kind: "failed", message });
       });
-  }, [link, busy, onFile, onWarm]);
+  }, [link, busy, onSource, onWarm]);
 
   return (
     <div>
@@ -85,8 +74,8 @@ export function LinkInput({ onFile, onWarm, disabled }: LinkInputProps) {
           Fetch
         </button>
       </form>
-      {phase.kind === "working" && (
-        <p className="mt-3 text-center font-mono text-sm text-mist-faint">{phase.label}</p>
+      {phase.kind === "resolving" && (
+        <p className="mt-3 text-center font-mono text-sm text-mist-faint">Looking up the post…</p>
       )}
       {phase.kind === "failed" && (
         <p className="mx-auto mt-3 max-w-md rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-center text-sm text-red-200">
