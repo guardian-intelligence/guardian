@@ -102,6 +102,9 @@ func (s *eventService) Publish(
 		}
 		copy(row.TraceID[:], e.GetTraceId())
 		rows = append(rows, row)
+		if _, ok := meteredEventNames[e.GetName()]; ok {
+			eventsByName.WithLabelValues(meta.ctx.Site, e.GetName()).Inc()
+		}
 	}
 	if len(rows) > 0 {
 		s.batch.Add(rows)
