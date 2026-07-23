@@ -28,6 +28,7 @@ go_test(
         "platform_agent_secrets_writer_invariants_test.go",
         "payments_conformance_test.go",
         "release_manifest_test.go",
+        "secret_consumer_conformance_test.go",
         "spicedb_conformance_test.go",
         "storage_encryption_foundation_test.go",
         "tigerbeetle_conformance_test.go",
