@@ -43,6 +43,10 @@ type System interface {
 	IsMounted(mountpoint string) (bool, error)
 	// Mount mounts the device.
 	Mount(ctx context.Context, device, mountpoint, filesystem string, options []string) error
+	// MountOverlay mounts a durable upper directory over an immutable lower
+	// directory. The lower bind keeps the image-provided files visible after
+	// target is covered by the merged mount.
+	MountOverlay(ctx context.Context, lower, lowerBind, upper, work, target string, options []string) error
 	// Unmount unmounts the mountpoint.
 	Unmount(mountpoint string) error
 	// Sync flushes dirty pages ahead of an unmount.
@@ -224,6 +228,67 @@ func (r RealSystem) Mount(_ context.Context, device, mountpoint, filesystem stri
 		return fmt.Errorf("guestd: mounting %s at %s: %w", device, mountpoint, err)
 	}
 	return nil
+}
+
+// MountOverlay implements System with a read-only bind of the image layer
+// and an OverlayFS merge whose writable directories live on the encrypted
+// tool volume. Every path is fixed by guestd rather than assignment input.
+func (r RealSystem) MountOverlay(_ context.Context, lower, lowerBind, upper, work, target string, options []string) error {
+	fstype, mounted, err := mountedFilesystem(target)
+	if err != nil {
+		return err
+	}
+	if mounted && fstype == "overlay" {
+		return nil
+	}
+	if err := os.MkdirAll(lowerBind, 0o755); err != nil {
+		return fmt.Errorf("guestd: creating overlay lower bind %s: %w", lowerBind, err)
+	}
+	if lowerMounted, err := r.IsMounted(lowerBind); err != nil {
+		return err
+	} else if !lowerMounted {
+		if err := unix.Mount(lower, lowerBind, "", unix.MS_BIND|unix.MS_REC, ""); err != nil {
+			return fmt.Errorf("guestd: binding overlay lower %s at %s: %w", lower, lowerBind, err)
+		}
+		if err := unix.Mount("", lowerBind, "", unix.MS_BIND|unix.MS_REMOUNT|unix.MS_RDONLY|unix.MS_NODEV|unix.MS_NOSUID, ""); err != nil {
+			return fmt.Errorf("guestd: making overlay lower read-only at %s: %w", lowerBind, err)
+		}
+	}
+	for _, directory := range []string{upper, work} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			return fmt.Errorf("guestd: creating overlay directory %s: %w", directory, err)
+		}
+	}
+	if err := r.makeMountpoint(target); err != nil {
+		return err
+	}
+	flags, optionData := mountOptions(options)
+	dataOptions := []string{"lowerdir=" + lowerBind, "upperdir=" + upper, "workdir=" + work}
+	if optionData != "" {
+		dataOptions = append(dataOptions, optionData)
+	}
+	data := strings.Join(dataOptions, ",")
+	if err := unix.Mount("overlay", target, "overlay", flags, data); err != nil {
+		return fmt.Errorf("guestd: mounting runner-home overlay at %s: %w", target, err)
+	}
+	return nil
+}
+
+func mountedFilesystem(mountpoint string) (string, bool, error) {
+	raw, err := os.ReadFile("/proc/self/mounts")
+	if err != nil {
+		return "", false, fmt.Errorf("guestd: reading mounts: %w", err)
+	}
+	target := path.Clean(mountpoint)
+	lines := strings.Split(string(raw), "\n")
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := lines[index]
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && unescapeMountPath(fields[1]) == target {
+			return fields[2], true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // makeMountpoint creates the mountpoint path, handing every directory it

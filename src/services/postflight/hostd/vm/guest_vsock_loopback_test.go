@@ -46,6 +46,13 @@ func (s *loopSystem) Mount(_ context.Context, _, mountpoint, _ string, _ []strin
 	return nil
 }
 
+func (s *loopSystem) MountOverlay(_ context.Context, _, _, _, _, target string, _ []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mounted[target] = true
+	return nil
+}
+
 func (s *loopSystem) Unmount(mountpoint string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

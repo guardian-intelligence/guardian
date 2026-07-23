@@ -132,6 +132,15 @@ func (f *fakeSystem) Mount(_ context.Context, device, mountpoint, filesystem str
 	return nil
 }
 
+func (f *fakeSystem) MountOverlay(_ context.Context, lower, lowerBind, upper, work, target string, options []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mounted[lowerBind] = lower
+	f.mounted[target] = "overlay"
+	f.log("overlay lower=%s lowerbind=%s upper=%s work=%s at %s options=%s", lower, lowerBind, upper, work, target, strings.Join(options, ","))
+	return nil
+}
+
 func (f *fakeSystem) Unmount(mountpoint string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -550,6 +559,32 @@ func TestNestedMountWaitsForParentVolume(t *testing.T) {
 	}
 	if parent < 0 || child < 0 || parent >= child {
 		t.Fatalf("nested mount order is unsafe: %v", entries)
+	}
+}
+
+func TestRunnerHomeUsesImageLowerAndDurableUpper(t *testing.T) {
+	system := newFakeSystem()
+	system.devices["tool"] = "/dev/sdb"
+	system.blank["/dev/sdb"] = true
+	server := &Server{cfg: Config{
+		System: system, RetryInterval: time.Millisecond,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}}
+	mount := guestproto.Mount{
+		Serial: "tool", Filesystem: "ext4", Mountpoint: RunnerHomeMountpoint,
+		Options: []string{"discard", "noatime", "nodev", "nosuid"},
+	}
+	if err := server.convergeMounts(context.Background(), []guestproto.Mount{mount}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"mkfs ext4 /dev/sdb",
+		"mount /dev/sdb at /var/lib/postflight/runner-home options=discard,noatime,nodev,nosuid",
+		"overlay lower=/home/runner lowerbind=/var/lib/postflight/runner-home-lower upper=/var/lib/postflight/runner-home/upper work=/var/lib/postflight/runner-home/work at /home/runner options=noatime,nodev,nosuid",
+		"adopt /home/runner",
+	}
+	if entries := system.entries(); fmt.Sprint(entries) != fmt.Sprint(want) {
+		t.Fatalf("journal %v, want %v", entries, want)
 	}
 }
 
