@@ -122,6 +122,9 @@ func siteFromHost(host string) string {
 	if strings.HasSuffix(h, "."+zone) {
 		return truncate(strings.TrimSuffix(h, "."+zone), 32)
 	}
+	if h == "rumi.engineering" || strings.HasSuffix(h, ".rumi.engineering") {
+		return "rumi.engineering"
+	}
 	return "local"
 }
 
