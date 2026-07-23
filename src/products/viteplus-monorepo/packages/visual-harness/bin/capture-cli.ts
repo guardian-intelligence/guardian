@@ -74,7 +74,7 @@ async function main(): Promise<number> {
   });
 
   if (values.help) {
-    console.log(USAGE);
+    process.stdout.write(`${USAGE}\n`);
     return 0;
   }
   if (!values.url || !values.out) {
@@ -135,8 +135,8 @@ async function main(): Promise<number> {
           cssAnimationsFrozen: result.cssAnimationsFrozen,
           sha256: result.sha256,
         });
-        console.log(
-          `wrote ${path} (${result.width}x${result.height}, sha256 ${result.sha256.slice(0, 12)})`,
+        process.stdout.write(
+          `wrote ${path} (${result.width}x${result.height}, sha256 ${result.sha256.slice(0, 12)})\n`,
         );
       }
     }
@@ -145,7 +145,7 @@ async function main(): Promise<number> {
   }
 
   await writeFile(join(values.out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`wrote ${join(values.out, "manifest.json")} (${manifest.length} shots)`);
+  process.stdout.write(`wrote ${join(values.out, "manifest.json")} (${manifest.length} shots)\n`);
   return 0;
 }
 
