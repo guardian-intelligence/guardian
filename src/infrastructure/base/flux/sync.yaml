@@ -777,6 +777,36 @@ spec:
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
+  name: guardian-imageops
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/guardian/imageops
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-system
+  prune: true
+  # Apply-only: the ExternalSecret stays pending until the imageops kv scope
+  # is seeded (a custody action), and the image CRs' readiness is the
+  # cutover's manual go/no-go check — every ImagePolicy latestRef must equal
+  # the digest pinned in Git before any ImageUpdateAutomation ships.
+  wait: false
+  timeout: 5m
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
   name: guardian-company-prod
   namespace: cozy-fluxcd
 spec:

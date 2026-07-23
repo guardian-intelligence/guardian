@@ -1,0 +1,13 @@
+# Image automation for first-party workload pins: Flux's image-reflector and
+# image-automation controllers, Guardian-owned because Cozystack's flux
+# bundle (cozy-fluxcd) ships neither — only the image.toolkit CRDs. The
+# controllers watch this namespace only; the CRs here follow each `edge` tag
+# and commit digest-pin bumps straight to main as guardian-promotions[bot]
+# (docs/supply-chain-design.md, "Promotion: how digests move").
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: imageops

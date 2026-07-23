@@ -1,0 +1,247 @@
+# The two Flux image controllers, pinned to the versions Flux v2.8.0 bundles
+# (matching the cozy-fluxcd controllers that serve the CRDs). Both run
+# single-replica with --watch-all-namespaces=false, so their RBAC stays
+# namespace-scoped: the whole automation estate lives in this namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: image-reflector-controller
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/name: image-reflector-controller
+    app.kubernetes.io/part-of: guardian
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: image-automation-controller
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/name: image-automation-controller
+    app.kubernetes.io/part-of: guardian
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: image-reflector-controller
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+rules:
+  - apiGroups: ["image.toolkit.fluxcd.io"]
+    resources: ["imagerepositories", "imagepolicies"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["image.toolkit.fluxcd.io"]
+    resources: ["imagerepositories/status", "imagepolicies/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["secrets", "serviceaccounts"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: image-automation-controller
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+rules:
+  - apiGroups: ["image.toolkit.fluxcd.io"]
+    resources: ["imageupdateautomations"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["image.toolkit.fluxcd.io"]
+    resources: ["imageupdateautomations/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["image.toolkit.fluxcd.io"]
+    resources: ["imagerepositories", "imagepolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["gitrepositories"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets", "serviceaccounts"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: image-reflector-controller
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: image-reflector-controller
+subjects:
+  - kind: ServiceAccount
+    name: image-reflector-controller
+    namespace: guardian-imageops
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: image-automation-controller
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: image-automation-controller
+subjects:
+  - kind: ServiceAccount
+    name: image-automation-controller
+    namespace: guardian-imageops
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: image-reflector-controller
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/name: image-reflector-controller
+    app.kubernetes.io/part-of: guardian
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: image-reflector-controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: image-reflector-controller
+        app.kubernetes.io/part-of: guardian
+    spec:
+      serviceAccountName: image-reflector-controller
+      securityContext:
+        fsGroup: 1337
+      containers:
+        - name: manager
+          image: ghcr.io/fluxcd/image-reflector-controller:v1.1.0@sha256:058160ea380827e5187700635da8a9f9231f366d7a89c781480c169a34da9bda
+          args:
+            - --watch-all-namespaces=false
+            - --log-level=info
+            - --log-encoding=json
+          env:
+            - name: RUNTIME_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: http-prom
+              containerPort: 8080
+            - name: healthz
+              containerPort: 9440
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: healthz
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            # The tag/digest database; rebuilt by rescan on restart, so an
+            # ephemeral volume is deliberate.
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: image-automation-controller
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/name: image-automation-controller
+    app.kubernetes.io/part-of: guardian
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: image-automation-controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: image-automation-controller
+        app.kubernetes.io/part-of: guardian
+    spec:
+      serviceAccountName: image-automation-controller
+      securityContext:
+        fsGroup: 1337
+      containers:
+        - name: manager
+          image: ghcr.io/fluxcd/image-automation-controller:v1.1.0@sha256:d0ef3e686e93f25135905266c5d32513b4e70d5b3fadd105310de7cab8ae3d09
+          args:
+            - --watch-all-namespaces=false
+            - --log-level=info
+            - --log-encoding=json
+          env:
+            - name: RUNTIME_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: http-prom
+              containerPort: 8080
+            - name: healthz
+              containerPort: 9440
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: healthz
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

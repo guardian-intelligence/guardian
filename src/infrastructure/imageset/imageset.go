@@ -155,6 +155,12 @@ func CollectRendered(root string) ([]RenderedRef, error) {
 				if ref, ok := ociRepositoryRef(doc); ok {
 					c.refs = append(c.refs, RenderedRef{File: file, Source: "oci repository pin", Ref: ref})
 				}
+				if isImageRepository(doc) {
+					// Flux ImageRepository CRs name a repository to WATCH,
+					// not an artifact anything runs — there is no digest to
+					// pin and nothing to haul.
+					continue
+				}
 				c.collect(file, doc)
 			}
 			return nil
@@ -374,6 +380,17 @@ func kustomizeImageEntryRef(node interface{}) (string, bool) {
 // ociRepositoryRef extracts the pinned artifact reference from a Flux
 // OCIRepository document (spec.url oci://host/repo + spec.ref.tag/digest).
 // These are pulled by source-controller, not containerd, but the dark
+// isImageRepository reports whether the document is a Flux ImageRepository
+// CR (image.toolkit.fluxcd.io): its spec.image is a repository name for the
+// reflector to watch, not a runnable reference.
+func isImageRepository(doc interface{}) bool {
+	m, ok := asStringMap(doc)
+	if !ok || stringValue(m["kind"]) != "ImageRepository" {
+		return false
+	}
+	return strings.HasPrefix(stringValue(m["apiVersion"]), "image.toolkit.fluxcd.io/")
+}
+
 // mirror must serve them all the same. Digest-less OCIRepositories (the
 // dark-mode branch-tip source) are not pinned artifacts and are skipped.
 func ociRepositoryRef(doc interface{}) (string, bool) {

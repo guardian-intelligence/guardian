@@ -362,6 +362,12 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				"githubAppPrivateKey": githubAppKey,
 			},
 		},
+		{
+			APIPath: "kv/data/guardian/guardian-mgmt/guardian-imageops/promotion/github-app",
+			Data: map[string]string{
+				"githubAppPrivateKey": githubAppKey,
+			},
+		},
 		// Postflight Runner GitHub App (prod): webhook HMAC secret and the App
 		// private key that signs the JWTs installation tokens are minted from.
 		// The public App ID rides along because the control plane consumes it.

@@ -69,8 +69,8 @@ func TestImportPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 10 {
-		t.Fatalf("plan length = %d, want 10", len(plan))
+	if len(plan) != 11 {
+		t.Fatalf("plan length = %d, want 11", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {
@@ -128,6 +128,13 @@ func TestImportPlan(t *testing.T) {
 	}
 	if productsPromotion.Data["githubAppPrivateKey"] != testGithubAppPEM {
 		t.Fatal("products githubAppPrivateKey did not round-trip through base64")
+	}
+	imageopsPromotion, ok := byPath["kv/data/guardian/guardian-mgmt/guardian-imageops/promotion/github-app"]
+	if !ok {
+		t.Fatal("imageops promotion write missing")
+	}
+	if imageopsPromotion.Data["githubAppPrivateKey"] != testGithubAppPEM {
+		t.Fatal("imageops githubAppPrivateKey did not round-trip through base64")
 	}
 	runner, ok := byPath["kv/data/guardian/guardian-mgmt/postflight-runner/github-app"]
 	if !ok {
@@ -203,8 +210,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 10 {
-		t.Fatalf("plan length = %d, want 10 (base only)", len(plan))
+	if len(plan) != 11 {
+		t.Fatalf("plan length = %d, want 11 (base only)", len(plan))
 	}
 
 	env["PROD_GITHUB_CLIENT_SECRET"] = "prod-secret"
@@ -212,8 +219,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 11 {
-		t.Fatalf("plan length = %d, want 11 (10 base + prod)", len(plan))
+	if len(plan) != 12 {
+		t.Fatalf("plan length = %d, want 12 (11 base + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {
@@ -232,8 +239,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 12 {
-		t.Fatalf("plan length = %d, want 12 (10 base + two environments)", len(plan))
+	if len(plan) != 13 {
+		t.Fatalf("plan length = %d, want 13 (11 base + two environments)", len(plan))
 	}
 	byPath = map[string]secretWrite{}
 	for _, w := range plan {
