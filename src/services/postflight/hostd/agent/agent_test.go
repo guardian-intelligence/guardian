@@ -297,6 +297,81 @@ func TestImageRolloutPreservesLocallyAssignedListenerBeforeSync(t *testing.T) {
 	}
 }
 
+func TestStoragePressureCordonsPoolBeforeListenerLaunch(t *testing.T) {
+	a, vms, volumes := newTestAgent(t, 1)
+	a.cfg.StorageMinimumAvailableBytes = 64 << 30
+	volumes.AvailableBytes = (64 << 30) - 1
+	a.HandleSync(syncproto.SyncResponse{
+		BootID: a.bootID, PoolTargets: map[string]int{string(testRunnerClass): 1},
+	})
+
+	a.Tick(context.Background())
+	statuses, err := vms.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statuses) != 0 {
+		t.Fatalf("storage-starved host launched %+v", statuses)
+	}
+	report, err := a.Report(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Slots) != 1 || report.Slots[0].Total != 0 {
+		t.Fatalf("storage-starved capacity report = %+v", report.Slots)
+	}
+}
+
+func TestUnownedUnusableVMRecyclesAndRefillsInOneTick(t *testing.T) {
+	a, vms, _ := newTestAgent(t, 1)
+	a.HandleSync(syncproto.SyncResponse{
+		BootID: a.bootID, PoolTargets: map[string]int{string(testRunnerClass): 1},
+	})
+	a.Tick(context.Background())
+	statuses, err := vms.List(context.Background())
+	if err != nil || len(statuses) != 1 {
+		t.Fatalf("initial pool = %+v, %v", statuses, err)
+	}
+	oldID := statuses[0].ID
+	if !vms.MarkRecycleRequired(oldID, guestproto.RestoreStatus{}, "qemu entered io-error: root=nospace") {
+		t.Fatal("mark recycle-required")
+	}
+
+	a.Tick(context.Background())
+	statuses, err = vms.List(context.Background())
+	if err != nil || len(statuses) != 1 {
+		t.Fatalf("replacement pool = %+v, %v", statuses, err)
+	}
+	if statuses[0].ID == oldID || statuses[0].Phase != vm.PhaseBooting {
+		t.Fatalf("replacement = %+v, old = %s", statuses[0], oldID)
+	}
+}
+
+func TestStoragePressureRejectsAssignedJobBeforeMaterialization(t *testing.T) {
+	a, vms, volumes := newTestAgent(t, 1)
+	members := poolMembers(t, a, vms, 1)
+	spec := assignmentSpec(0, members[0])
+	assignVM(t, vms, members[0], spec)
+	a.cfg.StorageMinimumAvailableBytes = 64 << 30
+	volumes.AvailableBytes = (64 << 30) - 1
+	a.HandleSync(syncproto.SyncResponse{
+		BootID: a.bootID, Members: members, Assignments: []syncproto.DesiredAssignment{spec},
+		PoolTargets: map[string]int{string(testRunnerClass): 1},
+	})
+
+	a.Tick(context.Background())
+	snapshot := a.Snapshot()[0]
+	if snapshot.State != syncproto.AssignmentFailedClosed || !strings.Contains(snapshot.Reason, "capacity below safety floor") {
+		t.Fatalf("assignment = %+v", snapshot)
+	}
+	if volumes.HasWorkspace(zvol.AssignmentID(spec.AssignmentID)) || volumes.HasTool(zvol.AssignmentID(spec.AssignmentID)) || volumes.HasProcess(zvol.AssignmentID(spec.AssignmentID)) {
+		t.Fatal("storage-starved assignment materialized a durable volume")
+	}
+	if a.Metrics().StorageAdmissionFailures.Load() != 1 {
+		t.Fatalf("storage admission failures = %d", a.Metrics().StorageAdmissionFailures.Load())
+	}
+}
+
 func TestPrepositionedPlanRendezvousesWithoutControlPlaneSync(t *testing.T) {
 	a, vms, volumes := newTestAgent(t, 1)
 	members := poolMembers(t, a, vms, 1)

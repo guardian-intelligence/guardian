@@ -4,6 +4,7 @@ go_library(
     name = "agent",
     srcs = [
         "agent.go",
+		"capacity.go",
 		"assignment.go",
         "checkout.go",
         "config.go",

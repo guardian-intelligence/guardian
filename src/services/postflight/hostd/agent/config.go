@@ -35,6 +35,10 @@ type Config struct {
 	// TraceDir receives one append-only JSONL trace per single-use runner.
 	// Empty disables the local evidence sink.
 	TraceDir string
+	// StorageMinimumAvailableBytes is the emergency headroom below which this
+	// host stops offering listeners and rejects an assignment before attaching
+	// tenant volumes. Zero disables the gate.
+	StorageMinimumAvailableBytes int64
 
 	Platform PlatformFingerprint
 }
@@ -73,6 +77,9 @@ func (c *Config) validate() error {
 	}
 	if c.SyncInterval <= 0 {
 		c.SyncInterval = 2 * time.Second
+	}
+	if c.StorageMinimumAvailableBytes < 0 {
+		return fmt.Errorf("agent: StorageMinimumAvailableBytes must not be negative")
 	}
 	return nil
 }

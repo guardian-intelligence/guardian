@@ -13,24 +13,25 @@ import (
 // (members, assignments, pool targets, reap verbs) arrives over sync; the environment only
 // describes what this host is.
 type config struct {
-	hostID         string
-	syncURL        string
-	syncSecret     string
-	hostSecretFile string
-	stateDir       string
-	pool           string
-	class          string
-	imageID        string
-	slots          int
-	cpus           int
-	memoryMiB      int
-	qemuPath       string
-	firmwarePath   string
-	criuVersion    string
-	syncInterval   time.Duration
-	guestNetwork   string
-	guestBridge    string
-	tapLifecyclePath string
+	hostID                       string
+	syncURL                      string
+	syncSecret                   string
+	hostSecretFile               string
+	stateDir                     string
+	pool                         string
+	class                        string
+	imageID                      string
+	slots                        int
+	cpus                         int
+	memoryMiB                    int
+	storageMinimumAvailableBytes int64
+	qemuPath                     string
+	firmwarePath                 string
+	criuVersion                  string
+	syncInterval                 time.Duration
+	guestNetwork                 string
+	guestBridge                  string
+	tapLifecyclePath             string
 
 	checkoutListenAddr  string
 	checkoutGuestOrigin string
@@ -70,28 +71,38 @@ func loadConfig() (config, error) {
 		}
 		return n
 	}
+	positiveInt64 := func(key, fallback string) int64 {
+		v := envOr(key, fallback)
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			errs = append(errs, fmt.Errorf("%s: %q is not a positive integer", key, v))
+			return 0
+		}
+		return n
+	}
 
 	cfg := config{
-		hostID:              required("HOSTD_HOST_ID"),
-		syncURL:             required("HOSTD_SYNC_URL"),
-		syncSecret:          required("HOSTD_SYNC_SECRET"),
-		hostSecretFile:      required("HOSTD_HOST_SECRET_FILE"),
-		stateDir:            required("HOSTD_STATE_DIR"),
-		pool:                required("HOSTD_POOL"),
-		class:               required("HOSTD_CLASS"),
-		imageID:             required("HOSTD_IMAGE_ID"),
-		slots:               positiveInt("HOSTD_SLOTS", "4"),
-		cpus:                positiveInt("HOSTD_CPUS", "4"),
-		memoryMiB:           positiveInt("HOSTD_MEMORY_MIB", "16384"),
-		qemuPath:            envOr("HOSTD_QEMU_PATH", "/usr/bin/qemu-system-x86_64"),
-		firmwarePath:        required("HOSTD_FIRMWARE_PATH"),
-		criuVersion:         required("HOSTD_CRIU_VERSION"),
-		syncInterval:        duration("HOSTD_SYNC_INTERVAL", "2s"),
-		guestNetwork:        envOr("HOSTD_GUEST_NETWORK", "none"),
-		guestBridge:         os.Getenv("HOSTD_GUEST_BRIDGE"),
-		tapLifecyclePath:    envOr("HOSTD_TAP_LIFECYCLE_PATH", "/usr/local/libexec/postflight-tap"),
-		checkoutListenAddr:  envOr("HOSTD_CHECKOUT_LISTEN_ADDR", "127.0.0.1:8480"),
-		checkoutGuestOrigin: required("HOSTD_CHECKOUT_GUEST_ORIGIN"),
+		hostID:                       required("HOSTD_HOST_ID"),
+		syncURL:                      required("HOSTD_SYNC_URL"),
+		syncSecret:                   required("HOSTD_SYNC_SECRET"),
+		hostSecretFile:               required("HOSTD_HOST_SECRET_FILE"),
+		stateDir:                     required("HOSTD_STATE_DIR"),
+		pool:                         required("HOSTD_POOL"),
+		class:                        required("HOSTD_CLASS"),
+		imageID:                      required("HOSTD_IMAGE_ID"),
+		slots:                        positiveInt("HOSTD_SLOTS", "4"),
+		cpus:                         positiveInt("HOSTD_CPUS", "4"),
+		memoryMiB:                    positiveInt("HOSTD_MEMORY_MIB", "16384"),
+		storageMinimumAvailableBytes: positiveInt64("HOSTD_STORAGE_MIN_AVAILABLE_BYTES", "68719476736"),
+		qemuPath:                     envOr("HOSTD_QEMU_PATH", "/usr/bin/qemu-system-x86_64"),
+		firmwarePath:                 required("HOSTD_FIRMWARE_PATH"),
+		criuVersion:                  required("HOSTD_CRIU_VERSION"),
+		syncInterval:                 duration("HOSTD_SYNC_INTERVAL", "2s"),
+		guestNetwork:                 envOr("HOSTD_GUEST_NETWORK", "none"),
+		guestBridge:                  os.Getenv("HOSTD_GUEST_BRIDGE"),
+		tapLifecyclePath:             envOr("HOSTD_TAP_LIFECYCLE_PATH", "/usr/local/libexec/postflight-tap"),
+		checkoutListenAddr:           envOr("HOSTD_CHECKOUT_LISTEN_ADDR", "127.0.0.1:8480"),
+		checkoutGuestOrigin:          required("HOSTD_CHECKOUT_GUEST_ORIGIN"),
 	}
 	switch cfg.guestNetwork {
 	case "none", "user":

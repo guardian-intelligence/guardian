@@ -3,6 +3,7 @@ package zvol
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 )
 
@@ -32,14 +33,26 @@ type Fake struct {
 
 	// Journal records every mutating call in order, for scenario assertions.
 	Journal []string
+
+	AvailableBytes int64
 }
 
 // NewFake returns an empty fake host substrate.
 func NewFake() *Fake {
 	f := newFakeVolumeTree("fake")
+	f.AvailableBytes = math.MaxInt64
 	f.process = newFakeVolumeTree("fake/process-state")
 	f.tool = newFakeVolumeTree("fake/tool-state")
 	return f
+}
+
+func (f *Fake) Capacity(context.Context) (Capacity, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.fail("capacity", ""); err != nil {
+		return Capacity{}, err
+	}
+	return Capacity{AvailableBytes: f.AvailableBytes}, nil
 }
 
 func newFakeVolumeTree(prefix string) *Fake {

@@ -16,6 +16,8 @@
 //	HOSTD_SLOTS                   per-class slot count (default 4; warm VM = slot, no overcommit)
 //	HOSTD_CPUS                    vCPUs per VM (default 4)
 //	HOSTD_MEMORY_MIB              memory per VM (default 16384)
+//	HOSTD_STORAGE_MIN_AVAILABLE_BYTES
+//	                              ZFS headroom required to offer listeners (default 64 GiB)
 //	HOSTD_QEMU_PATH               QEMU binary (default /usr/bin/qemu-system-x86_64)
 //	HOSTD_CRIU_VERSION            exact version baked into the guest, e.g. Version: 4.2
 //	HOSTD_SYNC_INTERVAL           sync cadence when the control plane does not suggest one (default 2s)
@@ -114,14 +116,15 @@ func run(logger *slog.Logger) error {
 	}
 
 	instance, err := agent.New(agent.Config{
-		HostID:              cfg.hostID,
-		ControlPlaneOrigin:  cfg.syncURL,
-		Slots:               map[vm.Class]int{class: cfg.slots},
-		Images:              map[vm.Class]string{class: image},
-		SyncInterval:        cfg.syncInterval,
-		CheckoutGuestOrigin: cfg.checkoutGuestOrigin,
-		TraceDir:            filepath.Join(cfg.stateDir, "rendezvous"),
-		Platform:            platformFingerprint(cfg),
+		HostID:                       cfg.hostID,
+		ControlPlaneOrigin:           cfg.syncURL,
+		Slots:                        map[vm.Class]int{class: cfg.slots},
+		Images:                       map[vm.Class]string{class: image},
+		SyncInterval:                 cfg.syncInterval,
+		CheckoutGuestOrigin:          cfg.checkoutGuestOrigin,
+		TraceDir:                     filepath.Join(cfg.stateDir, "rendezvous"),
+		StorageMinimumAvailableBytes: cfg.storageMinimumAvailableBytes,
+		Platform:                     platformFingerprint(cfg),
 	}, storage, vms, cfg.syncSecret, hostSecret, agent.Options{Logger: logger})
 	if err != nil {
 		return err
