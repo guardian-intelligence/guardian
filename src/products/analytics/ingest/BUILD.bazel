@@ -68,6 +68,7 @@ go_test(
         "//src/proto/gen/go/guardian/analytics/v1/analyticsv1connect",
         "@build_buf_go_protovalidate//:protovalidate",
         "@com_connectrpc_connect//:connect",
+        "@com_github_prometheus_client_golang//prometheus/testutil",
     ],
 )
 
