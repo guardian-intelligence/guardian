@@ -209,8 +209,12 @@ func (a *Agent) buildReport(ctx context.Context) (syncproto.SyncRequest, error) 
 	if err != nil {
 		return request, err
 	}
+	admission := a.storageAdmission(ctx)
 	slots := map[vm.Class]*syncproto.SlotReport{}
 	for class, total := range a.cfg.Slots {
+		if !admission.Admitted {
+			total = 0
+		}
 		slots[class] = &syncproto.SlotReport{Class: string(class), Total: total}
 	}
 	for _, status := range statuses {

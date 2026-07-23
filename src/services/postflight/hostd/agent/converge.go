@@ -37,7 +37,9 @@ func (a *Agent) Tick(ctx context.Context) {
 		a.logger.Error("listing vms", "err", err)
 		return
 	}
-	a.stepMembers(ctx, view, members, quarantinedMembers, assignments)
+	admission := a.storageAdmission(ctx)
+	a.recycleUnownedUnusableVMs(ctx, view, assignments)
+	a.stepMembers(ctx, view, members, quarantinedMembers, assignments, admission.Admitted)
 	for _, id := range sortedAssignmentIDs(assignments) {
 		record := assignments[id]
 		record.mu.Lock()
@@ -47,6 +49,11 @@ func (a *Agent) Tick(ctx context.Context) {
 		record.mu.Unlock()
 	}
 	a.reapGenerations(ctx, desiredAssignments, reap)
+	if !admission.Admitted {
+		for class := range poolTargets {
+			poolTargets[class] = 0
+		}
+	}
 	a.reconcilePool(ctx, view, poolTargets, assignments)
 	a.collectOrphans(ctx, view, assignments, desiredAssignments, quarantinedJobs)
 	a.mu.Lock()
@@ -102,7 +109,7 @@ func (a *Agent) listVMs(ctx context.Context) (*vmView, error) {
 	return view, nil
 }
 
-func (a *Agent) stepMembers(ctx context.Context, view *vmView, members map[string]syncproto.DesiredPoolMember, quarantined map[string]bool, assignments map[string]*assignment) {
+func (a *Agent) stepMembers(ctx context.Context, view *vmView, members map[string]syncproto.DesiredPoolMember, quarantined map[string]bool, assignments map[string]*assignment, storageAdmitted bool) {
 	for memberID, desired := range members {
 		if quarantined[memberID] {
 			continue
@@ -133,18 +140,15 @@ func (a *Agent) stepMembers(ctx context.Context, view *vmView, members map[strin
 			continue
 		}
 		if status.Phase == vm.PhaseRecycleRequired || status.Phase == vm.PhaseExited {
-			if assignmentOwned {
-				continue
-			}
-			if err := a.vms.Destroy(ctx, status.ID); err != nil {
-				a.logger.Error("recycling unusable pool member", "member_id", memberID, "vm", status.ID, "err", err)
-			}
 			continue
 		}
 		if status.Phase != vm.PhaseWarm {
 			continue
 		}
 		if desired.JITConfig == "" {
+			continue
+		}
+		if !storageAdmitted {
 			continue
 		}
 		started := time.Now()
@@ -257,6 +261,15 @@ func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vm
 			return
 		}
 		a.appendTrace(record.trace, record, "assignment_observed", nil)
+		admission := a.storageAdmission(ctx)
+		if !admission.Admitted {
+			a.metrics.StorageAdmissionFailures.Add(1)
+			a.appendTrace(record.trace, record, "storage_admission_rejected", func(event *traceEvent) {
+				event.FailureReason = admission.Reason
+			})
+			a.failClosed(ctx, record, admission.Reason)
+			return
+		}
 		started := time.Now()
 		a.appendTrace(record.trace, record, "generation_materialization_started", nil)
 		if err := a.materialize(ctx, record); err != nil {

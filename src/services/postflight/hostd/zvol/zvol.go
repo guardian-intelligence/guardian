@@ -62,6 +62,19 @@ type GenerationSet struct {
 	Process   GenerationSnapshot
 }
 
+// Capacity is the allocation headroom ZFS will honor after quotas and
+// reservations on the hostd dataset and its ancestors.
+type Capacity struct {
+	AvailableBytes int64
+}
+
+// CapacitySource lets the agent cordon storage-starved hosts before it starts
+// or offers another listener. It is separate from Driver so substrate fakes
+// and alternate durable-volume implementations can opt in independently.
+type CapacitySource interface {
+	Capacity(ctx context.Context) (Capacity, error)
+}
+
 // Errors the agent's convergence logic branches on. Exec wraps zfs stderr
 // into one of these classes; Fake returns them directly.
 var (

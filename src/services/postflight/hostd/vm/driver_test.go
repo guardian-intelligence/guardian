@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -298,6 +299,8 @@ func observeLocalAssignment(t *testing.T, driver *testDriver, id ID, memberID st
 type qemuHandler struct {
 	mu       sync.Mutex
 	running  bool
+	status   string
+	ioStatus map[string]string
 	blockdev map[string]bool
 	qdev     map[string]string
 	commands []string
@@ -315,7 +318,18 @@ func (h *qemuHandler) handle(command string, arguments json.RawMessage) ([]strin
 	h.commands = append(h.commands, command)
 	switch command {
 	case "query-status":
-		return nil, fmt.Sprintf(`{"return": {"status": "running", "running": %t}, "id": %%d}`, h.running)
+		status := h.status
+		if status == "" {
+			status = "running"
+		}
+		return nil, fmt.Sprintf(`{"return": {"status": %q, "running": %t}, "id": %%d}`, status, h.running)
+	case "query-block":
+		blocks := make([]string, 0, len(h.ioStatus))
+		for device, status := range h.ioStatus {
+			blocks = append(blocks, fmt.Sprintf(`{"device":%q,"qdev":%q,"inserted":{"node-name":%q,"io-status":%q}}`, device, device, device+"-node", status))
+		}
+		sort.Strings(blocks)
+		return nil, `{"return":[` + strings.Join(blocks, ",") + `],"id":%d}`
 	case "query-named-block-nodes":
 		nodes := []string{`{"node-name":"root"}`}
 		for _, node := range []string{workspaceNode, toolNode, processNode} {
@@ -1017,6 +1031,36 @@ func TestStatusPhaseLadder(t *testing.T) {
 	}
 	if !status.CustomerStepsReleased || status.FailureReason != "worker transport closed" {
 		t.Fatalf("exit lifecycle evidence = %+v", status)
+	}
+}
+
+func TestStatusQEMUIOErrorRequiresRecycle(t *testing.T) {
+	driver := newTestDriver(t, shortTempDir(t))
+	ctx := context.Background()
+	if err := driver.q.Launch(ctx, "vm-a", testClass); err != nil {
+		t.Fatal(err)
+	}
+	handler := &qemuHandler{
+		status: "io-error",
+		ioStatus: map[string]string{
+			"postflight-workspace": "nospace",
+			"postflight-tool":      "ok",
+		},
+	}
+	serveQEMU(t, driver, "vm-a", handler)
+
+	status, err := driver.q.Status(ctx, "vm-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Phase != PhaseRecycleRequired {
+		t.Fatalf("phase %s, want %s", status.Phase, PhaseRecycleRequired)
+	}
+	if status.FailureReason != "qemu entered io-error: postflight-workspace=nospace" {
+		t.Fatalf("failure reason %q", status.FailureReason)
+	}
+	if got := strings.Join(handler.log(), ","); !strings.Contains(got, "query-status,query-block") {
+		t.Fatalf("QMP evidence commands = %s", got)
 	}
 }
 

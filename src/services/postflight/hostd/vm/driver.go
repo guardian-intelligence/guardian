@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -861,7 +862,17 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 			Phase: PhaseGone, Incarnation: record.Incarnation, MemberID: record.MemberID,
 		}, true, nil
 	}
-	if !q.vmRunning(ctx, id) {
+	hypervisor := q.hypervisorStatus(ctx, id)
+	if hypervisor.Status == "io-error" {
+		status.Phase = PhaseRecycleRequired
+		status.FailureReason = hypervisor.failureReason()
+		status.Timing = append(status.Timing, q.timingFor(id)...)
+		q.cfg.Logger.Error("postflight.hostd.vm.io_error",
+			"vm", id, "member_id", record.MemberID, "assignment_id", record.AssignmentID,
+			"qmp_status", hypervisor.Status, "block_io_errors", hypervisor.blockErrorSummary())
+		return status, false, nil
+	}
+	if !hypervisor.Running {
 		// QEMU exists but is not (yet) running the guest; nothing further
 		// can be trusted, so report the phase the meta alone supports.
 		if record.MemberID == "" && q.bootExpired(id, record) {
@@ -1017,26 +1028,73 @@ func timingPoints(points []guestproto.TimingPoint) []TimingPoint {
 	return out
 }
 
-// vmRunning probes QMP for a running guest.
-func (q *QEMU) vmRunning(ctx context.Context, id ID) bool {
+type qmpBlockStatus struct {
+	Device   string `json:"device"`
+	QDev     string `json:"qdev"`
+	Inserted *struct {
+		NodeName string `json:"node-name"`
+		IOStatus string `json:"io-status"`
+	} `json:"inserted"`
+}
+
+type qmpVMStatus struct {
+	Running bool   `json:"running"`
+	Status  string `json:"status"`
+	Blocks  []qmpBlockStatus
+}
+
+func (s qmpVMStatus) blockErrorSummary() string {
+	var failures []string
+	for _, block := range s.Blocks {
+		if block.Inserted == nil || block.Inserted.IOStatus == "" || block.Inserted.IOStatus == "ok" {
+			continue
+		}
+		name := block.QDev
+		if name == "" {
+			name = block.Device
+		}
+		if name == "" {
+			name = block.Inserted.NodeName
+		}
+		failures = append(failures, name+"="+block.Inserted.IOStatus)
+	}
+	sort.Strings(failures)
+	return strings.Join(failures, ",")
+}
+
+func (s qmpVMStatus) failureReason() string {
+	if failures := s.blockErrorSummary(); failures != "" {
+		return "qemu entered io-error: " + failures
+	}
+	return "qemu entered io-error"
+}
+
+// hypervisorStatus probes QMP for the VM's run state and, when QEMU has
+// stopped for a block failure, captures the per-device error before recycle.
+func (q *QEMU) hypervisorStatus(ctx context.Context, id ID) qmpVMStatus {
 	probeCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
 	defer cancel()
 	client, err := dialQMP(probeCtx, qmpSocketPath(q.stateDir(id)))
 	if err != nil {
-		return false
+		return qmpVMStatus{}
 	}
 	defer client.Close()
 	result, err := client.Execute(probeCtx, "query-status", nil)
 	if err != nil {
-		return false
+		return qmpVMStatus{}
 	}
-	var reply struct {
-		Running bool `json:"running"`
-	}
+	var reply qmpVMStatus
 	if err := json.Unmarshal(result, &reply); err != nil {
-		return false
+		return qmpVMStatus{}
 	}
-	return reply.Running
+	if reply.Status != "io-error" {
+		return reply
+	}
+	result, err = client.Execute(probeCtx, "query-block", nil)
+	if err == nil {
+		_ = json.Unmarshal(result, &reply.Blocks)
+	}
+	return reply
 }
 
 // List implements Driver. A VM whose process died is not a VM anymore: its

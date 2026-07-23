@@ -85,6 +85,21 @@ func (e *Exec) timeout() time.Duration {
 	return defaultTimeout
 }
 
+// Capacity reports the real allocatable bytes after ancestor reservations and
+// quotas. Pool-wide free space is insufficient: a child dataset can have zero
+// available bytes while the underlying pool still reports free capacity.
+func (e *Exec) Capacity(ctx context.Context) (Capacity, error) {
+	out, err := e.run(ctx, "get", "-H", "-p", "-o", "value", "available", e.Root)
+	if err != nil {
+		return Capacity{}, err
+	}
+	available, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+	if err != nil || available < 0 {
+		return Capacity{}, fmt.Errorf("zvol: invalid available bytes %q", strings.TrimSpace(out))
+	}
+	return Capacity{AvailableBytes: available}, nil
+}
+
 func (e *Exec) workspaceDataset(assignment AssignmentID) string {
 	return e.Root + "/ws/" + string(assignment)
 }

@@ -6,6 +6,24 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 )
 
+func (a *Agent) recycleUnownedUnusableVMs(ctx context.Context, view *vmView, assignments map[string]*assignment) {
+	for id, status := range view.byID {
+		if status.Phase != vm.PhaseRecycleRequired && status.Phase != vm.PhaseExited {
+			continue
+		}
+		if assignmentOwnsMember(assignments, status.MemberID) || status.Assignment.RequestID != "" {
+			continue
+		}
+		if err := a.vms.Destroy(ctx, id); err != nil {
+			a.logger.Error("recycling unusable pool vm", "member_id", status.MemberID, "vm", id, "reason", status.FailureReason, "err", err)
+			continue
+		}
+		delete(view.byID, id)
+		delete(view.byMember, status.MemberID)
+		view.countByCl[status.Class]--
+	}
+}
+
 // reconcilePool converges warm-VM counts toward the control plane's targets
 // within this host's fixed slot totals. Destroy-and-refill is the governor's
 // whole vocabulary: it launches fresh VMs and destroys idle ones, never

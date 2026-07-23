@@ -21,17 +21,18 @@ import (
 )
 
 type Metrics struct {
-	SyncFailures            atomic.Int64
-	RejectedMembers         atomic.Int64
-	RejectedAssignments     atomic.Int64
-	ColdFallbacks           atomic.Int64
-	FailedClosedAssignments atomic.Int64
-	SealedGenerations       atomic.Int64
-	ReapedGenerations       atomic.Int64
-	OrphansDestroyed        atomic.Int64
-	RejectedJobPlans        atomic.Int64
-	JobPlanWatchFailures    atomic.Int64
-	JobPlanMisses           atomic.Int64
+	SyncFailures             atomic.Int64
+	RejectedMembers          atomic.Int64
+	RejectedAssignments      atomic.Int64
+	ColdFallbacks            atomic.Int64
+	FailedClosedAssignments  atomic.Int64
+	SealedGenerations        atomic.Int64
+	ReapedGenerations        atomic.Int64
+	OrphansDestroyed         atomic.Int64
+	RejectedJobPlans         atomic.Int64
+	JobPlanWatchFailures     atomic.Int64
+	JobPlanMisses            atomic.Int64
+	StorageAdmissionFailures atomic.Int64
 }
 
 type Agent struct {
