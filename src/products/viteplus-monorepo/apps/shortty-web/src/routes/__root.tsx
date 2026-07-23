@@ -1,4 +1,5 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
+import { BackgroundParticles } from "~/components/background-particles";
 import { TelemetryProbe } from "~/lib/telemetry/page-view";
 import { deployMetaTags } from "~/lib/telemetry/server-deploy-meta";
 import "~/styles/app.css";
@@ -49,7 +50,15 @@ function RootComponent() {
             <span className="stage-spotlight stage-spotlight--right" />
           </div>
         </div>
-        <div className="stage-grid" aria-hidden="true" />
+        <BackgroundParticles />
+        <div className="stage-lines" aria-hidden="true">
+          <span className="stage-line stage-line--vertical stage-line--outer-left" />
+          <span className="stage-line stage-line--vertical stage-line--inner-left" />
+          <span className="stage-line stage-line--vertical stage-line--center" />
+          <span className="stage-line stage-line--vertical stage-line--inner-right" />
+          <span className="stage-line stage-line--vertical stage-line--outer-right" />
+          <span className="stage-line stage-line--horizontal stage-line--header" />
+        </div>
         <div className="stage-grain" aria-hidden="true" />
         <Outlet />
         <TelemetryProbe />
