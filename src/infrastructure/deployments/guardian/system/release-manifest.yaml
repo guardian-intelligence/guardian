@@ -16,7 +16,7 @@ releases:
       image: ghcr.io/guardian-intelligence/alert-relay@sha256:9e64d1a5c21d6aa4c0b6bdb6548091a292abd672a4fd854d88958fe506fca6e5
   analytics-ingest:
     prod:
-      image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:5d9c4f3597a1cd0c278a0358f3a21e0cba8a75db6bf5c05955527a8cc5067ba6
+      image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:32609f29de19880529e83322700caed66c20505ce6a37f3be49ad555a6e2e36f
   authorization:
     prod:
       image: ghcr.io/guardian-intelligence/authorization@sha256:1ec7c52e497e3d3f378075cddd42d1929de073fc5a2e0af689b1daef8cda31df
