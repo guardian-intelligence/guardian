@@ -26,18 +26,35 @@
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["config:best-practices"],
 
-  // Kargo's territory plus the standard junk dirs (setting ignorePaths
-  // replaces the preset default, so the node_modules entries come along).
-  // Kargo's Stage pipelines git-push image bumps into exactly these three
-  // stage-manifest trees; the rest of deployments/ is infrastructure
-  // components whose chart pins Renovate proposes like any other dep.
+  // Flux image-automation's territory plus the standard junk dirs (setting
+  // ignorePaths replaces the preset default, so the node_modules entries
+  // come along). The image-automation controller (deployments/guardian/
+  // imageops) git-pushes first-party pin bumps into exactly these marker
+  // files; the cockpit pins move by hand; the rest of deployments/ is
+  // infrastructure components whose chart pins Renovate proposes like any
+  // other dep.
   ignorePaths: [
     "**/node_modules/**",
     "**/bower_components/**",
     "src/infrastructure/deployments/company/**",
-    "src/infrastructure/deployments/iam/**",
-    "src/infrastructure/deployments/products/**",
+    "src/infrastructure/deployments/payments/**",
+    "src/infrastructure/deployments/shortty/**",
+    "src/infrastructure/deployments/postflight-runner/**",
+    "src/infrastructure/deployments/iam/prod/journey-canary.yaml",
+    "src/infrastructure/deployments/products/prod/cockpit-events.yaml",
+    "src/infrastructure/deployments/products/prod/cockpit-rollup.yaml",
   ],
+
+  // Third-party workload images (Keycloak, Electric) are ordinary
+  // dependencies — Renovate is their one proposer, scoped to exactly their
+  // manifests so it can never reach the automation-owned first-party pins.
+  kubernetes: {
+    managerFilePatterns: [
+      "/^src/infrastructure/deployments/iam/prod/keycloak\\.yaml$/",
+      "/^src/infrastructure/deployments/iam/prod/realm-reconciler\\.yaml$/",
+      "/^src/infrastructure/deployments/products/prod/electric\\.yaml$/",
+    ],
+  },
 
   // The bespoke tool pins (oathtool, restic, ruby) live in
   // src/tools/<tool>/<tool>.MODULE.bazel as http_archive/http_file. The
@@ -95,6 +112,13 @@
     {
       matchUpdateTypes: ["major"],
       dependencyDashboardApproval: true,
+    },
+
+    // Keycloak is pinned in two manifests (server + realm reconciler) that
+    // must move together in one PR.
+    {
+      matchDepNames: ["quay.io/keycloak/keycloak"],
+      groupName: "keycloak",
     },
 
     // First-party actions: no cooldown.

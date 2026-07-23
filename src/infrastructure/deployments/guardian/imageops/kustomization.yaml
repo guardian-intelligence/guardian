@@ -6,4 +6,5 @@ resources:
   - secrets.yaml
   - gitrepository.yaml
   - imagepolicies.yaml
+  - imageupdateautomation.yaml
   - networkpolicy.yaml

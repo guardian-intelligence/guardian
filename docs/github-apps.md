@@ -55,7 +55,8 @@ automerge. Required checks and branch protection remain the merge authority;
 the bot itself is untrusted.
 
 - [Kargo promotion pipelines](../src/infrastructure/deployments/guardian/promotion/pipelines/)
-- [OpenBao-backed Kargo credential](../src/infrastructure/deployments/guardian/promotion/pipelines/secrets.yaml)
+- [OpenBao-backed Kargo credential](../src/infrastructure/deployments/guardian/promotion/pipelines/products-secrets.yaml)
+- [Flux image automation](../src/infrastructure/deployments/guardian/imageops/) (pushes pin bumps to main as the same App identity)
 - [Promotion automerge workflow](../.github/workflows/promotion-automerge.yml)
 - [Supply-chain design](supply-chain-design.md)
 

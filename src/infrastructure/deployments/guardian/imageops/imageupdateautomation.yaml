@@ -1,0 +1,33 @@
+# The single writer for first-party workload pins: one automation covering
+# the whole deployments tree, so coupled markers always move in one commit.
+# Pushes straight to main as guardian-promotions[bot] (ruleset bypass; the
+# push-time conformance gate is the admission policy's digest-pinning rule
+# plus Flagger where a Canary exists). Setters write the policy's latestRef
+# (repo:edge@sha256:...), which digest reflection keeps current.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: guardian
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  interval: 1m0s
+  sourceRef:
+    kind: GitRepository
+    name: guardian-push
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        name: guardian-promotions
+        email: guardian-promotions[bot]@users.noreply.github.com
+      messageTemplate: |
+        promote: {{ range .Changed.Changes }}{{ .OldValue }} -> {{ .NewValue }}{{ end }}
+    push:
+      branch: main
+  update:
+    path: ./src/infrastructure/deployments
+    strategy: Setters

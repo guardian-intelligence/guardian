@@ -1,89 +1,15 @@
-# Product-plane promotion. Electric remains deliberate; the two
-# Guardian-built payments images auto-promote together after CI publishes
-# their signed edge digests, then pass branch protection and Flagger.
+# The postflight CLI release train — Kargo's only remaining lane. Cluster
+# workload pins are moved by Flux image automation (deployments/guardian/
+# imageops); third-party images are Renovate's like any other dependency.
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Project
 metadata:
   name: guardian-products
 ---
-apiVersion: kargo.akuity.io/v1alpha1
-kind: ProjectConfig
-metadata:
-  name: guardian-products
-  namespace: guardian-products
-spec:
-  promotionPolicies:
-    - stageSelector:
-        name: payments-prod
-      autoPromotionEnabled: true
-    - stageSelector:
-        name: postflight-controlplane-prod
-      autoPromotionEnabled: true
-    - stageSelector:
-        name: shortty-web-prod
-      autoPromotionEnabled: true
----
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Warehouse
-metadata:
-  name: electric
-  namespace: guardian-products
-spec:
-  interval: 5m0s
-  subscriptions:
-    - image:
-        repoURL: docker.io/electricsql/electric
-        imageSelectionStrategy: SemVer
-        constraint: ">=1.7.6 <2.0.0"
-        platform: linux/amd64
----
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Warehouse
-metadata:
-  name: payments
-  namespace: guardian-products
-spec:
-  interval: 1m0s
-  subscriptions:
-    - image:
-        repoURL: ghcr.io/guardian-intelligence/payments
-        imageSelectionStrategy: Digest
-        constraint: edge
-    - image:
-        repoURL: ghcr.io/guardian-intelligence/payments-canary
-        imageSelectionStrategy: Digest
-        constraint: edge
----
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Warehouse
-metadata:
-  name: postflight-controlplane
-  namespace: guardian-products
-spec:
-  interval: 1m0s
-  subscriptions:
-    - image:
-        repoURL: ghcr.io/guardian-intelligence/postflight-controlplane
-        imageSelectionStrategy: Digest
-        constraint: edge
----
-apiVersion: kargo.akuity.io/v1alpha1
-kind: Warehouse
-metadata:
-  name: shortty-web
-  namespace: guardian-products
-spec:
-  interval: 1m0s
-  subscriptions:
-    - image:
-        repoURL: ghcr.io/guardian-intelligence/shortty-web
-        imageSelectionStrategy: Digest
-        constraint: edge
----
 # The postflight CLI artifact: binaries-in-an-OCI-image, not a runnable
-# container. Its stages advance channel pins rather than cluster manifests,
-# and nightly is deliberately absent from the promotion policies above —
-# cli-nightly-promoter promotes it on a cadence instead of on discovery.
+# container. Its stages advance channel pins rather than cluster manifests;
+# cli-nightly-promoter promotes on a cadence instead of on discovery, so no
+# auto-promotion policy exists.
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Warehouse
 metadata:
