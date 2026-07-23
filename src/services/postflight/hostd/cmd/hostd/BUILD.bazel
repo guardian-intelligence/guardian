@@ -24,7 +24,7 @@ go_binary(
 )
 
 sh_binary(
-    name = "postflight-tap-up",
-    srcs = ["postflight-tap-up.sh"],
+    name = "postflight-tap",
+    srcs = ["postflight-tap.sh"],
     visibility = ["//visibility:public"],
 )

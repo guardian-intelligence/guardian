@@ -88,9 +88,10 @@ type Config struct {
 	Guest Guest
 	// GuestNetwork selects every VM's egress datapath (see LaunchSpec).
 	GuestNetwork string
-	// TapUpScript attaches and isolates a QEMU-created tap. It is required for
-	// the tap datapath and ignored by other modes.
-	TapUpScript string
+	// TapLifecycle creates and destroys the host interface owned by a tap VM.
+	// It is required for the tap datapath and may also clean up tap VMs adopted
+	// across a hostd configuration change.
+	TapLifecycle TapLifecycle
 	Logger       *slog.Logger
 	Timing       *timing.Recorder
 }
@@ -113,10 +114,8 @@ func (c *Config) validate() error {
 		return errors.New("vm: Guest is required")
 	case c.GuestNetwork != "" && c.GuestNetwork != "none" && c.GuestNetwork != guestNetworkUser && c.GuestNetwork != guestNetworkTap:
 		return fmt.Errorf("vm: unknown GuestNetwork %q", c.GuestNetwork)
-	case c.GuestNetwork == guestNetworkTap && c.TapUpScript == "":
-		return errors.New("vm: TapUpScript is required for tap networking")
-	case c.GuestNetwork == guestNetworkTap && (!filepath.IsAbs(c.TapUpScript) || strings.Contains(c.TapUpScript, ",")):
-		return fmt.Errorf("vm: TapUpScript %q must be an absolute QEMU-option-safe path", c.TapUpScript)
+	case c.GuestNetwork == guestNetworkTap && c.TapLifecycle == nil:
+		return errors.New("vm: TapLifecycle is required for tap networking")
 	}
 	for class, shape := range c.Classes {
 		if shape.CPUs <= 0 || shape.MemoryMiB <= 0 || shape.Image == "" {
@@ -239,6 +238,9 @@ type meta struct {
 	ProcessMountpoint   string `json:"process_mountpoint,omitempty"`
 	// CID is the VM's vsock address for the guestd channel.
 	CID uint32 `json:"cid"`
+	// TapName is the host interface this VM owns. Persisting it makes cleanup
+	// independent of hostd's current network mode after a restart.
+	TapName string `json:"tap_name,omitempty"`
 	// RootDataset is the per-VM root clone.
 	RootDataset string `json:"root_dataset"`
 	// Argv is the exact invocation; liveness probes match against it so a
@@ -343,7 +345,6 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 		StateDir:     dir,
 		VsockCID:     cid,
 		GuestNetwork: q.cfg.GuestNetwork,
-		TapUpScript:  q.cfg.TapUpScript,
 	}
 	argv := spec.Argv()
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -356,6 +357,9 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 	record := meta{
 		ID: id, Class: class, Image: shape.Image, CreatedUnixNS: time.Now().UnixNano(),
 		Incarnation: incarnation, CID: cid, RootDataset: dataset, Argv: argv, ArgvSHA256: argvDigest(argv),
+	}
+	if q.cfg.GuestNetwork == guestNetworkTap {
+		record.TapName, _ = tapIdentity(id, cid)
 	}
 	q.recordTiming(id, "vm_launch_started")
 	if err := q.writeMeta(record); err != nil {
@@ -375,8 +379,19 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 	if err := q.writeMeta(record); err != nil {
 		return err
 	}
+	if record.TapName != "" {
+		if err := q.cfg.TapLifecycle.Up(ctx, record.TapName); err != nil {
+			return errors.Join(
+				fmt.Errorf("vm: preparing tap %s for %s: %w", record.TapName, id, err),
+				q.cfg.TapLifecycle.Down(ctx, record.TapName),
+			)
+		}
+	}
 	if err := q.cfg.Launcher.Start(ctx, id, dir, argv); err != nil {
-		return err
+		if record.TapName == "" {
+			return err
+		}
+		return errors.Join(err, q.cfg.TapLifecycle.Down(ctx, record.TapName))
 	}
 	q.recordTiming(id, "qemu_started")
 	return nil
@@ -1105,6 +1120,18 @@ func (q *QEMU) destroyLocked(ctx context.Context, id ID) error {
 		dataset := record.RootDataset
 		if corrupt {
 			dataset = q.rootDataset(id)
+		}
+		tapName := record.TapName
+		if corrupt && q.cfg.TapLifecycle != nil {
+			tapName, _ = tapIdentity(id, 0)
+		}
+		if tapName != "" {
+			if q.cfg.TapLifecycle == nil {
+				return fmt.Errorf("vm: cannot remove tap %s without a tap lifecycle", tapName)
+			}
+			if err := q.cfg.TapLifecycle.Down(ctx, tapName); err != nil {
+				return fmt.Errorf("vm: removing tap %s for %s: %w", tapName, id, err)
+			}
 		}
 		if err := q.disks.Destroy(ctx, dataset); err != nil {
 			return err
