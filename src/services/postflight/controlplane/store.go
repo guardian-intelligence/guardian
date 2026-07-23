@@ -447,8 +447,12 @@ const sqlEnsureProviderDemand = `
 INSERT INTO github_provider_demands (
     provider_job_id, provider_installation_id, provider_repository_id, repository_full_name,
     provider_run_id, provider_run_attempt, trust_class, runner_class,
-    workspace_scope_id, state, last_delivery_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, 'demand_recorded', $10)
+    workspace_scope_id, source_generation, state, last_delivery_id
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid,
+    COALESCE((SELECT current_generation_id FROM workspace_scopes WHERE scope_id = NULLIF($9, '')::uuid), ''),
+    'demand_recorded', $10
+)
 ON CONFLICT (provider_job_id) DO UPDATE SET
     provider_installation_id = EXCLUDED.provider_installation_id,
     provider_repository_id = EXCLUDED.provider_repository_id,
@@ -470,6 +474,11 @@ func (s *pgStore) EnsureProviderDemand(ctx context.Context, d demandRow) (string
 		d.WorkspaceScopeID, d.LastDeliveryID,
 	).Scan(&state)
 	return state, err
+}
+
+func (s *pgStore) NotifyJobPlans(ctx context.Context) error {
+	_, err := s.pool.Exec(ctx, `SELECT pg_notify('postflight_job_plans', '')`)
+	return err
 }
 
 // sqlAppendDemandProblem mirrors the delivery problem append, additionally

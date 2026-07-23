@@ -94,7 +94,7 @@ func main() {
 		}()
 	}
 
-	mux := buildMux(cfg, st, ws, tracer)
+	mux := buildMux(ctx, cfg, st, ws, tracer)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.listenAddr,
@@ -133,14 +133,18 @@ func main() {
 // buildMux assembles the full HTTP surface; the e2e test serves exactly
 // this. The hostd sync endpoint only exists when a sync secret is
 // configured — with the env var unset the deploy stays inert.
-func buildMux(cfg config, st *pgStore, ws *webhookServer, tracer trace.Tracer) *http.ServeMux {
+func buildMux(ctx context.Context, cfg config, st *pgStore, ws *webhookServer, tracer trace.Tracer) *http.ServeMux {
 	mux := http.NewServeMux()
 	// Method handling is the handlers' own (405 + Allow with a problem doc),
 	// so no method patterns here.
 	mux.HandleFunc("/api/v1/github/webhooks", ws.handleWebhook)
 	if cfg.hostdSyncSecret != "" {
-		ss := &syncServer{st: st, secret: []byte(cfg.hostdSyncSecret), sealTimeout: cfg.sealTimeout, tracer: tracer}
+		ss := &syncServer{
+			st: st, secret: []byte(cfg.hostdSyncSecret), sealTimeout: cfg.sealTimeout, tracer: tracer,
+			jobPlans: newJobPlanBus(ctx, st.pool),
+		}
 		mux.HandleFunc(syncproto.SyncPath, ss.handleSync)
+		mux.HandleFunc(syncproto.JobPlanPath, ss.handleJobPlans)
 	}
 	health := func(w http.ResponseWriter, r *http.Request) {
 		hctx, hcancel := context.WithTimeout(r.Context(), 2*time.Second)

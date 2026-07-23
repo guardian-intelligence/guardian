@@ -518,6 +518,41 @@ func TestMountConvergesThroughUdevLag(t *testing.T) {
 	}
 }
 
+func TestNestedMountWaitsForParentVolume(t *testing.T) {
+	system := newFakeSystem()
+	for serial, device := range map[string]string{
+		"tool": "/dev/sdb", "workspace": "/dev/sdc", "process": "/dev/sdd",
+	} {
+		system.devices[serial] = device
+		system.blank[device] = false
+	}
+	server := &Server{cfg: Config{
+		System: system, RetryInterval: time.Millisecond,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}}
+	mounts := []guestproto.Mount{
+		{Serial: "tool", Filesystem: "ext4", Mountpoint: "/home/runner"},
+		{Serial: "workspace", Filesystem: "ext4", Mountpoint: "/home/runner/_work/repo/repo"},
+		{Serial: "process", Filesystem: "ext4", Mountpoint: "/var/lib/postflight/process"},
+	}
+	if err := server.convergeMounts(context.Background(), mounts); err != nil {
+		t.Fatal(err)
+	}
+	entries := system.entries()
+	parent, child := -1, -1
+	for index, entry := range entries {
+		switch {
+		case strings.Contains(entry, "at /home/runner options="):
+			parent = index
+		case strings.Contains(entry, "at /home/runner/_work/repo/repo options="):
+			child = index
+		}
+	}
+	if parent < 0 || child < 0 || parent >= child {
+		t.Fatalf("nested mount order is unsafe: %v", entries)
+	}
+}
+
 func TestMountThatCannotConvergeKeepsWorkerBlockedForRecycle(t *testing.T) {
 	w := newWorld(t, func(cfg *Config) { cfg.MountDeadline = 30 * time.Millisecond }, nil)
 	// No device ever appears.

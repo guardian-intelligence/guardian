@@ -354,26 +354,29 @@ WHERE provider_job_id = $1`, providerJobID, observed.RequestID, observed.JobID);
 	var assignmentID string
 	if err := tx.QueryRow(ctx, `
 INSERT INTO runner_job_assignments (
-    member_id, provider_job_id, host_id, request_id, protocol_job_id, check_run_id,
+    assignment_id, member_id, provider_job_id, host_id, request_id, protocol_job_id, check_run_id,
     runner_name, job_display_name, run_id, run_attempt, repository,
     workflow_job, state, workspace_scope_id, source_generation,
     source_process_digest, source_process_version, timing_json
 )
-SELECT $1, i.provider_job_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-       'observed', d.workspace_scope_id, COALESCE(s.current_generation_id, ''),
-       COALESCE(CASE WHEN g.process_valid THEN g.process_digest END, ''),
-       COALESCE(CASE WHEN g.process_valid THEN g.criu_version END, ''), $12::jsonb
+SELECT d.plan_id, $1, i.provider_job_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+       'observed', d.workspace_scope_id,
+       COALESCE(CASE WHEN g.host_id = $2 THEN d.source_generation END, ''),
+       COALESCE(CASE WHEN g.host_id = $2 AND g.process_valid THEN g.process_digest END, ''),
+       COALESCE(CASE WHEN g.host_id = $2 AND g.process_valid THEN g.criu_version END, ''), $12::jsonb
 FROM github_job_intents i
 JOIN github_provider_demands d ON d.provider_job_id = i.provider_job_id
-LEFT JOIN workspace_scopes s ON s.scope_id = d.workspace_scope_id
-LEFT JOIN workspace_generations g ON g.generation = s.current_generation_id
+LEFT JOIN workspace_generations g ON g.generation = d.source_generation
 WHERE i.provider_job_id = $13
 RETURNING assignment_id::text`, member.MemberID, hostID, observed.RequestID, observed.JobID, observed.CheckRunID,
 		runnerName, observed.JobDisplayName, observed.Identity.RunID, observed.Identity.RunAttempt,
 		observed.Identity.Repository, observed.Identity.WorkflowJob, string(timing), providerJobID).Scan(&assignmentID); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `UPDATE runner_pool_members SET state = 'assigned', updated_at = now() WHERE member_id = $1`, member.MemberID)
+	if _, err = tx.Exec(ctx, `UPDATE runner_pool_members SET state = 'assigned', updated_at = now() WHERE member_id = $1`, member.MemberID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `SELECT pg_notify('postflight_job_plans', '')`)
 	return err
 }
 
@@ -392,6 +395,13 @@ func (s *pgStore) ApplyAssignmentReport(ctx context.Context, hostID string, repo
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if report.Observed != nil {
+		if err := bindObservedAssignment(ctx, tx, hostID, syncproto.PoolMemberReport{
+			MemberID: report.MemberID, Assignment: report.Observed,
+		}); err != nil {
+			return err
+		}
+	}
 	var providerJobID int64
 	var state, trustClass, scopeID, sourceGeneration, class string
 	err = tx.QueryRow(ctx, `
@@ -592,6 +602,55 @@ type desiredAssignmentRow struct {
 	WorkspaceBytes, ToolBytes, ProcessBytes             int64
 	ProcessDigest, ProcessVersion                       string
 	SealGeneration, CheckpointDigest, CheckpointVersion string
+}
+
+type jobPlanRow struct {
+	PlanID, Repository, RunnerClass, SourceGeneration string
+	ProviderJobID, InstallationID, RepositoryID       int64
+	CheckRunID                                        int64
+	RunID                                             string
+	RunAttempt                                        int
+	JobDisplayName                                    string
+	WorkspaceBytes, ToolBytes, ProcessBytes           int64
+	ProcessDigest, ProcessVersion                     string
+}
+
+func (s *pgStore) ListJobPlans(ctx context.Context, hostID string) ([]jobPlanRow, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT d.plan_id::text, d.provider_job_id, d.provider_installation_id,
+       d.provider_repository_id, d.repository_full_name, d.runner_class,
+       j.check_run_id, d.provider_run_id::text, d.provider_run_attempt::integer,
+       j.name, CASE WHEN g.host_id = $1 THEN d.source_generation ELSE '' END,
+       c.disk_bytes, c.tool_disk_bytes, c.process_disk_bytes,
+       CASE WHEN g.host_id = $1 AND g.process_valid THEN g.process_digest ELSE '' END,
+       CASE WHEN g.host_id = $1 AND g.process_valid THEN g.criu_version ELSE '' END
+FROM github_provider_demands d
+JOIN github_workflow_jobs j USING (provider_job_id)
+JOIN runner_classes c ON c.class = d.runner_class
+JOIN host_slots slots ON slots.host_id = $1 AND slots.class = d.runner_class AND slots.total > 0
+LEFT JOIN workspace_generations g ON g.generation = d.source_generation
+WHERE d.state IN ('demand_recorded', 'capacity_requested')
+  AND j.status = 'queued' AND j.check_run_id > 0
+ORDER BY d.provider_job_id`, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	plans := []jobPlanRow{}
+	for rows.Next() {
+		var row jobPlanRow
+		if err := rows.Scan(
+			&row.PlanID, &row.ProviderJobID, &row.InstallationID,
+			&row.RepositoryID, &row.Repository, &row.RunnerClass,
+			&row.CheckRunID, &row.RunID, &row.RunAttempt, &row.JobDisplayName,
+			&row.SourceGeneration, &row.WorkspaceBytes, &row.ToolBytes, &row.ProcessBytes,
+			&row.ProcessDigest, &row.ProcessVersion,
+		); err != nil {
+			return nil, err
+		}
+		plans = append(plans, row)
+	}
+	return plans, rows.Err()
 }
 
 func (s *pgStore) ListDesiredAssignments(ctx context.Context, hostID string) ([]desiredAssignmentRow, error) {

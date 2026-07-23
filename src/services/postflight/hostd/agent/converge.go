@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/checkoutbundle"
@@ -18,27 +19,52 @@ import (
 
 func (a *Agent) Tick(ctx context.Context) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if !a.synced {
+		a.mu.Unlock()
 		return
 	}
+	members := cloneMap(a.desiredMembers)
+	assignments := cloneMap(a.assignments)
+	desiredAssignments := cloneMap(a.desiredAssignments)
+	quarantinedMembers := cloneMap(a.quarantinedMembers)
+	quarantinedJobs := cloneMap(a.quarantinedJobs)
+	reap := append([]zvol.GenerationID(nil), a.reap...)
+	poolTargets := cloneMap(a.poolTargets)
+	a.mu.Unlock()
 	started := time.Now()
 	view, err := a.listVMs(ctx)
 	if err != nil {
 		a.logger.Error("listing vms", "err", err)
 		return
 	}
-	a.stepMembers(ctx, view)
-	for _, id := range sortedAssignmentIDs(a.assignments) {
-		a.stepAssignment(ctx, a.assignments[id], view)
+	a.stepMembers(ctx, view, members, quarantinedMembers, assignments)
+	for _, id := range sortedAssignmentIDs(assignments) {
+		record := assignments[id]
+		record.mu.Lock()
+		if !quarantinedJobs[id] {
+			a.stepAssignment(ctx, record, view)
+		}
+		record.mu.Unlock()
 	}
-	a.reapGenerations(ctx)
-	a.reconcilePool(ctx, view)
-	a.collectOrphans(ctx, view)
-	a.pruneTraces()
+	a.reapGenerations(ctx, desiredAssignments, reap)
+	a.reconcilePool(ctx, view, poolTargets, assignments)
+	a.collectOrphans(ctx, view, assignments, desiredAssignments, quarantinedJobs)
+	a.mu.Lock()
+	traceMembers := cloneMap(a.desiredMembers)
+	traceAssignments := cloneMap(a.assignments)
+	a.mu.Unlock()
+	a.pruneTraces(traceMembers, traceAssignments)
 	a.logger.Info("postflight.hostd.convergence.completed",
 		"duration_ns", time.Since(started).Nanoseconds(), "vms", len(view.byID),
-		"members", len(a.desiredMembers), "assignments", len(a.assignments))
+		"members", len(members), "assignments", len(assignments))
+}
+
+func cloneMap[K comparable, V any](input map[K]V) map[K]V {
+	output := make(map[K]V, len(input))
+	for key, value := range input {
+		output[key] = value
+	}
+	return output
 }
 
 type vmView struct {
@@ -76,9 +102,9 @@ func (a *Agent) listVMs(ctx context.Context) (*vmView, error) {
 	return view, nil
 }
 
-func (a *Agent) stepMembers(ctx context.Context, view *vmView) {
-	for memberID, desired := range a.desiredMembers {
-		if a.quarantinedMembers[memberID] {
+func (a *Agent) stepMembers(ctx context.Context, view *vmView, members map[string]syncproto.DesiredPoolMember, quarantined map[string]bool, assignments map[string]*assignment) {
+	for memberID, desired := range members {
+		if quarantined[memberID] {
 			continue
 		}
 		status, ok := view.byMember[memberID]
@@ -90,13 +116,13 @@ func (a *Agent) stepMembers(ctx context.Context, view *vmView) {
 			a.logger.Error("opening pool-member evidence", "member_id", memberID, "vm", status.ID, "err", err)
 		} else {
 			a.appendBootstrapTiming(trace, status.Timing)
-			if trace != nil && (trace.seen["runner_registered"] || status.Phase == vm.PhaseListening) {
+			if trace != nil && (a.traceEventSeen(trace, "runner_registered") || status.Phase == vm.PhaseListening) {
 				a.appendTrace(trace, nil, "pool_ready", func(event *traceEvent) {
 					event.Platform = a.platformEvidence()
 				})
 			}
 		}
-		assignmentOwned := a.assignmentOwnsMember(memberID)
+		assignmentOwned := assignmentOwnsMember(assignments, memberID)
 		if desired.State == syncproto.DesiredMemberRecycle {
 			if assignmentOwned {
 				continue
@@ -136,32 +162,34 @@ func (a *Agent) stepMembers(ctx context.Context, view *vmView) {
 	}
 }
 
-func (a *Agent) assignmentOwnsMember(memberID string) bool {
-	for _, record := range a.assignments {
-		if record.spec.MemberID == memberID {
+func assignmentOwnsMember(assignments map[string]*assignment, memberID string) bool {
+	for _, record := range assignments {
+		if record.memberID == memberID {
 			return true
 		}
 	}
 	return false
 }
 
-func (a *Agent) stepStatus(ctx context.Context, status vm.Status) {
-	for _, record := range a.assignments {
+func (a *Agent) stepStatus(ctx context.Context, status vm.Status, assignments map[string]*assignment, quarantined map[string]bool) {
+	for id, record := range assignments {
+		record.mu.Lock()
 		if record.spec.MemberID == status.Incarnation {
-			a.stepAssignment(ctx, record, &vmView{
-				byID:     map[vm.ID]vm.Status{status.ID: status},
-				byMember: map[string]vm.Status{status.Incarnation: status},
-				warm:     map[vm.Class][]vm.ID{}, countByCl: map[vm.Class]int{status.Class: 1},
-			})
+			if !quarantined[id] {
+				a.stepAssignment(ctx, record, &vmView{
+					byID:     map[vm.ID]vm.Status{status.ID: status},
+					byMember: map[string]vm.Status{status.Incarnation: status},
+					warm:     map[vm.Class][]vm.ID{}, countByCl: map[vm.Class]int{status.Class: 1},
+				})
+			}
+			record.mu.Unlock()
 			return
 		}
+		record.mu.Unlock()
 	}
 }
 
 func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vmView) {
-	if a.quarantinedJobs[record.spec.AssignmentID] {
-		return
-	}
 	if record.termination != "" {
 		a.finishPendingTermination(ctx, record)
 		return
@@ -377,14 +405,32 @@ func validateRuntimeIdentity(expected syncproto.JobIdentity, observed vm.JobIden
 
 func (a *Agent) materialize(ctx context.Context, record *assignment) error {
 	spec := record.spec
-	workspace, err := a.zvols.EnsureWorkspace(ctx, zvol.AssignmentID(spec.AssignmentID), zvol.GenerationID(spec.Workspace.Generation), spec.Workspace.SizeBytes)
-	if err != nil {
-		return fmt.Errorf("workspace: %w", err)
-	}
-	tool, err := a.zvols.EnsureTool(ctx, zvol.AssignmentID(spec.AssignmentID), zvol.GenerationID(spec.Tool.Generation), toolVolumeSize(spec.Tool.SizeBytes))
-	if err != nil {
-		return fmt.Errorf("tool: %w", err)
-	}
+	materializeCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var workspace zvol.WorkspaceVolume
+	var tool zvol.ToolVolume
+	var process zvol.ProcessVolume
+	errs := make([]error, 3)
+	var wait sync.WaitGroup
+	wait.Add(3)
+	go func() {
+		defer wait.Done()
+		started := time.Now()
+		workspace, errs[0] = a.zvols.EnsureWorkspace(materializeCtx, zvol.AssignmentID(spec.AssignmentID), zvol.GenerationID(spec.Workspace.Generation), spec.Workspace.SizeBytes)
+		if errs[0] != nil {
+			cancel()
+		}
+		a.logger.Info("postflight.hostd.volume.materialized", "assignment_id", spec.AssignmentID, "role", "workspace", "duration_ns", time.Since(started).Nanoseconds())
+	}()
+	go func() {
+		defer wait.Done()
+		started := time.Now()
+		tool, errs[1] = a.zvols.EnsureTool(materializeCtx, zvol.AssignmentID(spec.AssignmentID), zvol.GenerationID(spec.Tool.Generation), toolVolumeSize(spec.Tool.SizeBytes))
+		if errs[1] != nil {
+			cancel()
+		}
+		a.logger.Info("postflight.hostd.volume.materialized", "assignment_id", spec.AssignmentID, "role", "tool", "duration_ns", time.Since(started).Nanoseconds())
+	}()
 	processGeneration := zvol.GenerationID("")
 	if spec.Process.ExpectedDigest != "" {
 		processGeneration = zvol.GenerationID(spec.Process.Generation)
@@ -393,9 +439,20 @@ func (a *Agent) materialize(ctx context.Context, record *assignment) error {
 	if processSize == 0 {
 		processSize = defaultProcessVolumeSizeBytes
 	}
-	process, err := a.zvols.EnsureProcess(ctx, zvol.AssignmentID(spec.AssignmentID), processGeneration, processSize)
-	if err != nil {
-		return fmt.Errorf("process: %w", err)
+	go func() {
+		defer wait.Done()
+		started := time.Now()
+		process, errs[2] = a.zvols.EnsureProcess(materializeCtx, zvol.AssignmentID(spec.AssignmentID), processGeneration, processSize)
+		if errs[2] != nil {
+			cancel()
+		}
+		a.logger.Info("postflight.hostd.volume.materialized", "assignment_id", spec.AssignmentID, "role", "process", "duration_ns", time.Since(started).Nanoseconds())
+	}()
+	wait.Wait()
+	for index, err := range errs {
+		if err != nil {
+			return fmt.Errorf("%s: %w", []string{"workspace", "tool", "process"}[index], err)
+		}
 	}
 	record.device, record.volume = workspace.Device, workspace
 	record.toolDevice, record.toolVolume = tool.Device, tool
@@ -564,14 +621,14 @@ func workspaceMountpoint(repository string) string {
 	return runnerWorkRoot + "/" + name + "/" + name
 }
 
-func (a *Agent) reapGenerations(ctx context.Context) {
+func (a *Agent) reapGenerations(ctx context.Context, desiredAssignments map[string]syncproto.DesiredAssignment, reap []zvol.GenerationID) {
 	referenced := map[zvol.GenerationID]bool{}
-	for _, desired := range a.desiredAssignments {
+	for _, desired := range desiredAssignments {
 		if desired.Workspace.Generation != "" {
 			referenced[zvol.GenerationID(desired.Workspace.Generation)] = true
 		}
 	}
-	for _, generation := range a.reap {
+	for _, generation := range reap {
 		if referenced[generation] {
 			continue
 		}

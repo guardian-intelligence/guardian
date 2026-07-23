@@ -12,14 +12,17 @@ func (a *Agent) ResolveActiveAssignment(_ context.Context, executionID, attemptI
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, record := range a.assignments {
+		record.mu.Lock()
 		if record.state.Terminal() {
+			record.mu.Unlock()
 			continue
 		}
 		spec := record.spec
 		if spec.ExecutionID != executionID || spec.AttemptID != attemptID {
+			record.mu.Unlock()
 			continue
 		}
-		return checkoutbundle.AssignmentIdentity{
+		identity := checkoutbundle.AssignmentIdentity{
 			ExecutionID:        spec.ExecutionID,
 			AttemptID:          spec.AttemptID,
 			OrgID:              spec.OrgID,
@@ -28,7 +31,9 @@ func (a *Agent) ResolveActiveAssignment(_ context.Context, executionID, attemptI
 			RepositoryFullName: spec.RepositoryFullName,
 			RunnerClass:        spec.RunnerClass,
 			RunnerName:         spec.Identity.RunnerName,
-		}, true, nil
+		}
+		record.mu.Unlock()
+		return identity, true, nil
 	}
 	return checkoutbundle.AssignmentIdentity{}, false, nil
 }

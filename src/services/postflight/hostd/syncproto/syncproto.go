@@ -3,7 +3,10 @@
 // assignment, and durable generation selection remain separate identities.
 package syncproto
 
-const SyncPath = "/api/v1/hostd/sync"
+const (
+	SyncPath    = "/api/v1/hostd/sync"
+	JobPlanPath = "/api/v1/hostd/job-plans"
+)
 
 type SyncRequest struct {
 	HostID      string             `json:"host_id"`
@@ -128,6 +131,7 @@ type AssignmentReport struct {
 	Checkpoint       *CheckpointArtifact `json:"checkpoint,omitempty"`
 	SealedGeneration string              `json:"sealed_generation,omitempty"`
 	Timing           []TimingPoint       `json:"timing,omitempty"`
+	Observed         *ObservedAssignment `json:"observed,omitempty"`
 }
 
 type RestoreReport struct {
@@ -149,6 +153,35 @@ type SyncResponse struct {
 	Reap            []string            `json:"reap"`
 	PoolTargets     map[string]int      `json:"pool_targets"`
 	PollAfterMillis int                 `json:"poll_after_millis"`
+}
+
+// JobPlanSnapshot is a host-specific, level-triggered view of queued work.
+// The control plane holds a request while Cursor is current and returns as
+// soon as a committed demand changes the view.
+type JobPlanSnapshot struct {
+	Cursor string    `json:"cursor"`
+	Plans  []JobPlan `json:"plans"`
+}
+
+// JobPlan fixes the durable generation before GitHub chooses a listener.
+// Member and runner-protocol identities are deliberately absent: hostd binds
+// those fields from the selected VM's authenticated local assignment event.
+type JobPlan struct {
+	PlanID             string        `json:"plan_id"`
+	ExecutionID        string        `json:"execution_id"`
+	AttemptID          string        `json:"attempt_id"`
+	CheckRunID         int64         `json:"check_run_id"`
+	RunID              string        `json:"run_id"`
+	RunAttempt         int           `json:"run_attempt"`
+	JobDisplayName     string        `json:"job_display_name"`
+	OrgID              string        `json:"org_id"`
+	InstallationID     int64         `json:"installation_id"`
+	RepositoryID       int64         `json:"repository_id"`
+	RepositoryFullName string        `json:"repository_full_name"`
+	RunnerClass        string        `json:"runner_class"`
+	Workspace          WorkspaceSpec `json:"workspace"`
+	Tool               WorkspaceSpec `json:"tool"`
+	Process            ProcessSpec   `json:"process"`
 }
 
 type DesiredMemberState string

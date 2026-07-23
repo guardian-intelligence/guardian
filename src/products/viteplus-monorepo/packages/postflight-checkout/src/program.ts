@@ -199,6 +199,7 @@ export const acquirePack = Effect.fn("postflight.checkout.acquirePack")(function
     endpoint: prepared.runtime.endpoint,
     executionId: prepared.runtime.executionId,
     githubToken: prepared.runtime.githubToken,
+    have: prepared.preexistingHead,
     maximumBytes: MAXIMUM_PACK_BYTES,
     spec: prepared.spec,
   } as const;

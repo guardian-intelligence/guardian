@@ -469,6 +469,9 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 	}); err != nil {
 		return fmt.Errorf("ensure demand: %w", err)
 	}
+	if err := w.st.NotifyJobPlans(ctx); err != nil {
+		return fmt.Errorf("publish job plan: %w", err)
+	}
 	a := attrs
 	a.Result = "succeeded"
 	emitEvent(ctx, evDemandRecorded, a)

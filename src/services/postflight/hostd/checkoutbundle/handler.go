@@ -91,6 +91,9 @@ func (s *Service) handleBundle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(shaHeader, spec.SHA)
 	w.Header().Set(sizeHeader, strconv.FormatInt(bundle.SizeBytes, 10))
 	w.Header().Set(cacheHitHeader, strconv.FormatBool(bundle.CacheHit))
+	if bundle.ThinBase != "" {
+		w.Header().Set(thinBaseHeader, bundle.ThinBase)
+	}
 	written, copyErr := io.Copy(w, file)
 	s.Metrics.BytesServed.Add(written)
 	s.cfg.Logger.Info("checkout bundle served",

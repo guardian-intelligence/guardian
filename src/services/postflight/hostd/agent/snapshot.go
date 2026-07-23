@@ -31,6 +31,7 @@ func (a *Agent) Snapshot() []AssignmentSnapshot {
 	defer a.mu.Unlock()
 	snapshots := make([]AssignmentSnapshot, 0, len(a.assignments))
 	for _, record := range a.assignments {
+		record.mu.Lock()
 		snapshots = append(snapshots, AssignmentSnapshot{
 			AssignmentID: record.spec.AssignmentID, MemberID: record.spec.MemberID,
 			RequestID: record.spec.RequestID, JobID: record.spec.JobID, CheckRunID: record.spec.CheckRunID,
@@ -39,6 +40,7 @@ func (a *Agent) Snapshot() []AssignmentSnapshot {
 			ExitCode: record.exit, Reason: record.reason, Restore: record.restore,
 			SealedGeneration: record.sealGen, Quarantined: a.quarantinedJobs[record.spec.AssignmentID],
 		})
+		record.mu.Unlock()
 	}
 	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].AssignmentID < snapshots[j].AssignmentID })
 	return snapshots

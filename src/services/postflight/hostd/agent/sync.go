@@ -64,13 +64,28 @@ func validateAssignment(spec syncproto.DesiredAssignment) error {
 	return nil
 }
 
-func sameImmutableAssignment(left, right syncproto.DesiredAssignment) bool {
-	return left.AssignmentID == right.AssignmentID && left.MemberID == right.MemberID &&
-		left.RequestID == right.RequestID && left.JobID == right.JobID && left.CheckRunID == right.CheckRunID &&
-		left.ExecutionID == right.ExecutionID && left.AttemptID == right.AttemptID &&
-		left.RepositoryFullName == right.RepositoryFullName && left.RunnerClass == right.RunnerClass &&
-		left.Identity == right.Identity && left.Workspace == right.Workspace &&
-		left.Tool == right.Tool && left.Process == right.Process
+func immutableAssignmentDifference(left, right syncproto.DesiredAssignment) string {
+	checks := []struct {
+		name  string
+		equal bool
+	}{
+		{"assignment_id", left.AssignmentID == right.AssignmentID},
+		{"member_id", left.MemberID == right.MemberID},
+		{"runner_protocol", left.RequestID == right.RequestID && left.JobID == right.JobID && left.CheckRunID == right.CheckRunID},
+		{"execution", left.ExecutionID == right.ExecutionID && left.AttemptID == right.AttemptID},
+		{"repository", left.RepositoryFullName == right.RepositoryFullName},
+		{"runner_class", left.RunnerClass == right.RunnerClass},
+		{"identity", left.Identity == right.Identity},
+		{"workspace", left.Workspace == right.Workspace},
+		{"tool", left.Tool == right.Tool},
+		{"process", left.Process == right.Process},
+	}
+	for _, check := range checks {
+		if !check.equal {
+			return check.name
+		}
+	}
+	return ""
 }
 
 func (a *Agent) applyDesired(response syncproto.SyncResponse) {
@@ -114,7 +129,8 @@ func (a *Agent) applyDesired(response syncproto.SyncResponse) {
 		if record == nil {
 			point := a.timing.Point("assignment_update_received")
 			record = &assignment{
-				spec: spec, state: syncproto.AssignmentObserved, since: a.now(),
+				memberID: spec.MemberID,
+				spec:     spec, state: syncproto.AssignmentObserved, since: a.now(),
 				updateTiming: vm.TimingPoint{
 					Event: point.Event, Source: point.Source, BootID: point.BootID,
 					Sequence: point.Sequence, MonotonicNS: point.MonotonicNS, UnixNS: point.UnixNS,
@@ -131,25 +147,31 @@ func (a *Agent) applyDesired(response syncproto.SyncResponse) {
 			a.assignments[spec.AssignmentID] = record
 			continue
 		}
-		if !sameImmutableAssignment(record.spec, spec) {
+		record.mu.Lock()
+		if difference := immutableAssignmentDifference(record.spec, spec); difference != "" {
 			quarantinedJobs[spec.AssignmentID] = true
 			a.metrics.RejectedAssignments.Add(1)
-			a.logger.Error("rejecting mutation of immutable assignment", "assignment_id", spec.AssignmentID)
+			a.logger.Error("rejecting mutation of immutable assignment", "assignment_id", spec.AssignmentID, "field", difference,
+				"local_workspace", record.spec.Workspace, "desired_workspace", spec.Workspace)
+			record.mu.Unlock()
 			continue
 		}
 		record.spec.State = spec.State
 		record.spec.SealGeneration = spec.SealGeneration
 		record.spec.SealCheckpoint = spec.SealCheckpoint
+		record.mu.Unlock()
 	}
 
 	a.desiredMembers = members
 	a.desiredAssignments = desiredAssignments
 	for id, record := range a.assignments {
+		record.mu.Lock()
 		if record.state == syncproto.AssignmentExited {
 			if _, stillDesired := desiredAssignments[id]; !stillDesired {
 				record.enter(syncproto.AssignmentCompleted, a.now())
 			}
 		}
+		record.mu.Unlock()
 	}
 	a.quarantinedMembers = quarantinedMembers
 	a.quarantinedJobs = quarantinedJobs
@@ -171,6 +193,10 @@ func (a *Agent) applyDesired(response syncproto.SyncResponse) {
 }
 
 func (a *Agent) buildReport(ctx context.Context) (syncproto.SyncRequest, error) {
+	a.mu.Lock()
+	desiredMembers := cloneMap(a.desiredMembers)
+	assignments := cloneMap(a.assignments)
+	a.mu.Unlock()
 	request := syncproto.SyncRequest{
 		HostID: a.cfg.HostID, BootID: a.bootID,
 		Platform: syncproto.PlatformReport{
@@ -208,7 +234,7 @@ func (a *Agent) buildReport(ctx context.Context) (syncproto.SyncRequest, error) 
 			MemberID: status.Incarnation, VMID: string(status.ID), Class: string(status.Class),
 			Image: status.Image, State: memberState(status),
 		}
-		if desired, ok := a.desiredMembers[status.Incarnation]; ok {
+		if desired, ok := desiredMembers[status.Incarnation]; ok {
 			member.RunnerName = desired.RunnerName
 		}
 		if status.Assignment.RequestID != "" {
@@ -223,8 +249,10 @@ func (a *Agent) buildReport(ctx context.Context) (syncproto.SyncRequest, error) 
 	for _, slot := range slots {
 		request.Slots = append(request.Slots, *slot)
 	}
-	for _, record := range a.assignments {
+	for _, record := range assignments {
+		record.mu.Lock()
 		request.Assignments = append(request.Assignments, record.report())
+		record.mu.Unlock()
 	}
 	generations, workspaces, err := a.zvols.Inventory(ctx)
 	if err != nil {
@@ -289,9 +317,7 @@ func observedAssignment(input vm.Assignment) *syncproto.ObservedAssignment {
 
 func (a *Agent) syncOnce(ctx context.Context) (time.Duration, error) {
 	started := time.Now()
-	a.mu.Lock()
 	request, err := a.buildReport(ctx)
-	a.mu.Unlock()
 	if err != nil {
 		return 0, fmt.Errorf("build report: %w", err)
 	}
@@ -325,6 +351,7 @@ func (a *Agent) syncOnce(ctx context.Context) (time.Duration, error) {
 	a.mu.Lock()
 	a.applyDesired(desired)
 	a.mu.Unlock()
+	a.retryDeferredUpdates(ctx)
 	a.logger.Info("postflight.hostd.sync.completed", "duration_ns", time.Since(started).Nanoseconds(),
 		"reported_members", len(request.Members), "reported_assignments", len(request.Assignments),
 		"desired_members", len(desired.Members), "desired_assignments", len(desired.Assignments))

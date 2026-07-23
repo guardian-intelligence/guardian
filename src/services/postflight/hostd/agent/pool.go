@@ -10,12 +10,12 @@ import (
 // within this host's fixed slot totals. Destroy-and-refill is the governor's
 // whole vocabulary: it launches fresh VMs and destroys idle ones, never
 // touches a busy member, and never reuses anything.
-func (a *Agent) reconcilePool(ctx context.Context, vms *vmView) {
+func (a *Agent) reconcilePool(ctx context.Context, vms *vmView, poolTargets map[vm.Class]int, assignments map[string]*assignment) {
 	// A host configuration can stop serving a class while idle VMs from its
 	// previous configuration still exist on disk. Busy members finish under
 	// their original class and are reclaimed by their assignment lifecycle.
 	for id, status := range vms.byID {
-		if _, configured := a.cfg.Slots[status.Class]; configured || !a.poolVMCanRecycle(status) {
+		if _, configured := a.cfg.Slots[status.Class]; configured || !poolVMCanRecycle(status, assignments) {
 			continue
 		}
 		if err := a.vms.Destroy(ctx, id); err != nil {
@@ -27,7 +27,7 @@ func (a *Agent) reconcilePool(ctx context.Context, vms *vmView) {
 	}
 
 	for class, total := range a.cfg.Slots {
-		target := a.poolTargets[class]
+		target := poolTargets[class]
 		if target > total {
 			target = total
 		}
@@ -36,7 +36,7 @@ func (a *Agent) reconcilePool(ctx context.Context, vms *vmView) {
 		// replaced. Busy members finish under the image they started with.
 		if image := a.cfg.Images[class]; image != "" {
 			for id, status := range vms.byID {
-				if status.Class != class || status.Image == image || !a.poolVMCanRecycle(status) {
+				if status.Class != class || status.Image == image || !poolVMCanRecycle(status, assignments) {
 					continue
 				}
 				if err := a.vms.Destroy(ctx, id); err != nil {
@@ -97,8 +97,8 @@ func (a *Agent) reconcilePool(ctx context.Context, vms *vmView) {
 	}
 }
 
-func (a *Agent) poolVMCanRecycle(status vm.Status) bool {
-	if status.Assignment.RequestID != "" || a.assignmentOwnsMember(status.MemberID) {
+func poolVMCanRecycle(status vm.Status, assignments map[string]*assignment) bool {
+	if status.Assignment.RequestID != "" || assignmentOwnsMember(assignments, status.MemberID) {
 		return false
 	}
 	switch status.Phase {

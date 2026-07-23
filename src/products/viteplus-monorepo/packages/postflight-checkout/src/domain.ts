@@ -141,6 +141,7 @@ export interface CheckoutBundleRequest {
   readonly endpoint: URL;
   readonly executionId: ExecutionId;
   readonly githubToken: Option.Option<Redacted.Redacted<string>>;
+  readonly have: Option.Option<CommitSha>;
   readonly maximumBytes: number;
   readonly spec: CheckoutSpec;
 }
