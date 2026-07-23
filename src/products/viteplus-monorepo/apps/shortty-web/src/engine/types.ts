@@ -3,7 +3,15 @@ import type { VideoCodecChoice } from "./ladder";
 
 // A session source: a local file from the dropzone, or a remote mp4 (an X
 // post's CDN URL) that the engine reads with HTTP range requests.
-export type MediaSource = File | { readonly url: string; readonly name: string };
+export type MediaSource =
+  | File
+  | {
+      readonly url: string;
+      readonly name: string;
+      // The resolve trace that produced this URL; rides along so failures
+      // past the resolve hop (e.g. CDN fetch errors) still join to it.
+      readonly traceId?: string;
+    };
 
 export interface VideoTrackSummary {
   readonly width: number;

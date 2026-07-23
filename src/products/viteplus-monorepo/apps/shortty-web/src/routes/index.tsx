@@ -58,7 +58,11 @@ function Home() {
         })
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : "Could not read this file.";
-          emitSpan("shortty.probe_failed", { message });
+          const traceId = source instanceof File ? undefined : source.traceId;
+          emitSpan("shortty.probe_failed", {
+            message,
+            ...(traceId !== undefined && traceId !== "" && { "trace.id": traceId }),
+          });
           setSession({ kind: "rejected", message });
         });
     },
