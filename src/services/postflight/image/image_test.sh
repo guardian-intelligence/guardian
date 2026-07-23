@@ -58,6 +58,11 @@ grep -Fq 'ln -s /home/runner/_work "${mnt}/opt/actions-runner/_work"' "${build_s
   fail "runner work root is not backed by the durable runner-home volume"
 grep -Fq 'in_chroot install -d -o runner -g runner -m 0755 /home/runner/_work' "${build_sh}" ||
   fail "runner work target is absent before listener registration"
+grep -Fq 'Driver=virtio_net' "${build_sh}" ||
+  fail "networkd does not restrict DHCP to the QEMU virtio NIC"
+if grep -Fq 'Type=ether' "${build_sh}"; then
+  fail "networkd would claim workload-created veth devices"
+fi
 grep -Fq 'PACKER_TIMEOUT' "${build_upstream_sh}" ||
   fail "upstream image build has no hard timeout"
 grep -Fq 'qemu-img check -q "${cached_image}"' "${build_upstream_sh}" ||
