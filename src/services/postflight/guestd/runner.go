@@ -53,19 +53,15 @@ func ExecRunner(root, username string, logger *slog.Logger) RunRunner {
 		if err != nil {
 			return 0, fmt.Errorf("guestd: looking up %s: %w", username, err)
 		}
-		uid, err := strconv.ParseUint(account.Uid, 10, 32)
+		credential, err := accountCredential(account)
 		if err != nil {
-			return 0, fmt.Errorf("guestd: uid of %s: %w", username, err)
-		}
-		gid, err := strconv.ParseUint(account.Gid, 10, 32)
-		if err != nil {
-			return 0, fmt.Errorf("guestd: gid of %s: %w", username, err)
+			return 0, fmt.Errorf("guestd: credentials of %s: %w", username, err)
 		}
 
 		cmd := runnerCommand(ctx, root, jitConfig)
 		cmd.Dir = root
 		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)},
+			Credential: credential,
 		}
 		cmd.Env = runnerEnviron(account, env)
 
@@ -94,6 +90,43 @@ func ExecRunner(root, username string, logger *slog.Logger) RunRunner {
 		}
 		return 0, fmt.Errorf("guestd: waiting on runner: %w", err)
 	}
+}
+
+func accountCredential(account *user.User) (*syscall.Credential, error) {
+	uid, err := strconv.ParseUint(account.Uid, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("uid: %w", err)
+	}
+	gid, err := strconv.ParseUint(account.Gid, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("gid: %w", err)
+	}
+	rawGroups, err := account.GroupIds()
+	if err != nil {
+		return nil, fmt.Errorf("supplementary groups: %w", err)
+	}
+	groups, err := parseGroupIDs(rawGroups)
+	if err != nil {
+		return nil, err
+	}
+	return &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), Groups: groups}, nil
+}
+
+func parseGroupIDs(raw []string) ([]uint32, error) {
+	unique := make(map[uint32]struct{}, len(raw))
+	for _, value := range raw {
+		group, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("supplementary group %q: %w", value, err)
+		}
+		unique[uint32(group)] = struct{}{}
+	}
+	groups := make([]uint32, 0, len(unique))
+	for group := range unique {
+		groups = append(groups, group)
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i] < groups[j] })
+	return groups, nil
 }
 
 func runnerCommand(ctx context.Context, root, jitConfig string) *exec.Cmd {

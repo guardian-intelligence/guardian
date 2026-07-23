@@ -630,7 +630,7 @@ JOIN runner_classes c ON c.class = d.runner_class
 JOIN host_slots slots ON slots.host_id = $1 AND slots.class = d.runner_class AND slots.total > 0
 LEFT JOIN workspace_generations g ON g.generation = d.source_generation
 WHERE d.state IN ('demand_recorded', 'capacity_requested')
-  AND j.status = 'queued' AND j.check_run_id > 0
+  AND j.status IN ('queued', 'in_progress') AND j.check_run_id > 0
 ORDER BY d.provider_job_id`, hostID)
 	if err != nil {
 		return nil, err

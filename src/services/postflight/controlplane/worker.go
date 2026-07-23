@@ -433,9 +433,7 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 		}
 	}
 
-	if apiEv.Job.Status != "queued" {
-		// API is truth: the demand path is abandoned; the API version of the
-		// job already replaced the payload above.
+	if !jobCanStillRequireRendezvous(apiEv.Job.Status) {
 		if apiEv.Job.Status == "completed" {
 			a := attrs
 			a.Result, a.Reason = "succeeded", apiEv.Job.Conclusion
@@ -477,6 +475,10 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 	emitEvent(ctx, evDemandRecorded, a)
 	markDirty()
 	return nil
+}
+
+func jobCanStillRequireRendezvous(status string) bool {
+	return status == "queued" || status == "in_progress"
 }
 
 // refreshRunAndJobs is the in_progress/completed path: the payload's terminal

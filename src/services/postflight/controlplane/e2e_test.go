@@ -422,6 +422,11 @@ UPDATE github_provider_demands SET source_generation = $1
 WHERE provider_job_id = $2`, sourceGeneration, e2eJobID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := control.pool.Exec(context.Background(), `
+UPDATE github_workflow_jobs SET status = 'in_progress'
+WHERE provider_job_id = $1`, e2eJobID); err != nil {
+		t.Fatal(err)
+	}
 	if err := (&pgStore{pool: control.pool}).NotifyJobPlans(context.Background()); err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -521,8 +522,25 @@ func RunRunnerWorkerExec(args []string) error {
 	if err != nil || pid <= 1 {
 		return errors.New("guestd: invalid capsule pid")
 	}
-	if err := syscall.Setgroups([]int{}); err != nil {
-		return fmt.Errorf("guestd: clear Runner.Worker supplementary groups: %w", err)
+	account, err := user.Lookup("runner")
+	if err != nil {
+		return fmt.Errorf("guestd: look up Runner.Worker account: %w", err)
+	}
+	credential, err := accountCredential(account)
+	if err != nil {
+		return fmt.Errorf("guestd: resolve Runner.Worker credentials: %w", err)
+	}
+	if credential.Uid != RunnerUID || credential.Gid != RunnerGID {
+		return errors.New("guestd: Runner.Worker account has unexpected credentials")
+	}
+	groups := make([]int, len(credential.Groups))
+	for i, group := range credential.Groups {
+		groups[i] = int(group)
+	}
+	// Retain only the image-declared runner groups. Docker is intentionally
+	// root-equivalent inside this single-job guest, matching GitHub's image.
+	if err := syscall.Setgroups(groups); err != nil {
+		return fmt.Errorf("guestd: set Runner.Worker supplementary groups: %w", err)
 	}
 	if err := callLocal(localRequest{Kind: "worker-starting"}, nil); err != nil {
 		return fmt.Errorf("guestd: report Runner.Worker start: %w", err)
