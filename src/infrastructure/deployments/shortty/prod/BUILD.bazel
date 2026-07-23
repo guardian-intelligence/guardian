@@ -3,6 +3,8 @@ filegroup(
     srcs = [
         "kustomization.yaml",
         "networkpolicy.yaml",
+        "observability.yaml",
+        "otel-networkpolicy.yaml",
         "root-ingress-networkpolicy.yaml",
         "secrets.yaml",
         "web.yaml",

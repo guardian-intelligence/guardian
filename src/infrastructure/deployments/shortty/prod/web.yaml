@@ -30,6 +30,7 @@ spec:
         app.kubernetes.io/component: web
         guardian.dev/product: shortty
         guardian.dev/stage: prod
+        guardian.dev/otel: producer
     spec:
       automountServiceAccountToken: false
       topologySpreadConstraints:
@@ -63,6 +64,15 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.uid
+            # The running image's own ref, kept in lockstep with the
+            # container image by the same Flux setter marker: it surfaces as
+            # the guardian:image meta tag (event props) and the trace
+            # resource's service.version, so any event or trace names the
+            # exact deployment that served it.
+            - name: GUARDIAN_IMAGE
+              value: ghcr.io/guardian-intelligence/shortty-web:edge@sha256:acf7d254de3ee43f01bca4b3ae2a4f12bc55d9b67a7a957dc4b57ed0e2d4dac3 # {"$imagepolicy": "guardian-imageops:shortty-web"}
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: http://otel-collector.guardian-analytics.svc.cozy.local:4318/v1/traces
           readinessProbe:
             httpGet:
               path: /healthz

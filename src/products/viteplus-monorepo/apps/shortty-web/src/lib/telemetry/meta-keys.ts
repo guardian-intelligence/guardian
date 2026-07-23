@@ -10,4 +10,5 @@ export const DEPLOY_META = {
   id: "guardian:deploy-id",
   commitSha: "guardian:commit-sha",
   supervisor: "guardian:supervisor",
+  image: "guardian:image",
 } as const;

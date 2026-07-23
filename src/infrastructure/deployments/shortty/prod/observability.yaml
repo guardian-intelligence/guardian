@@ -1,0 +1,38 @@
+# Alerts on what users experienced, not on what the server saw: the metric
+# is analytics-ingest's per-event-name counter over the browser-reported
+# shortty.link_failed events, so it fires even when the failure is the BFF
+# being unreachable. The @pt:...@ token is rendered to a Pacific wall-clock
+# time by alert-relay (renderTimeTokens); vmalert itself cannot format a
+# zoned timestamp.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: shortty-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: shortty-web
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: shortty
+    guardian.dev/stage: prod
+spec:
+  groups:
+    - name: shortty-web.rules
+      interval: 30s
+      rules:
+        - alert: ShorttyXLinkImportFailures
+          expr: >-
+            sum(increase(analytics_ingest_events_by_name_total{site="rumi.engineering",event_name="shortty.link_failed"}[15m]))
+            >= 3
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "Elevated X-link import failure rate on rumi.engineering"
+            description: >-
+              Elevated X URL resolve error rates since @pt:{{ $activeAt.Unix }}@
+              — {{ printf "%.0f" $value }} failed X-link imports in the last 15m
+              on rumi.engineering. Each shortty.link_failed event in
+              guardian_analytics.events carries props.code and a trace_id; join
+              trace_id to guardian_analytics.otel_traces (ServiceName
+              shortty-web) for the resolve → syndication spans and the serving
+              image in ResourceAttributes.
