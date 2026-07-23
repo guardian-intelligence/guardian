@@ -1,7 +1,7 @@
 # First-party image publisher. One matrix workflow for every service and web
 # image: the universal `build` check already builds and tests //... on every
 # PR, so PR-side this runs only the runtime gates that need the packed image
-# (company-site scroll-perf, shortty smoke); on pushes to main it rebuilds and
+# (company-site scroll-perf, privatecut smoke); on pushes to main it rebuilds and
 # pushes exactly the images whose inputs changed. Images are not signed —
 # provenance enforcement is the digest-pinning admission policy plus the
 # reviewed-main-only path to `edge` (docs/supply-chain-design.md). The
@@ -65,7 +65,7 @@ jobs:
         run: |
           names=(alert-relay analytics-ingest authorization canary-journeys
             cockpit payments payments-canary postflight-controlplane
-            company-site shortty-web)
+            company-site privatecut-web)
           declare -A watch=(
             [alert-relay]='^src/services/alerting/'
             [analytics-ingest]='^src/products/analytics/|^src/proto/'
@@ -76,7 +76,7 @@ jobs:
             [payments-canary]='^src/services/payments/'
             [postflight-controlplane]='^src/services/postflight/'
             [company-site]='^src/products/viteplus-monorepo/'
-            [shortty-web]='^src/products/viteplus-monorepo/'
+            [privatecut-web]='^src/products/viteplus-monorepo/'
           )
           declare -A push_target=(
             [alert-relay]='//src/services/alerting/relay:push'
@@ -88,7 +88,7 @@ jobs:
             [payments-canary]='//src/services/payments/canary:push'
             [postflight-controlplane]='//src/services/postflight/controlplane:push'
             [company-site]='//src/products/viteplus-monorepo/apps/guardianintelligence-web/site:push'
-            [shortty-web]='//src/products/viteplus-monorepo/apps/shortty-web/site:push'
+            [privatecut-web]='//src/products/viteplus-monorepo/apps/privatecut-web/site:push'
           )
           go_images=' alert-relay analytics-ingest authorization cockpit payments payments-canary postflight-controlplane '
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'
@@ -181,9 +181,9 @@ jobs:
         if: always()
         run: docker rm -f perf-gate || true
 
-  # Runtime gate for shortty: load the exact image just built, run it, and
+  # Runtime gate for privatecut: load the exact image just built, run it, and
   # require a healthy serve of the app shell.
-  shortty-smoke-gate:
+  privatecut-smoke-gate:
     needs: classify
     if: github.event_name == 'pull_request' && needs.classify.outputs.viteplus == 'true'
     runs-on: ubuntu-latest
@@ -195,8 +195,8 @@ jobs:
 
       - name: Load and smoke-test the built image
         run: |
-          bazelisk run //src/products/viteplus-monorepo/apps/shortty-web/site:load
-          docker run -d --name shortty-smoke -p 8080:8080 ghcr.io/guardian-intelligence/shortty-web:edge
+          bazelisk run //src/products/viteplus-monorepo/apps/privatecut-web/site:load
+          docker run -d --name privatecut-smoke -p 8080:8080 ghcr.io/guardian-intelligence/privatecut-web:edge
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:8080/healthz >/dev/null && break
             sleep 1
@@ -206,7 +206,7 @@ jobs:
 
       - name: Stop smoke container
         if: always()
-        run: docker rm -f shortty-smoke || true
+        run: docker rm -f privatecut-smoke || true
 
   # Push only for the canonical main history — not for PRs, and not for
   # workflow_dispatch on arbitrary branches (a dispatch push would retag

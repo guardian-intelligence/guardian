@@ -79,7 +79,7 @@ go_test(
         "//src/infrastructure/deployments/iam:manifests",
         "//src/infrastructure/deployments/iam/prod:manifests",
         "//src/infrastructure/deployments/postflight-runner:manifests",
-        "//src/infrastructure/deployments/shortty/prod:manifests",
+        "//src/infrastructure/deployments/privatecut/prod:manifests",
         "//src/infrastructure/deployments/payments/prod:manifests",
         "//src/infrastructure/deployments/products/prod:manifests",
         "//src/infrastructure/deployments/tigerbeetle/system:manifests",

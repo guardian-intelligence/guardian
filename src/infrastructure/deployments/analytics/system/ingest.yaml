@@ -134,9 +134,9 @@ spec:
                 name: analytics-ingest
                 port:
                   number: 80
-    # Shortty publishes to the same relative endpoint from its own apex, so
+    # PrivateCut publishes to the same relative endpoint from its own apex, so
     # ingest stays same-origin on every product domain and needs no CORS.
-    # The rumi.engineering origin cert is registered by the shortty-web
+    # The rumi.engineering origin cert is registered by the privatecut-web
     # Ingress's tls block; this rule only adds the host's path routing.
     - host: rumi.engineering
       http:

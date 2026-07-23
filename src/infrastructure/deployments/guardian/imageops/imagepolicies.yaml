@@ -124,24 +124,24 @@ spec:
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
 metadata:
-  name: shortty-web
+  name: privatecut-web
   namespace: guardian-imageops
   labels:
     app.kubernetes.io/part-of: guardian
 spec:
-  image: ghcr.io/guardian-intelligence/shortty-web
+  image: ghcr.io/guardian-intelligence/privatecut-web
   interval: 1m0s
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImagePolicy
 metadata:
-  name: shortty-web
+  name: privatecut-web
   namespace: guardian-imageops
   labels:
     app.kubernetes.io/part-of: guardian
 spec:
   imageRepositoryRef:
-    name: shortty-web
+    name: privatecut-web
   filterTags:
     pattern: '^edge$'
   policy:

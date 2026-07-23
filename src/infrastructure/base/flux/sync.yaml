@@ -834,12 +834,12 @@ spec:
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: guardian-shortty-prod
+  name: guardian-privatecut-prod
   namespace: cozy-fluxcd
 spec:
   interval: 10m
   retryInterval: 1m
-  path: ./src/infrastructure/deployments/shortty/prod
+  path: ./src/infrastructure/deployments/privatecut/prod
   sourceRef:
     kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
