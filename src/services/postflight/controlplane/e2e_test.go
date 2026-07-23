@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -50,6 +51,8 @@ type jitMintRequest struct {
 type fakeGitHub struct {
 	mu    sync.Mutex
 	mints []jitMintRequest
+	runs  map[int64]apiWorkflowRun
+	jobs  map[int64][]apiWorkflowJob
 }
 
 func (f *fakeGitHub) handler(t *testing.T) http.Handler {
@@ -72,11 +75,44 @@ func (f *fakeGitHub) handler(t *testing.T) http.Handler {
 			"runner": map[string]any{"id": 7}, "encoded_jit_config": e2eJITBlob,
 		})
 	})
+	mux.HandleFunc("GET /repos/{owner}/{repo}/actions/runs/{run_id}", func(w http.ResponseWriter, r *http.Request) {
+		runID, _ := strconv.ParseInt(r.PathValue("run_id"), 10, 64)
+		f.mu.Lock()
+		run, ok := f.runs[runID]
+		f.mu.Unlock()
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(run)
+	})
+	mux.HandleFunc("GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt}/jobs", func(w http.ResponseWriter, r *http.Request) {
+		runID, _ := strconv.ParseInt(r.PathValue("run_id"), 10, 64)
+		f.mu.Lock()
+		jobs, ok := f.jobs[runID]
+		f.mu.Unlock()
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"total_count": len(jobs), "jobs": jobs})
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected GitHub request %s %s", r.Method, r.URL.Path)
 		http.NotFound(w, r)
 	})
 	return mux
+}
+
+func (f *fakeGitHub) setRun(run apiWorkflowRun, jobs []apiWorkflowJob) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.runs == nil {
+		f.runs = map[int64]apiWorkflowRun{}
+		f.jobs = map[int64][]apiWorkflowJob{}
+	}
+	f.runs[run.ID] = run
+	f.jobs[run.ID] = append([]apiWorkflowJob(nil), jobs...)
 }
 
 func testRSAKeyPEM(t *testing.T) string {
@@ -92,6 +128,7 @@ type e2eControlPlane struct {
 	pool   *pgxpool.Pool
 	server *httptest.Server
 	github *fakeGitHub
+	worker *worker
 }
 
 func TestProviderAcquisitionMigrationFailsHistoricalRequeuesClosed(t *testing.T) {
@@ -209,7 +246,8 @@ func startE2EControlPlane(t *testing.T) *e2eControlPlane {
 	store := &pgStore{pool: pool}
 	tracer := noop.NewTracerProvider().Tracer("e2e")
 	webhook := &webhookServer{secret: []byte("unused"), inbox: store, tracer: tracer, now: time.Now}
-	server := httptest.NewServer(buildMux(ctx, cfg, store, webhook, tracer))
+	providerWorker := &worker{st: store, gh: client, cfg: cfg, tracer: tracer}
+	server := httptest.NewServer(buildMux(ctx, cfg, store, webhook, providerWorker, tracer))
 	t.Cleanup(server.Close)
 	done := make(chan struct{})
 	go func() {
@@ -220,7 +258,7 @@ func startE2EControlPlane(t *testing.T) *e2eControlPlane {
 		cancel()
 		<-done
 	})
-	return &e2eControlPlane{pool: pool, server: server, github: fake}
+	return &e2eControlPlane{pool: pool, server: server, github: fake, worker: providerWorker}
 }
 
 func seedE2EJob(t *testing.T, pool *pgxpool.Pool) {
@@ -389,6 +427,141 @@ func postHostSync(t *testing.T, origin string, request syncproto.SyncRequest) sy
 		t.Fatal(err)
 	}
 	return desired
+}
+
+func postJobPlanResolve(t *testing.T, origin string, request syncproto.JobPlanResolveRequest) syncproto.JobPlanResolveResponse {
+	t.Helper()
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpRequest, err := http.NewRequest(http.MethodPost, origin+syncproto.JobPlanResolvePath, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpRequest.Header.Set("Authorization", "Bearer "+e2eSyncSecret)
+	httpRequest.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(httpRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		detail, _ := io.ReadAll(response.Body)
+		t.Fatalf("job-plan resolve returned %s: %s", response.Status, detail)
+	}
+	var resolved syncproto.JobPlanResolveResponse
+	if err := json.NewDecoder(response.Body).Decode(&resolved); err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}
+
+func TestObservedAssignmentCreatesPlanWithoutQueuedWebhook(t *testing.T) {
+	control := startE2EControlPlane(t)
+	const (
+		hostID     = "host-resolve"
+		bootID     = "boot-resolve"
+		memberID   = "member-resolve"
+		vmID       = "vm-resolve"
+		runID      = int64(779)
+		jobID      = int64(9003)
+		checkRunID = int64(8003)
+	)
+	hostReport := syncproto.SyncRequest{
+		HostID: hostID, BootID: bootID,
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1, Listening: 1}},
+		Members: []syncproto.PoolMemberReport{{
+			MemberID: memberID, VMID: vmID, Class: e2eClass, Image: "golden", State: syncproto.MemberListening,
+		}},
+	}
+	postHostSync(t, control.server.URL, hostReport)
+	waitFor(t, "capacity pool intent", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pools WHERE runner_class = $1 AND desired_count > 0`, e2eClass) == "1"
+	})
+	postHostSync(t, control.server.URL, hostReport)
+	runnerName := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, memberID)
+	if runnerName == "" {
+		t.Fatal("resolver member was not allocated to the warm pool")
+	}
+	run := apiWorkflowRun{
+		ID: runID, Event: "push", Path: ".github/workflows/ci.yml",
+		HeadBranch: "main", HeadSHA: strings.Repeat("a", 40), RunAttempt: 1,
+	}
+	run.HeadRepository.FullName = e2eRepo
+	run.Repository.ID = e2eRepositoryID
+	run.Repository.FullName = e2eRepo
+	control.github.setRun(run, []apiWorkflowJob{{
+		ID: jobID, RunID: runID, RunAttempt: 1, Name: "build", Status: "in_progress",
+		Labels: []string{e2eClass}, RunnerID: 99, RunnerName: runnerName,
+		CheckRunURL: fmt.Sprintf("https://api.github.com/repos/%s/check-runs/%d", e2eRepo, checkRunID),
+		HeadSHA:     run.HeadSHA, HeadBranch: run.HeadBranch, WorkflowName: "CI",
+	}})
+
+	resolved := postJobPlanResolve(t, control.server.URL, syncproto.JobPlanResolveRequest{
+		HostID: hostID, BootID: bootID, MemberID: memberID, VMID: vmID,
+		Assignment: syncproto.ObservedAssignment{
+			RequestID: "request-9003", JobID: "protocol-job-9003", CheckRunID: checkRunID,
+			RunnerName: runnerName, JobDisplayName: "build",
+			Identity: syncproto.JobIdentity{
+				RunID: strconv.FormatInt(runID, 10), RunAttempt: 1, RunnerName: runnerName,
+				Repository: e2eRepo, WorkflowJob: "build-key",
+			},
+		},
+	})
+	if resolved.Plan.ExecutionID != strconv.FormatInt(jobID, 10) || resolved.Plan.CheckRunID != checkRunID ||
+		resolved.Plan.RunnerClass != e2eClass || resolved.Plan.RepositoryFullName != e2eRepo {
+		t.Fatalf("resolved plan = %+v", resolved.Plan)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM github_job_intents WHERE provider_job_id = $1`, jobID); got != "observed" {
+		t.Fatalf("resolved intent state = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT member_id FROM runner_job_assignments WHERE provider_job_id = $1`, jobID); got != memberID {
+		t.Fatalf("resolved assignment member = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT count(*)::text FROM github_webhook_deliveries WHERE provider_job_id = $1`, jobID); got != "0" {
+		t.Fatalf("resolver unexpectedly required %s webhook deliveries", got)
+	}
+}
+
+func TestInProgressAPIRefreshCreatesDemandWithoutQueuedWebhook(t *testing.T) {
+	control := startE2EControlPlane(t)
+	const (
+		runID      = int64(780)
+		jobID      = int64(9004)
+		checkRunID = int64(8004)
+	)
+	run := apiWorkflowRun{
+		ID: runID, Event: "push", Path: ".github/workflows/ci.yml",
+		HeadBranch: "main", HeadSHA: strings.Repeat("b", 40), RunAttempt: 1,
+	}
+	run.HeadRepository.FullName = e2eRepo
+	run.Repository.ID = e2eRepositoryID
+	run.Repository.FullName = e2eRepo
+	control.github.setRun(run, []apiWorkflowJob{{
+		ID: jobID, RunID: runID, RunAttempt: 1, Name: "build", Status: "in_progress",
+		Labels: []string{e2eClass}, RunnerID: 100, RunnerName: "postflight-locally-selected",
+		CheckRunURL: fmt.Sprintf("https://api.github.com/repos/%s/check-runs/%d", e2eRepo, checkRunID),
+		HeadSHA:     run.HeadSHA, HeadBranch: run.HeadBranch, WorkflowName: "CI",
+	}})
+
+	err := control.worker.refreshRunAndJobs(context.Background(), jobEvent{
+		Action: "in_progress", InstallationID: e2eInstallationID,
+		RepositoryID: e2eRepositoryID, RepositoryFullName: e2eRepo,
+		Job: workflowJobPayload{ID: jobID, RunID: runID, RunAttempt: 1, Status: "in_progress"},
+	}, "in-progress-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, jobID); got != "demand_recorded" {
+		t.Fatalf("API-refreshed demand state = %q", got)
+	}
+	waitFor(t, "API-refreshed job intent", func() bool {
+		return queryString(t, control.pool, `SELECT state FROM github_job_intents WHERE provider_job_id = $1`, jobID) == "queued"
+	})
+	if got := queryString(t, control.pool, `SELECT count(*)::text FROM github_webhook_deliveries WHERE provider_job_id = $1`, jobID); got != "0" {
+		t.Fatalf("API refresh unexpectedly required %s queued webhook deliveries", got)
+	}
 }
 
 func TestWarmPoolLocalAssignmentAndRecoverableRestoreEndToEnd(t *testing.T) {

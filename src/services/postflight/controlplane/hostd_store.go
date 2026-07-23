@@ -159,6 +159,27 @@ type poolMemberForJIT struct {
 	InstallationID int64
 }
 
+type resolvablePoolMember struct {
+	RunnerName     string
+	RunnerClass    string
+	OrgID          string
+	InstallationID int64
+}
+
+func (s *pgStore) ResolvePoolMember(ctx context.Context, hostID, bootID, memberID, vmID string) (resolvablePoolMember, error) {
+	var member resolvablePoolMember
+	err := s.pool.QueryRow(ctx, `
+SELECT m.runner_name, m.runner_class, p.org_id, p.installation_id
+FROM runner_pool_members m
+JOIN runner_pools p ON p.pool_id = m.pool_id
+JOIN hosts h ON h.host_id = m.host_id
+WHERE m.host_id = $1 AND h.boot_id = $2 AND m.member_id = $3 AND m.vm_id = $4
+  AND m.state NOT IN ('recycling', 'lost') AND p.enabled
+FOR SHARE OF m, p, h`, hostID, bootID, memberID, vmID).Scan(
+		&member.RunnerName, &member.RunnerClass, &member.OrgID, &member.InstallationID)
+	return member, err
+}
+
 func (s *pgStore) ListPoolMembersNeedingJIT(ctx context.Context, limit int) ([]poolMemberForJIT, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT m.member_id, m.runner_name, m.runner_class, p.org_id, p.installation_id
@@ -378,6 +399,20 @@ RETURNING assignment_id::text`, member.MemberID, hostID, observed.RequestID, obs
 	}
 	_, err = tx.Exec(ctx, `SELECT pg_notify('postflight_job_plans', '')`)
 	return err
+}
+
+func (s *pgStore) BindObservedAssignment(ctx context.Context, hostID, memberID string, observed syncproto.ObservedAssignment) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := bindObservedAssignment(ctx, tx, hostID, syncproto.PoolMemberReport{
+		MemberID: memberID, Assignment: &observed,
+	}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func assignmentExists(ctx context.Context, tx pgx.Tx, memberID string) (bool, error) {

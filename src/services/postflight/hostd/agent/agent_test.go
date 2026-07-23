@@ -404,6 +404,88 @@ func TestPrepositionedPlanRendezvousesWithoutControlPlaneSync(t *testing.T) {
 	}
 }
 
+func TestMissingPlanResolvesTheSelectedMemberDirectly(t *testing.T) {
+	a, vms, volumes := newTestAgent(t, 1)
+	members := poolMembers(t, a, vms, 1)
+	spec := assignmentSpec(0, members[0])
+	plan := syncproto.JobPlan{
+		PlanID: spec.AssignmentID, ExecutionID: spec.ExecutionID, AttemptID: spec.AttemptID,
+		CheckRunID: spec.CheckRunID, RunID: spec.Identity.RunID, RunAttempt: spec.Identity.RunAttempt,
+		JobDisplayName: spec.Identity.WorkflowJob, OrgID: spec.OrgID,
+		InstallationID: spec.InstallationID, RepositoryID: spec.RepositoryID,
+		RepositoryFullName: spec.RepositoryFullName, RunnerClass: spec.RunnerClass,
+		Workspace: spec.Workspace, Tool: spec.Tool, Process: spec.Process,
+	}
+	requests := make(chan syncproto.JobPlanResolveRequest, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != syncproto.JobPlanResolvePath || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		var request syncproto.JobPlanResolveRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode resolution request: %v", err)
+			http.Error(w, "invalid", http.StatusBadRequest)
+			return
+		}
+		requests <- request
+		_ = json.NewEncoder(w).Encode(syncproto.JobPlanResolveResponse{Plan: plan})
+	}))
+	defer server.Close()
+	a.cfg.ControlPlaneOrigin = server.URL
+	a.httpClient = server.Client()
+
+	assignVM(t, vms, members[0], spec)
+	a.HandleVMUpdate(context.Background(), vm.ID(members[0].VMID))
+
+	request := <-requests
+	if request.HostID != a.cfg.HostID || request.BootID != a.bootID || request.MemberID != members[0].MemberID ||
+		request.VMID != members[0].VMID || request.Assignment.CheckRunID != spec.CheckRunID {
+		t.Fatalf("resolution request = %+v", request)
+	}
+	if !volumes.HasWorkspace(zvol.AssignmentID(spec.AssignmentID)) {
+		t.Fatal("resolved assignment did not enter rendezvous")
+	}
+	if a.Metrics().JobPlanResolveAttempts.Load() != 1 || a.Metrics().JobPlanResolveSuccesses.Load() != 1 ||
+		a.Metrics().JobPlanResolveFailures.Load() != 0 {
+		t.Fatalf("resolver metrics = attempts %d successes %d failures %d",
+			a.Metrics().JobPlanResolveAttempts.Load(), a.Metrics().JobPlanResolveSuccesses.Load(),
+			a.Metrics().JobPlanResolveFailures.Load())
+	}
+}
+
+func TestRejectedPlanResolutionRecyclesOnlyTheSelectedVM(t *testing.T) {
+	a, vms, _ := newTestAgent(t, 2)
+	members := poolMembers(t, a, vms, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != syncproto.JobPlanResolvePath || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "assignment identity rejected", http.StatusUnprocessableEntity)
+	}))
+	defer server.Close()
+	a.cfg.ControlPlaneOrigin = server.URL
+	a.httpClient = server.Client()
+
+	spec := assignmentSpec(0, members[0])
+	assignVM(t, vms, members[0], spec)
+	a.HandleVMUpdate(context.Background(), vm.ID(members[0].VMID))
+
+	if status, err := vms.Status(context.Background(), vm.ID(members[0].VMID)); err != nil || status.Phase != vm.PhaseGone {
+		t.Fatalf("rejected selected VM status = %+v, err = %v", status, err)
+	}
+	if status, err := vms.Status(context.Background(), vm.ID(members[1].VMID)); err != nil || status.Phase == vm.PhaseGone {
+		t.Fatalf("unselected VM status = %+v, err = %v", status, err)
+	}
+	if a.Metrics().JobPlanResolveAttempts.Load() != 1 || a.Metrics().JobPlanResolveFailures.Load() != 1 ||
+		a.Metrics().JobPlanResolveSuccesses.Load() != 0 {
+		t.Fatalf("resolver metrics = attempts %d successes %d failures %d",
+			a.Metrics().JobPlanResolveAttempts.Load(), a.Metrics().JobPlanResolveSuccesses.Load(),
+			a.Metrics().JobPlanResolveFailures.Load())
+	}
+}
+
 func TestSixListeningMembersBindConcurrentJobsExactly(t *testing.T) {
 	a, vms, volumes := newTestAgent(t, 6)
 	members := poolMembers(t, a, vms, 6)
