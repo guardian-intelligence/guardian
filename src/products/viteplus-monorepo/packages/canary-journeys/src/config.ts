@@ -1,6 +1,7 @@
 export interface JourneyConfig {
   pageUrl: string;
   guardianHost: string;
+  issuer: string;
   githubUsername: string;
   githubPassword: string;
   githubTotpSeed: string;
@@ -45,6 +46,7 @@ export function loadJourneyConfig(env: Record<string, string | undefined>): Jour
   return {
     pageUrl,
     guardianHost: parsed.hostname,
+    issuer: `${parsed.origin}/realms/guardianintelligence.org`,
     githubUsername,
     githubPassword,
     githubTotpSeed,
