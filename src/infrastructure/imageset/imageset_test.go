@@ -144,7 +144,6 @@ kind: ImageRepository
 spec:
   image: ghcr.io/example/app
   interval: 1m0s
-  digestReflectionMode: Always
 `,
 	})
 	if err != nil {
