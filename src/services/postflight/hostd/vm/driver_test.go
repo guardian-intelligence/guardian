@@ -326,7 +326,7 @@ func (h *qemuHandler) handle(command string, arguments json.RawMessage) ([]strin
 	case "query-block":
 		blocks := make([]string, 0, len(h.ioStatus))
 		for device, status := range h.ioStatus {
-			blocks = append(blocks, fmt.Sprintf(`{"device":%q,"qdev":%q,"inserted":{"node-name":%q,"io-status":%q}}`, device, device, device+"-node", status))
+			blocks = append(blocks, fmt.Sprintf(`{"device":%q,"qdev":%q,"io-status":%q,"inserted":{"node-name":%q}}`, device, device, status, device+"-node"))
 		}
 		sort.Strings(blocks)
 		return nil, `{"return":[` + strings.Join(blocks, ",") + `],"id":%d}`

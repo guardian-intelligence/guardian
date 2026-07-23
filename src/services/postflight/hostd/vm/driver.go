@@ -1032,9 +1032,9 @@ func timingPoints(points []guestproto.TimingPoint) []TimingPoint {
 type qmpBlockStatus struct {
 	Device   string `json:"device"`
 	QDev     string `json:"qdev"`
+	IOStatus string `json:"io-status"`
 	Inserted *struct {
 		NodeName string `json:"node-name"`
-		IOStatus string `json:"io-status"`
 	} `json:"inserted"`
 }
 
@@ -1047,17 +1047,17 @@ type qmpVMStatus struct {
 func (s qmpVMStatus) blockErrorSummary() string {
 	var failures []string
 	for _, block := range s.Blocks {
-		if block.Inserted == nil || block.Inserted.IOStatus == "" || block.Inserted.IOStatus == "ok" {
+		if block.IOStatus == "" || block.IOStatus == "ok" {
 			continue
 		}
 		name := block.QDev
 		if name == "" {
 			name = block.Device
 		}
-		if name == "" {
+		if name == "" && block.Inserted != nil {
 			name = block.Inserted.NodeName
 		}
-		failures = append(failures, name+"="+block.Inserted.IOStatus)
+		failures = append(failures, name+"="+block.IOStatus)
 	}
 	sort.Strings(failures)
 	return strings.Join(failures, ",")
