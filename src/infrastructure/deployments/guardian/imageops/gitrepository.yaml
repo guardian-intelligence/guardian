@@ -1,0 +1,22 @@
+# The push source for image automation. Deliberately separate from the
+# anonymous read-only `guardian` GitRepository in cozy-fluxcd (which must
+# stay dark-flippable and credential-free): this one exists solely so the
+# ImageUpdateAutomation can clone and push main as guardian-promotions[bot].
+# Reconciled by the cozy-fluxcd source-controller; connected-only, like the
+# previews source — in dark mode it starves harmlessly while pins already in
+# Git keep applying.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: guardian-push
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  interval: 5m
+  url: https://github.com/guardian-intelligence/guardian
+  ref:
+    branch: main
+  provider: github
+  secretRef:
+    name: guardian-repo-creds

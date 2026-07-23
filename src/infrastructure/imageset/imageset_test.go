@@ -139,6 +139,13 @@ spec:
   ref:
     tag: dark
 `,
+		"src/infrastructure/deployments/app/image-watch.yaml": `apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+spec:
+  image: ghcr.io/example/app
+  interval: 1m0s
+  digestReflectionMode: Always
+`,
 	})
 	if err != nil {
 		t.Fatalf("CollectRendered() error = %v", err)
@@ -158,7 +165,8 @@ spec:
 		}
 	}
 	// templated + placeholder scalars and the digest-less dark-mode
-	// OCIRepository are excluded; the base-tree anchor adds one.
+	// OCIRepository and the watch-only ImageRepository are excluded; the
+	// base-tree anchor adds one.
 	if len(refs) != 5 {
 		t.Fatalf("CollectRendered() = %d refs, want 5: %v", len(refs), got)
 	}

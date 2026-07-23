@@ -1,0 +1,173 @@
+# One ImageRepository + ImagePolicy per first-party lane. Every lane follows
+# the mutable `edge` tag; digestReflectionMode re-resolves the digest behind
+# it each scan, so the Setters markers write tag@digest pins — the admission
+# policy's digest-pinning requirement holds. 1m matches the Kargo Warehouse
+# poll cadence this replaces. The alphabetical policy is vacuous over a
+# single tag; the digest comes from reflection.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: company-site
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  image: ghcr.io/guardian-intelligence/company-site
+  interval: 1m0s
+  digestReflectionMode: Always
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: company-site
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  imageRepositoryRef:
+    name: company-site
+  filterTags:
+    pattern: '^edge$'
+  policy:
+    alphabetical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: payments
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  image: ghcr.io/guardian-intelligence/payments
+  interval: 1m0s
+  digestReflectionMode: Always
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: payments
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  imageRepositoryRef:
+    name: payments
+  filterTags:
+    pattern: '^edge$'
+  policy:
+    alphabetical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: payments-canary
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  image: ghcr.io/guardian-intelligence/payments-canary
+  interval: 1m0s
+  digestReflectionMode: Always
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: payments-canary
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  imageRepositoryRef:
+    name: payments-canary
+  filterTags:
+    pattern: '^edge$'
+  policy:
+    alphabetical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: postflight-controlplane
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  image: ghcr.io/guardian-intelligence/postflight-controlplane
+  interval: 1m0s
+  digestReflectionMode: Always
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: postflight-controlplane
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  imageRepositoryRef:
+    name: postflight-controlplane
+  filterTags:
+    pattern: '^edge$'
+  policy:
+    alphabetical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: shortty-web
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  image: ghcr.io/guardian-intelligence/shortty-web
+  interval: 1m0s
+  digestReflectionMode: Always
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: shortty-web
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  imageRepositoryRef:
+    name: shortty-web
+  filterTags:
+    pattern: '^edge$'
+  policy:
+    alphabetical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: canary-journeys
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  image: ghcr.io/guardian-intelligence/canary-journeys
+  interval: 1m0s
+  digestReflectionMode: Always
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: canary-journeys
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  imageRepositoryRef:
+    name: canary-journeys
+  filterTags:
+    pattern: '^edge$'
+  policy:
+    alphabetical:
+      order: asc
