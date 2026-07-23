@@ -42,7 +42,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: browser
-              image: ghcr.io/guardian-intelligence/canary-journeys:edge@sha256:4ba2c77a51557e63ff3b7ad2a72c57b102c2d4a0f70eadacb5edc20a2e7a44c1 # {"$imagepolicy": "guardian-imageops:canary-journeys"}
+              image: ghcr.io/guardian-intelligence/canary-journeys:edge@sha256:13984b45de190e4cb315e547c2aa4220d95dcb0a1ce95d2a1fea7ab0fb951e12 # {"$imagepolicy": "guardian-imageops:canary-journeys"}
               imagePullPolicy: IfNotPresent
               env:
                 - name: POSTFLIGHT_URL
