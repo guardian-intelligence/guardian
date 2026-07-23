@@ -26,10 +26,10 @@ spec:
                 name: postflight-controlplane
                 port:
                   number: 8080
-          # Host sync exchange from off-cluster runner hosts, fail-closed on
-          # the HOSTD_SYNC_SECRET bearer. The /api edge bypass exempts it from
-          # browser checks, same as the webhook path.
-          - path: /api/v1/hostd/sync
+          # Host control exchange from off-cluster runner hosts, fail-closed
+          # on the HOSTD_SYNC_SECRET bearer. The /api edge bypass exempts it
+          # from browser checks, same as the webhook path.
+          - path: /api/v1/hostd
             pathType: Prefix
             backend:
               service:
