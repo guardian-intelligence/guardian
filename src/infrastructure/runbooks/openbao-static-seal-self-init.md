@@ -198,12 +198,28 @@ Almost every secret change is the routine path. Reinit is rare.
   yet.
 
 The scoped namespaces that already exist (no reinit needed to write into them):
-`external-dns`, `company-site`, `guardian-iam`, `guardian-products`,
+`external-dns`, `guardian-products`, `guardian-imageops`,
 `guardian-analytics`, `postflight-runner`, `tenant-root`, `tenant-guardian`,
 and `tenant-guardian-prod`. The `operator/` subtree is the
 exception: custody reference material the importer writes but no standing
 role can read. Confirm the live list against the self-init block's
 reader/writer pairs (pinned by `TestOpenBaoOperationsInventoryConformance`).
+
+## Operator-loaded values after a reinit
+
+The importer plan re-seeds only what custody carries. Values loaded through
+a namespace's `secrets-writer` role after bootstrap (product API keys,
+per-product R2 credentials, origin TLS material) are NOT in the plan: after
+a reinit their ExternalSecrets report `SecretSyncedError` while their
+consumers keep running on the Orphan/Retain materialized Secrets. Restore
+each from those retained Secrets — for every `spec.data[]` entry, write
+`remoteRef.property = base64decode(targetSecret.data[secretKey])` back to
+`remoteRef.key` via that namespace's writer role. Where several
+ExternalSecrets share one kv key (each reading a different property), read
+the key through the namespace's reader role first and merge — a kv v2 write
+replaces the whole secret. Then force-sync the ExternalSecrets and confirm
+Ready. Proven 2026-07-23 on the six payments/shortty/postflight-runner/
+analytics values after the guardian-imageops reinit.
 
 ## Adding A Secret (Routine, No OpenBao Changes)
 

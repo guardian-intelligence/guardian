@@ -82,10 +82,9 @@ func TestOpenBaoStaticSealTLSAndStorageConformance(t *testing.T) {
 		`token_policies = ["guardian-reader-external-dns"]`,
 		`token_policies = ["guardian-writer-external-dns"]`,
 		`kv/data/guardian/guardian-mgmt/external-dns/*`,
-		`request "write_reader_policy_company_site"`,
-		`token_policies = ["guardian-reader-company-site"]`,
-		`kv/data/guardian/guardian-mgmt/company-site/*`,
-		`kv/data/guardian/guardian-mgmt/guardian-iam/*`,
+		`request "write_reader_policy_guardian_imageops"`,
+		`token_policies = ["guardian-reader-guardian-imageops"]`,
+		`kv/data/guardian/guardian-mgmt/guardian-imageops/*`,
 		`kv/data/guardian/guardian-mgmt/tenant-guardian-prod/*`,
 		`request "write_secret_importer_policy"`,
 		`request "write_secret_importer_role"`,
@@ -286,8 +285,6 @@ func TestOpenBaoOperationsInventoryConformance(t *testing.T) {
 	// (that is the structural change that re-initializes).
 	for _, scope := range []string{
 		"external_dns",
-		"company_site",
-		"guardian_iam",
 		"guardian_analytics",
 		"guardian_imageops",
 		"guardian_products",
@@ -320,8 +317,6 @@ func TestOpenBaoWriterPoliciesAreWriteOnlyConformance(t *testing.T) {
 	raw := readText(t, runfilePath("src/infrastructure/deployments/guardian/system/openbao-helmrelease.yaml"))
 	for _, ns := range []string{
 		"external-dns",
-		"company-site",
-		"guardian-iam",
 		"guardian-analytics",
 		"guardian-imageops",
 		"guardian-products",

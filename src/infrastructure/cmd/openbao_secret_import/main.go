@@ -342,26 +342,14 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 			},
 		},
 		{
-			APIPath: "kv/data/guardian/guardian-mgmt/company-site/promotion/github-app",
-			Data: map[string]string{
-				"githubAppPrivateKey": githubAppKey,
-			},
-		},
-		// Same App identity, second consumer namespace: Kargo credentials
-		// are project-namespaced, and the scope model requires each
-		// namespace to read only its own subtree.
-		{
-			APIPath: "kv/data/guardian/guardian-mgmt/guardian-iam/promotion/github-app",
-			Data: map[string]string{
-				"githubAppPrivateKey": githubAppKey,
-			},
-		},
-		{
 			APIPath: "kv/data/guardian/guardian-mgmt/guardian-products/promotion/github-app",
 			Data: map[string]string{
 				"githubAppPrivateKey": githubAppKey,
 			},
 		},
+		// Same App identity, second consumer namespace: credentials are
+		// namespace-scoped, and the scope model requires each namespace to
+		// read only its own subtree.
 		{
 			APIPath: "kv/data/guardian/guardian-mgmt/guardian-imageops/promotion/github-app",
 			Data: map[string]string{

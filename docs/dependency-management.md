@@ -6,13 +6,19 @@ See `supply-chain-design.md` for the first-party image trust model,
 
 ## One proposer per pin
 
-Every pin has exactly one untrusted proposer; CI and branch protection
-decide every merge:
+Every pin has exactly one untrusted proposer; CI and the main-protection
+ruleset decide every merge:
 
-- **Renovate** owns source-plane pins configured in `renovate.json5`.
-- **Kargo** owns the stage-manifest trees its Stage pipelines write under
-  `src/infrastructure/deployments/{company,iam,products}/**`. Never
-  hand-roll or duplicate its promotion PRs.
+- **Renovate** owns source-plane pins configured in `renovate.json5` —
+  including the third-party workload images (Keycloak, Electric) its
+  kubernetes manager is scoped to.
+- **Flux image automation** (`deployments/guardian/imageops`) owns the
+  first-party workload pins that carry `$imagepolicy` setter markers; it
+  commits straight to main as `guardian-promotions[bot]` through the
+  ruleset bypass. Never hand-roll a pin bump on a marked line.
+- **Kargo** owns only the postflight CLI release channels
+  (`src/products/postflight-cli/release/channels.yaml` plus the release
+  manifest's CLI lane). Never hand-roll or duplicate its promotion PRs.
 
 Renovate configuration errors do not fail scheduled runs, so
 `//:renovate_config_test` validates the config in the universal Bazel gate.
