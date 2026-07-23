@@ -1,9 +1,10 @@
 # One ImageRepository + ImagePolicy per first-party lane. Every lane follows
-# the mutable `edge` tag; digestReflectionMode re-resolves the digest behind
-# it each scan, so the Setters markers write tag@digest pins — the admission
-# policy's digest-pinning requirement holds. 1m matches the Kargo Warehouse
-# poll cadence this replaces. The alphabetical policy is vacuous over a
-# single tag; the digest comes from reflection.
+# the mutable `edge` tag; digestReflectionPolicy: Always re-resolves the
+# digest behind it on the policy's own interval, so the Setters markers
+# write tag@digest pins — the admission policy's digest-pinning requirement
+# holds. 1m matches the Kargo Warehouse poll cadence this replaces. The
+# alphabetical policy is vacuous over a single tag; the digest comes from
+# reflection.
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
 metadata:
@@ -14,7 +15,6 @@ metadata:
 spec:
   image: ghcr.io/guardian-intelligence/company-site
   interval: 1m0s
-  digestReflectionMode: Always
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImagePolicy
@@ -31,6 +31,8 @@ spec:
   policy:
     alphabetical:
       order: asc
+  digestReflectionPolicy: Always
+  interval: 1m0s
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
@@ -42,7 +44,6 @@ metadata:
 spec:
   image: ghcr.io/guardian-intelligence/payments
   interval: 1m0s
-  digestReflectionMode: Always
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImagePolicy
@@ -59,6 +60,8 @@ spec:
   policy:
     alphabetical:
       order: asc
+  digestReflectionPolicy: Always
+  interval: 1m0s
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
@@ -70,7 +73,6 @@ metadata:
 spec:
   image: ghcr.io/guardian-intelligence/payments-canary
   interval: 1m0s
-  digestReflectionMode: Always
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImagePolicy
@@ -87,6 +89,8 @@ spec:
   policy:
     alphabetical:
       order: asc
+  digestReflectionPolicy: Always
+  interval: 1m0s
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
@@ -98,7 +102,6 @@ metadata:
 spec:
   image: ghcr.io/guardian-intelligence/postflight-controlplane
   interval: 1m0s
-  digestReflectionMode: Always
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImagePolicy
@@ -115,6 +118,8 @@ spec:
   policy:
     alphabetical:
       order: asc
+  digestReflectionPolicy: Always
+  interval: 1m0s
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
@@ -126,7 +131,6 @@ metadata:
 spec:
   image: ghcr.io/guardian-intelligence/shortty-web
   interval: 1m0s
-  digestReflectionMode: Always
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImagePolicy
@@ -143,6 +147,8 @@ spec:
   policy:
     alphabetical:
       order: asc
+  digestReflectionPolicy: Always
+  interval: 1m0s
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
@@ -154,7 +160,6 @@ metadata:
 spec:
   image: ghcr.io/guardian-intelligence/canary-journeys
   interval: 1m0s
-  digestReflectionMode: Always
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImagePolicy
@@ -171,3 +176,5 @@ spec:
   policy:
     alphabetical:
       order: asc
+  digestReflectionPolicy: Always
+  interval: 1m0s
