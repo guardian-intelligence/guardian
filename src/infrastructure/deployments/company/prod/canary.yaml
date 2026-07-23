@@ -38,6 +38,10 @@ metadata:
     guardian.dev/stage: prod
 spec:
   provider: nginx
+  # On Canary deletion, hand the apex Service and the Deployment's replicas
+  # back to the Git-declared objects instead of orphaning the -primary
+  # clone — the prerequisite for retiring this Canary.
+  revertOnDeletion: true
   targetRef:
     apiVersion: apps/v1
     kind: Deployment
