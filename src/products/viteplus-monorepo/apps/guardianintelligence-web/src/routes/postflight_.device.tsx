@@ -14,8 +14,9 @@ const deviceSearchSchema = v.fallback(
   {},
 );
 
-export const Route = createFileRoute("/postflight/device")({
+export const Route = createFileRoute("/postflight_/device")({
   validateSearch: (search) => v.parse(deviceSearchSchema, search),
+  head: () => ({ meta: [{ title: "Approve CLI sign-in — Postflight" }] }),
   component: DeviceApprovalPage,
 });
 

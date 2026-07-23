@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import "~/styles/postflight.css";
 
-export const Route = createFileRoute("/postflight/device/done")({
+export const Route = createFileRoute("/postflight_/device_/done")({
+  head: () => ({ meta: [{ title: "CLI connected — Postflight" }] }),
   component: DeviceDonePage,
 });
 
