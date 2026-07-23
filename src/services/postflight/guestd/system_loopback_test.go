@@ -232,3 +232,50 @@ func TestRealSystemLoopbackEncryptedConvergence(t *testing.T) {
 		t.Fatalf("reopened mapper blank=%v err=%v, want filesystem", blank, err)
 	}
 }
+
+func TestRealSystemRunnerHomeOverlay(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("overlay mount conformance needs root")
+	}
+	root := t.TempDir()
+	lower := filepath.Join(root, "image-home")
+	lowerBind := filepath.Join(root, "image-home-lower")
+	backing := filepath.Join(root, "durable")
+	upper := filepath.Join(backing, "upper")
+	work := filepath.Join(backing, "work")
+	target := filepath.Join(root, "runner-home")
+	for _, directory := range []string{lower, backing, target} {
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(lower, "cargo"), []byte("image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	system := RealSystem{RunnerUser: "root"}
+	if err := system.MountOverlay(context.Background(), lower, lowerBind, upper, work, target, []string{"noatime", "nodev", "nosuid"}); err != nil {
+		if errors.Is(err, unix.EPERM) {
+			t.Skipf("overlay mount not permitted here: %v", err)
+		}
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = unix.Unmount(target, unix.MNT_DETACH)
+		_ = unix.Unmount(lowerBind, unix.MNT_DETACH)
+	})
+	if err := system.MountOverlay(context.Background(), lower, lowerBind, upper, work, target, nil); err != nil {
+		t.Fatalf("idempotent overlay mount: %v", err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(target, "cargo")); err != nil || string(raw) != "image" {
+		t.Fatalf("image lower file = %q, %v", raw, err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "cache"), []byte("durable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(upper, "cache")); err != nil || string(raw) != "durable" {
+		t.Fatalf("durable upper file = %q, %v", raw, err)
+	}
+	if err := os.WriteFile(filepath.Join(lowerBind, "forbidden"), nil, 0o644); err == nil {
+		t.Fatal("read-only image lower accepted a write")
+	}
+}

@@ -340,7 +340,7 @@ func RunCapsuleEnter(args []string) error {
 	}
 	// CRIU images must stay outside the captured tree, while a private tmpfs
 	// keeps process-backed temporary mappings available in the next guest.
-	for _, mountpoint := range []string{ProcessMountpoint, "/boot/efi", "/boot", "/tmp"} {
+	for _, mountpoint := range []string{ProcessMountpoint, RunnerHomeBackingMountpoint, RunnerHomeLowerMountpoint, "/boot/efi", "/boot", "/tmp"} {
 		if err := syscall.Unmount(mountpoint, syscall.MNT_DETACH); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOENT) {
 			return fmt.Errorf("guestd: detaching capsule mount %s: %w", mountpoint, err)
 		}

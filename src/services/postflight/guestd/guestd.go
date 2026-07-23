@@ -610,6 +610,9 @@ func (s *Server) convergeMount(ctx context.Context, mount guestproto.Mount) erro
 }
 
 func (s *Server) tryMount(ctx context.Context, mount guestproto.Mount, options []string) error {
+	if mount.Serial == "tool" && mount.Mountpoint == RunnerHomeMountpoint {
+		return s.tryRunnerHomeMount(ctx, mount, options)
+	}
 	system := s.cfg.System
 	mounted, err := system.IsMounted(mount.Mountpoint)
 	if err != nil {
@@ -640,6 +643,46 @@ func (s *Server) tryMount(ctx context.Context, mount guestproto.Mount, options [
 		}
 	}
 	return system.Adopt(mount.Mountpoint)
+}
+
+func (s *Server) tryRunnerHomeMount(ctx context.Context, mount guestproto.Mount, options []string) error {
+	system := s.cfg.System
+	device, err := system.LocateDevice(ctx, mount.Serial)
+	if err != nil {
+		return err
+	}
+	if s.cfg.Encryption.enabled() {
+		device, err = s.openEncrypted(ctx, device, mount.Serial)
+		if err != nil {
+			return err
+		}
+	}
+	backingMounted, err := system.IsMounted(RunnerHomeBackingMountpoint)
+	if err != nil {
+		return err
+	}
+	if !backingMounted {
+		blank, err := system.IsBlank(ctx, device)
+		if err != nil {
+			return err
+		}
+		if blank {
+			if err := system.MakeFilesystem(ctx, device, mount.Filesystem); err != nil {
+				return err
+			}
+		}
+		if err := system.Mount(ctx, device, RunnerHomeBackingMountpoint, mount.Filesystem, options); err != nil {
+			return err
+		}
+	}
+	if err := system.MountOverlay(ctx,
+		RunnerHomeMountpoint, RunnerHomeLowerMountpoint,
+		RunnerHomeBackingMountpoint+"/upper", RunnerHomeBackingMountpoint+"/work",
+		RunnerHomeMountpoint, []string{"noatime", "nodev", "nosuid"},
+	); err != nil {
+		return err
+	}
+	return system.Adopt(RunnerHomeMountpoint)
 }
 
 // openEncrypted converges the device to an open LUKS2 mapper and returns

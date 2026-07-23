@@ -11,8 +11,11 @@ import (
 )
 
 const (
-	ProcessMountpoint = "/var/lib/postflight/process"
-	ProcessImagesDir  = ProcessMountpoint + "/images"
+	ProcessMountpoint           = "/var/lib/postflight/process"
+	ProcessImagesDir            = ProcessMountpoint + "/images"
+	RunnerHomeMountpoint        = "/home/runner"
+	RunnerHomeBackingMountpoint = "/var/lib/postflight/runner-home"
+	RunnerHomeLowerMountpoint   = "/var/lib/postflight/runner-home-lower"
 )
 
 // ProcessCheckpoints couples the generic PID capsule to CRIU. ImagesRoot is
