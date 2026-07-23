@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Dropzone } from "~/components/dropzone";
 import { Editor } from "~/components/editor";
 import { Header } from "~/components/header";
+import { LinkInput } from "~/components/link-input";
 import type { ShorttyEngine } from "~/engine/client";
 import type { ProbeSummary } from "~/engine/types";
 import { emitSpan } from "~/lib/telemetry/browser";
@@ -90,6 +91,7 @@ function Home() {
             </p>
             <div className="mt-10">
               <Dropzone onFile={onFile} onWarm={warm} disabled={session.kind === "probing"} />
+              <LinkInput onFile={onFile} onWarm={warm} disabled={session.kind === "probing"} />
             </div>
             {session.kind === "probing" && (
               <p className="mt-4 text-center font-mono text-sm text-mist-faint">
