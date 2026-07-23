@@ -72,9 +72,9 @@ function Home() {
   }, []);
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-5 pb-16">
+    <div className="shortty-shell">
       <Header />
-      <main id="main" className="flex flex-1 flex-col justify-center py-10">
+      <main id="main" className="shortty-main">
         {session.kind === "ready" && engineRef.current ? (
           <Editor
             engine={engineRef.current}
@@ -83,32 +83,42 @@ function Home() {
             onReset={reset}
           />
         ) : (
-          <>
-            <h1 className="text-center text-4xl font-semibold tracking-tight text-mist md:text-5xl">
-              Any clip, under 4&thinsp;MB
-            </h1>
-            <p className="mx-auto mt-4 max-w-md text-center text-mist-dim">
-              Pick up to a minute of any video. Get the best possible quality that fits — never a
-              byte over.
-            </p>
-            <div className="mt-10">
+          <section className="shortty-hero" aria-labelledby="shortty-title">
+            <div className="shortty-hero__eyebrow">
+              <span>Browser-native video clipping</span>
+            </div>
+            <div className="shortty-hero__copy-frame">
+              <span className="shortty-hero__cross shortty-hero__cross--left" aria-hidden="true" />
+              <span className="shortty-hero__cross shortty-hero__cross--right" aria-hidden="true" />
+              <h1
+                id="shortty-title"
+                className="shortty-title"
+                data-copy="Any clip, under 4 MB"
+                aria-label="Any clip, under 4 MB"
+              >
+                Any clip, under 4&thinsp;MB
+              </h1>
+              <p className="shortty-hero__lede">
+                Pick up to a minute of any video. Get the best possible quality that fits — never a
+                byte over.
+              </p>
+            </div>
+            <div className="shortty-hero__drop-frame">
               <Dropzone onFile={onSource} onWarm={warm} disabled={session.kind === "probing"} />
               <LinkInput onSource={onSource} onWarm={warm} disabled={session.kind === "probing"} />
             </div>
             {session.kind === "probing" && (
-              <p className="mt-4 text-center font-mono text-sm text-mist-faint">
-                Reading {session.name}…
-              </p>
+              <p className="shortty-hero__message font-mono">Reading {session.name}…</p>
             )}
             {session.kind === "rejected" && (
-              <p className="mx-auto mt-4 max-w-md rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-center text-sm text-red-200">
+              <p className="shortty-hero__message shortty-hero__message--error">
                 {session.message}
               </p>
             )}
-            <p className="mt-12 text-center text-xs text-mist-faint">
+            <p className="shortty-hero__privacy">
               Everything runs in your browser. Your video is never uploaded.
             </p>
-          </>
+          </section>
         )}
       </main>
     </div>

@@ -39,7 +39,14 @@ function RootComponent() {
         <HeadContent />
       </head>
       <body className="font-sans antialiased text-mist min-h-screen">
-        <div className="stage-light" aria-hidden="true" />
+        <div className="stage-light" aria-hidden="true">
+          <div className="stage-spotlights">
+            <span className="stage-spotlight stage-spotlight--left" />
+            <span className="stage-spotlight stage-spotlight--center" />
+            <span className="stage-spotlight stage-spotlight--right" />
+          </div>
+        </div>
+        <div className="stage-grid" aria-hidden="true" />
         <div className="stage-grain" aria-hidden="true" />
         <Outlet />
         <TelemetryProbe />
