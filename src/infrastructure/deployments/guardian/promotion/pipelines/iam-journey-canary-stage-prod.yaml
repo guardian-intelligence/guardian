@@ -35,12 +35,6 @@ spec:
             updates:
               - key: spec.jobTemplate.spec.template.spec.containers.0.image
                 value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
-        - uses: yaml-update
-          config:
-            path: ./repo/src/infrastructure/deployments/guardian/system/release-manifest.yaml
-            updates:
-              - key: releases.journey-canary.prod.image
-                value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
         - uses: git-commit
           as: commit
           config:

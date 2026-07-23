@@ -1,6 +1,6 @@
 # Kargo — the promotion controller. It moves digest pins into Git (bump the
-# manifest pin, open a PR); the provenance gate in company-site-image.yml and
-# branch protection are the enforcement, so Kargo is an untrusted bot by
+# manifest pin, open a PR); branch protection and the conformance tests on
+# the promotion PR are the enforcement, so Kargo is an untrusted bot by
 # construction (docs/supply-chain-design.md, "Promotion: how digests move").
 #
 # Deliberately headless and minimal: the API server (UI/CLI) is disabled —

@@ -54,8 +54,7 @@ oci_load(
     repo_tags = ["guardian/alert-relay:dev"],
 )
 
-# Pushed by CI (.github/workflows/alert-relay-image.yml) on merges to
-# main; the workflow file path is the cosign trust anchor for this image.
+# Pushed by CI (.github/workflows/images.yml) on merges to main.
 oci_push(
     name = "push",
     image = ":image",

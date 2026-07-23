@@ -21,5 +21,5 @@ separate build system ships:
 bazelisk build //src/products/viteplus-monorepo/apps/guardianintelligence-web/site:image
 ```
 
-CI's `site-gate` builds and promotes that target. `pnpm run build` runs the
+CI's `images` workflow builds and publishes that target. `pnpm run build` runs the
 same vite build for local inspection.

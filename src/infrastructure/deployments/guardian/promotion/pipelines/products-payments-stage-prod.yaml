@@ -40,14 +40,6 @@ spec:
             updates:
               - key: spec.jobTemplate.spec.template.spec.containers.0.image
                 value: ${{ vars.canaryRepo }}@${{ imageFrom(vars.canaryRepo).Digest }}
-        - uses: yaml-update
-          config:
-            path: ./repo/src/infrastructure/deployments/guardian/system/release-manifest.yaml
-            updates:
-              - key: releases.payments.prod.image
-                value: ${{ vars.serviceRepo }}@${{ imageFrom(vars.serviceRepo).Digest }}
-              - key: releases.payments-canary.prod.image
-                value: ${{ vars.canaryRepo }}@${{ imageFrom(vars.canaryRepo).Digest }}
         - uses: git-commit
           as: commit
           config:

@@ -507,6 +507,4 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	assertTextContains(t, string(promotion),
 		`path: ./repo/src/infrastructure/deployments/iam/prod/journey-canary.yaml`,
 		"journey canary promotion must update the CronJob image")
-	assertTextContains(t, string(promotion), `key: releases.journey-canary.prod.image`,
-		"journey canary promotion must update the release manifest")
 }
