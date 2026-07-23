@@ -5,7 +5,4 @@ resources:
   - postflight-auth-secrets.yaml
   - cloudflare-origin-pull-ca.yaml
   - root-ingress-networkpolicy.yaml
-  - canary.yaml
-  - loadtester.yaml
   - networkpolicy.yaml
-  - ../load/prod

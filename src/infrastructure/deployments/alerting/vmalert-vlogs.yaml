@@ -32,9 +32,8 @@ spec:
   evaluationInterval: 60s
   datasource:
     url: http://vlselect-generic.tenant-root.svc:9471
-  # Recording rules (ingress-canary-metrics.yaml) project LogsQL stats into
-  # the TSDB so Prometheus-API consumers (Flagger's canary gate) can query
-  # log-derived series.
+  # Recording rules project LogsQL stats into the TSDB so Prometheus-API
+  # consumers can query log-derived series.
   remoteWrite:
     url: http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus
   notifiers:
@@ -51,14 +50,12 @@ spec:
     - guardian-log-pipeline-vlogs-rules
     - guardian-trust-vlogs-rules
     - guardian-talos-vlogs-rules
-    - guardian-ingress-canary-vlogs-rules
     - guardian-canary-redaction-vlogs-rules
   rulePath:
     - /etc/vm/configs/guardian-audit-vlogs-rules/*.yaml
     - /etc/vm/configs/guardian-log-pipeline-vlogs-rules/*.yaml
     - /etc/vm/configs/guardian-trust-vlogs-rules/*.yaml
     - /etc/vm/configs/guardian-talos-vlogs-rules/*.yaml
-    - /etc/vm/configs/guardian-ingress-canary-vlogs-rules/*.yaml
     - /etc/vm/configs/guardian-canary-redaction-vlogs-rules/*.yaml
 ---
 apiVersion: operator.victoriametrics.com/v1beta1

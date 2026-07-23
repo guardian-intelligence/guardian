@@ -26,12 +26,6 @@ spec:
       guardian.dev/stage: prod
   template:
     metadata:
-      annotations:
-        guardian.dev/rollout-controller: flagger
-        # Flagger records a failed rollout's spec and will not re-run it
-        # until the pod template changes; bump this nonce to re-send the
-        # same code through the canary gate.
-        guardian.dev/rollout-nonce: canary-gate-vlogs
       labels:
         app.kubernetes.io/name: company-site
         app.kubernetes.io/part-of: guardian

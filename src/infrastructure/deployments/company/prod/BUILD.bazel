@@ -5,10 +5,7 @@ filegroup(
         "web.yaml",
         "cloudflare-origin-pull-ca.yaml",
         "root-ingress-networkpolicy.yaml",
-        "canary.yaml",
-        "loadtester.yaml",
         "networkpolicy.yaml",
-        "//src/infrastructure/deployments/company/load/prod:manifests",
     ],
     visibility = ["//visibility:public"],
 )

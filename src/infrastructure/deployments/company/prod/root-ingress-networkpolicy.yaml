@@ -3,10 +3,6 @@
 # the reserved host/remote-node identities — never a pod identity — and the
 # admit must be entity-based. This additive policy admits node-identity
 # traffic to the company-site pods.
-#
-# Matches both label values because Flagger's apex Service routes to the
-# primary clone (company-site-primary), not the plain company-site pods,
-# once the Canary (added alongside this policy) takes over the Deployment.
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy
 metadata:
@@ -25,7 +21,6 @@ spec:
         operator: In
         values:
           - company-site
-          - company-site-primary
   ingress:
     - fromEntities:
         - host
