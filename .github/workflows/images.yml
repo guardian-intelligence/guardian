@@ -65,7 +65,7 @@ jobs:
         run: |
           names=(alert-relay analytics-ingest authorization canary-journeys
             cockpit payments payments-canary postflight-controlplane
-            company-site shortty-web)
+            company-site shortty-web visual-harness)
           declare -A watch=(
             [alert-relay]='^src/services/alerting/'
             [analytics-ingest]='^src/products/analytics/|^src/proto/'
@@ -77,6 +77,7 @@ jobs:
             [postflight-controlplane]='^src/services/postflight/'
             [company-site]='^src/products/viteplus-monorepo/'
             [shortty-web]='^src/products/viteplus-monorepo/'
+            [visual-harness]='^src/products/viteplus-monorepo/packages/visual-harness/|^src/products/viteplus-monorepo/pnpm-(lock|workspace)\.yaml$'
           )
           declare -A push_target=(
             [alert-relay]='//src/services/alerting/relay:push'
@@ -89,6 +90,7 @@ jobs:
             [postflight-controlplane]='//src/services/postflight/controlplane:push'
             [company-site]='//src/products/viteplus-monorepo/apps/guardianintelligence-web/site:push'
             [shortty-web]='//src/products/viteplus-monorepo/apps/shortty-web/site:push'
+            [visual-harness]='//src/products/viteplus-monorepo/packages/visual-harness:push'
           )
           go_images=' alert-relay analytics-ingest authorization cockpit payments payments-canary postflight-controlplane '
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'
@@ -207,6 +209,63 @@ jobs:
       - name: Stop smoke container
         if: always()
         run: docker rm -f shortty-smoke || true
+
+  # Deterministic visual gate for shortty: load the exact images just built,
+  # run the visual-harness canary inside the pinned Playwright image (whose
+  # font rendering matches the committed linux baselines), and fail on visual
+  # drift or on critical elements dropping below the fold in any form factor.
+  shortty-visual-gate:
+    needs: classify
+    if: github.event_name == 'pull_request' && needs.classify.outputs.viteplus == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
+
+      - name: Load and run the built images
+        run: |
+          bazelisk run //src/products/viteplus-monorepo/apps/shortty-web/site:load
+          bazelisk run //src/products/viteplus-monorepo/packages/visual-harness:load
+          docker network create visual-gate
+          docker run -d --name shortty-visual --network visual-gate --network-alias shortty \
+            -p 8080:8080 ghcr.io/guardian-intelligence/shortty-web:edge
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/healthz >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8080/healthz >/dev/null
+
+      - name: Visual drift + fold gate
+        run: |
+          mkdir -p /tmp/visual-output
+          # journeys/ is mounted read-write and the run passes
+          # --update-snapshots=missing: a form factor with no committed
+          # baseline writes one (surfaced via the artifact below for review
+          # and commit) instead of bricking bootstrap, while any committed
+          # baseline that mismatches still fails the gate.
+          docker run --rm --network visual-gate \
+            -e VISUAL_TARGET_URL=http://shortty:8080 -e VISUAL_ALLOW_HTTP=1 \
+            -v "$PWD/src/products/viteplus-monorepo/packages/visual-harness/journeys:/app/journeys" \
+            -v /tmp/visual-output:/tmp/visual-harness-output \
+            guardian/visual-harness:dev --update-snapshots=missing
+
+      - name: Upload baselines and diff artifacts
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: shortty-visual
+          if-no-files-found: ignore
+          path: |
+            src/products/viteplus-monorepo/packages/visual-harness/journeys/visual.spec.ts-snapshots/
+            /tmp/visual-output/
+
+      - name: Stop visual-gate containers
+        if: always()
+        run: |
+          docker rm -f shortty-visual || true
+          docker network rm visual-gate || true
 
   # Push only for the canonical main history — not for PRs, and not for
   # workflow_dispatch on arbitrary branches (a dispatch push would retag
