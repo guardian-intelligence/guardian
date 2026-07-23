@@ -125,12 +125,20 @@ jobs:
           revision="${{ steps.verify.outputs.revision }}"
           day="$(date -u +%Y%m%d -d "@$(git log -1 --format=%ct)")"
           tag="postflight-cli/nightly-$day"
-          existing="$(gh api "repos/${{ github.repository }}/git/ref/tags/${tag//\//%2F}" \
-            --jq .object.sha 2>/dev/null || true)"
+          # On 404 gh api prints the error JSON to stdout and --jq never
+          # applies — only the exit code distinguishes a missing tag, so an
+          # unguarded $(...) capture reads garbage into the variable.
+          tag_sha() {
+            local out
+            if out="$(gh api "repos/${{ github.repository }}/git/ref/tags/$1" \
+                --jq .object.sha 2>/dev/null)"; then
+              printf '%s' "$out"
+            fi
+          }
+          existing="$(tag_sha "$tag")"
           if [[ -n "$existing" && "$existing" != "$revision" ]]; then
             tag="$tag-$(date -u +%H%M -d "@$(git log -1 --format=%ct)")"
-            existing="$(gh api "repos/${{ github.repository }}/git/ref/tags/${tag//\//%2F}" \
-              --jq .object.sha 2>/dev/null || true)"
+            existing="$(tag_sha "$tag")"
           fi
           # Create the tag ref first: the releases API 403s integration tokens
           # when target_commitish is a bare SHA (cli/cli#9514), while plain
