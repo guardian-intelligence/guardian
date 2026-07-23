@@ -997,16 +997,6 @@ body {
   background: rgb(248 113 113 / 10%);
 }
 
-.shortty-hero__privacy {
-  margin-top: 2.25rem;
-  color: rgb(101 115 138 / 70%);
-  font-size: 0.7rem;
-  text-align: center;
-  opacity: 0;
-  transform: translateY(0.625rem);
-  animation: intro-up 1.5s 2.1s ease forwards;
-}
-
 @property --line-angle {
   syntax: "<angle>";
   inherits: false;
@@ -1227,8 +1217,7 @@ body {
   .shortty-hero__lede,
   .shortty-hero__cross,
   .shortty-hero__drop-frame,
-  .dropzone__light::before,
-  .shortty-hero__privacy {
+  .dropzone__light::before {
     animation: none;
   }
 
@@ -1239,8 +1228,7 @@ body {
   .shortty-hero__copy-frame::before,
   .shortty-title,
   .shortty-hero__lede,
-  .shortty-hero__drop-frame,
-  .shortty-hero__privacy {
+  .shortty-hero__drop-frame {
     opacity: 1;
     transform: none;
   }

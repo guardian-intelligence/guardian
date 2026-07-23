@@ -62,6 +62,10 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
 
   const estimate = useMemo(() => estimateSelection(summary, selection), [summary, selection]);
 
+  // Portrait footage should hug a narrow column so the media, timeline, and
+  // controls read as one stack — never a sliver of video floating in black.
+  const portrait = summary.video.height >= summary.video.width;
+
   const encode = useCallback(() => {
     setPhase({ kind: "encoding", pass: 1, fraction: 0 });
     emitSpan("shortty.encode_started", {
@@ -109,14 +113,17 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
   }
 
   return (
-    <div className="glass-strong space-y-6 p-6">
+    <div
+      className="glass-strong mx-auto w-full space-y-6 p-6"
+      style={{ maxWidth: portrait ? "30rem" : "52rem" }}
+    >
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <video
         ref={videoRef}
         src={previewUrl}
         controls
         playsInline
-        className="max-h-[42vh] w-full rounded-xl bg-black"
+        className="mx-auto block max-h-[62vh] max-w-full rounded-xl bg-black"
       />
       <Timeline
         summary={summary}

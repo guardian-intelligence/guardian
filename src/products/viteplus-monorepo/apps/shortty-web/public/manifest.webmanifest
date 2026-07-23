@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Shortty — any clip, under 4 MB",
-  "short_name": "Shortty",
-  "description": "Clip up to a minute of any video to the best quality that fits under 4 MB.",
+  "name": "PrivateCut — private video clipping",
+  "short_name": "PrivateCut",
+  "description": "Trim video to a shareable clip right in your browser. Nothing is uploaded — your footage never leaves your device.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

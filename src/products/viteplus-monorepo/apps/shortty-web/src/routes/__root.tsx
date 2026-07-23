@@ -20,15 +20,15 @@ export const Route = createRootRoute({
       },
       { name: "theme-color", content: "#0a0a0e" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
-      { name: "apple-mobile-web-app-title", content: "Shortty" },
+      { name: "apple-mobile-web-app-title", content: "PrivateCut" },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
-      { title: "Shortty — any clip, under 4 MB" },
+      { title: "PrivateCut — private video clipping, on your device" },
       {
         name: "description",
         content:
-          "Pick up to a minute of any video and get the best possible quality under 4 MB. In your browser — your video never leaves your device.",
+          "Trim and compress any video right in your browser. Nothing is uploaded — your footage never leaves your device. No account, no cloud; export a clip under 4 MB.",
       },
-      { property: "og:site_name", content: "Shortty" },
+      { property: "og:site_name", content: "PrivateCut" },
       ...deployMetaTags(),
     ],
     links: [

@@ -1,4 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dropzone } from "~/components/dropzone";
 import { Editor } from "~/components/editor";
@@ -8,8 +10,27 @@ import type { ShorttyEngine } from "~/engine/client";
 import type { MediaSource, ProbeSummary } from "~/engine/types";
 import { emitSpan } from "~/lib/telemetry/browser";
 
+type DeviceKind = "phone" | "computer";
+
+// Phones (not tablets/desktops) get "your phone" copy. iPadOS 13+ reports a
+// desktop Safari UA, so iPads read as "computer" — which matches how people
+// describe them here.
+function deviceFromUserAgent(ua: string): DeviceKind {
+  if (/iphone|ipod|windows phone/i.test(ua)) return "phone";
+  if (/android/i.test(ua) && /mobile/i.test(ua)) return "phone";
+  return "computer";
+}
+
+// Read the UA during SSR so the first document already carries the right word;
+// no client-side swap, no hydration flicker.
+const getDeviceKind = createServerFn({ method: "GET" }).handler((): DeviceKind => {
+  const ua = getRequest().headers.get("user-agent") ?? "";
+  return deviceFromUserAgent(ua);
+});
+
 export const Route = createFileRoute("/")({
   component: Home,
+  loader: () => getDeviceKind(),
 });
 
 type Session =
@@ -19,6 +40,7 @@ type Session =
   | { kind: "rejected"; message: string };
 
 function Home() {
+  const device = Route.useLoaderData();
   const [session, setSession] = useState<Session>({ kind: "idle" });
   const engineRef = useRef<ShorttyEngine | null>(null);
   const warmRef = useRef<Promise<typeof import("~/engine/client")> | null>(null);
@@ -97,14 +119,13 @@ function Home() {
               <h1
                 id="shortty-title"
                 className="shortty-title"
-                data-copy={"Any clip, under 4\u202fMB"}
-                aria-label="Any clip, under 4 MB"
+                data-copy="Private Cutting Room Floor"
+                aria-label="Private Cutting Room Floor"
               >
-                Any clip, under 4&#8239;MB
+                Private Cutting Room Floor
               </h1>
               <p className="shortty-hero__lede">
-                Pick up to a minute of any video. Get the best possible quality that fits — never a
-                byte over.
+                Videos stay on your {device} — never uploaded to the cloud.
               </p>
             </div>
             <div className="shortty-hero__drop-frame">
@@ -119,9 +140,6 @@ function Home() {
                 {session.message}
               </p>
             )}
-            <p className="shortty-hero__privacy">
-              Everything runs in your browser. Your video is never uploaded.
-            </p>
           </section>
         )}
       </main>
