@@ -24,6 +24,8 @@ grep -Fq '"${script_dir}/build-upstream.sh"' "${build_sh}" ||
   fail "build.sh does not consume the cached runner-images qcow2"
 grep -Fq "cryptsetup-bin" "${build_sh}" ||
   fail "build.sh does not install the Postflight runtime package"
+grep -Fq "util-linux" "${build_sh}" ||
+  fail "build.sh does not install the runner namespace privilege tools"
 grep -Fq 'CRIU_SHA256=' "${pins_env}" ||
   fail "pins.env does not pin the CRIU archive"
 grep -Fq 'TINI_VERSION=' "${pins_env}" ||

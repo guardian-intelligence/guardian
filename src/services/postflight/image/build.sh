@@ -292,6 +292,7 @@ in_chroot apt-get -q -y --no-install-recommends install \
   protobuf-compiler \
   protobuf-c-compiler \
   python3-protobuf \
+  util-linux \
   "tini=${TINI_VERSION}" \
   uuid-dev \
   "linux-modules-extra-${guest_kernel_release}"

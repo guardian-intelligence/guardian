@@ -25,6 +25,7 @@ const (
 	CapsulePIDPath       = "/run/postflight/capsule.pid"
 	RunnerWorkerReal     = "/opt/actions-runner/bin/Runner.Worker.real"
 	RunnerWorkerWrapper  = "/opt/actions-runner/bin/Runner.Worker"
+	RunnerSetpriv        = "/usr/bin/setpriv"
 	RunnerUID            = 1001
 	RunnerGID            = 1001
 	localMessageLimit    = 1 << 20
@@ -545,14 +546,28 @@ func RunRunnerWorkerExec(args []string) error {
 	if err := callLocal(localRequest{Kind: "worker-starting"}, nil); err != nil {
 		return fmt.Errorf("guestd: report Runner.Worker start: %w", err)
 	}
+	nsenter, nsenterArgs := runnerWorkerNamespaceCommand(pid, credential, args[1:])
+	return syscall.Exec(nsenter, nsenterArgs, os.Environ())
+}
+
+func runnerWorkerNamespaceCommand(pid int, credential *syscall.Credential, workerArgs []string) (string, []string) {
+	groups := make([]string, len(credential.Groups))
+	for i, group := range credential.Groups {
+		groups[i] = strconv.FormatUint(uint64(group), 10)
+	}
 	nsenter := "/usr/bin/nsenter"
-	nsenterArgs := []string{
-		nsenter, "--target", strconv.Itoa(pid), "--pid", "--mount",
-		"--setuid=" + strconv.Itoa(RunnerUID), "--setgid=" + strconv.Itoa(RunnerGID),
+	// nsenter --setgid clears supplementary groups. Enter while privileged,
+	// then let setpriv apply the complete image-declared identity atomically.
+	args := []string{
+		nsenter, "--target", strconv.Itoa(pid), "--pid", "--mount", "--",
+		RunnerSetpriv,
+		"--reuid=" + strconv.FormatUint(uint64(credential.Uid), 10),
+		"--regid=" + strconv.FormatUint(uint64(credential.Gid), 10),
+		"--groups=" + strings.Join(groups, ","),
+		"--inh-caps=-all",
 		"--", RunnerWorkerReal,
 	}
-	nsenterArgs = append(nsenterArgs, args[1:]...)
-	return syscall.Exec(nsenter, nsenterArgs, os.Environ())
+	return nsenter, append(args, workerArgs...)
 }
 
 func ReportRunnerWorkerFailure(err error) {
