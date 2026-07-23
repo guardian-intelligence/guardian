@@ -51,7 +51,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web
-          image: ghcr.io/guardian-intelligence/shortty-web:edge@sha256:a3a841f8634b4eac71f84eaeed9a6db8e96717045416c4117790fec731b1ae84 # {"$imagepolicy": "guardian-imageops:shortty-web"}
+          image: ghcr.io/guardian-intelligence/shortty-web:edge@sha256:8d5b983c87341d2b9a3d98b480255df8bd4cfc3dbecc9634a25f4826048f5de0 # {"$imagepolicy": "guardian-imageops:shortty-web"}
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -70,7 +70,7 @@ spec:
             # resource's service.version, so any event or trace names the
             # exact deployment that served it.
             - name: GUARDIAN_IMAGE
-              value: ghcr.io/guardian-intelligence/shortty-web:edge@sha256:a3a841f8634b4eac71f84eaeed9a6db8e96717045416c4117790fec731b1ae84 # {"$imagepolicy": "guardian-imageops:shortty-web"}
+              value: ghcr.io/guardian-intelligence/shortty-web:edge@sha256:8d5b983c87341d2b9a3d98b480255df8bd4cfc3dbecc9634a25f4826048f5de0 # {"$imagepolicy": "guardian-imageops:shortty-web"}
             - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
               value: http://otel-collector.guardian-analytics.svc.cozy.local:4318/v1/traces
           readinessProbe:
