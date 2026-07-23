@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"os/user"
 	"strings"
 	"sync"
 	"testing"
@@ -46,6 +47,54 @@ func TestParseGroupIDsDeduplicatesAndSorts(t *testing.T) {
 func TestParseGroupIDsRejectsMalformedID(t *testing.T) {
 	if _, err := parseGroupIDs([]string{"docker"}); err == nil {
 		t.Fatal("parseGroupIDs accepted a non-numeric group id")
+	}
+}
+
+func TestRunnerEnvironmentPreservesImageToolchain(t *testing.T) {
+	path := t.TempDir() + "/environment"
+	if err := os.WriteFile(path, []byte(strings.Join([]string{
+		"# generated image contract",
+		"PATH=/snap/bin:$HOME/.local/bin:${HOME}/.cargo/bin:/usr/bin",
+		`JAVA_HOME="/usr/lib/jvm/temurin-17-jdk-amd64"`,
+		"RUNNER_TOOL_CACHE=/opt/hostedtoolcache",
+	}, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	account := &user.User{Username: "runner", HomeDir: "/home/runner"}
+	imageEnv, err := readRunnerImageEnvironment(path, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := runnerEnviron(account, imageEnv, map[string]string{"POSTFLIGHT_ATTEMPT_ID": "1"})
+	values := make(map[string]string, len(got))
+	for _, entry := range got {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("malformed environment entry %q", entry)
+		}
+		values[key] = value
+	}
+	if values["PATH"] != "/snap/bin:/home/runner/.local/bin:/home/runner/.cargo/bin:/usr/bin" {
+		t.Fatalf("PATH = %q", values["PATH"])
+	}
+	if values["JAVA_HOME"] != "/usr/lib/jvm/temurin-17-jdk-amd64" || values["RUNNER_TOOL_CACHE"] != "/opt/hostedtoolcache" {
+		t.Fatalf("image toolchain environment missing: %v", values)
+	}
+	if values["HOME"] != "/home/runner" || values["USER"] != "runner" || values["LOGNAME"] != "runner" {
+		t.Fatalf("runner identity environment missing: %v", values)
+	}
+	if values["POSTFLIGHT_ATTEMPT_ID"] != "1" {
+		t.Fatalf("assignment environment missing: %v", values)
+	}
+}
+
+func TestRunnerEnvironmentRejectsInvalidEntry(t *testing.T) {
+	path := t.TempDir() + "/environment"
+	if err := os.WriteFile(path, []byte("not an assignment\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readRunnerImageEnvironment(path, &user.User{HomeDir: "/home/runner"}); err == nil {
+		t.Fatal("invalid image environment was accepted")
 	}
 }
 

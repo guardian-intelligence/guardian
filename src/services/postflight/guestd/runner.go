@@ -21,6 +21,8 @@ import (
 // RunnerRoot is where the golden image installs the actions runner tree.
 const RunnerRoot = "/opt/actions-runner"
 
+const runnerImageEnvironment = "/etc/environment"
+
 // outputDrainGrace is how long buffered runner output may trail the runner's
 // exit before the pipe is severed.
 const outputDrainGrace = 2 * time.Second
@@ -57,13 +59,17 @@ func ExecRunner(root, username string, logger *slog.Logger) RunRunner {
 		if err != nil {
 			return 0, fmt.Errorf("guestd: credentials of %s: %w", username, err)
 		}
+		imageEnv, err := readRunnerImageEnvironment(runnerImageEnvironment, account)
+		if err != nil {
+			return 0, fmt.Errorf("guestd: runner image environment: %w", err)
+		}
 
 		cmd := runnerCommand(ctx, root, jitConfig)
 		cmd.Dir = root
 		cmd.SysProcAttr = &syscall.SysProcAttr{
 			Credential: credential,
 		}
-		cmd.Env = runnerEnviron(account, env)
+		cmd.Env = runnerEnviron(account, imageEnv, env)
 
 		read, write, err := os.Pipe()
 		if err != nil {
@@ -205,20 +211,83 @@ func redactor(jitConfig string, env map[string]string) *strings.Replacer {
 	return strings.NewReplacer(pairs...)
 }
 
-// runnerEnviron builds the runner's environment: the account's identity
-// plus the assignment env, deterministically ordered.
-func runnerEnviron(account *user.User, env map[string]string) []string {
-	environ := []string{
-		"HOME=" + account.HomeDir,
-		"USER=" + account.Username,
-		"LOGNAME=" + account.Username,
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+// readRunnerImageEnvironment imports the root-owned compatibility contract
+// produced by actions/runner-images. PAM expands HOME for interactive users;
+// guestd starts the listener directly, so it performs that expansion here.
+func readRunnerImageEnvironment(path string, account *user.User) (map[string]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
 	}
+	defer file.Close()
+
+	env := make(map[string]string)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		key = strings.TrimSpace(key)
+		if !ok || !validEnvironmentName(key) {
+			return nil, fmt.Errorf("invalid environment entry %q", line)
+		}
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 && value[0] == value[len(value)-1] && (value[0] == '\'' || value[0] == '"') {
+			if value[0] == '"' {
+				value, err = strconv.Unquote(value)
+				if err != nil {
+					return nil, fmt.Errorf("environment %s: %w", key, err)
+				}
+			} else {
+				value = value[1 : len(value)-1]
+			}
+		}
+		value = strings.NewReplacer("${HOME}", account.HomeDir, "$HOME", account.HomeDir).Replace(value)
+		env[key] = value
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return env, nil
+}
+
+func validEnvironmentName(name string) bool {
+	for i, char := range name {
+		if (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z') || char == '_' || (i > 0 && char >= '0' && char <= '9') {
+			continue
+		}
+		return false
+	}
+	return name != ""
+}
+
+// runnerEnviron layers assignment-specific values over the image's declared
+// toolchain environment and the runner account identity.
+func runnerEnviron(account *user.User, imageEnv, assignmentEnv map[string]string) []string {
+	env := map[string]string{
+		"HOME":    account.HomeDir,
+		"USER":    account.Username,
+		"LOGNAME": account.Username,
+		"PATH":    "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+	}
+	for key, value := range imageEnv {
+		env[key] = value
+	}
+	env["HOME"] = account.HomeDir
+	env["USER"] = account.Username
+	env["LOGNAME"] = account.Username
+	for key, value := range assignmentEnv {
+		env[key] = value
+	}
+
 	keys := make([]string, 0, len(env))
 	for key := range env {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+	environ := make([]string, 0, len(keys))
 	for _, key := range keys {
 		environ = append(environ, key+"="+env[key])
 	}
