@@ -40,3 +40,14 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    # OTLP/HTTP to the analytics collector: the resolve route's server-side
+    # spans. The collector's own namespaced policy cannot admit a foreign
+    # namespace, so otel-networkpolicy.yaml carries the matching ingress.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: guardian-analytics
+            k8s:app.kubernetes.io/name: otel-collector
+      toPorts:
+        - ports:
+            - port: "4318"
+              protocol: TCP

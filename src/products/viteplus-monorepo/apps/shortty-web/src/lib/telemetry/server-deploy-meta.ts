@@ -19,6 +19,7 @@ export function deployMetaTags(): DeployMetaTag[] {
     { name: DEPLOY_META.id, content: env.GUARDIAN_DEPLOY_ID ?? "" },
     { name: DEPLOY_META.commitSha, content: env.GUARDIAN_COMMIT_SHA ?? "" },
     { name: DEPLOY_META.supervisor, content: env.GUARDIAN_SUPERVISOR ?? "" },
+    { name: DEPLOY_META.image, content: env.GUARDIAN_IMAGE ?? "" },
   ];
   // Any non-prod site (pr-<N> previews, future stages) must never be indexed
   // or ranked against the apex: canonical/OG URLs are compile-time constants

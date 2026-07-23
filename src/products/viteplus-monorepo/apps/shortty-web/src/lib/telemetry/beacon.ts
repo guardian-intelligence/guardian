@@ -6,6 +6,8 @@
 // transport errors swallowed. Integrity lives server-side.
 
 import type { TelemetryEvent } from "./browser";
+import { DEPLOY_META } from "./meta-keys";
+import { traceIdToBase64 } from "./trace-id";
 
 const ENDPOINT = "/api/events/guardian.analytics.v1.EventService/Publish";
 const LS_KEY = "guardian_events_v1";
@@ -18,11 +20,28 @@ interface WireEvent {
   name: string;
   path?: string;
   referrer?: string;
+  // Event.trace_id bytes, base64 per the Connect JSON codec: the server
+  // trace this event belongs to (only rpc/error-style events carry one).
+  traceId?: string;
   offsetMs?: number;
   sessionSeq?: number;
   vitalName?: string;
   vitalValue?: number;
   propsJson?: string;
+}
+
+// The serving deployment's image digest (short form), read once from the
+// SSR-emitted guardian:image meta tag; stamped into every event's props so
+// error rates can be sliced by frontend deployment straight from ClickHouse.
+let deploySlug: string | undefined;
+
+function deployShortDigest(): string {
+  if (deploySlug === undefined) {
+    const content =
+      document.querySelector<HTMLMetaElement>(`meta[name="${DEPLOY_META.image}"]`)?.content ?? "";
+    deploySlug = /@sha256:([0-9a-f]{12})/.exec(content)?.[1] ?? "";
+  }
+  return deploySlug;
 }
 
 let seq = 0;
@@ -54,13 +73,19 @@ function saveSeq(): void {
 }
 
 function toWire(e: TelemetryEvent, nowPerf: number): WireEvent {
-  const { "route.path": routePath, referrer, ...rest } = e.attrs;
+  const { "route.path": routePath, referrer, "trace.id": traceHex, ...rest } = e.attrs;
   const w: WireEvent = {
     name: e.name,
     path: routePath ?? window.location.pathname,
     offsetMs: Math.max(0, Math.round(nowPerf - e.t)),
   };
   if (referrer) w.referrer = referrer;
+  if (traceHex !== undefined) {
+    const b64 = traceIdToBase64(traceHex);
+    if (b64 !== "") w.traceId = b64;
+  }
+  const deploy = deployShortDigest();
+  if (deploy !== "") rest.deploy ??= deploy;
   if (e.name.startsWith("web_vital.")) {
     w.vitalName = rest["web_vital.name"] ?? "";
     w.vitalValue = Number(rest["web_vital.value"]) || 0;

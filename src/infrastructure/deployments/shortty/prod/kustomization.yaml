@@ -5,3 +5,5 @@ resources:
   - secrets.yaml
   - networkpolicy.yaml
   - root-ingress-networkpolicy.yaml
+  - otel-networkpolicy.yaml
+  - observability.yaml

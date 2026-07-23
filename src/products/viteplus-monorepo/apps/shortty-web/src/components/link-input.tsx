@@ -26,9 +26,10 @@ export function LinkInput({ onSource, onWarm, disabled }: LinkInputProps) {
     emitSpan("shortty.link_submitted", {});
     const startedAt = performance.now();
     resolveXVideo(value)
-      .then((source) => {
+      .then(({ source, traceId }) => {
         emitSpan("shortty.link_resolved", {
           wall_ms: String(Math.round(performance.now() - startedAt)),
+          ...(traceId !== "" && { "trace.id": traceId }),
         });
         setPhase({ kind: "idle" });
         setLink("");
@@ -36,8 +37,9 @@ export function LinkInput({ onSource, onWarm, disabled }: LinkInputProps) {
       })
       .catch((error: unknown) => {
         const code = error instanceof ResolveError ? error.code : "unknown";
+        const traceId = error instanceof ResolveError ? error.traceId : "";
         const message = error instanceof Error ? error.message : "Something went wrong. Try again.";
-        emitSpan("shortty.link_failed", { code });
+        emitSpan("shortty.link_failed", { code, ...(traceId !== "" && { "trace.id": traceId }) });
         setPhase({ kind: "failed", message });
       });
   }, [link, busy, onSource, onWarm]);
