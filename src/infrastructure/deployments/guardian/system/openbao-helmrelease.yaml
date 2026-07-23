@@ -402,14 +402,6 @@ spec:
                   }
                 }
 
-                }
-
-                }
-
-                }
-
-                }
-
                 request "write_reader_policy_guardian_imageops" {
                   operation = "update"
                   path = "sys/policies/acl/guardian-reader-guardian-imageops"
@@ -492,14 +484,6 @@ spec:
                     token_ttl = "600"
                     token_max_ttl = "600"
                   }
-                }
-
-                }
-
-                }
-
-                }
-
                 }
 
                 request "write_reader_policy_guardian_products" {
