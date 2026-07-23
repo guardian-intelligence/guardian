@@ -7,6 +7,8 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  annotations:
+    reloader.stakater.com/auto: "true"
   name: cockpit-events
   namespace: tenant-guardian-prod
   labels:
