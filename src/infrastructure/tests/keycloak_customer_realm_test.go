@@ -485,7 +485,7 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read Guardian journey canary: %v", err)
 	}
-	assertTextContains(t, string(canary), `ghcr.io/guardian-intelligence/canary-journeys@sha256:`,
+	assertTextContains(t, string(canary), `ghcr.io/guardian-intelligence/canary-journeys:edge@sha256:`,
 		"Guardian journey canary must run the signed browser image")
 	assertTextContains(t, string(canary), `value: https://guardianintelligence.org/postflight`,
 		"Guardian journey canary must start at the public Postflight route")
