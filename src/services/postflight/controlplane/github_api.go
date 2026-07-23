@@ -285,6 +285,10 @@ type apiWorkflowRun struct {
 	HeadRepository struct {
 		FullName string `json:"full_name"`
 	} `json:"head_repository"`
+	Repository struct {
+		ID       int64  `json:"id"`
+		FullName string `json:"full_name"`
+	} `json:"repository"`
 }
 
 type apiWorkflowJob struct {

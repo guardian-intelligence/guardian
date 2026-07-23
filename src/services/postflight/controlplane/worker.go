@@ -452,19 +452,7 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 		return nil
 	}
 
-	trust := trustClassForRun(obs)
-	if _, err := w.st.EnsureProviderDemand(ctx, demandRow{
-		ProviderJobID:          apiEv.Job.ID,
-		ProviderInstallationID: ev.InstallationID,
-		ProviderRepositoryID:   ev.RepositoryID,
-		RepositoryFullName:     ev.RepositoryFullName,
-		ProviderRunID:          apiEv.Job.RunID,
-		ProviderRunAttempt:     apiEv.Job.RunAttempt,
-		TrustClass:             trust,
-		RunnerClass:            class,
-		WorkspaceScopeID:       w.resolveWorkspaceScope(ctx, ev.RepositoryFullName, class, trust, run, apiEv.Job.Name, prBaseRef),
-		LastDeliveryID:         deliveryID,
-	}); err != nil {
+	if err := w.ensureDemandForAPIJob(ctx, apiEv, run, trustClassForRun(obs), prBaseRef, deliveryID); err != nil {
 		return fmt.Errorf("ensure demand: %w", err)
 	}
 	if err := w.st.NotifyJobPlans(ctx); err != nil {
@@ -479,6 +467,23 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 
 func jobCanStillRequireRendezvous(status string) bool {
 	return status == "queued" || status == "in_progress"
+}
+
+func (w *worker) ensureDemandForAPIJob(ctx context.Context, ev jobEvent, run apiWorkflowRun, trust, prBaseRef, deliveryID string) error {
+	class := runnerClassForLabels(ev.Job.Labels, w.cfg.runnerClassPrefix)
+	_, err := w.st.EnsureProviderDemand(ctx, demandRow{
+		ProviderJobID:          ev.Job.ID,
+		ProviderInstallationID: ev.InstallationID,
+		ProviderRepositoryID:   ev.RepositoryID,
+		RepositoryFullName:     ev.RepositoryFullName,
+		ProviderRunID:          ev.Job.RunID,
+		ProviderRunAttempt:     ev.Job.RunAttempt,
+		TrustClass:             trust,
+		RunnerClass:            class,
+		WorkspaceScopeID:       w.resolveWorkspaceScope(ctx, ev.RepositoryFullName, class, trust, run, ev.Job.Name, prBaseRef),
+		LastDeliveryID:         deliveryID,
+	})
+	return err
 }
 
 // refreshRunAndJobs is the in_progress/completed path: the payload's terminal
@@ -507,21 +512,26 @@ func (w *worker) refreshRunAndJobs(ctx context.Context, ev jobEvent, deliveryID 
 
 	now := time.Now()
 	ourClassSeen := false
+	active := make([]jobEvent, 0, len(jobs))
 	for _, aj := range jobs {
 		p := payloadFromAPIJob(aj)
 		class := runnerClassForLabels(p.Labels, w.cfg.runnerClassPrefix)
 		if class != "" {
 			ourClassSeen = true
 		}
-		row := jobRowFrom(jobEvent{
+		apiEv := jobEvent{
 			Action:             ev.Action,
 			InstallationID:     ev.InstallationID,
 			RepositoryID:       ev.RepositoryID,
 			RepositoryFullName: ev.RepositoryFullName,
 			Job:                p,
-		}, class, &now)
+		}
+		row := jobRowFrom(apiEv, class, &now)
 		if err := w.st.UpsertWorkflowJob(ctx, row); err != nil {
 			return fmt.Errorf("persist API job %d: %w", p.ID, err)
+		}
+		if class != "" && jobCanStillRequireRendezvous(p.Status) {
+			active = append(active, apiEv)
 		}
 		ja := attrs
 		ja.JobID, ja.RunnerClass = p.ID, class
@@ -543,7 +553,29 @@ func (w *worker) refreshRunAndJobs(ctx context.Context, ev jobEvent, deliveryID 
 		}
 	}
 
-	prNumber, _, prResolved := w.resolveAndStampPullRequest(ctx, ev.InstallationID, ev.RepositoryFullName, ev.Job.RunID, run, nil)
+	obs := runObservation{
+		Event:                  run.Event,
+		RepositoryFullName:     ev.RepositoryFullName,
+		HeadRepositoryFullName: run.HeadRepository.FullName,
+		HeadBranch:             run.HeadBranch,
+		HeadSHA:                run.HeadSHA,
+	}
+	prNumber, prBaseRef, prResolved := w.resolveAndStampPullRequest(ctx, ev.InstallationID, ev.RepositoryFullName, ev.Job.RunID, run, &obs)
+	for _, apiEv := range active {
+		if err := w.ensureDemandForAPIJob(ctx, apiEv, run, trustClassForRun(obs), prBaseRef, deliveryID); err != nil {
+			return fmt.Errorf("ensure demand for API job %d: %w", apiEv.Job.ID, err)
+		}
+		da := attrs
+		da.JobID = apiEv.Job.ID
+		da.RunnerClass = runnerClassForLabels(apiEv.Job.Labels, w.cfg.runnerClassPrefix)
+		da.Result = "succeeded"
+		emitEvent(ctx, evDemandRecorded, da)
+	}
+	if len(active) > 0 {
+		if err := w.st.NotifyJobPlans(ctx); err != nil {
+			return fmt.Errorf("publish refreshed job plans: %w", err)
+		}
+	}
 	if ourClassSeen && prResolved && prNumber > 0 {
 		if err := w.st.MarkPRCommentDirty(ctx, ev.RepositoryID, ev.InstallationID, ev.RepositoryFullName, prNumber); err != nil {
 			slog.Error("worker: mark comment dirty", "repo", ev.RepositoryFullName, "pr", prNumber, "err", err)

@@ -4,8 +4,9 @@
 package syncproto
 
 const (
-	SyncPath    = "/api/v1/hostd/sync"
-	JobPlanPath = "/api/v1/hostd/job-plans"
+	SyncPath           = "/api/v1/hostd/sync"
+	JobPlanPath        = "/api/v1/hostd/job-plans"
+	JobPlanResolvePath = "/api/v1/hostd/job-plans/resolve"
 )
 
 type SyncRequest struct {
@@ -161,6 +162,22 @@ type SyncResponse struct {
 type JobPlanSnapshot struct {
 	Cursor string    `json:"cursor"`
 	Plans  []JobPlan `json:"plans"`
+}
+
+// JobPlanResolveRequest is the exact local assignment that selected one
+// already-listening VM. It lets hostd recover a plan directly when provider
+// assignment outruns the queued-job webhook without involving any other pool
+// member.
+type JobPlanResolveRequest struct {
+	HostID     string             `json:"host_id"`
+	BootID     string             `json:"boot_id"`
+	MemberID   string             `json:"member_id"`
+	VMID       string             `json:"vm_id"`
+	Assignment ObservedAssignment `json:"assignment"`
+}
+
+type JobPlanResolveResponse struct {
+	Plan JobPlan `json:"plan"`
 }
 
 // JobPlan fixes the durable generation before GitHub chooses a listener.

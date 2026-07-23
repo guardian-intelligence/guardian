@@ -6,10 +6,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,6 +34,9 @@ type Metrics struct {
 	RejectedJobPlans         atomic.Int64
 	JobPlanWatchFailures     atomic.Int64
 	JobPlanMisses            atomic.Int64
+	JobPlanResolveAttempts   atomic.Int64
+	JobPlanResolveFailures   atomic.Int64
+	JobPlanResolveSuccesses  atomic.Int64
 	StorageAdmissionFailures atomic.Int64
 }
 
@@ -281,11 +286,52 @@ func (a *Agent) HandleVMUpdate(ctx context.Context, id vm.ID) {
 		if !owned {
 			plan, ok := a.jobPlanFor(status)
 			if !ok {
-				a.deferVMUpdate(id)
 				a.metrics.JobPlanMisses.Add(1)
-				a.logger.Error("postflight.hostd.job_plan.missed", "vm", id, "member_id", status.Incarnation,
+				a.metrics.JobPlanResolveAttempts.Add(1)
+				trace, traceErr := a.traceFor(status.Incarnation, status.Assignment.RunnerName, string(status.ID))
+				if traceErr != nil {
+					a.logger.Error("opening plan-resolution evidence", "member_id", status.Incarnation, "vm", status.ID, "err", traceErr)
+				}
+				a.appendTrace(trace, nil, "job_plan_resolution_started", func(event *traceEvent) {
+					event.CheckRunID = status.Assignment.CheckRunID
+					event.Repo = status.Assignment.Identity.Repository
+				})
+				started := time.Now()
+				a.logger.Info("postflight.hostd.job_plan.resolve_started", "vm", id, "member_id", status.Incarnation,
 					"check_run_id", status.Assignment.CheckRunID, "run_id", status.Assignment.Identity.RunID)
-				return
+				resolved, err := a.resolveJobPlan(ctx, status)
+				if err != nil {
+					a.metrics.JobPlanResolveFailures.Add(1)
+					a.appendTrace(trace, nil, "job_plan_resolution_failed", func(event *traceEvent) {
+						event.CheckRunID = status.Assignment.CheckRunID
+						event.Repo = status.Assignment.Identity.Repository
+						event.FailureReason = err.Error()
+					})
+					var resolutionErr *jobPlanResolveError
+					if errors.As(err, &resolutionErr) && resolutionErr.status == http.StatusUnprocessableEntity {
+						a.clearDeferredUpdate(id)
+						a.logger.Error("postflight.hostd.job_plan.resolve_rejected", "vm", id, "member_id", status.Incarnation,
+							"check_run_id", status.Assignment.CheckRunID, "duration_ns", time.Since(started).Nanoseconds())
+						if destroyErr := a.vms.Destroy(ctx, id); destroyErr != nil {
+							a.logger.Error("recycling rejected assignment vm", "vm", id, "member_id", status.Incarnation, "err", destroyErr)
+						}
+						return
+					}
+					a.deferVMUpdate(id)
+					a.logger.Error("postflight.hostd.job_plan.resolve_failed", "vm", id, "member_id", status.Incarnation,
+						"check_run_id", status.Assignment.CheckRunID, "duration_ns", time.Since(started).Nanoseconds(), "err", err)
+					return
+				}
+				a.metrics.JobPlanResolveSuccesses.Add(1)
+				a.appendTrace(trace, nil, "job_plan_resolution_completed", func(event *traceEvent) {
+					event.CheckRunID = status.Assignment.CheckRunID
+					event.JobID, _ = strconv.ParseInt(resolved.ExecutionID, 10, 64)
+					event.Repo = status.Assignment.Identity.Repository
+				})
+				a.logger.Info("postflight.hostd.job_plan.resolve_completed", "vm", id, "member_id", status.Incarnation,
+					"check_run_id", status.Assignment.CheckRunID, "plan_id", resolved.PlanID,
+					"duration_ns", time.Since(started).Nanoseconds())
+				plan, ok = resolved, true
 			}
 			a.clearDeferredUpdate(id)
 			spec := desiredFromPlan(plan, status)

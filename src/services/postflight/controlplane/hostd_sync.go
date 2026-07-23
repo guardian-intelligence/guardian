@@ -22,6 +22,7 @@ const maxSyncRequestBytes = 4 << 20
 
 type syncServer struct {
 	st          *pgStore
+	resolver    *worker
 	secret      []byte
 	sealTimeout time.Duration
 	tracer      trace.Tracer

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,15 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
+
+type jobPlanResolveError struct {
+	status int
+	detail string
+}
+
+func (e *jobPlanResolveError) Error() string {
+	return fmt.Sprintf("job-plan resolver returned %d: %s", e.status, e.detail)
+}
 
 func validateJobPlan(plan syncproto.JobPlan) error {
 	if err := zvol.ValidateName("plan", plan.PlanID); err != nil {
@@ -66,9 +76,7 @@ func (a *Agent) jobPlanFor(status vm.Status) (syncproto.JobPlan, bool) {
 	a.planMu.RUnlock()
 	var matched syncproto.JobPlan
 	for _, plan := range candidates {
-		if plan.RunnerClass != string(status.Class) || plan.RunID != assignment.Identity.RunID ||
-			plan.RunAttempt != assignment.Identity.RunAttempt || plan.RepositoryFullName != assignment.Identity.Repository ||
-			plan.JobDisplayName != assignment.JobDisplayName {
+		if !jobPlanMatchesStatus(plan, status) {
 			continue
 		}
 		if matched.PlanID != "" {
@@ -77,6 +85,55 @@ func (a *Agent) jobPlanFor(status vm.Status) (syncproto.JobPlan, bool) {
 		matched = plan
 	}
 	return matched, matched.PlanID != ""
+}
+
+func jobPlanMatchesStatus(plan syncproto.JobPlan, status vm.Status) bool {
+	assignment := status.Assignment
+	return plan.CheckRunID == assignment.CheckRunID && plan.RunnerClass == string(status.Class) &&
+		plan.RunID == assignment.Identity.RunID && plan.RunAttempt == assignment.Identity.RunAttempt &&
+		plan.RepositoryFullName == assignment.Identity.Repository && plan.JobDisplayName == assignment.JobDisplayName
+}
+
+func (a *Agent) resolveJobPlan(ctx context.Context, status vm.Status) (syncproto.JobPlan, error) {
+	endpoint, err := url.JoinPath(a.cfg.ControlPlaneOrigin, syncproto.JobPlanResolvePath)
+	if err != nil {
+		return syncproto.JobPlan{}, err
+	}
+	body, err := json.Marshal(syncproto.JobPlanResolveRequest{
+		HostID: a.cfg.HostID, BootID: a.bootID, MemberID: status.Incarnation,
+		VMID: string(status.ID), Assignment: *observedAssignment(status.Assignment),
+	})
+	if err != nil {
+		return syncproto.JobPlan{}, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return syncproto.JobPlan{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+a.credential)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := a.httpClient.Do(request)
+	if err != nil {
+		return syncproto.JobPlan{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		detail, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return syncproto.JobPlan{}, &jobPlanResolveError{status: response.StatusCode, detail: string(detail)}
+	}
+	var resolved syncproto.JobPlanResolveResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&resolved); err != nil {
+		return syncproto.JobPlan{}, err
+	}
+	if err := validateJobPlan(resolved.Plan); err != nil {
+		a.metrics.RejectedJobPlans.Add(1)
+		return syncproto.JobPlan{}, fmt.Errorf("resolved job plan is invalid: %w", err)
+	}
+	if !jobPlanMatchesStatus(resolved.Plan, status) {
+		a.metrics.RejectedJobPlans.Add(1)
+		return syncproto.JobPlan{}, errors.New("resolved job plan differs from the local assignment")
+	}
+	return resolved.Plan, nil
 }
 
 func desiredFromPlan(plan syncproto.JobPlan, status vm.Status) syncproto.DesiredAssignment {

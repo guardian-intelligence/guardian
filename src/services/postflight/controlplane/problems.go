@@ -160,6 +160,25 @@ func problemSyncUnavailable() problem {
 	}
 }
 
+func problemJobPlanPending() problem {
+	return problem{
+		Code:      "job_plan.provider_truth_pending",
+		Title:     "job plan is not ready",
+		Detail:    "the selected assignment is not yet visible from the provider; the host will retry",
+		Status:    http.StatusConflict,
+		Retryable: true,
+	}
+}
+
+func problemJobPlanRejected() problem {
+	return problem{
+		Code:   "job_plan.assignment_rejected",
+		Title:  "job assignment identity rejected",
+		Detail: "the selected member and provider job identities did not match",
+		Status: http.StatusUnprocessableEntity,
+	}
+}
+
 func problemCapacityTimeout(class string) problem {
 	return problem{
 		Code:   "pool.capacity_timeout",

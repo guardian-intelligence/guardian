@@ -20,6 +20,7 @@ go_library(
         "github_api.go",
         "hostd_store.go",
         "hostd_sync.go",
+		"job_plan_resolver.go",
         "job_plans.go",
         "main.go",
         "migrations.go",
