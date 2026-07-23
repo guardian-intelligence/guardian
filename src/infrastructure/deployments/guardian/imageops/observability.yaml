@@ -1,0 +1,91 @@
+# The wedge detection that replaces the retired Kargo lanes' alerts.
+# Readiness comes from the platform's Flux CRS exporter (gotk_resource_info
+# already carries ready= for ImageRepository/ImagePolicy/
+# ImageUpdateAutomation); the dead-man is the controllers' own
+# controller-runtime reconcile counters — a wedged controller freezes its
+# CR statuses at their last healthy value, so only a stalled reconcile
+# rate goes loud for that failure class.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: imageops-controllers
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  namespaceSelector:
+    matchNames:
+      - guardian-imageops
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - image-reflector-controller
+          - image-automation-controller
+  podMetricsEndpoints:
+    - port: http-prom
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: imageops
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: imageops.rules
+      rules:
+        # A first-party lane whose CR reports Ready=False for 15m cannot
+        # discover or write pins: registry auth broken, git push rejected
+        # (ruleset bypass lost), or a bad policy edit.
+        - alert: ImageOpsResourceNotReady
+          expr: >-
+            gotk_resource_info{exported_namespace="guardian-imageops",
+            customresource_kind=~"ImageRepository|ImagePolicy|ImageUpdateAutomation",
+            ready="False"}
+          for: 15m
+          labels:
+            severity: critical
+            guardian.dev/component: imageops
+          annotations:
+            summary: an image-automation resource has been not-Ready for 15m; first-party promotion is stalled for that lane.
+            description: >-
+              {{ $labels.customresource_kind }}/{{ $labels.name }} in
+              guardian-imageops reports Ready=False. Check the
+              image-reflector/image-automation controller logs and the CR's
+              status conditions.
+        # Dead-man: both controllers reconcile every CR each minute, so a
+        # zero reconcile rate over 15m means the controller is wedged even
+        # while every CR status still reads Ready from before the wedge.
+        - alert: ImageOpsControllerStalled
+          expr: >-
+            sum by (controller)
+            (rate(controller_runtime_reconcile_total{namespace="guardian-imageops"}[15m])) == 0
+          for: 5m
+          labels:
+            severity: critical
+            guardian.dev/component: imageops
+          annotations:
+            summary: an image-automation controller has stopped reconciling; pins are silently frozen.
+            description: >-
+              controller_runtime_reconcile_total for {{ $labels.controller }}
+              in guardian-imageops has been flat for 15m against a 1m
+              reconcile interval. Restart the controller and check its logs.
+        - alert: ImageOpsMetricsAbsent
+          expr: absent(controller_runtime_reconcile_total{namespace="guardian-imageops"})
+          for: 30m
+          labels:
+            severity: critical
+            guardian.dev/component: imageops
+          annotations:
+            summary: image-automation controller metrics are absent; promotion health is unverified.
+            description: >-
+              No controller_runtime_reconcile_total samples from
+              guardian-imageops for 30m — the scrape is broken or both
+              controllers are down. Promotion coverage is unknown until this
+              is fixed.

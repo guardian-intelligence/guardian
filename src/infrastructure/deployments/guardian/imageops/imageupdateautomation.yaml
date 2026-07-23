@@ -25,7 +25,9 @@ spec:
         name: guardian-promotions
         email: guardian-promotions[bot]@users.noreply.github.com
       messageTemplate: |
-        promote: {{ range .Changed.Changes }}{{ .OldValue }} -> {{ .NewValue }}{{ end }}
+        promote first-party pins
+        {{ range .Changed.Changes }}
+        {{ .OldValue }} -> {{ .NewValue }}{{ end }}
     push:
       branch: main
   update:

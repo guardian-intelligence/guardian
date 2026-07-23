@@ -402,46 +402,12 @@ spec:
                   }
                 }
 
-                request "write_reader_policy_company_site" {
-                  operation = "update"
-                  path = "sys/policies/acl/guardian-reader-company-site"
-                  data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/company-site/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/company-site/*\" {\n  capabilities = [\"read\"]\n}\n"
-                  }
                 }
 
-                request "write_reader_role_company_site" {
-                  operation = "update"
-                  path = "auth/kubernetes/role/guardian-reader-company-site"
-                  data = {
-                    bound_service_account_names = ["secrets-reader"]
-                    bound_service_account_namespaces = ["company-site"]
-                    audience = "openbao"
-                    token_policies = ["guardian-reader-company-site"]
-                    token_ttl = "3600"
-                    token_max_ttl = "3600"
-                  }
                 }
 
-                request "write_writer_policy_company_site" {
-                  operation = "update"
-                  path = "sys/policies/acl/guardian-writer-company-site"
-                  data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/company-site/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/company-site/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
-                  }
                 }
 
-                request "write_writer_role_company_site" {
-                  operation = "update"
-                  path = "auth/kubernetes/role/guardian-writer-company-site"
-                  data = {
-                    bound_service_account_names = ["secrets-writer"]
-                    bound_service_account_namespaces = ["company-site"]
-                    audience = "openbao"
-                    token_policies = ["guardian-writer-company-site"]
-                    token_ttl = "600"
-                    token_max_ttl = "600"
-                  }
                 }
 
                 request "write_reader_policy_guardian_imageops" {
@@ -528,46 +494,12 @@ spec:
                   }
                 }
 
-                request "write_reader_policy_guardian_iam" {
-                  operation = "update"
-                  path = "sys/policies/acl/guardian-reader-guardian-iam"
-                  data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-iam/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-iam/*\" {\n  capabilities = [\"read\"]\n}\n"
-                  }
                 }
 
-                request "write_reader_role_guardian_iam" {
-                  operation = "update"
-                  path = "auth/kubernetes/role/guardian-reader-guardian-iam"
-                  data = {
-                    bound_service_account_names = ["secrets-reader"]
-                    bound_service_account_namespaces = ["guardian-iam"]
-                    audience = "openbao"
-                    token_policies = ["guardian-reader-guardian-iam"]
-                    token_ttl = "3600"
-                    token_max_ttl = "3600"
-                  }
                 }
 
-                request "write_writer_policy_guardian_iam" {
-                  operation = "update"
-                  path = "sys/policies/acl/guardian-writer-guardian-iam"
-                  data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-iam/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-iam/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
-                  }
                 }
 
-                request "write_writer_role_guardian_iam" {
-                  operation = "update"
-                  path = "auth/kubernetes/role/guardian-writer-guardian-iam"
-                  data = {
-                    bound_service_account_names = ["secrets-writer"]
-                    bound_service_account_namespaces = ["guardian-iam"]
-                    audience = "openbao"
-                    token_policies = ["guardian-writer-guardian-iam"]
-                    token_ttl = "600"
-                    token_max_ttl = "600"
-                  }
                 }
 
                 request "write_reader_policy_guardian_products" {

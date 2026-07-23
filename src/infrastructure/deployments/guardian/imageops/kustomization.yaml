@@ -8,3 +8,4 @@ resources:
   - imagepolicies.yaml
   - imageupdateautomation.yaml
   - networkpolicy.yaml
+  - observability.yaml

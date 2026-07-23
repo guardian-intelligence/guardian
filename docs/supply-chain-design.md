@@ -72,7 +72,7 @@ is deliberately traded away: a dark rollback now means building (or
 retaining) a bundle at the revision being rolled back to, and a standing
 air-gapped cluster doing live upgrades must keep its mirror store additive
 across syncs rather than serving a single revision's haul. Bring-up from a
-drive is unaffected — Flagger deploys fresh from the manifests, so no
+drive is unaffected — workloads deploy fresh from the manifests, so no
 superseded digest is ever needed.
 
 The dark-uplink haul is *derived* from the union lock and every blob in it
@@ -100,32 +100,35 @@ and upstream-registry axes, not the operator.
 
 Deployment pins are decoupled from content changes. A content PR never
 moves a pin; when it merges, CI on main builds and pushes the new `edge`
-digest, which makes it *eligible* for promotion — nothing more. Promotion
-is a separate pin-only PR that bumps the manifest pin and nothing else:
-the inventory is the generated union, so the moved pin joins it by
-derivation, not by a second edit. The gate on that PR is the conformance
-suite plus the required `build` check — every digest behind `edge` came
-from reviewed main history by construction, so the pin move needs no
+digest, which makes it *eligible* for promotion — nothing more. Every
+digest behind `edge` came from reviewed main history by construction
+(`images.yml` publishes on main pushes only), so a pin move needs no
 per-digest verification.
 
-The promoter is Kargo (deployments/guardian/promotion): a Warehouse tracks
-the digest behind each `edge` tag, and the Stage's promotion opens the
-pin-bump PR as the `guardian-promotions` GitHub App. The
-`promotion-automerge` workflow arms automerge on the bot's PRs; no
-inventory sync exists or is needed. The promoter is untrusted by
-construction: branch protection requires `build` on main, so nothing
-reaches main that the conformance suite did not pass, whether the PR was
-opened by a human or the bot. The required-checks + allow-auto-merge repo
-settings are the enforcement's load-bearing half and live outside Git —
-re-assert them when recreating the repo (exact commands in
-[TRIBAL_KNOWLEDGE.md](TRIBAL_KNOWLEDGE.md)).
+First-party workload pins move by Flux image automation
+(deployments/guardian/imageops): an ImagePolicy with digest reflection
+follows each `edge` tag, and the ImageUpdateAutomation commits the
+tag@digest bump straight to main as the `guardian-promotions` GitHub App,
+through the main-protection ruleset's bypass. Post-push, the conformance
+suite still runs on main (loud-after-merge), the admission policy enforces
+digest pinning at apply time, and Flagger gates the rollout where a Canary
+exists. Third-party workload images are ordinary dependencies: Renovate
+proposes their bumps as reviewed PRs. The one Kargo lane left is the
+postflight CLI release train, whose Stage opens channel-pin PRs that the
+`promotion-automerge` workflow arms.
+
+The ruleset (required checks + the bot bypass) is the enforcement's
+load-bearing half and lives outside Git — re-assert it when recreating the
+repo: `gh api repos/<owner>/<repo>/rulesets` with required checks `build`,
+`derive`, `site-perf-gate`, `shortty-smoke-gate` and the
+guardian-promotions App as bypass actor, plus allow-auto-merge.
 
 This deliberately weakens the old invariant "pin == the digest CI builds
 from this same commit" to "pin ∈ digests published from main history".
 What is bought: content merges stop requiring a round-trip repin commit,
 and promotion becomes an automatable, independently-gated step per
 service. What is given up: Git alone no longer proves the pin is the
-*latest* build — freshness is the promoter's job — and pinning an older
+*latest* build — freshness is the automation's job — and pinning an older
 published digest (rollback) remains a legitimate one-line operation rather
 than a violation.
 

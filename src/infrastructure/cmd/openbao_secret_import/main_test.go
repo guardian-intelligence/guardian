@@ -69,8 +69,8 @@ func TestImportPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 11 {
-		t.Fatalf("plan length = %d, want 11", len(plan))
+	if len(plan) != 9 {
+		t.Fatalf("plan length = %d, want 9", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {
@@ -114,13 +114,6 @@ func TestImportPlan(t *testing.T) {
 	// KeycloakRealmUser passwordSecret keys).
 	if admins.Data["platform-admin"] != "admin-pass" || admins.Data["platform-agent"] != "agent-pass" {
 		t.Fatalf("platform-admins data = %#v", admins.Data)
-	}
-	promotion, ok := byPath["kv/data/guardian/guardian-mgmt/company-site/promotion/github-app"]
-	if !ok {
-		t.Fatal("company-site promotion write missing")
-	}
-	if promotion.Data["githubAppPrivateKey"] != testGithubAppPEM {
-		t.Fatal("githubAppPrivateKey did not round-trip through base64")
 	}
 	productsPromotion, ok := byPath["kv/data/guardian/guardian-mgmt/guardian-products/promotion/github-app"]
 	if !ok {
@@ -210,8 +203,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 11 {
-		t.Fatalf("plan length = %d, want 11 (base only)", len(plan))
+	if len(plan) != 9 {
+		t.Fatalf("plan length = %d, want 9 (base only)", len(plan))
 	}
 
 	env["PROD_GITHUB_CLIENT_SECRET"] = "prod-secret"
@@ -219,8 +212,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 12 {
-		t.Fatalf("plan length = %d, want 12 (11 base + prod)", len(plan))
+	if len(plan) != 10 {
+		t.Fatalf("plan length = %d, want 10 (9 base + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {
@@ -239,8 +232,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 13 {
-		t.Fatalf("plan length = %d, want 13 (11 base + two environments)", len(plan))
+	if len(plan) != 11 {
+		t.Fatalf("plan length = %d, want 11 (9 base + two environments)", len(plan))
 	}
 	byPath = map[string]secretWrite{}
 	for _, w := range plan {
