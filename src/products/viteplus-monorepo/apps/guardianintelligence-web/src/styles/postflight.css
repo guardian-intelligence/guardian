@@ -605,3 +605,64 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+.postflight-device-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: radial-gradient(120% 90% at 15% 0%, #2d1a6b 0%, #1b0f45 55%, #120a30 100%);
+}
+
+.postflight-device-card {
+  min-height: 0;
+}
+
+.postflight-device-code-label {
+  display: block;
+  margin: 18px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5e5871;
+}
+
+.postflight-device-code {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgb(23 20 29 / 0.18);
+  border-radius: 10px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 22px;
+  letter-spacing: 0.14em;
+  text-align: center;
+  text-transform: uppercase;
+  color: #17141d;
+  background: #fff;
+  margin-bottom: 18px;
+}
+
+.postflight-device-code:focus {
+  outline: 2px solid #4930a8;
+  outline-offset: 1px;
+}
+
+.postflight-device-caution {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgb(23 20 29 / 0.1);
+  font-size: 13px;
+  line-height: 1.5;
+  color: #5e5871;
+}
+
+.postflight-device-error {
+  padding: 10px 12px;
+  border: 1px solid rgb(178 34 52 / 0.35);
+  border-radius: 10px;
+  background: rgb(178 34 52 / 0.08);
+  color: #8f1d2c;
+  font-size: 14px;
+}

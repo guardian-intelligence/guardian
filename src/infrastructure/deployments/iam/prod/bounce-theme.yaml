@@ -1,0 +1,106 @@
+# guardian-bounce: the realm login theme that keeps Keycloak invisible. Only
+# two templates are overridden — the device-flow terminal page (info.ftl)
+# bounces straight back to the product surface, and the device code form
+# renders Guardian-branded for the expired/mistyped-code path. Every other
+# template falls through parent=keycloak and renders byte-identically to
+# stock, so nothing else (web login, canary journeys) changes.
+#
+# Keycloak caches compiled templates: edits here must also bump the
+# guardian.dev/bounce-theme-checksum annotation in keycloak.yaml so the
+# Deployment rolls.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-bounce-theme
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  theme.properties: |
+    parent=keycloak
+  login.ftl: |
+    <#-- Reached only when a flow loses its way back to the product: a GitHub
+         authorize denial forwarded into the browser flow, or a Keycloak URL
+         visited without the kc_idp_hint redirector. The realm has no
+         password or registration path, so there is nothing to render here —
+         return to the product surface, which can start a fresh hinted
+         sign-in. -->
+    <!DOCTYPE html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">
+    <meta http-equiv="refresh" content="0;url=https://guardianintelligence.org/postflight?auth_error=access_denied">
+    <title>Guardian</title></head>
+    <body><a href="https://guardianintelligence.org/postflight?auth_error=access_denied">Continue</a></body></html>
+  info.ftl: |
+    <#-- Device-flow terminal pages bounce to the product surface; the
+         messageHeader comparison renders through the same bundle the
+         endpoint used, so the discriminator is locale-proof. -->
+    <#if messageHeader?? && messageHeader == msg("oauth2DeviceVerificationCompleteHeader")>
+    <!DOCTYPE html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">
+    <meta http-equiv="refresh" content="0;url=https://guardianintelligence.org/postflight/device/done">
+    <title>Postflight</title></head>
+    <body><a href="https://guardianintelligence.org/postflight/device/done">Continue</a></body></html>
+    <#elseif messageHeader?? && messageHeader == msg("oauth2DeviceVerificationFailedHeader")>
+    <!DOCTYPE html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">
+    <meta http-equiv="refresh" content="0;url=https://guardianintelligence.org/postflight/device?error=expired">
+    <title>Postflight</title></head>
+    <body><a href="https://guardianintelligence.org/postflight/device?error=expired">Continue</a></body></html>
+    <#else>
+    <!DOCTYPE html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">
+    <title>Guardian</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: flex; align-items: center;
+        justify-content: center; font-family: system-ui, sans-serif;
+        background: radial-gradient(120% 90% at 15% 0%, #2d1a6b 0%, #1b0f45 55%, #120a30 100%); }
+      .card { width: min(92vw, 390px); padding: 34px; border-radius: 14px;
+        background: #fcfcfd; color: #17141d; box-shadow: 0 35px 90px rgb(28 7 89 / 0.42); }
+      .card p { color: #5e5871; line-height: 1.5; }
+    </style></head>
+    <body><div class="card">
+      <h2><#if messageHeader??>${kcSanitize(messageHeader)?no_esc}<#else>Guardian</#if></h2>
+      <#if message??><p>${kcSanitize(message.summary)?no_esc}</p></#if>
+      <#if pageRedirectUri?has_content><p><a href="${pageRedirectUri}">${msg("backToApplication")}</a></p>
+      <#elseif actionUri?has_content><p><a href="${actionUri}">${msg("proceedWithAction")}</a></p></#if>
+    </div></body></html>
+    </#if>
+  login-oauth2-device-verify-user-code.ftl: |
+    <#-- Reached only when a device code was mistyped, expired, or reused:
+         the product's approval page always arrives with a valid code in the
+         URL, which skips this form entirely. -->
+    <!DOCTYPE html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">
+    <title>Postflight — enter code</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: flex; align-items: center;
+        justify-content: center; font-family: system-ui, sans-serif;
+        background: radial-gradient(120% 90% at 15% 0%, #2d1a6b 0%, #1b0f45 55%, #120a30 100%); }
+      .card { width: min(92vw, 390px); padding: 34px; border-radius: 14px;
+        background: #fcfcfd; color: #17141d; box-shadow: 0 35px 90px rgb(28 7 89 / 0.42); }
+      .error { padding: 10px 12px; border: 1px solid rgb(178 34 52 / 0.35); border-radius: 10px;
+        background: rgb(178 34 52 / 0.08); color: #8f1d2c; font-size: 14px; }
+      input { width: 100%; box-sizing: border-box; padding: 12px 14px; margin: 6px 0 16px;
+        border: 1px solid rgb(23 20 29 / 0.18); border-radius: 10px; text-align: center;
+        font-family: ui-monospace, Menlo, monospace; font-size: 22px; letter-spacing: 0.14em;
+        text-transform: uppercase; }
+      button { width: 100%; padding: 12px; border: 0; border-radius: 10px; background: #4930a8;
+        color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
+      .hint { margin-top: 16px; font-size: 13px; color: #5e5871; line-height: 1.5; }
+    </style></head>
+    <body><div class="card">
+      <h2>Enter your one-time code</h2>
+      <#if message?? && message.type = 'error'><p class="error">${kcSanitize(message.summary)?no_esc}</p></#if>
+      <form action="${url.oauth2DeviceVerificationAction}" method="post">
+        <input id="device-user-code" name="device_user_code" autocomplete="off"
+          spellcheck="false" autofocus dir="ltr" />
+        <button type="submit">Continue</button>
+      </form>
+      <p class="hint">The code is shown by the terminal running the postflight CLI. If it
+      expired, run <code>postflight auth login</code> again, or start over at
+      <a href="https://guardianintelligence.org/postflight/device">guardianintelligence.org/postflight/device</a>.</p>
+    </div></body></html>
