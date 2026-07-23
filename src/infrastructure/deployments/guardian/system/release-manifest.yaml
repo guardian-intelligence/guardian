@@ -25,7 +25,7 @@ releases:
       image: ghcr.io/guardian-intelligence/cockpit@sha256:0589274466069f6c2e6df0f67ab38f7ac1288887d71d73085f80bce2b72e0ca2
   company-site:
     prod:
-      image: ghcr.io/guardian-intelligence/company-site@sha256:b4bfd333903169f4b176cc064a8b0d98ce5949a687043d25c18a52d72ffbaa4c
+      image: ghcr.io/guardian-intelligence/company-site@sha256:877535bd6a46e91aa1624678637d733832d74201237fa0d69bf5a9c59f699ba6
   journey-canary:
     prod:
       image: ghcr.io/guardian-intelligence/canary-journeys@sha256:4ba2c77a51557e63ff3b7ad2a72c57b102c2d4a0f70eadacb5edc20a2e7a44c1
