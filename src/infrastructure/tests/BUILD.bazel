@@ -23,6 +23,7 @@ go_test(
         "log_pipeline_health_test.go",
         "log_redaction_test.go",
         "oci_base_conformance_test.go",
+        "openbao_config_parse_test.go",
         "openbao_conformance_test.go",
         "platform_agent_secrets_writer_invariants_test.go",
         "payments_conformance_test.go",
@@ -94,6 +95,7 @@ go_test(
     deps = [
         "//src/infrastructure/imageset",
         "@com_github_google_cel_go//cel",
+        "@com_github_hashicorp_hcl//:hcl",
         "@in_gopkg_yaml_v3//:yaml_v3",
         "@io_k8s_api//admissionregistration/v1:admissionregistration",
         "@io_k8s_api//core/v1:core",

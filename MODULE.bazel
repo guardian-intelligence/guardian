@@ -106,6 +106,7 @@ use_repo(
     "com_github_clickhouse_clickhouse_go_v2",
     "com_github_coreos_go_oidc_v3",
     "com_github_google_cel_go",
+    "com_github_hashicorp_hcl",
     "com_github_jackc_pgx_v5",
     "com_github_mileusna_useragent",
     "com_github_openbao_openbao_api_v2",
