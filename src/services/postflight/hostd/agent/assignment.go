@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"sync"
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
@@ -16,10 +17,14 @@ var assignmentDeadlines = map[syncproto.AssignmentState]time.Duration{
 }
 
 type assignment struct {
-	spec  syncproto.DesiredAssignment
-	state syncproto.AssignmentState
-	since time.Time
-	vmID  string
+	mu sync.Mutex
+	// memberID is immutable after publication and permits ownership checks
+	// without waiting behind an unrelated VM's convergence lock.
+	memberID string
+	spec     syncproto.DesiredAssignment
+	state    syncproto.AssignmentState
+	since    time.Time
+	vmID     string
 
 	device        string
 	toolDevice    string
@@ -38,6 +43,7 @@ type assignment struct {
 	updateTiming     vm.TimingPoint
 	trace            *traceState
 	termination      syncproto.AssignmentState
+	observed         *syncproto.ObservedAssignment
 }
 
 func (a *assignment) enter(state syncproto.AssignmentState, now time.Time) {
@@ -51,7 +57,8 @@ func (a *assignment) report() syncproto.AssignmentReport {
 		RequestID: a.spec.RequestID, JobID: a.spec.JobID, State: a.state,
 		ExitCode: a.exit, Reason: a.reason, SealedGeneration: a.sealGen,
 		Checkpoint: a.checkpoint, Restore: a.restore,
-		Timing: append([]syncproto.TimingPoint(nil), a.timing...),
+		Timing:   append([]syncproto.TimingPoint(nil), a.timing...),
+		Observed: a.observed,
 	}
 	return report
 }

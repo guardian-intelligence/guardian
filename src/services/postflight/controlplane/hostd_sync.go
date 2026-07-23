@@ -25,6 +25,7 @@ type syncServer struct {
 	secret      []byte
 	sealTimeout time.Duration
 	tracer      trace.Tracer
+	jobPlans    *jobPlanBus
 }
 
 func (s *syncServer) authorized(r *http.Request) bool {

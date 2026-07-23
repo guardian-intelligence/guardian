@@ -29,6 +29,9 @@ type Metrics struct {
 	SealedGenerations       atomic.Int64
 	ReapedGenerations       atomic.Int64
 	OrphansDestroyed        atomic.Int64
+	RejectedJobPlans        atomic.Int64
+	JobPlanWatchFailures    atomic.Int64
+	JobPlanMisses           atomic.Int64
 }
 
 type Agent struct {
@@ -47,6 +50,15 @@ type Agent struct {
 	traces     map[string]*traceState
 
 	mu                 sync.Mutex
+	planMu             sync.RWMutex
+	traceMu            sync.Mutex
+	updateMu           sync.Mutex
+	deferredUpdateMu   sync.Mutex
+	updateWG           sync.WaitGroup
+	updateWorkers      map[vm.ID]chan struct{}
+	deferredUpdates    map[vm.ID]struct{}
+	jobPlans           map[int64][]syncproto.JobPlan
+	planCursor         string
 	assignments        map[string]*assignment
 	desiredMembers     map[string]syncproto.DesiredPoolMember
 	desiredAssignments map[string]syncproto.DesiredAssignment
@@ -84,6 +96,9 @@ func New(cfg Config, zvols zvol.Driver, vms vm.Driver, credential string, hostSe
 		desiredAssignments: map[string]syncproto.DesiredAssignment{},
 		quarantinedMembers: map[string]bool{}, quarantinedJobs: map[string]bool{},
 		poolTargets: map[vm.Class]int{}, traces: map[string]*traceState{},
+		jobPlans:        map[int64][]syncproto.JobPlan{},
+		updateWorkers:   map[vm.ID]chan struct{}{},
+		deferredUpdates: map[vm.ID]struct{}{},
 	}
 	if a.logger == nil {
 		a.logger = slog.Default()
@@ -137,13 +152,20 @@ func (a *Agent) HandleSync(response syncproto.SyncResponse) {
 }
 
 func (a *Agent) Report(ctx context.Context) (syncproto.SyncRequest, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	return a.buildReport(ctx)
 }
 
 func (a *Agent) Run(ctx context.Context) error {
-	defer a.closeTraceFiles()
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		a.watchJobPlans(ctx)
+	}()
+	defer func() {
+		<-watchDone
+		a.updateWG.Wait()
+		a.closeTraceFiles()
+	}()
 	var updates <-chan vm.ID
 	if source, ok := a.vms.(vm.UpdateSource); ok {
 		updates = source.Updates()
@@ -155,24 +177,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case id := <-updates:
-			a.HandleVMUpdate(ctx, id)
-			if status, err := a.vms.Status(ctx, id); err == nil && status.Assignment.RequestID != "" {
-				// Assignment is the latency-critical edge. Immediately publish
-				// it and consume the exact binding response instead of waiting for
-				// the periodic repair interval.
-				pollAfter, err := a.syncOnce(ctx)
-				if err != nil {
-					a.metrics.SyncFailures.Add(1)
-					a.logger.Error("assignment sync", "vm", id, "err", err)
-				} else {
-					interval := a.cfg.SyncInterval
-					if pollAfter > 0 {
-						interval = pollAfter
-					}
-					resetTimer(timer, interval)
-				}
-			}
-			a.Tick(ctx)
+			a.dispatchVMUpdate(ctx, id)
 		case <-timer.C:
 			interval := a.cfg.SyncInterval
 			if pollAfter, err := a.syncOnce(ctx); err != nil {
@@ -190,6 +195,44 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 }
 
+func (a *Agent) dispatchVMUpdate(ctx context.Context, id vm.ID) {
+	a.updateMu.Lock()
+	worker := a.updateWorkers[id]
+	if worker == nil {
+		worker = make(chan struct{}, 1)
+		a.updateWorkers[id] = worker
+		a.updateWG.Add(1)
+		go func() {
+			defer a.updateWG.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					a.updateMu.Lock()
+					if a.updateWorkers[id] == worker {
+						delete(a.updateWorkers, id)
+					}
+					a.updateMu.Unlock()
+					return
+				case <-worker:
+					a.HandleVMUpdate(ctx, id)
+					a.updateMu.Lock()
+					if len(worker) == 0 && a.updateWorkers[id] == worker {
+						delete(a.updateWorkers, id)
+						a.updateMu.Unlock()
+						return
+					}
+					a.updateMu.Unlock()
+				}
+			}
+		}()
+	}
+	select {
+	case worker <- struct{}{}:
+	default:
+	}
+	a.updateMu.Unlock()
+}
+
 func resetTimer(timer *time.Timer, duration time.Duration) {
 	if !timer.Stop() {
 		select {
@@ -200,18 +243,84 @@ func resetTimer(timer *time.Timer, duration time.Duration) {
 	timer.Reset(duration)
 }
 
-// HandleVMUpdate performs only local convergence. Run adds the immediate sync
-// on assignment; tests can call this method deterministically.
+// HandleVMUpdate converges only the VM named by the event. Pool maintenance
+// and control-plane synchronization run independently.
 func (a *Agent) HandleVMUpdate(ctx context.Context, id vm.ID) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if !a.synced {
+	synced := a.synced
+	a.mu.Unlock()
+	if !synced {
+		a.deferVMUpdate(id)
 		return
 	}
 	status, err := a.vms.Status(ctx, id)
 	if err != nil {
+		a.clearDeferredUpdate(id)
+		a.mu.Lock()
+		assignments := cloneMap(a.assignments)
+		a.mu.Unlock()
+		for _, record := range assignments {
+			record.mu.Lock()
+			if record.vmID != string(id) || record.state.Terminal() {
+				record.mu.Unlock()
+				continue
+			}
+			record.vmID = ""
+			a.failClosed(ctx, record, "pool member disappeared after provider acquisition")
+			record.mu.Unlock()
+			return
+		}
 		a.logger.Error("observing updated vm", "vm", id, "err", err)
 		return
 	}
-	a.stepStatus(ctx, status)
+	if status.Phase == vm.PhaseJobAssigned {
+		a.mu.Lock()
+		owned := assignmentOwnsMember(a.assignments, status.Incarnation)
+		a.mu.Unlock()
+		if !owned {
+			plan, ok := a.jobPlanFor(status)
+			if !ok {
+				a.deferVMUpdate(id)
+				a.metrics.JobPlanMisses.Add(1)
+				a.logger.Error("postflight.hostd.job_plan.missed", "vm", id, "member_id", status.Incarnation,
+					"check_run_id", status.Assignment.CheckRunID, "run_id", status.Assignment.Identity.RunID)
+				return
+			}
+			a.clearDeferredUpdate(id)
+			spec := desiredFromPlan(plan, status)
+			if err := validateAssignment(spec); err != nil {
+				a.metrics.RejectedAssignments.Add(1)
+				a.logger.Error("rejecting locally bound job plan", "plan_id", plan.PlanID, "err", err)
+				return
+			}
+			point := a.timing.Point("job_plan_bound_locally")
+			trace, traceErr := a.traceFor(status.Incarnation, status.Assignment.RunnerName, string(status.ID))
+			if traceErr != nil {
+				a.logger.Error("opening locally bound assignment evidence", "member_id", status.Incarnation, "vm", status.ID, "err", traceErr)
+			}
+			record := &assignment{
+				memberID: status.Incarnation,
+				spec:     spec, state: syncproto.AssignmentObserved, since: a.now(),
+				trace:    trace,
+				observed: observedAssignment(status.Assignment),
+				updateTiming: vm.TimingPoint{Event: point.Event, Source: point.Source, BootID: point.BootID,
+					Sequence: point.Sequence, MonotonicNS: point.MonotonicNS, UnixNS: point.UnixNS},
+			}
+			a.mu.Lock()
+			if assignmentOwnsMember(a.assignments, status.Incarnation) {
+				a.mu.Unlock()
+				return
+			}
+			a.assignments[spec.AssignmentID] = record
+			a.desiredAssignments[spec.AssignmentID] = spec
+			a.mu.Unlock()
+			a.logger.Info("postflight.hostd.job_plan.bound", "plan_id", plan.PlanID, "member_id", status.Incarnation,
+				"check_run_id", status.Assignment.CheckRunID)
+		}
+	}
+	a.mu.Lock()
+	assignments := cloneMap(a.assignments)
+	quarantined := cloneMap(a.quarantinedJobs)
+	a.mu.Unlock()
+	a.stepStatus(ctx, status, assignments, quarantined)
 }

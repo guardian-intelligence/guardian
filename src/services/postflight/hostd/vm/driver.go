@@ -44,9 +44,17 @@ type QEMU struct {
 	// quiesceTimeout bounds the guest-side checkpoint and flush ahead of a seal.
 	quiesceTimeout time.Duration
 
-	mu      sync.Mutex
-	timing  *timing.Recorder
-	timings map[ID][]TimingPoint
+	mu       sync.Mutex
+	lockMu   sync.Mutex
+	locks    map[ID]*vmOperationLock
+	timingMu sync.Mutex
+	timing   *timing.Recorder
+	timings  map[ID][]TimingPoint
+}
+
+type vmOperationLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 var _ Driver = (*QEMU)(nil)
@@ -140,11 +148,38 @@ func NewQEMU(cfg Config) (*QEMU, error) {
 		cfg: cfg, disks: zfsDisks{}, probeTimeout: 5 * time.Second,
 		guestProbeTimeout: 250 * time.Millisecond, bootTimeout: 2 * time.Minute,
 		quiesceTimeout: 5*time.Minute + 30*time.Second,
-		timing:         cfg.Timing, timings: map[ID][]TimingPoint{},
+		timing:         cfg.Timing, timings: map[ID][]TimingPoint{}, locks: map[ID]*vmOperationLock{},
 	}, nil
 }
 
+func (q *QEMU) lockVM(id ID) func() {
+	q.lockMu.Lock()
+	lock := q.locks[id]
+	if lock == nil {
+		lock = &vmOperationLock{}
+		q.locks[id] = lock
+	}
+	lock.refs++
+	q.lockMu.Unlock()
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		q.lockMu.Lock()
+		lock.refs--
+		if lock.refs == 0 {
+			delete(q.locks, id)
+		}
+		q.lockMu.Unlock()
+	}
+}
+
 func (q *QEMU) recordTiming(id ID, event string) {
+	q.timingMu.Lock()
+	defer q.timingMu.Unlock()
+	q.recordTimingLocked(id, event)
+}
+
+func (q *QEMU) recordTimingLocked(id ID, event string) {
 	point := q.timing.Point(event)
 	q.timings[id] = append(q.timings[id], TimingPoint{
 		Event: point.Event, Source: point.Source, BootID: point.BootID,
@@ -153,12 +188,20 @@ func (q *QEMU) recordTiming(id ID, event string) {
 }
 
 func (q *QEMU) recordTimingOnce(id ID, event string) {
+	q.timingMu.Lock()
+	defer q.timingMu.Unlock()
 	for _, point := range q.timings[id] {
 		if point.Event == event {
 			return
 		}
 	}
-	q.recordTiming(id, event)
+	q.recordTimingLocked(id, event)
+}
+
+func (q *QEMU) timingFor(id ID) []TimingPoint {
+	q.timingMu.Lock()
+	defer q.timingMu.Unlock()
+	return append([]TimingPoint(nil), q.timings[id]...)
 }
 
 // Updates delegates guest-local lifecycle edges. QMP-only transitions are
@@ -254,6 +297,8 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	unlockVM := q.lockVM(id)
+	defer unlockVM()
 
 	if existing, err := q.readMeta(id); err == nil {
 		if existing.Class != class {
@@ -384,8 +429,8 @@ func (q *QEMU) Prepare(ctx context.Context, id ID, preparation Preparation) erro
 	if err := validateID(id); err != nil {
 		return err
 	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	unlockVM := q.lockVM(id)
+	defer unlockVM()
 	record, err := q.readMeta(id)
 	if errors.Is(err, os.ErrNotExist) {
 		return ErrNotFound
@@ -429,8 +474,8 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 	if (rendezvous.CheckpointDigest == "") != (rendezvous.CheckpointVersion == "") {
 		return errors.New("vm: checkpoint digest and version must be supplied together")
 	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	unlockVM := q.lockVM(id)
+	defer unlockVM()
 	q.recordTiming(id, "qmp_rendezvous_started")
 	record, err := q.readMeta(id)
 	if errors.Is(err, os.ErrNotExist) {
@@ -471,18 +516,39 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 	}
 	defer client.Close()
 	q.recordTiming(id, "qmp_connected")
-	if err := q.attachVolume(ctx, client, workspaceNode, workspaceDevice, rendezvous.WorkspaceDevice); err != nil {
-		return err
+	attachments := []struct {
+		role, node, qdev, device string
+	}{
+		{"workspace", workspaceNode, workspaceDevice, rendezvous.WorkspaceDevice},
+		{"tool", toolNode, toolDevice, rendezvous.ToolDevice},
+		{"process", processNode, processDevice, rendezvous.ProcessDevice},
 	}
-	q.recordTiming(id, "workspace_device_attached")
-	if err := q.attachVolume(ctx, client, toolNode, toolDevice, rendezvous.ToolDevice); err != nil {
-		return err
+	attachCtx, cancelAttach := context.WithCancel(ctx)
+	defer cancelAttach()
+	errs := make([]error, len(attachments))
+	var attachWait sync.WaitGroup
+	attachWait.Add(len(attachments))
+	for index := range attachments {
+		index := index
+		go func() {
+			defer attachWait.Done()
+			attachment := attachments[index]
+			started := time.Now()
+			errs[index] = q.attachVolume(attachCtx, client, attachment.node, attachment.qdev, attachment.device)
+			if errs[index] != nil {
+				cancelAttach()
+			}
+			q.cfg.Logger.Info("postflight.hostd.qmp.volume_attached", "vm", id, "role", attachment.role,
+				"duration_ns", time.Since(started).Nanoseconds(), "error", errs[index])
+		}()
 	}
-	q.recordTiming(id, "tool_device_attached")
-	if err := q.attachVolume(ctx, client, processNode, processDevice, rendezvous.ProcessDevice); err != nil {
-		return err
+	attachWait.Wait()
+	for index, err := range errs {
+		if err != nil {
+			return fmt.Errorf("attach %s volume: %w", attachments[index].role, err)
+		}
+		q.recordTiming(id, attachments[index].role+"_device_attached")
 	}
-	q.recordTiming(id, "process_device_attached")
 	deliverCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
 	defer cancel()
 	request := guestproto.Rendezvous{
@@ -527,8 +593,8 @@ func (q *QEMU) Authorize(ctx context.Context, id ID, authorization Authorization
 	if err := validateID(id); err != nil {
 		return err
 	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	unlockVM := q.lockVM(id)
+	defer unlockVM()
 	record, err := q.readMeta(id)
 	if errors.Is(err, os.ErrNotExist) {
 		return ErrNotFound
@@ -560,12 +626,12 @@ func (q *QEMU) Quiesce(ctx context.Context, id ID) (CheckpointArtifact, error) {
 	if err := validateID(id); err != nil {
 		return CheckpointArtifact{}, err
 	}
-	q.mu.Lock()
+	unlockVM := q.lockVM(id)
+	defer unlockVM()
 	record, err := q.readMeta(id)
 	if err == nil {
 		q.recordTiming(id, "quiesce_rpc_started")
 	}
-	q.mu.Unlock()
 	if errors.Is(err, os.ErrNotExist) {
 		return CheckpointArtifact{}, ErrNotFound
 	}
@@ -587,17 +653,17 @@ func (q *QEMU) Quiesce(ctx context.Context, id ID) (CheckpointArtifact, error) {
 			},
 		},
 	})
-	q.mu.Lock()
+	q.timingMu.Lock()
 	q.timings[id] = append(q.timings[id], timingPoints(reply.Timing)...)
 	if err != nil {
-		q.recordTiming(id, "quiesce_rpc_failed")
+		q.recordTimingLocked(id, "quiesce_rpc_failed")
 		checkpointTiming := append([]TimingPoint(nil), q.timings[id]...)
-		q.mu.Unlock()
+		q.timingMu.Unlock()
 		return CheckpointArtifact{Timing: checkpointTiming}, err
 	}
-	q.recordTiming(id, "quiesce_rpc_completed")
+	q.recordTimingLocked(id, "quiesce_rpc_completed")
 	checkpointTiming := append([]TimingPoint(nil), q.timings[id]...)
-	q.mu.Unlock()
+	q.timingMu.Unlock()
 	if reply.Checkpoint == nil {
 		return CheckpointArtifact{}, errors.New("vm: guest quiesced without a checkpoint artifact")
 	}
@@ -730,8 +796,8 @@ func (q *QEMU) detachVolume(ctx context.Context, client *qmpClient, node, qdev s
 
 // Status implements Driver.
 func (q *QEMU) Status(ctx context.Context, id ID) (Status, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	unlockVM := q.lockVM(id)
+	defer unlockVM()
 	status, _, err := q.observeLocked(ctx, id)
 	return status, err
 }
@@ -779,7 +845,7 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 			q.cfg.Logger.Error("guest boot deadline exceeded", "vm", id, "deadline", q.bootTimeout)
 			return Status{ID: id, Class: record.Class, Image: record.Image, Phase: PhaseGone}, true, nil
 		}
-		status.Timing = append(status.Timing, q.timings[id]...)
+		status.Timing = append(status.Timing, q.timingFor(id)...)
 		return status, false, nil
 	}
 	observeCtx, cancel := context.WithTimeout(ctx, q.guestProbeTimeout)
@@ -791,7 +857,7 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 			q.cfg.Logger.Error("guest boot deadline exceeded", "vm", id, "deadline", q.bootTimeout)
 			return Status{ID: id, Class: record.Class, Image: record.Image, Phase: PhaseGone}, true, nil
 		}
-		status.Timing = append(status.Timing, q.timings[id]...)
+		status.Timing = append(status.Timing, q.timingFor(id)...)
 		return status, false, nil
 	}
 	if observation.Hello {
@@ -806,7 +872,7 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 		if record.Assignment != nil && !sameAssignment(*record.Assignment, observed) {
 			status.Phase = PhaseRecycleRequired
 			status.FailureReason = "local assignment changed within one VM incarnation"
-			status.Timing = append(status.Timing, q.timings[id]...)
+			status.Timing = append(status.Timing, q.timingFor(id)...)
 			status.Timing = append(status.Timing, timingPoints(observation.Timing)...)
 			return status, false, nil
 		}
@@ -864,7 +930,7 @@ func (q *QEMU) observeLocked(ctx context.Context, id ID) (Status, bool, error) {
 	default:
 		status.Phase = PhaseBooting
 	}
-	status.Timing = append(status.Timing, q.timings[id]...)
+	status.Timing = append(status.Timing, q.timingFor(id)...)
 	status.Timing = append(status.Timing, timingPoints(observation.Timing)...)
 	status.CustomerStepsReleased = observation.Released
 	return status, false, nil
@@ -954,8 +1020,6 @@ func (q *QEMU) vmRunning(ctx context.Context, id ID) bool {
 // leftovers (root clone, state dir) are collected here and it is omitted,
 // which is exactly the disappearance the agent's failure paths key on.
 func (q *QEMU) List(ctx context.Context) ([]Status, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
 	entries, err := os.ReadDir(q.cfg.StateRoot)
 	if err != nil {
 		return nil, fmt.Errorf("vm: scanning state root: %w", err)
@@ -966,8 +1030,10 @@ func (q *QEMU) List(ctx context.Context) ([]Status, error) {
 			continue
 		}
 		id := ID(entry.Name())
+		unlockVM := q.lockVM(id)
 		status, dead, err := q.observeLocked(ctx, id)
 		if err != nil {
+			unlockVM()
 			return nil, err
 		}
 		if dead || status.Phase == PhaseGone {
@@ -975,9 +1041,11 @@ func (q *QEMU) List(ctx context.Context) ([]Status, error) {
 				q.cfg.Logger.Error("collecting dead vm", "vm", id, "err", err)
 				statuses = append(statuses, status)
 			}
+			unlockVM()
 			continue
 		}
 		statuses = append(statuses, status)
+		unlockVM()
 	}
 	return statuses, nil
 }
@@ -987,8 +1055,8 @@ func (q *QEMU) Destroy(ctx context.Context, id ID) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	unlockVM := q.lockVM(id)
+	defer unlockVM()
 	return q.destroyLocked(ctx, id)
 }
 
@@ -1037,6 +1105,8 @@ func (q *QEMU) destroyLocked(ctx context.Context, id ID) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("vm: removing state dir for %s: %w", id, err)
 	}
+	q.timingMu.Lock()
 	delete(q.timings, id)
+	q.timingMu.Unlock()
 	return nil
 }

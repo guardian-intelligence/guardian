@@ -34,6 +34,15 @@ func TestRunPeriodicSyncCannotBePostponedByVMUpdates(t *testing.T) {
 	first := make(chan struct{})
 	second := make(chan struct{})
 	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == syncproto.JobPlanPath {
+			if r.URL.Query().Get("cursor") != "" {
+				<-r.Context().Done()
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(syncproto.JobPlanSnapshot{Cursor: strings.Repeat("e", 64)})
+			return
+		}
 		defer r.Body.Close()
 		var report syncproto.SyncRequest
 		if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
@@ -285,6 +294,38 @@ func TestImageRolloutPreservesLocallyAssignedListenerBeforeSync(t *testing.T) {
 	statuses, err := vms.List(context.Background())
 	if err != nil || len(statuses) != 1 || statuses[0].ID != oldID || statuses[0].Image != "golden" || statuses[0].Assignment.RequestID == "" {
 		t.Fatalf("locally assigned listener was replaced during rollout: %+v, %v", statuses, err)
+	}
+}
+
+func TestPrepositionedPlanRendezvousesWithoutControlPlaneSync(t *testing.T) {
+	a, vms, volumes := newTestAgent(t, 1)
+	members := poolMembers(t, a, vms, 1)
+	spec := assignmentSpec(0, members[0])
+	plan := syncproto.JobPlan{
+		PlanID: spec.AssignmentID, ExecutionID: spec.ExecutionID, AttemptID: spec.AttemptID,
+		CheckRunID: spec.CheckRunID, RunID: spec.Identity.RunID, RunAttempt: spec.Identity.RunAttempt,
+		JobDisplayName: spec.Identity.WorkflowJob, OrgID: spec.OrgID,
+		InstallationID: spec.InstallationID, RepositoryID: spec.RepositoryID,
+		RepositoryFullName: spec.RepositoryFullName, RunnerClass: spec.RunnerClass,
+		Workspace: spec.Workspace, Tool: spec.Tool, Process: spec.Process,
+	}
+	if err := a.replaceJobPlans(context.Background(), syncproto.JobPlanSnapshot{
+		Cursor: strings.Repeat("a", 64), Plans: []syncproto.JobPlan{plan},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assignVM(t, vms, members[0], spec)
+	a.HandleVMUpdate(context.Background(), vm.ID(members[0].VMID))
+
+	snapshot := a.Snapshot()
+	if len(snapshot) != 1 || snapshot[0].AssignmentID != spec.AssignmentID || snapshot[0].State != syncproto.AssignmentBinding {
+		t.Fatalf("local rendezvous snapshot = %+v", snapshot)
+	}
+	if !volumes.HasWorkspace(zvol.AssignmentID(spec.AssignmentID)) || !volumes.HasTool(zvol.AssignmentID(spec.AssignmentID)) || !volumes.HasProcess(zvol.AssignmentID(spec.AssignmentID)) {
+		t.Fatal("local rendezvous did not materialize the complete durable tuple")
+	}
+	if _, found := vms.RendezvousFor(vm.ID(members[0].VMID)); !found {
+		t.Fatal("local assignment did not dispatch rendezvous")
 	}
 }
 

@@ -251,7 +251,9 @@ export const makeGitLive = (options: GitLiveOptions = {}) => {
     configureSafeDirectory,
     head,
     importPack: (target, pack) =>
-      checked("index pack", target, ["index-pack", "--stdin"], pack).pipe(Effect.asVoid),
+      checked("index pack", target, ["index-pack", "--fix-thin", "--stdin"], pack).pipe(
+        Effect.asVoid,
+      ),
     initialize: (target) => checked("initialize", target, ["init"]).pipe(Effect.asVoid),
     inspectHead,
     markShallow,

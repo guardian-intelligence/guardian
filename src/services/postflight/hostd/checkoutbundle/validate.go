@@ -19,6 +19,7 @@ type bundleRequest struct {
 	Repository  string `json:"repository"`
 	Ref         string `json:"ref"`
 	SHA         string `json:"sha"`
+	Have        string `json:"have,omitempty"`
 	GitHubToken string `json:"github_token"`
 }
 
@@ -27,6 +28,7 @@ type checkoutSpec struct {
 	Repository  string
 	Ref         string
 	SHA         string
+	Have        string
 	GitHubToken string
 }
 
@@ -43,6 +45,13 @@ func validateRequest(req bundleRequest, identity AssignmentIdentity) (checkoutSp
 	if err != nil {
 		return checkoutSpec{}, err
 	}
+	have := ""
+	if strings.TrimSpace(req.Have) != "" {
+		have, err = normalizeSHA(req.Have)
+		if err != nil {
+			return checkoutSpec{}, err
+		}
+	}
 	ref, err := normalizeRef(req.Ref)
 	if err != nil {
 		return checkoutSpec{}, err
@@ -51,7 +60,7 @@ func validateRequest(req bundleRequest, identity AssignmentIdentity) (checkoutSp
 	if err != nil {
 		return checkoutSpec{}, err
 	}
-	return checkoutSpec{Repository: repository, Ref: ref, SHA: sha, GitHubToken: token}, nil
+	return checkoutSpec{Repository: repository, Ref: ref, SHA: sha, Have: have, GitHubToken: token}, nil
 }
 
 func normalizeRepository(repository string) (string, error) {

@@ -33,6 +33,7 @@ const (
 	shaHeader      = "X-Postflight-Checkout-Sha"
 	sizeHeader     = "X-Postflight-Checkout-Size-Bytes"
 	cacheHitHeader = "X-Postflight-Checkout-Bundle-Cache-Hit"
+	thinBaseHeader = "X-Postflight-Checkout-Thin-Base"
 
 	executionIDHeader = "X-Postflight-Execution-Id"
 	attemptIDHeader   = "X-Postflight-Attempt-Id"

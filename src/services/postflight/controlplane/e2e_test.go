@@ -209,7 +209,7 @@ func startE2EControlPlane(t *testing.T) *e2eControlPlane {
 	store := &pgStore{pool: pool}
 	tracer := noop.NewTracerProvider().Tracer("e2e")
 	webhook := &webhookServer{secret: []byte("unused"), inbox: store, tracer: tracer, now: time.Now}
-	server := httptest.NewServer(buildMux(cfg, store, webhook, tracer))
+	server := httptest.NewServer(buildMux(ctx, cfg, store, webhook, tracer))
 	t.Cleanup(server.Close)
 	done := make(chan struct{})
 	go func() {
@@ -393,11 +393,6 @@ func postHostSync(t *testing.T, origin string, request syncproto.SyncRequest) sy
 
 func TestWarmPoolLocalAssignmentAndRecoverableRestoreEndToEnd(t *testing.T) {
 	control := startE2EControlPlane(t)
-	host, vms, volumes, _ := startE2EHost(t, control.server.URL)
-
-	waitFor(t, "two registered listeners", func() bool {
-		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening'`) == "2"
-	})
 	const sourceGeneration = "generation-source"
 	const sourceProcessDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	scopeID, err := (&pgStore{pool: control.pool}).EnsureWorkspaceScope(context.Background(), workspaceScopeKey{
@@ -422,7 +417,19 @@ UPDATE workspace_scopes SET current_generation_id = $1, home_host_id = 'host-e2e
 WHERE scope_id = $2::uuid`, sourceGeneration, scopeID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := control.pool.Exec(context.Background(), `
+UPDATE github_provider_demands SET source_generation = $1
+WHERE provider_job_id = $2`, sourceGeneration, e2eJobID); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&pgStore{pool: control.pool}).NotifyJobPlans(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	host, vms, volumes, _ := startE2EHost(t, control.server.URL)
 	volumes.SeedGeneration(sourceGeneration, 1<<30)
+	waitFor(t, "two registered listeners", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening'`) == "2"
+	})
 	statuses, err := vms.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -535,10 +542,10 @@ INSERT INTO github_workflow_jobs (
 INSERT INTO github_provider_demands (
     provider_job_id, provider_installation_id, provider_repository_id,
     repository_full_name, provider_run_id, provider_run_attempt,
-    trust_class, runner_class, workspace_scope_id, state
-) VALUES ($1, $2, $3, $4, 778, 1, $5, $6, $7::uuid, 'demand_recorded')`,
+    trust_class, runner_class, workspace_scope_id, source_generation, state
+) VALUES ($1, $2, $3, $4, 778, 1, $5, $6, $7::uuid, $8, 'demand_recorded')`,
 		retryJobID, e2eInstallationID, e2eRepositoryID, e2eRepo,
-		trustClassPR, e2eClass, scopeID); err != nil {
+		trustClassPR, e2eClass, scopeID, sourceGeneration); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (&pgStore{pool: control.pool}).EnsureJobIntents(context.Background()); err != nil {
@@ -731,8 +738,11 @@ func TestOfflineHostFailsAcquiredAssignmentClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered != 1 {
-		t.Fatalf("recovered assignments = %d, want 1", recovered)
+	// The live scheduler uses the same recovery transaction and may win the
+	// race after last_sync_at is aged. Either caller may perform the one
+	// transition; the durable state below is the invariant.
+	if recovered < 0 || recovered > 1 {
+		t.Fatalf("recovered assignments = %d, want at most 1", recovered)
 	}
 	if got := queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE member_id = $1`, selected.Incarnation); got != "failed_closed" {
 		t.Fatalf("assignment state = %q", got)

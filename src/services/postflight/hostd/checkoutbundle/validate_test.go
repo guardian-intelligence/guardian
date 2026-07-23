@@ -12,6 +12,7 @@ func TestValidateRequest(t *testing.T) {
 		Repository:  "acme/widget",
 		Ref:         "refs/heads/main",
 		SHA:         strings.Repeat("ab", 20),
+		Have:        strings.Repeat("cd", 20),
 		GitHubToken: "ghs_dummy",
 	}
 
@@ -20,7 +21,7 @@ func TestValidateRequest(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if spec.Repository != "acme/widget" || spec.Ref != "refs/heads/main" {
+		if spec.Repository != "acme/widget" || spec.Ref != "refs/heads/main" || spec.Have != valid.Have {
 			t.Fatalf("unexpected spec: %+v", spec)
 		}
 	})
@@ -70,6 +71,8 @@ func TestValidateRequest(t *testing.T) {
 		"repository with space":    {Repository: "acme/wid get", Ref: valid.Ref, SHA: valid.SHA, GitHubToken: valid.GitHubToken},
 		"short sha":                {Repository: valid.Repository, Ref: valid.Ref, SHA: "abc123", GitHubToken: valid.GitHubToken},
 		"non-hex sha":              {Repository: valid.Repository, Ref: valid.Ref, SHA: strings.Repeat("zz", 20), GitHubToken: valid.GitHubToken},
+		"short have":               {Repository: valid.Repository, Ref: valid.Ref, SHA: valid.SHA, Have: "abc123", GitHubToken: valid.GitHubToken},
+		"non-hex have":             {Repository: valid.Repository, Ref: valid.Ref, SHA: valid.SHA, Have: strings.Repeat("zz", 20), GitHubToken: valid.GitHubToken},
 		"partial ref":              {Repository: valid.Repository, Ref: "main", SHA: valid.SHA, GitHubToken: valid.GitHubToken},
 		"ref with dotdot":          {Repository: valid.Repository, Ref: "refs/heads/a..b", SHA: valid.SHA, GitHubToken: valid.GitHubToken},
 		"ref with space":           {Repository: valid.Repository, Ref: "refs/heads/a b", SHA: valid.SHA, GitHubToken: valid.GitHubToken},

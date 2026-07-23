@@ -37,26 +37,26 @@ type preparedBundle struct {
 	File      *os.File
 	SizeBytes int64
 	CacheHit  bool
+	ThinBase  string
 }
 
-// prepareBundle returns the cached pack for (repository, sha) or builds it:
-// ensure the bare mirror, fetch the commit with the job's GitHub token, and
-// write the single-commit pack closure atomically into the cache. All
-// mutation for one repository is serialized behind its repo lock, so
-// concurrent same-SHA requests collapse into one fetch and the followers
-// take the cache path.
+// prepareBundle returns the cached pack for (repository, sha, have) or builds
+// it. When have is a target ancestor, the pack contains the commit range and
+// may delta-compress objects against that base. All mutation for one
+// repository is serialized behind its repo lock, so concurrent identical
+// requests collapse into one fetch and the followers take the cache path.
 func (s *Service) prepareBundle(ctx context.Context, identity AssignmentIdentity, spec checkoutSpec) (preparedBundle, error) {
 	repoKey := repositoryStoreKey(identity)
 	unlock := s.lockRepo(repoKey)
 	defer unlock()
 
-	bundlePath := s.bundlePath(repoKey, spec.SHA)
+	bundlePath := s.bundlePath(repoKey, spec.SHA, spec.Have)
 	s.touchMirrorStamp(repoKey)
 	if file, size, ok := openIfNonEmpty(bundlePath); ok {
 		now := time.Now()
 		_ = os.Chtimes(bundlePath, now, now) // LRU recency for the reaper
 		s.Metrics.CacheHits.Add(1)
-		return preparedBundle{File: file, SizeBytes: size, CacheHit: true}, nil
+		return preparedBundle{File: file, SizeBytes: size, CacheHit: true, ThinBase: spec.Have}, nil
 	}
 
 	mirrorDir := s.mirrorDir(repoKey)
@@ -70,14 +70,25 @@ func (s *Service) prepareBundle(ctx context.Context, identity AssignmentIdentity
 	if err := s.fetchCommit(ctx, mirrorDir, spec); err != nil {
 		return preparedBundle{}, err
 	}
-	if err := s.createBundle(ctx, mirrorDir, bundlePath, spec.SHA); err != nil {
+	effectiveHave := ""
+	if spec.Have != "" && s.canThinAgainst(ctx, mirrorDir, spec.Have, spec.SHA) {
+		effectiveHave = spec.Have
+	}
+	bundlePath = s.bundlePath(repoKey, spec.SHA, effectiveHave)
+	if file, size, ok := openIfNonEmpty(bundlePath); ok {
+		now := time.Now()
+		_ = os.Chtimes(bundlePath, now, now)
+		s.Metrics.CacheHits.Add(1)
+		return preparedBundle{File: file, SizeBytes: size, CacheHit: true, ThinBase: effectiveHave}, nil
+	}
+	if err := s.createBundle(ctx, mirrorDir, bundlePath, spec.SHA, effectiveHave); err != nil {
 		return preparedBundle{}, err
 	}
 	file, size, ok := openIfNonEmpty(bundlePath)
 	if !ok {
 		return preparedBundle{}, fmt.Errorf("bundle disappeared after creation")
 	}
-	return preparedBundle{File: file, SizeBytes: size, CacheHit: false}, nil
+	return preparedBundle{File: file, SizeBytes: size, CacheHit: false, ThinBase: effectiveHave}, nil
 }
 
 // openIfNonEmpty opens the pack and returns its size, reporting false when it
@@ -100,8 +111,11 @@ func (s *Service) mirrorDir(repoKey string) string {
 	return filepath.Join(s.cfg.StoreDir, "mirrors", repoKey)
 }
 
-func (s *Service) bundlePath(repoKey, sha string) string {
-	return filepath.Join(s.cfg.StoreDir, "bundles", repoKey, sha, bundleFilename)
+func (s *Service) bundlePath(repoKey, sha, have string) string {
+	if have == "" {
+		have = "full"
+	}
+	return filepath.Join(s.cfg.StoreDir, "bundles", repoKey, sha, have, bundleFilename)
 }
 
 // repositoryStoreKey keys stores by immutable GitHub identity, not by name:
@@ -199,10 +213,10 @@ func classifyFetchError(err error) error {
 	return fmt.Errorf("%w: %s", errUpstream, boundedGitError(err))
 }
 
-// createBundle writes the exact single-commit pack closure (commit, trees,
-// blobs — no history) to a temp file and renames it into the cache. Partial
-// packs are structurally unservable: only the rename publishes the path.
-func (s *Service) createBundle(ctx context.Context, mirrorDir, bundlePath, sha string) error {
+// createBundle writes a full target closure or a thin have..target pack to a
+// temp file and renames it into the cache. Partial packs are structurally
+// unservable: only the rename publishes the path.
+func (s *Service) createBundle(ctx context.Context, mirrorDir, bundlePath, sha, have string) error {
 	if err := os.MkdirAll(filepath.Dir(bundlePath), 0o700); err != nil {
 		return err
 	}
@@ -212,7 +226,7 @@ func (s *Service) createBundle(ctx context.Context, mirrorDir, bundlePath, sha s
 	}
 	tmpPath := tmp.Name()
 	defer func() { _ = os.Remove(tmpPath) }()
-	if err := s.writePack(ctx, mirrorDir, sha, tmp); err != nil {
+	if err := s.writePack(ctx, mirrorDir, sha, have, tmp); err != nil {
 		_ = tmp.Close()
 		return err
 	}
@@ -222,42 +236,53 @@ func (s *Service) createBundle(ctx context.Context, mirrorDir, bundlePath, sha s
 	return os.Rename(tmpPath, bundlePath)
 }
 
-// writePack pipes `git rev-list --objects -1 <sha>` into
-// `git pack-objects --stdout`, enforcing MaxPackBytes as the bytes stream:
-// an oversized pack kills the writer mid-flight instead of filling the disk
-// first.
-func (s *Service) writePack(ctx context.Context, mirrorDir, sha string, out io.Writer) error {
+// writePack creates a full target closure or a thin have..target pack,
+// enforcing MaxPackBytes as the bytes stream: an oversized pack kills the
+// writer mid-flight instead of filling the disk first.
+func (s *Service) writePack(ctx context.Context, mirrorDir, sha, have string, out io.Writer) error {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.GitTimeout)
 	defer cancel()
 
-	revList := exec.CommandContext(ctx, "git", "rev-list", "--objects", "--no-object-names", "-1", sha)
-	revList.Dir = mirrorDir
-	revList.Env = s.gitEnv(nil)
-	packObjects := exec.CommandContext(ctx, "git", "pack-objects", "--stdout")
+	packArguments := []string{"pack-objects", "--stdout"}
+	var revList *exec.Cmd
+	if have != "" {
+		packArguments = append(packArguments, "--revs", "--thin")
+	} else {
+		revList = exec.CommandContext(ctx, "git", "rev-list", "--objects", "--no-object-names", "-1", sha)
+		revList.Dir = mirrorDir
+		revList.Env = s.gitEnv(nil)
+	}
+	packObjects := exec.CommandContext(ctx, "git", packArguments...)
 	packObjects.Dir = mirrorDir
 	packObjects.Env = s.gitEnv(nil)
 
 	var revErr, packErr strings.Builder
-	revList.Stderr = limitBuilder(&revErr)
 	packObjects.Stderr = limitBuilder(&packErr)
-
-	revStdout, err := revList.StdoutPipe()
-	if err != nil {
-		return err
+	if revList == nil {
+		packObjects.Stdin = strings.NewReader(sha + "\n^" + have + "\n")
+	} else {
+		revList.Stderr = limitBuilder(&revErr)
+		revStdout, err := revList.StdoutPipe()
+		if err != nil {
+			return err
+		}
+		packObjects.Stdin = revStdout
 	}
-	packObjects.Stdin = revStdout
 	limited := &limitedWriter{w: out, remaining: s.cfg.MaxPackBytes}
 	packObjects.Stdout = limited
 
 	if err := packObjects.Start(); err != nil {
 		return fmt.Errorf("git pack_objects: %w", err)
 	}
-	if err := revList.Start(); err != nil {
-		_ = packObjects.Process.Kill()
-		_ = packObjects.Wait()
-		return fmt.Errorf("git rev_list: %w", err)
+	var revWaitErr error
+	if revList != nil {
+		if err := revList.Start(); err != nil {
+			_ = packObjects.Process.Kill()
+			_ = packObjects.Wait()
+			return fmt.Errorf("git rev_list: %w", err)
+		}
+		revWaitErr = revList.Wait()
 	}
-	revWaitErr := revList.Wait()
 	packWaitErr := packObjects.Wait()
 	if limited.exceeded {
 		return errTooLarge
@@ -269,6 +294,13 @@ func (s *Service) writePack(ctx context.Context, mirrorDir, sha string, out io.W
 		return fmt.Errorf("git pack_objects: %w: %s", packWaitErr, strings.TrimSpace(packErr.String()))
 	}
 	return nil
+}
+
+func (s *Service) canThinAgainst(ctx context.Context, mirrorDir, have, target string) bool {
+	if err := s.runGit(ctx, "cat_file_have", mirrorDir, nil, "cat-file", "-e", have+"^{commit}"); err != nil {
+		return false
+	}
+	return s.runGit(ctx, "merge_base_have", mirrorDir, nil, "merge-base", "--is-ancestor", have, target) == nil
 }
 
 // limitedWriter fails the stream once the limit is crossed.

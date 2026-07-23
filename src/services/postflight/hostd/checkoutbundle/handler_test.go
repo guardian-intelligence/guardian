@@ -2,6 +2,7 @@ package checkoutbundle
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -68,6 +69,39 @@ func makeUpstream(t *testing.T) (string, string) {
 	// sha-fallback path testable.
 	testGit(t, upstream, "config", "uploadpack.allowAnySHA1InWant", "true")
 	return root, sha
+}
+
+// makeDeltaUpstream creates two commits whose large blob differs by only a
+// few bytes, making the thin-pack behavior observable in the response size.
+func makeDeltaUpstream(t *testing.T) (string, string, string) {
+	t.Helper()
+	root := t.TempDir()
+	work := t.TempDir()
+	testGit(t, work, "init", "--initial-branch=main", ".")
+	content := make([]byte, 2<<20)
+	if _, err := rand.Read(content); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(work, "large.bin")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, work, "add", ".")
+	testGit(t, work, "commit", "-m", "base")
+	base := testGit(t, work, "rev-parse", "HEAD")
+	copy(content[len(content)/2:], []byte("postflight-thin-pack"))
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, work, "commit", "-am", "target")
+	target := testGit(t, work, "rev-parse", "HEAD")
+	upstream := filepath.Join(root, "acme", "widget.git")
+	if err := os.MkdirAll(filepath.Dir(upstream), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, work, "clone", "--bare", ".", upstream)
+	testGit(t, upstream, "config", "uploadpack.allowAnySHA1InWant", "true")
+	return root, base, target
 }
 
 const (
@@ -138,7 +172,8 @@ func validBody(sha string) map[string]string {
 
 // assertServedPack checks every success-contract requirement the action
 // enforces, then proves the pack is real by materializing it exactly the way
-// the action does: git init + index-pack --stdin + checkout --detach.
+// the action does: git init + index-pack --fix-thin --stdin + checkout
+// --detach.
 func assertServedPack(t *testing.T, response bundleResponse, sha string, wantCacheHit bool) {
 	t.Helper()
 	if response.status != http.StatusOK {
@@ -167,7 +202,7 @@ func assertServedPack(t *testing.T, response bundleResponse, sha string, wantCac
 	if err := os.WriteFile(packPath, response.body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	indexPack := exec.Command("git", "index-pack", "--stdin")
+	indexPack := exec.Command("git", "index-pack", "--fix-thin", "--stdin")
 	indexPack.Dir = target
 	packFile, err := os.Open(packPath)
 	if err != nil {
@@ -186,6 +221,70 @@ func assertServedPack(t *testing.T, response bundleResponse, sha string, wantCac
 	if err != nil || string(content) != "postflight\n" {
 		t.Fatalf("worktree content wrong: %q, %v", content, err)
 	}
+}
+
+func TestBundleThinPackUsesWorkspaceHead(t *testing.T) {
+	requireGit(t)
+	upstreamRoot, base, target := makeDeltaUpstream(t)
+	service := newTestService(t, upstreamRoot, nil)
+
+	baseBody := validBody(base)
+	baseBody["ref"] = ""
+	baseResponse := requestBundle(t, service, nil, baseBody)
+	if baseResponse.status != http.StatusOK {
+		t.Fatalf("base status %d, body %s", baseResponse.status, baseResponse.body)
+	}
+
+	targetBody := validBody(target)
+	targetBody["have"] = base
+	thinResponse := requestBundle(t, service, nil, targetBody)
+	if thinResponse.status != http.StatusOK {
+		t.Fatalf("thin status %d, body %s", thinResponse.status, thinResponse.body)
+	}
+	if got := thinResponse.headers.Get(thinBaseHeader); got != base {
+		t.Fatalf("%s = %q, want %q", thinBaseHeader, got, base)
+	}
+	if len(thinResponse.body)*10 >= len(baseResponse.body) {
+		t.Fatalf("thin pack is not meaningfully smaller: thin=%d full=%d", len(thinResponse.body), len(baseResponse.body))
+	}
+
+	checkout := t.TempDir()
+	testGit(t, checkout, "init", ".")
+	for _, response := range []bundleResponse{baseResponse, thinResponse} {
+		packPath := filepath.Join(t.TempDir(), "response.pack")
+		if err := os.WriteFile(packPath, response.body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		packFile, err := os.Open(packPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		indexPack := exec.Command("git", "index-pack", "--fix-thin", "--stdin")
+		indexPack.Dir = checkout
+		indexPack.Stdin = packFile
+		output, indexErr := indexPack.CombinedOutput()
+		_ = packFile.Close()
+		if indexErr != nil {
+			t.Fatalf("index-pack rejected served bytes: %v: %s", indexErr, output)
+		}
+	}
+	testGit(t, checkout, "checkout", "--force", "--detach", target)
+	if head := testGit(t, checkout, "rev-parse", "HEAD"); head != target {
+		t.Fatalf("materialized HEAD %s, want %s", head, target)
+	}
+}
+
+func TestBundleUnknownThinBaseFallsBackToFullPack(t *testing.T) {
+	requireGit(t)
+	upstreamRoot, sha := makeUpstream(t)
+	service := newTestService(t, upstreamRoot, nil)
+	body := validBody(sha)
+	body["have"] = strings.Repeat("d", 40)
+	response := requestBundle(t, service, nil, body)
+	if got := response.headers.Get(thinBaseHeader); got != "" {
+		t.Fatalf("unexpected %s %q", thinBaseHeader, got)
+	}
+	assertServedPack(t, response, sha, false)
 }
 
 func TestBundleHappyPathThenCacheHit(t *testing.T) {

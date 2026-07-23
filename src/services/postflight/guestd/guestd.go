@@ -505,9 +505,63 @@ func (s *Server) convergeMounts(ctx context.Context, mounts []guestproto.Mount) 
 	if len(mounts) == 0 {
 		return errors.New("assignment carries no mounts")
 	}
+	serials := make(map[string]bool, len(mounts))
+	mountpoints := make(map[string]bool, len(mounts))
 	for _, mount := range mounts {
-		if err := s.convergeMount(ctx, mount); err != nil {
-			return fmt.Errorf("serial %s at %s: %w", mount.Serial, mount.Mountpoint, err)
+		if err := validateMount(mount); err != nil {
+			return err
+		}
+		if serials[mount.Serial] || mountpoints[mount.Mountpoint] {
+			return errors.New("assignment carries duplicate mount identity")
+		}
+		serials[mount.Serial] = true
+		mountpoints[mount.Mountpoint] = true
+	}
+	mountCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errs := make([]error, len(mounts))
+	done := make([]chan struct{}, len(mounts))
+	dependencies := make([][]int, len(mounts))
+	for index := range mounts {
+		done[index] = make(chan struct{})
+		for candidate := range mounts {
+			if index != candidate && strings.HasPrefix(mounts[index].Mountpoint, mounts[candidate].Mountpoint+"/") {
+				dependencies[index] = append(dependencies[index], candidate)
+			}
+		}
+	}
+	var wait sync.WaitGroup
+	wait.Add(len(mounts))
+	for index := range mounts {
+		index := index
+		go func() {
+			defer wait.Done()
+			defer close(done[index])
+			for _, dependency := range dependencies[index] {
+				select {
+				case <-done[dependency]:
+					if errs[dependency] != nil {
+						errs[index] = fmt.Errorf("parent mount %s did not converge", mounts[dependency].Mountpoint)
+						return
+					}
+				case <-mountCtx.Done():
+					errs[index] = mountCtx.Err()
+					return
+				}
+			}
+			started := time.Now()
+			errs[index] = s.convergeMount(mountCtx, mounts[index])
+			if errs[index] != nil {
+				cancel()
+			}
+			s.cfg.Logger.Info("postflight.guestd.mount.converged", "serial", mounts[index].Serial,
+				"duration_ns", time.Since(started).Nanoseconds(), "error", errs[index])
+		}()
+	}
+	wait.Wait()
+	for index, err := range errs {
+		if err != nil {
+			return fmt.Errorf("serial %s at %s: %w", mounts[index].Serial, mounts[index].Mountpoint, err)
 		}
 	}
 	return nil

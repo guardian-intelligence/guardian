@@ -44,6 +44,7 @@ const withDestination = async <A>(
     endpoint: new URL("http://127.0.0.1/internal/sandbox/v1/github-checkout/bundle"),
     executionId: Schema.decodeUnknownSync(ExecutionId)("execution-1"),
     githubToken: Option.some(Redacted.make("github-secret")),
+    have: Option.none(),
     maximumBytes: 1024,
     spec: new CheckoutSpec({
       clean: "PreserveBuildState",
@@ -129,11 +130,12 @@ describe("checkout control-plane HTTP client", () => {
     try {
       const address = server.address() as AddressInfo;
       await withDestination(async (baseRequest, destination) => {
-        const request = {
+        const request: CheckoutBundleRequest = {
           ...baseRequest,
           endpoint: new URL(
             `http://127.0.0.1:${address.port}/internal/sandbox/v1/github-checkout/bundle`,
           ),
+          have: Option.some(SHA),
         };
         const metadata = await Effect.runPromise(execute(globalThis.fetch, request));
         expect(metadata.bytes).toBe(bytes.length);
@@ -141,6 +143,7 @@ describe("checkout control-plane HTTP client", () => {
         expect(receivedPath).toBe("/internal/sandbox/v1/github-checkout/bundle");
         expect(receivedBody).toEqual({
           github_token: "github-secret",
+          have: SHA,
           ref: "refs/heads/main",
           repository: "guardian-intelligence/guardian",
           sha: SHA,

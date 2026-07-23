@@ -100,6 +100,8 @@ type traceRestore struct {
 }
 
 func (a *Agent) traceFor(memberID, runnerName, vmID string) (*traceState, error) {
+	a.traceMu.Lock()
+	defer a.traceMu.Unlock()
 	if a.cfg.TraceDir == "" {
 		return nil, nil
 	}
@@ -194,6 +196,12 @@ func (a *Agent) appendBootstrapTiming(state *traceState, points []vm.TimingPoint
 	}
 }
 
+func (a *Agent) traceEventSeen(state *traceState, event string) bool {
+	a.traceMu.Lock()
+	defer a.traceMu.Unlock()
+	return state != nil && state.seen[event]
+}
+
 func preAssignmentTraceEvent(event string) bool {
 	switch event {
 	case "vm_launch_started", "qemu_started", "guest_hello_observed",
@@ -206,6 +214,8 @@ func preAssignmentTraceEvent(event string) bool {
 }
 
 func (a *Agent) appendTrace(state *traceState, record *assignment, event string, enrich func(*traceEvent)) {
+	a.traceMu.Lock()
+	defer a.traceMu.Unlock()
 	if state == nil || state.file == nil || state.seen[event] {
 		return
 	}
@@ -242,8 +252,8 @@ func (a *Agent) appendTrace(state *traceState, record *assignment, event string,
 }
 
 func (a *Agent) closeTraceFiles() {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.traceMu.Lock()
+	defer a.traceMu.Unlock()
 	for memberID, state := range a.traces {
 		if state.file != nil {
 			if err := state.file.Close(); err != nil {
@@ -254,14 +264,16 @@ func (a *Agent) closeTraceFiles() {
 	}
 }
 
-func (a *Agent) pruneTraces() {
-	live := make(map[string]bool, len(a.desiredMembers)+len(a.assignments))
-	for memberID := range a.desiredMembers {
+func (a *Agent) pruneTraces(members map[string]syncproto.DesiredPoolMember, assignments map[string]*assignment) {
+	live := make(map[string]bool, len(members)+len(assignments))
+	for memberID := range members {
 		live[memberID] = true
 	}
-	for _, record := range a.assignments {
-		live[record.spec.MemberID] = true
+	for _, record := range assignments {
+		live[record.memberID] = true
 	}
+	a.traceMu.Lock()
+	defer a.traceMu.Unlock()
 	for memberID, state := range a.traces {
 		if live[memberID] {
 			continue
