@@ -92,11 +92,16 @@ spec:
             # with (mounted into VMAlertmanager via spec.secrets).
             - name: ALERTA_URL
               value: http://alerta.tenant-root.svc
+            # optional: the pager's last hop must start even if the
+            # chart-managed Alerta Secret is absent (DR bootstrap ordering);
+            # an empty key just means unauthenticated fetches, which fail
+            # into relay_alerta_enrichment_failures_total.
             - name: ALERTA_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: alerta
                   key: alerta-api-key
+                  optional: true
           ports:
             - name: http
               containerPort: 8080

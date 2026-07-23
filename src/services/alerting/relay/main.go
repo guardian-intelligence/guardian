@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"log/slog"
 
@@ -396,6 +397,10 @@ func (s *server) enrichFromAlerta(ctx context.Context, text string, n notificati
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.cfg.alertaURL+"/api/alert/"+id, nil)
 	if err != nil {
+		// The only way here is a malformed ALERTA_URL: a config typo must
+		// not silently disable enrichment forever.
+		s.m.enrichFailures.Add(1)
+		slog.Warn("alerta enrichment request build failed", "err", err)
 		return n
 	}
 	if s.cfg.alertaAPIKey != "" {
@@ -427,8 +432,21 @@ func (s *server) enrichFromAlerta(ctx context.Context, text string, n notificati
 	if alertText == "" || strings.Contains(n.Body, alertText) {
 		return n
 	}
-	n.Body = truncate(alertText, 2048) + "\n" + n.Body
+	n.Body = truncateUTF8(alertText, 2048) + "\n" + n.Body
 	return n
+}
+
+// truncateUTF8 cuts at no more than n bytes without splitting a rune —
+// byte-slicing an annotation mid-rune would ship invalid UTF-8 at the seam
+// of every page body that hits the cap.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 type metrics struct {
@@ -857,11 +875,18 @@ func (s *server) handleSlack(w http.ResponseWriter, r *http.Request) {
 		defer s.inflight.Done()
 		dctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), deliveryBudget)
 		defer cancel()
-		if s.cfg.alertaURL != "" && parsed {
-			n = s.enrichFromAlerta(dctx, p.Text, n)
+		if parsed {
+			if s.cfg.alertaURL != "" {
+				// Detached from dctx: enrichment's 5s bound must come out
+				// of its own budget, not the delivery headroom the
+				// deliveryBudget comment accounts for.
+				n = s.enrichFromAlerta(context.WithoutCancel(dctx), p.Text, n)
+			}
+			// Unparsed payloads are forwarded verbatim as forensic
+			// evidence; only composed pages get token rendering.
+			n.Title = renderTimeTokens(n.Title, s.loc)
+			n.Body = renderTimeTokens(n.Body, s.loc)
 		}
-		n.Title = renderTimeTokens(n.Title, s.loc)
-		n.Body = renderTimeTokens(n.Body, s.loc)
 		if err := s.out.deliver(dctx, n); err != nil {
 			// Counting failure to deliver this counter's own alert would keep
 			// the alert firing forever whenever the sink is rate-limited.
