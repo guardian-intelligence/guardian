@@ -107,7 +107,8 @@ function drain(): void {
   const events = q.splice(0, q.length);
   const minimal = lowData();
   for (const e of events) {
-    if (minimal && !(e.name === "privatecut.route_view" || e.name.startsWith("web_vital."))) continue;
+    if (minimal && !(e.name === "privatecut.route_view" || e.name.startsWith("web_vital.")))
+      continue;
     const w = toWire(e, now);
     w.sessionSeq = ++seq;
     pending.push(w);

@@ -114,8 +114,14 @@ function Home() {
               <span>Browser-native video clipping</span>
             </div>
             <div className="privatecut-hero__copy-frame">
-              <span className="privatecut-hero__cross privatecut-hero__cross--left" aria-hidden="true" />
-              <span className="privatecut-hero__cross privatecut-hero__cross--right" aria-hidden="true" />
+              <span
+                className="privatecut-hero__cross privatecut-hero__cross--left"
+                aria-hidden="true"
+              />
+              <span
+                className="privatecut-hero__cross privatecut-hero__cross--right"
+                aria-hidden="true"
+              />
               <h1
                 id="privatecut-title"
                 className="privatecut-title"

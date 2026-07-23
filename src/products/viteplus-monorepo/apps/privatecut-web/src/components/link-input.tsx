@@ -39,7 +39,10 @@ export function LinkInput({ onSource, onWarm, disabled }: LinkInputProps) {
         const code = error instanceof ResolveError ? error.code : "unknown";
         const traceId = error instanceof ResolveError ? error.traceId : "";
         const message = error instanceof Error ? error.message : "Something went wrong. Try again.";
-        emitSpan("privatecut.link_failed", { code, ...(traceId !== "" && { "trace.id": traceId }) });
+        emitSpan("privatecut.link_failed", {
+          code,
+          ...(traceId !== "" && { "trace.id": traceId }),
+        });
         setPhase({ kind: "failed", message });
       });
   }, [link, busy, onSource, onWarm]);
