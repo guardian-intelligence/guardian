@@ -482,14 +482,14 @@ func TestOpenBaoConsumersUseTLSConformance(t *testing.T) {
 	}
 	assertTextNotContains(t, dns, "server: http://guardian-openbao", "external-dns SecretStore")
 
-	promotion := readText(t, runfilePath("src/infrastructure/deployments/guardian/promotion/pipelines/secrets.yaml"))
+	promotion := readText(t, runfilePath("src/infrastructure/deployments/guardian/promotion/pipelines/products-secrets.yaml"))
 	for _, want := range []string{
 		"kind: ClusterSecretStore",
-		"name: promotion-openbao",
+		"name: guardian-products-openbao",
 		"server: https://guardian-openbao.tenant-guardian.svc:8200",
 		"caProvider:",
 		"name: guardian-openbao-api-tls",
-		"role: guardian-reader-company-site",
+		"role: guardian-reader-guardian-products",
 		"kargo.akuity.io/cred-type: git",
 	} {
 		assertTextContains(t, promotion, want, "promotion SecretStore")
@@ -499,6 +499,20 @@ func TestOpenBaoConsumersUseTLSConformance(t *testing.T) {
 	// value-bearing template would defeat the custody model. "PRIVATE KEY"
 	// matches every PEM label (PKCS#1, PKCS#8, OpenSSH).
 	assertTextNotContains(t, promotion, "PRIVATE KEY", "promotion SecretStore")
+
+	imageops := readText(t, runfilePath("src/infrastructure/deployments/guardian/imageops/secrets.yaml"))
+	for _, want := range []string{
+		"kind: ClusterSecretStore",
+		"name: guardian-imageops-openbao",
+		"server: https://guardian-openbao.tenant-guardian.svc:8200",
+		"caProvider:",
+		"name: guardian-openbao-api-tls",
+		"role: guardian-reader-guardian-imageops",
+	} {
+		assertTextContains(t, imageops, want, "imageops SecretStore")
+	}
+	assertTextNotContains(t, imageops, "server: http://guardian-openbao", "imageops SecretStore")
+	assertTextNotContains(t, imageops, "PRIVATE KEY", "imageops SecretStore")
 }
 
 // Every ExternalSecret must read exclusively from its own namespace's kv

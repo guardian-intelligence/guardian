@@ -498,13 +498,6 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	assertTextNotContains(t, string(canary), `KC_ADMIN`,
 		"Guardian journey canary must not use Keycloak administration")
 
-	promotion, err := os.ReadFile(runfilePath(
-		"src/infrastructure/deployments/guardian/promotion/pipelines/iam-journey-canary-stage-prod.yaml",
-	))
-	if err != nil {
-		t.Fatalf("read Guardian journey canary promotion: %v", err)
-	}
-	assertTextContains(t, string(promotion),
-		`path: ./repo/src/infrastructure/deployments/iam/prod/journey-canary.yaml`,
-		"journey canary promotion must update the CronJob image")
+	assertTextContains(t, string(canary), `{"$imagepolicy": "guardian-imageops:canary-journeys"}`,
+		"journey canary image must carry the image-automation marker that moves its pin")
 }
