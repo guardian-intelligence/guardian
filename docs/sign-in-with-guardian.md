@@ -21,12 +21,13 @@ connections to a Guardian account; they are not the account model.
   recoverable ID token (expired or unsealable session cookie) clears the
   local session and returns to Postflight without visiting Keycloak, because
   Keycloak demands a confirmation page when the hint is missing.
-- Known phase-1 exception: denying the GitHub authorize prompt returns
-  `error=access_denied` to the broker endpoint, and Keycloak answers by
-  rendering its own login page — a dead end, since the realm has no password
-  or registration path. The realm conformance test tracks this exception;
-  closing it requires a realm login theme (or equivalent) that returns the
-  user to Postflight.
+- The realm ships the `guardian-bounce` login theme: Keycloak never renders
+  a visible page of its own. Denying the GitHub authorize prompt (or hitting
+  a Keycloak URL without the hint) lands on the themed login page, which
+  bounces straight back to Postflight; the device-flow terminal pages bounce
+  to the product's approval surfaces the same way. Only the device-code
+  re-entry form stays interactive, Guardian-branded, for expired or mistyped
+  codes.
 - Every web relying party is confidential, uses authorization code flow with
   PKCE S256, an exact callback, a server-side token exchange, and an encrypted
   HttpOnly `Secure` `SameSite=Lax` session cookie.

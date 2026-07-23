@@ -34,6 +34,11 @@ spec:
       app.kubernetes.io/name: keycloak
   template:
     metadata:
+      annotations:
+        # sha256 of bounce-theme.yaml's data block: Keycloak caches compiled
+        # templates, so theme edits must roll the pods. Recompute with:
+        # awk '/^data:/{f=1;next} f' bounce-theme.yaml | sha256sum
+        guardian.dev/bounce-theme-checksum: 324177d63fa4b48353424bf91739cff8ff696b3a64962cd4653fff7745135989
       labels:
         app.kubernetes.io/name: keycloak
         app.kubernetes.io/part-of: guardian
@@ -202,10 +207,16 @@ spec:
             - name: vault
               mountPath: /opt/keycloak/data/vault
               readOnly: true
+            - name: bounce-theme
+              mountPath: /opt/keycloak/themes/guardian-bounce/login
+              readOnly: true
       volumes:
         - name: realm-import
           configMap:
             name: keycloak-realm-guardian
+        - name: bounce-theme
+          configMap:
+            name: keycloak-bounce-theme
         # File names follow the file-vault provider's REALM_UNDERSCORE_KEY
         # convention (<realm>_<key>).
         - name: vault

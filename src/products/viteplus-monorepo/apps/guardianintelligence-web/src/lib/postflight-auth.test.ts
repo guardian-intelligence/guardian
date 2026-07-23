@@ -4,7 +4,8 @@ import {
   SESSION_COOKIE,
   beginPostflightLogin,
   completePostflightLogin,
-  deviceApprovalRedirect,
+  deviceContinueRedirect,
+  validUserCode,
   endPostflightSession,
   postflightSessionResponse,
 } from "./postflight-auth";
@@ -236,7 +237,7 @@ describe("Postflight OIDC BFF", () => {
   });
 });
 
-describe("device approval redirect", () => {
+describe("device continue redirect", () => {
   beforeEach(() => {
     process.env.POSTFLIGHT_PUBLIC_URL = publicURL;
     process.env.POSTFLIGHT_OIDC_ISSUER = issuer;
@@ -255,9 +256,9 @@ describe("device approval redirect", () => {
     }
   });
 
-  it("forwards to the issuer's device page with a well-formed code prefilled", () => {
-    const response = deviceApprovalRedirect(
-      new Request(`${publicURL}/postflight/device?user_code=WDJB-MJHT`),
+  it("forwards to the issuer's device verification with the code attached", () => {
+    const response = deviceContinueRedirect(
+      new Request(`${publicURL}/postflight/device/continue?user_code=wdjb-mjht`),
     );
 
     expect(response.status).toBe(303);
@@ -265,19 +266,34 @@ describe("device approval redirect", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("drops a malformed code instead of forwarding it", () => {
-    const response = deviceApprovalRedirect(
-      new Request(`${publicURL}/postflight/device?user_code=${encodeURIComponent("<script>x")}`),
+  it("bounces back to the approval page when the code is malformed", () => {
+    const response = deviceContinueRedirect(
+      new Request(
+        `${publicURL}/postflight/device/continue?user_code=${encodeURIComponent("<script>x")}`,
+      ),
     );
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe(`${issuer}/device`);
+    expect(response.headers.get("location")).toBe(`${publicURL}/postflight/device`);
   });
 
-  it("redirects without a code when none is supplied", () => {
-    const response = deviceApprovalRedirect(new Request(`${publicURL}/postflight/device`));
+  it("bounces back to the approval page when no code is supplied", () => {
+    const response = deviceContinueRedirect(new Request(`${publicURL}/postflight/device/continue`));
 
     expect(response.status).toBe(303);
-    expect(response.headers.get("location")).toBe(`${issuer}/device`);
+    expect(response.headers.get("location")).toBe(`${publicURL}/postflight/device`);
+  });
+});
+
+describe("validUserCode", () => {
+  it("normalizes well-formed codes to uppercase", () => {
+    expect(validUserCode("wdjb-mjht")).toBe("WDJB-MJHT");
+  });
+
+  it("rejects malformed and missing codes", () => {
+    expect(validUserCode("<script>x")).toBeNull();
+    expect(validUserCode("abc")).toBeNull();
+    expect(validUserCode(null)).toBeNull();
+    expect(validUserCode(undefined)).toBeNull();
   });
 });

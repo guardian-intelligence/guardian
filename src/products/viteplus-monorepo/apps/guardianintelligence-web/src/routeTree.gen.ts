@@ -42,6 +42,8 @@ import { Route as PostflightAuthCallbackRouteImport } from './routes/postflight.
 import { Route as PostflightAuthLoginRouteImport } from './routes/postflight.auth.login'
 import { Route as PostflightAuthLogoutRouteImport } from './routes/postflight.auth.logout'
 import { Route as PostflightAuthSessionRouteImport } from './routes/postflight.auth.session'
+import { Route as PostflightDeviceContinueRouteImport } from './routes/postflight.device.continue'
+import { Route as PostflightDeviceDoneRouteImport } from './routes/postflight.device.done'
 
 const WorkshopRouteRoute = WorkshopRouteRouteImport.update({
   id: '/_workshop',
@@ -207,6 +209,17 @@ const PostflightAuthSessionRoute = PostflightAuthSessionRouteImport.update({
   path: '/auth/session',
   getParentRoute: () => PostflightRoute,
 } as any)
+const PostflightDeviceContinueRoute =
+  PostflightDeviceContinueRouteImport.update({
+    id: '/continue',
+    path: '/continue',
+    getParentRoute: () => PostflightDeviceRoute,
+  } as any)
+const PostflightDeviceDoneRoute = PostflightDeviceDoneRouteImport.update({
+  id: '/done',
+  path: '/done',
+  getParentRoute: () => PostflightDeviceRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof WorkshopIndexRoute
@@ -227,7 +240,7 @@ export interface FileRoutesByFullPath {
   '/letters/$slug': typeof LettersSlugRoute
   '/news/$slug': typeof NewsSlugRoute
   '/og/$slug': typeof OgSlugRoute
-  '/postflight/device': typeof PostflightDeviceRoute
+  '/postflight/device': typeof PostflightDeviceRouteWithChildren
   '/postflight/console': typeof PostflightConsoleRoute
   '/letters/': typeof LettersIndexRoute
   '/news/': typeof NewsIndexRoute
@@ -240,6 +253,8 @@ export interface FileRoutesByFullPath {
   '/postflight/auth/login': typeof PostflightAuthLoginRoute
   '/postflight/auth/logout': typeof PostflightAuthLogoutRoute
   '/postflight/auth/session': typeof PostflightAuthSessionRoute
+  '/postflight/device/continue': typeof PostflightDeviceContinueRoute
+  '/postflight/device/done': typeof PostflightDeviceDoneRoute
   '/design/': typeof WorkshopDesignIndexRoute
 }
 export interface FileRoutesByTo {
@@ -257,7 +272,7 @@ export interface FileRoutesByTo {
   '/letters/$slug': typeof LettersSlugRoute
   '/news/$slug': typeof NewsSlugRoute
   '/og/$slug': typeof OgSlugRoute
-  '/postflight/device': typeof PostflightDeviceRoute
+  '/postflight/device': typeof PostflightDeviceRouteWithChildren
   '/postflight/console': typeof PostflightConsoleRoute
   '/': typeof WorkshopIndexRoute
   '/letters': typeof LettersIndexRoute
@@ -271,6 +286,8 @@ export interface FileRoutesByTo {
   '/postflight/auth/login': typeof PostflightAuthLoginRoute
   '/postflight/auth/logout': typeof PostflightAuthLogoutRoute
   '/postflight/auth/session': typeof PostflightAuthSessionRoute
+  '/postflight/device/continue': typeof PostflightDeviceContinueRoute
+  '/postflight/device/done': typeof PostflightDeviceDoneRoute
   '/design': typeof WorkshopDesignIndexRoute
 }
 export interface FileRoutesById {
@@ -293,7 +310,7 @@ export interface FileRoutesById {
   '/letters/$slug': typeof LettersSlugRoute
   '/news/$slug': typeof NewsSlugRoute
   '/og/$slug': typeof OgSlugRoute
-  '/postflight/device': typeof PostflightDeviceRoute
+  '/postflight/device': typeof PostflightDeviceRouteWithChildren
   '/postflight_/console': typeof PostflightConsoleRoute
   '/_workshop/': typeof WorkshopIndexRoute
   '/letters/': typeof LettersIndexRoute
@@ -307,6 +324,8 @@ export interface FileRoutesById {
   '/postflight/auth/login': typeof PostflightAuthLoginRoute
   '/postflight/auth/logout': typeof PostflightAuthLogoutRoute
   '/postflight/auth/session': typeof PostflightAuthSessionRoute
+  '/postflight/device/continue': typeof PostflightDeviceContinueRoute
+  '/postflight/device/done': typeof PostflightDeviceDoneRoute
   '/_workshop/design/': typeof WorkshopDesignIndexRoute
 }
 export interface FileRouteTypes {
@@ -343,6 +362,8 @@ export interface FileRouteTypes {
     | '/postflight/auth/login'
     | '/postflight/auth/logout'
     | '/postflight/auth/session'
+    | '/postflight/device/continue'
+    | '/postflight/device/done'
     | '/design/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -374,6 +395,8 @@ export interface FileRouteTypes {
     | '/postflight/auth/login'
     | '/postflight/auth/logout'
     | '/postflight/auth/session'
+    | '/postflight/device/continue'
+    | '/postflight/device/done'
     | '/design'
   id:
     | '__root__'
@@ -409,6 +432,8 @@ export interface FileRouteTypes {
     | '/postflight/auth/login'
     | '/postflight/auth/logout'
     | '/postflight/auth/session'
+    | '/postflight/device/continue'
+    | '/postflight/device/done'
     | '/_workshop/design/'
   fileRoutesById: FileRoutesById
 }
@@ -659,6 +684,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PostflightAuthSessionRouteImport
       parentRoute: typeof PostflightRoute
     }
+    '/postflight/device/continue': {
+      id: '/postflight/device/continue'
+      path: '/continue'
+      fullPath: '/postflight/device/continue'
+      preLoaderRoute: typeof PostflightDeviceContinueRouteImport
+      parentRoute: typeof PostflightDeviceRoute
+    }
+    '/postflight/device/done': {
+      id: '/postflight/device/done'
+      path: '/done'
+      fullPath: '/postflight/device/done'
+      preLoaderRoute: typeof PostflightDeviceDoneRouteImport
+      parentRoute: typeof PostflightDeviceRoute
+    }
   }
 }
 
@@ -735,8 +774,21 @@ const NewsRouteRouteWithChildren = NewsRouteRoute._addFileChildren(
   NewsRouteRouteChildren,
 )
 
+interface PostflightDeviceRouteChildren {
+  PostflightDeviceContinueRoute: typeof PostflightDeviceContinueRoute
+  PostflightDeviceDoneRoute: typeof PostflightDeviceDoneRoute
+}
+
+const PostflightDeviceRouteChildren: PostflightDeviceRouteChildren = {
+  PostflightDeviceContinueRoute: PostflightDeviceContinueRoute,
+  PostflightDeviceDoneRoute: PostflightDeviceDoneRoute,
+}
+
+const PostflightDeviceRouteWithChildren =
+  PostflightDeviceRoute._addFileChildren(PostflightDeviceRouteChildren)
+
 interface PostflightRouteChildren {
-  PostflightDeviceRoute: typeof PostflightDeviceRoute
+  PostflightDeviceRoute: typeof PostflightDeviceRouteWithChildren
   PostflightAuthCallbackRoute: typeof PostflightAuthCallbackRoute
   PostflightAuthLoginRoute: typeof PostflightAuthLoginRoute
   PostflightAuthLogoutRoute: typeof PostflightAuthLogoutRoute
@@ -744,7 +796,7 @@ interface PostflightRouteChildren {
 }
 
 const PostflightRouteChildren: PostflightRouteChildren = {
-  PostflightDeviceRoute: PostflightDeviceRoute,
+  PostflightDeviceRoute: PostflightDeviceRouteWithChildren,
   PostflightAuthCallbackRoute: PostflightAuthCallbackRoute,
   PostflightAuthLoginRoute: PostflightAuthLoginRoute,
   PostflightAuthLogoutRoute: PostflightAuthLogoutRoute,

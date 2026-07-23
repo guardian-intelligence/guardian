@@ -457,19 +457,31 @@ export async function endPostflightSession(request: Request): Promise<Response> 
 
 const USER_CODE_PATTERN = /^[A-Z0-9-]{4,32}$/i;
 
-/**
- * /postflight/device — the URL every shipped CLI prints for device-flow
- * approval. Forwards to the issuer's verification page (code prefilled when
- * well-formed); when the BFF-rendered approval page replaces this, released
- * binaries keep working unchanged.
- */
-export function deviceApprovalRedirect(request: Request): Response {
-  const cfg = configuration();
-  const target = new URL(`${cfg.issuer}/device`);
-  const userCode = new URL(request.url).searchParams.get("user_code");
-  if (userCode && USER_CODE_PATTERN.test(userCode)) {
-    target.searchParams.set("user_code", userCode);
+export function validUserCode(value: string | null | undefined): string | null {
+  if (value && USER_CODE_PATTERN.test(value)) {
+    return value.toUpperCase();
   }
+  return null;
+}
+
+/**
+ * /postflight/device/continue — the post-approval hop. The approval page
+ * sends the user through the regular hinted sign-in first (return_to lands
+ * here), so an SSO session already exists and the issuer's device
+ * verification never renders a login page: with the code in the URL it
+ * approves directly and hands off to the bounce theme's success redirect.
+ */
+export function deviceContinueRedirect(request: Request): Response {
+  const cfg = configuration();
+  const userCode = validUserCode(new URL(request.url).searchParams.get("user_code"));
+  if (!userCode) {
+    return new Response(null, {
+      status: 303,
+      headers: { ...securityHeaders(), location: `${cfg.publicURL}/postflight/device` },
+    });
+  }
+  const target = new URL(`${cfg.issuer}/device`);
+  target.searchParams.set("user_code", userCode);
   return new Response(null, {
     status: 303,
     headers: { ...securityHeaders(), location: target.toString() },

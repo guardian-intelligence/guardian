@@ -382,21 +382,13 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		t.Fatalf("realm workflows = %d files: each new workflow needs its own conformance ruling", len(workflowJSON))
 	}
 
-	// Denying the GitHub authorize prompt returns access_denied to the broker
-	// endpoint; Keycloak forwards the error into the browser flow, which
-	// skips the kc_idp_hint redirector and renders Keycloak's own login page
-	// as a dead end. The canary only ever grants, so the gap is tracked here:
-	// it must stay documented until a realm login theme (or equivalent)
-	// closes it, and shipping that theme must retire both the documented
-	// exception and this probe.
-	signInDoc, err := os.ReadFile(runfilePath("docs/sign-in-with-guardian.md"))
-	if err != nil {
-		t.Fatalf("read sign-in doc: %v", err)
-	}
-	assertTextContains(t, string(signInDoc), "error=access_denied",
-		"the GitHub deny dead end is an accepted phase-1 gap and must stay documented until it is closed")
-	if strings.Contains(realmJSON, "loginTheme") {
-		t.Fatal("the realm now ships a login theme: close the GitHub-deny dead end and remove the documented phase-1 exception")
+	// The guardian-bounce theme is what closes the GitHub-deny dead end:
+	// Keycloak's login page bounces back to the product surface instead of
+	// rendering as a dead end, and the device-flow terminal pages bounce to
+	// the product's approval surfaces. The realm must keep pinning it —
+	// removing the theme silently reopens visible Keycloak UI.
+	if !strings.Contains(realmJSON, `"loginTheme": "guardian-bounce"`) {
+		t.Fatal(`the realm must pin "loginTheme": "guardian-bounce": without it Keycloak renders its own pages (GitHub-deny dead end included)`)
 	}
 
 	stateFiles := map[string]string{
