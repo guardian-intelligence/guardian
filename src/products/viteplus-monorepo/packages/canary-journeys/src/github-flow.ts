@@ -48,7 +48,10 @@ async function clickIfPresent(page: Page, selector: string): Promise<void> {
 let lastTotpWindow = -1;
 
 async function nextTotpCode(page: Page, seed: string): Promise<string> {
-  if (process.env.TEST_WORKER_INDEX !== undefined && process.env.TEST_WORKER_INDEX !== "0") {
+  // TEST_PARALLEL_INDEX is the concurrency slot; TEST_WORKER_INDEX would
+  // misfire here because it increments every time Playwright replaces a
+  // worker after an unrelated failure.
+  if (process.env.TEST_PARALLEL_INDEX !== undefined && process.env.TEST_PARALLEL_INDEX !== "0") {
     throw new Error(
       "GitHub-account journeys serialize on one TOTP account and must run in a single worker; " +
         "parallel workers require per-account leases from the canary orchestrator",
@@ -72,7 +75,15 @@ export async function finishGitHubAuthorization(page: Page, cfg: JourneyConfig):
   let totpSent = false;
   let grantSent = false;
   while (Date.now() < deadline) {
-    const state = await page.evaluate(oauthPageProbe, PROBE_SELECTORS);
+    let state;
+    try {
+      state = await page.evaluate(oauthPageProbe, PROBE_SELECTORS);
+    } catch {
+      // A redirect (the device flow ends in a meta-refresh bounce)
+      // destroyed the execution context mid-probe; poll again.
+      await page.waitForTimeout(250);
+      continue;
+    }
     const action = classifyOAuthPage(state, cfg.guardianHost);
     switch (action) {
       case "complete":
@@ -120,14 +131,22 @@ export async function awaitPostflightLanding(
 ): Promise<void> {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    const state = await page.evaluate(
-      (args: { marker: string; keycloakPage: string }) => ({
-        path: location.pathname,
-        ready: Boolean(document.querySelector(args.marker)),
-        keycloakPage: Boolean(document.querySelector(args.keycloakPage)),
-      }),
-      { marker, keycloakPage: PROBE_SELECTORS.keycloakPage },
-    );
+    let state;
+    try {
+      state = await page.evaluate(
+        (args: { marker: string; keycloakPage: string }) => ({
+          path: location.pathname,
+          ready: Boolean(document.querySelector(args.marker)),
+          keycloakPage: Boolean(document.querySelector(args.keycloakPage)),
+        }),
+        { marker, keycloakPage: PROBE_SELECTORS.keycloakPage },
+      );
+    } catch {
+      // A meta-refresh or redirect destroyed the execution context
+      // mid-probe; the next poll sees the settled document.
+      await page.waitForTimeout(250);
+      continue;
+    }
     if (state.keycloakPage) {
       throw new Error(`${stepName}: Keycloak rendered a page`);
     }
