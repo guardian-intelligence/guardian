@@ -53,9 +53,13 @@ describe("platform icons", () => {
     const manifest = JSON.parse(
       readPublicFile("manifest.webmanifest").toString("utf8"),
     ) as WebManifest;
+    const maskableIcon = readPublicFile("icon-maskable.svg").toString("utf8");
 
     expect(manifest.background_color).toBe("#0a0a0e");
     expect(manifest.theme_color).toBe("#0a0a0e");
+    expect(maskableIcon).toContain('<rect x="105" y="106" width="140" height="140"');
+    expect(maskableIcon).toContain("scale(.8)");
+    expect(maskableIcon).not.toMatch(/\brx=/);
     expect(manifest.icons).toEqual([
       {
         src: "/icon-192.png",
