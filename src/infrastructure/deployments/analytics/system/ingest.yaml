@@ -43,7 +43,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: ingest
-          image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:32609f29de19880529e83322700caed66c20505ce6a37f3be49ad555a6e2e36f
+          image: ghcr.io/guardian-intelligence/analytics-ingest@sha256:27e9ae5b7e94327cd07f90f018dfe3e21fd992838a97fb79ffc30c3d27668df2
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
