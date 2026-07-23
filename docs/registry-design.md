@@ -119,8 +119,7 @@ sync during referrer discovery: zot otherwise enumerates and redundantly
 copies the CI `.sig` manifest before returning its local OCI referrers.
 The explicit Fulcio verification still resolves that exact CI signature tag
 on demand when a digest needs countersigning.
-The loop's one internet path is the Rekor upload (world:443 — FQDN
-allowlisting needs the L7 DNS proxy the chained datapath rules out);
+The loop's one internet path is the Rekor upload (world:443);
 everything else it talks to is in-cluster (OpenBao, zot, apiserver,
 vminsert), and a failed upload fails the sign loudly rather than minting
 an unlogged signature. In dark operation signing therefore pauses while

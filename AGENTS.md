@@ -17,6 +17,7 @@ Reference https://github.com/guardian-intelligence/verself/tree/main/docs for in
 * Roll Forward, not Backward: avoid data corruption/security issues by root-causing issues and rolling the cluster forward to a known good state.
 * Feature Flag client code, not services: it's impossible to reason about how a service will behave with a runtime configuration change. Prefer rolling restarts with a different OCI and direct traffic safely.
 * Traces, Logs, and Metrics describe how the system works, not code. Commit/OCI hashes are useful for orienting yourself in time and space.
+* Secure the Supply Chain - Pin dependencies, regularly accept security patches. Repo uses Renovate + GitHub App integration, Kargo proposes rendered stage images. Trust tiers, doorbell semantics, the Actions-allowlist lockstep, and per-PR due diligence are in docs/dependency-management.md; policy is renovate.json5.
 </operations_guidelines>
 
 <development_loop>
@@ -50,13 +51,14 @@ Step by step:
 5. Report task completion to the user with relevant metrics/logs/traces e.g. "LCP down for route /letters/<slug> from 3.4s to 3.2s based on last 30m of traffic to prod".
 
 Common post-merge issues:
-- Flux: `BuildFailed`, `denied by ValidatingAdmissionPolicy ...` (image-provenance denials name the offending image and the fix: pin the digest, extend base/admission/registry-prefixes.txt, or declare the operator-spawned ref in images.declared.lock — each in its own reviewed PR), `HealthCheckFailed`, `dependency '...' is not ready`
-- Kargo (image changes only): promotions are done by Kargo GitHub app bot commits.
-- Flagger: A failed canary rolls back automatically and pages.
+- `KustomizationNotApplied`
+- Flux: `BuildFailed`, `denied by ValidatingAdmissionPolicy ...`, `HealthCheckFailed`, `dependency '...' is not ready`
+- Kargo: manages promotions of pushed code to edge (every change), nightly, RC, and release builds. Check the Kargo configuration for the distributable that failed promotion.
+- Flagger: A failed canary rolls back automatically and pages (Alerta) sometime later.
 - Alerta: typically high signal, if there's unnecessary/unrelated noise, continue to monitor but assume it's your duty to fix noise unless you can make a strong case to flag to the user to fix separately. If it's a small fixup, even if unrelated, just tack on the fix instead of bothering the user. Default `cluster-watch` tails Alerta but alerts take ~15 minutes of sustained failure.
 
 House rules:
-- Do not use CLI commands as a second control plane. Rely on Flux to converge the cluster after merge.
+- Do not use administration CLIs as a second control plane, use them for reads. Rely on Flux to converge the cluster after merge.
 - If relevant to your task, clean up any hanging resources post-merge. Write access is audit logged and pages a human. Write access requires `aspect infra auth --platform-admin --reason "<why>"`.
 </development_loop>
 
@@ -64,12 +66,8 @@ House rules:
 - Logs: `kubectl port-forward -n tenant-root svc/vlselect-generic 9471:9471`, then LogsQL via `curl 127.0.0.1:9471/select/logsql/query --data-urlencode 'query=...'`.
 - Metrics: `kubectl port-forward -n tenant-root svc/vmselect-shortterm 8481:8481`, then PromQL via `curl 127.0.0.1:8481/select/0/prometheus/api/v1/query --data-urlencode 'query=...'`.
 - Traces, spans, and analytics events: `kubectl port-forward -n tenant-root svc/chendpoint-clickhouse-analytics 9000:9000`, get the `ingest` password from `kubectl get secret -n guardian-analytics analytics-ch-ingest -o jsonpath='{.data.ingest}' | base64 -d`, then `clickhouse-client --host 127.0.0.1 --user ingest` and `SHOW CREATE TABLE guardian_analytics.events` / `guardian_analytics.otel_traces` for the schema actually being served.
-- Schema source: `src/infrastructure/analytics/events-table.sql` (canonical events DDL) and `src/infrastructure/deployments/analytics/system/{ddl-configmap.yaml,traces-configmap.yaml}` (what's actually rendered and applied in-cluster).
+- Schema source: `src/infrastructure/deployments/analytics/system/{ddl-configmap.yaml,traces-configmap.yaml}`.
 </observability>
-
-<dependency_management>
-One proposer per pin: Renovate proposes source-plane pins, Kargo proposes rendered stage images — never hand-roll either's PRs. Trust tiers, doorbell semantics, the Actions-allowlist lockstep, and per-PR due diligence are in docs/dependency-management.md; policy is renovate.json5.
-</dependency_management>
 
 <coding_guidelines>
 * Improvements and refactors should leave no trace that the old approach ever existed unless someone spelunks through git history. This means that comments should not reference the previous approach nor should any compatibility shims be provided. E.g. if migrating from Cozystack v1.4.0 -> v1.5.0 avoid comments like "this is required for 1.5.0 whereas 1.4.0 did XYZ".
