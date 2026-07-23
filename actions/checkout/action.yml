@@ -18,7 +18,7 @@ inputs:
     required: false
     default: "false"
   fetch-depth:
-    description: Accepted for actions/checkout familiarity. Postflight currently materializes one commit.
+    description: Number of commits to fetch. Supports 1 for a shallow checkout and 0 for full history.
     required: false
     default: "1"
   persist-credentials:

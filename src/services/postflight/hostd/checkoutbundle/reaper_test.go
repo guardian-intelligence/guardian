@@ -10,7 +10,7 @@ import (
 
 func writeBundleFixture(t *testing.T, service *Service, repoKey, sha string, size int, age time.Duration) string {
 	t.Helper()
-	path := service.bundlePath(repoKey, sha, "")
+	path := service.bundlePath(repoKey, sha, "", 1)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}

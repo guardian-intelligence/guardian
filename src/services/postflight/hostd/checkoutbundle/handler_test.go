@@ -136,7 +136,7 @@ type bundleResponse struct {
 	body    []byte
 }
 
-func requestBundle(t *testing.T, service *Service, mutate func(*http.Request), body map[string]string) bundleResponse {
+func requestBundle(t *testing.T, service *Service, mutate func(*http.Request), body any) bundleResponse {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -272,6 +272,50 @@ func TestBundleThinPackUsesWorkspaceHead(t *testing.T) {
 	if head := testGit(t, checkout, "rev-parse", "HEAD"); head != target {
 		t.Fatalf("materialized HEAD %s, want %s", head, target)
 	}
+}
+
+func TestBundleFullHistoryIncludesAncestorsAndUsesSeparateCache(t *testing.T) {
+	requireGit(t)
+	upstreamRoot, base, target := makeDeltaUpstream(t)
+	service := newTestService(t, upstreamRoot, nil)
+
+	shallowResponse := requestBundle(t, service, nil, validBody(target))
+	if shallowResponse.status != http.StatusOK {
+		t.Fatalf("shallow status %d, body %s", shallowResponse.status, shallowResponse.body)
+	}
+
+	fullBody := map[string]any{}
+	for key, value := range validBody(target) {
+		fullBody[key] = value
+	}
+	fullBody["fetch_depth"] = 0
+	fullResponse := requestBundle(t, service, nil, fullBody)
+	if fullResponse.status != http.StatusOK {
+		t.Fatalf("full-history status %d, body %s", fullResponse.status, fullResponse.body)
+	}
+	if got := fullResponse.headers.Get(cacheHitHeader); got != "false" {
+		t.Fatalf("full-history cache hit = %q, want false", got)
+	}
+
+	checkout := t.TempDir()
+	testGit(t, checkout, "init", ".")
+	packPath := filepath.Join(t.TempDir(), "full-history.pack")
+	if err := os.WriteFile(packPath, fullResponse.body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	packFile, err := os.Open(packPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexPack := exec.Command("git", "index-pack", "--fix-thin", "--stdin")
+	indexPack.Dir = checkout
+	indexPack.Stdin = packFile
+	output, indexErr := indexPack.CombinedOutput()
+	_ = packFile.Close()
+	if indexErr != nil {
+		t.Fatalf("index-pack rejected full-history bytes: %v: %s", indexErr, output)
+	}
+	testGit(t, checkout, "cat-file", "-e", base+"^{commit}")
 }
 
 func TestBundleUnknownThinBaseFallsBackToFullPack(t *testing.T) {

@@ -85,6 +85,7 @@ const acquirePack = (fetchImplementation: typeof fetch, request: CheckoutBundleR
             ? { github_token: Redacted.value(request.githubToken.value) }
             : {}),
           ...(Option.isSome(request.have) ? { have: request.have.value } : {}),
+          fetch_depth: request.spec.fetchDepth,
           ref: checkoutRefValue(request.spec.ref),
           repository: request.spec.repository,
           sha: request.spec.expectedCommit,

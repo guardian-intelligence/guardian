@@ -21,7 +21,8 @@ func TestValidateRequest(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if spec.Repository != "acme/widget" || spec.Ref != "refs/heads/main" || spec.Have != valid.Have {
+		if spec.Repository != "acme/widget" || spec.Ref != "refs/heads/main" ||
+			spec.Have != valid.Have || spec.FetchDepth != 1 {
 			t.Fatalf("unexpected spec: %+v", spec)
 		}
 	})
@@ -79,6 +80,29 @@ func TestValidateRequest(t *testing.T) {
 		"missing token":            {Repository: valid.Repository, Ref: valid.Ref, SHA: valid.SHA},
 		"token with newline":       {Repository: valid.Repository, Ref: valid.Ref, SHA: valid.SHA, GitHubToken: "bad\ntoken"},
 	}
+
+	t.Run("unsupported fetch depth", func(t *testing.T) {
+		req := valid
+		depth := 2
+		req.FetchDepth = &depth
+		_, err := validateRequest(req, identity)
+		if !errors.Is(err, errInvalid) {
+			t.Fatalf("expected errInvalid, got %v", err)
+		}
+	})
+
+	t.Run("full history", func(t *testing.T) {
+		req := valid
+		depth := 0
+		req.FetchDepth = &depth
+		spec, err := validateRequest(req, identity)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if spec.FetchDepth != 0 {
+			t.Fatalf("fetch depth = %d, want 0", spec.FetchDepth)
+		}
+	})
 	for name, req := range invalidCases {
 		t.Run(name, func(t *testing.T) {
 			_, err := validateRequest(req, identity)

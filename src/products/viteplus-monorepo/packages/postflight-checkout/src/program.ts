@@ -41,7 +41,7 @@ import {
   type MutationImpact,
 } from "./state.ts";
 
-export const MAXIMUM_PACK_BYTES = 512 * 1024 * 1024;
+export const MAXIMUM_PACK_BYTES = 2 * 1024 * 1024 * 1024;
 
 const errorValue = (value: string): string => value.slice(0, 1024);
 
@@ -115,7 +115,7 @@ export const validate = Effect.fn("postflight.checkout.validate")(function* (rec
     false,
   );
   const fetchDepth = received.inputs.fetchDepth.trim() || "1";
-  if (fetchDepth !== "1") {
+  if (fetchDepth !== "0" && fetchDepth !== "1") {
     return yield* Effect.fail(new UnsupportedFetchDepth({ value: errorValue(fetchDepth) }));
   }
   const executionId = yield* decodeInput(
@@ -159,7 +159,7 @@ export const validate = Effect.fn("postflight.checkout.validate")(function* (rec
     spec: new CheckoutSpec({
       clean: clean ? "ResetTrackedFiles" : "PreserveBuildState",
       expectedCommit,
-      fetchDepth: 1,
+      fetchDepth: fetchDepth === "0" ? 0 : 1,
       ref,
       repository,
       requestedPath,
@@ -177,8 +177,12 @@ export const prepareTarget = Effect.fn("postflight.checkout.prepareTarget")(func
     validated.spec.requestedPath,
   );
   const preexistingHead = yield* git.inspectHead(prepared.target);
+  const preexistingShallow = Option.isSome(preexistingHead)
+    ? yield* git.isShallow(prepared.target)
+    : false;
   return new TargetPrepared({
     preexistingHead,
+    preexistingShallow,
     runtime: validated.runtime,
     spec: validated.spec,
     target: prepared.target,
@@ -192,6 +196,8 @@ export const acquirePack = Effect.fn("postflight.checkout.acquirePack")(function
   tempPack: TempPack,
 ) {
   const host = yield* CheckoutHost;
+  const requestTimeout = prepared.spec.fetchDepth === 0 ? "5 minutes" : "20 seconds";
+  const retryDeadline = prepared.spec.fetchDepth === 0 ? "15 minutes" : "45 seconds";
   const request = {
     attemptId: prepared.runtime.attemptId,
     checkoutToken: prepared.runtime.checkoutToken,
@@ -199,13 +205,16 @@ export const acquirePack = Effect.fn("postflight.checkout.acquirePack")(function
     endpoint: prepared.runtime.endpoint,
     executionId: prepared.runtime.executionId,
     githubToken: prepared.runtime.githubToken,
-    have: prepared.preexistingHead,
+    have:
+      prepared.spec.fetchDepth === 0 && prepared.preexistingShallow
+        ? Option.none()
+        : prepared.preexistingHead,
     maximumBytes: MAXIMUM_PACK_BYTES,
     spec: prepared.spec,
   } as const;
   const metadata = yield* host.acquirePack(request).pipe(
     Effect.timeoutFail({
-      duration: "20 seconds",
+      duration: requestTimeout,
       onTimeout: () => new HostUnavailable({ detail: "request timed out", status: null }),
     }),
     Effect.retry({
@@ -214,7 +223,7 @@ export const acquirePack = Effect.fn("postflight.checkout.acquirePack")(function
       while: (error) => error._tag === "HostUnavailable",
     }),
     Effect.timeoutFail({
-      duration: "45 seconds",
+      duration: retryDeadline,
       onTimeout: () =>
         new HostUnavailable({
           detail: "retry deadline expired",
@@ -238,7 +247,11 @@ export const materialize = Effect.fn("postflight.checkout.materialize")(function
   yield* git.initialize(ready.target);
   yield* git.configureOrigin(ready.target, ready.spec.repository);
   yield* git.importPack(ready.target, ready.tempPack.path);
-  yield* git.markShallow(ready.target, ready.spec.expectedCommit);
+  if (ready.spec.fetchDepth === 0) {
+    yield* git.clearShallow(ready.target);
+  } else {
+    yield* git.markShallow(ready.target, ready.spec.expectedCommit);
+  }
   yield* git.updateCheckoutRef(ready.target, ready.spec.expectedCommit);
   if (ready.spec.clean === "ResetTrackedFiles" && Option.isSome(ready.preexistingHead)) {
     yield* git.resetTrackedFiles(ready.target);

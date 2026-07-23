@@ -21,9 +21,9 @@ import { Workspace } from "../src/services/workspace.ts";
 import { Received } from "../src/state.ts";
 import { makeGitFixture, readText } from "./control-plane-fixtures.ts";
 
-const actionInputs = (clean: boolean): RawActionInputs => ({
+const actionInputs = (clean: boolean, fetchDepth = 1): RawActionInputs => ({
   clean: String(clean),
-  fetchDepth: "1",
+  fetchDepth: String(fetchDepth),
   githubToken: Option.some(Redacted.make("github-token")),
   path: "checkout",
   persistCredentials: "false",
@@ -119,6 +119,76 @@ it("materializes exact commits while preserving durable build state", async () =
     expect(await readText(join(target, "build.cache"))).toBe("durable artifact\n");
     expect(await readdir(fixture.tempPacks)).toEqual([]);
     expect(harness.outputs).toHaveLength(2);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+it("deepens a durable shallow checkout when full history is requested", async () => {
+  const fixture = await makeGitFixture();
+  try {
+    const first = await fixture.commit("first\n");
+    const second = await fixture.commit("second\n");
+    const third = await fixture.commit("third\n");
+    const packs = new Map<CommitSha, Uint8Array>([
+      [first.sha, first.pack],
+      [second.sha, second.pack],
+      [third.sha, third.pack],
+    ]);
+    const observedHaves: Array<Option.Option<CommitSha>> = [];
+    const harness = actionHarness();
+    const host = Layer.succeed(CheckoutHost, {
+      acquirePack: (request) =>
+        Effect.tryPromise({
+          try: async () => {
+            observedHaves.push(request.have);
+            const pack = packs.get(request.spec.expectedCommit);
+            if (!pack) throw new Error("fixture pack missing");
+            await writeFile(request.destination, pack, { mode: 0o600 });
+            return new PackMetadata({
+              bytes: Schema.decodeUnknownSync(PackBytes)(pack.byteLength),
+              cacheHit: false,
+              sha: request.spec.expectedCommit,
+            });
+          },
+          catch: () => new HostUnavailable({ detail: "fixture pack missing", status: null }),
+        }),
+    });
+    const services = Layer.mergeAll(
+      harness.layer,
+      host,
+      makeGitLive({ environment: { HOME: fixture.home } }),
+      makeWorkspaceLive({ tempDirectory: fixture.tempPacks }),
+    );
+
+    await Effect.runPromise(
+      runCheckout(
+        new Received({
+          inputs: actionInputs(false),
+          runtime: runtime(fixture.workspace, first.sha),
+        }),
+      ).pipe(Effect.provide(services)),
+    );
+    await Effect.runPromise(
+      runCheckout(
+        new Received({
+          inputs: actionInputs(false, 0),
+          runtime: runtime(fixture.workspace, second.sha),
+        }),
+      ).pipe(Effect.provide(services)),
+    );
+    await Effect.runPromise(
+      runCheckout(
+        new Received({
+          inputs: actionInputs(false, 0),
+          runtime: runtime(fixture.workspace, third.sha),
+        }),
+      ).pipe(Effect.provide(services)),
+    );
+
+    const gitEntries = await readdir(join(fixture.workspace, "checkout", ".git"));
+    expect(gitEntries).not.toContain("shallow");
+    expect(observedHaves).toEqual([Option.none(), Option.none(), Option.some(second.sha)]);
   } finally {
     await fixture.cleanup();
   }

@@ -94,6 +94,7 @@ it("retries only retryable pack acquisition failures", () =>
       });
       const prepared = new TargetPrepared({
         preexistingHead: Option.none(),
+        preexistingShallow: false,
         runtime: {
           attemptId: Schema.decodeUnknownSync(AttemptId)("attempt-1"),
           checkoutPath: "/internal/sandbox/v1/github-checkout",
@@ -153,12 +154,14 @@ it("removes the temporary pack when checkout is interrupted", () =>
       });
       const git = Layer.succeed(Git, {
         checkoutDetached: () => Effect.void,
+        clearShallow: () => Effect.void,
         configureOrigin: () => Effect.void,
         configureSafeDirectory: () => Effect.void,
         head: () => Effect.succeed(SHA),
         importPack: () => Effect.void,
         initialize: () => Effect.void,
         inspectHead: () => Effect.succeed(Option.none()),
+        isShallow: () => Effect.succeed(false),
         markShallow: () => Effect.void,
         resetTrackedFiles: () => Effect.void,
         updateCheckoutRef: () => Effect.void,
@@ -196,12 +199,14 @@ it("never publishes outputs after a pack failure", () =>
       });
       const git = Layer.succeed(Git, {
         checkoutDetached: () => Effect.void,
+        clearShallow: () => Effect.void,
         configureOrigin: () => Effect.void,
         configureSafeDirectory: () => Effect.void,
         head: () => Effect.succeed(SHA),
         importPack: () => Effect.void,
         initialize: () => Effect.void,
         inspectHead: () => Effect.succeed(Option.none()),
+        isShallow: () => Effect.succeed(false),
         markShallow: () => Effect.void,
         resetTrackedFiles: () => Effect.void,
         updateCheckoutRef: () => Effect.void,
