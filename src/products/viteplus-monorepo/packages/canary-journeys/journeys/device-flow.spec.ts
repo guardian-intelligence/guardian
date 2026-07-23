@@ -47,7 +47,11 @@ async function pollDeviceToken(
 // the broker `state` Keycloak minted for this browser context. The state is
 // carried in GitHub's authorize URL directly, or nested in the login page's
 // return_to when the context holds no GitHub session.
-async function approveUntilGitHub(page: Page, cfg: JourneyConfig, userCode: string): Promise<string> {
+async function approveUntilGitHub(
+  page: Page,
+  cfg: JourneyConfig,
+  userCode: string,
+): Promise<string> {
   await page.goto(`${cfg.pageUrl.replace(/\/$/, "")}/device?user_code=${userCode}`);
   const code = page.locator("#device-user-code");
   await expect(code).toHaveValue(userCode);
@@ -56,7 +60,9 @@ async function approveUntilGitHub(page: Page, cfg: JourneyConfig, userCode: stri
     page.locator("#postflight-device-approve").click(),
   ]);
   const url = new URL(page.url());
-  let state = url.pathname.includes("/login/oauth/authorize") ? url.searchParams.get("state") : null;
+  let state = url.pathname.includes("/login/oauth/authorize")
+    ? url.searchParams.get("state")
+    : null;
   if (!state) {
     const returnTo = url.searchParams.get("return_to");
     if (returnTo) {

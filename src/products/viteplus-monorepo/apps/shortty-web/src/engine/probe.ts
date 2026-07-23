@@ -24,7 +24,14 @@ export interface OpenedInput {
 export async function openInput(source: MediaSource): Promise<OpenedInput> {
   const input = new Input({
     formats: ALL_FORMATS,
-    source: source instanceof File ? new BlobSource(source) : new UrlSource(source.url),
+    source:
+      source instanceof File
+        ? new BlobSource(source)
+        : // video.twimg.com hotlink-blocks any third-party Referer with a
+          // 403 (even the origin-only form browsers send by default), and a
+          // worker's fetches are not covered by the document's referrer
+          // policy — it must be set per-request here.
+          new UrlSource(source.url, { requestInit: { referrerPolicy: "no-referrer" } }),
   });
   const videoTrack = await input.getPrimaryVideoTrack();
   if (videoTrack === null) {

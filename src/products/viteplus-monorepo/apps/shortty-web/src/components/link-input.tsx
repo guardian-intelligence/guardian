@@ -33,7 +33,7 @@ export function LinkInput({ onSource, onWarm, disabled }: LinkInputProps) {
         });
         setPhase({ kind: "idle" });
         setLink("");
-        onSource(source);
+        onSource(traceId === "" ? source : { ...source, traceId });
       })
       .catch((error: unknown) => {
         const code = error instanceof ResolveError ? error.code : "unknown";

@@ -9,6 +9,11 @@ export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
+      // Media elements have no referrerpolicy attribute, so the document
+      // policy is what keeps the <video> preview's requests Referer-free —
+      // video.twimg.com 403s any third-party Referer. (Worker fetches set
+      // this per-request in engine/probe.ts; this tag cannot reach them.)
+      { name: "referrer", content: "no-referrer" },
       {
         name: "viewport",
         content: "width=device-width, initial-scale=1, viewport-fit=cover",
