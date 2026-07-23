@@ -93,3 +93,16 @@ func TestValidRepoFullName(t *testing.T) {
 		}
 	}
 }
+
+func TestJobCanStillRequireRendezvous(t *testing.T) {
+	for _, status := range []string{"queued", "in_progress"} {
+		if !jobCanStillRequireRendezvous(status) {
+			t.Errorf("jobCanStillRequireRendezvous(%q) = false, want true", status)
+		}
+	}
+	for _, status := range []string{"", "completed", "waiting", "pending", "requested"} {
+		if jobCanStillRequireRendezvous(status) {
+			t.Errorf("jobCanStillRequireRendezvous(%q) = true, want false", status)
+		}
+	}
+}

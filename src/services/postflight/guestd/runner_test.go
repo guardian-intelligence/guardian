@@ -27,6 +27,28 @@ func TestRunnerCommandBypassesRetryingShellWrapper(t *testing.T) {
 	}
 }
 
+func TestParseGroupIDsDeduplicatesAndSorts(t *testing.T) {
+	got, err := parseGroupIDs([]string{"1001", "999", "1001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []uint32{999, 1001}
+	if len(got) != len(want) {
+		t.Fatalf("groups = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("groups = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestParseGroupIDsRejectsMalformedID(t *testing.T) {
+	if _, err := parseGroupIDs([]string{"docker"}); err == nil {
+		t.Fatal("parseGroupIDs accepted a non-numeric group id")
+	}
+}
+
 // syncedBuffer captures log output safely across the observer goroutine.
 type syncedBuffer struct {
 	mu  sync.Mutex
