@@ -88,6 +88,9 @@ type Config struct {
 	Guest Guest
 	// GuestNetwork selects every VM's egress datapath (see LaunchSpec).
 	GuestNetwork string
+	// TapUpScript attaches and isolates a QEMU-created tap. It is required for
+	// the tap datapath and ignored by other modes.
+	TapUpScript string
 	Logger       *slog.Logger
 	Timing       *timing.Recorder
 }
@@ -108,8 +111,12 @@ func (c *Config) validate() error {
 		return errors.New("vm: Launcher is required")
 	case c.Guest == nil:
 		return errors.New("vm: Guest is required")
-	case c.GuestNetwork != "" && c.GuestNetwork != "none" && c.GuestNetwork != guestNetworkUser:
+	case c.GuestNetwork != "" && c.GuestNetwork != "none" && c.GuestNetwork != guestNetworkUser && c.GuestNetwork != guestNetworkTap:
 		return fmt.Errorf("vm: unknown GuestNetwork %q", c.GuestNetwork)
+	case c.GuestNetwork == guestNetworkTap && c.TapUpScript == "":
+		return errors.New("vm: TapUpScript is required for tap networking")
+	case c.GuestNetwork == guestNetworkTap && (!filepath.IsAbs(c.TapUpScript) || strings.Contains(c.TapUpScript, ",")):
+		return fmt.Errorf("vm: TapUpScript %q must be an absolute QEMU-option-safe path", c.TapUpScript)
 	}
 	for class, shape := range c.Classes {
 		if shape.CPUs <= 0 || shape.MemoryMiB <= 0 || shape.Image == "" {
@@ -336,6 +343,7 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 		StateDir:     dir,
 		VsockCID:     cid,
 		GuestNetwork: q.cfg.GuestNetwork,
+		TapUpScript:  q.cfg.TapUpScript,
 	}
 	argv := spec.Argv()
 	if err := os.MkdirAll(dir, 0o750); err != nil {

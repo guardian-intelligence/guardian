@@ -19,11 +19,15 @@
 //	HOSTD_QEMU_PATH               QEMU binary (default /usr/bin/qemu-system-x86_64)
 //	HOSTD_CRIU_VERSION            exact version baked into the guest, e.g. Version: 4.2
 //	HOSTD_SYNC_INTERVAL           sync cadence when the control plane does not suggest one (default 2s)
-//	HOSTD_GUEST_NETWORK           guest egress datapath: none (default) or user. user is the
+//	HOSTD_GUEST_NETWORK           guest egress datapath: none (default), user, or tap. user is the
 //	                              tracer-only libslirp datapath: unrestricted outbound from the
 //	                              host's network position, and the guest reaches every host
 //	                              loopback service via the 10.0.2.2 gateway. The production lane
-//	                              is a filtered bridge; do not expose untrusted guests under user.
+//	                              is tap on a filtered bridge; do not expose untrusted guests under user.
+//	HOSTD_GUEST_BRIDGE            existing filtered bridge used by tap mode. Its DHCP, DNS, host
+//	                              firewall, NAT, and per-port isolation are host infrastructure.
+//	HOSTD_TAP_UP_SCRIPT           root-owned tap attachment program (default
+//	                              /usr/local/libexec/postflight-tap-up)
 //	HOSTD_CHECKOUT_LISTEN_ADDR    checkout endpoint bind (default 127.0.0.1:8480). It carries
 //	                              tenant GitHub tokens over plaintext HTTP; under GUEST_NETWORK=user
 //	                              the loopback bind is itself guest-reachable (via 10.0.2.2), which
@@ -102,6 +106,7 @@ func run(logger *slog.Logger) error {
 		Launcher:     vm.NewSystemdLauncher(),
 		Guest:        guest,
 		GuestNetwork: cfg.guestNetwork,
+		TapUpScript:  cfg.tapUpScript,
 		Logger:       logger,
 	})
 	if err != nil {
