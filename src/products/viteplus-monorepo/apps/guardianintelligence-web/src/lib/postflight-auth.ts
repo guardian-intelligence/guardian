@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -59,6 +61,21 @@ function env(name: string, fallback?: string): string {
   return value;
 }
 
+function secretValue(name: string): string | undefined {
+  // A *_FILE indirection is read on every call: the kubelet swaps mounted
+  // Secret contents atomically on rotation, and a value captured at process
+  // start would keep failing until the next deploy rolls pods.
+  const filePath = process.env[`${name}_FILE`]?.trim();
+  if (filePath) return readFileSync(filePath, "utf8").trim() || undefined;
+  return process.env[name]?.trim() || undefined;
+}
+
+function requiredSecret(name: string): string {
+  const value = secretValue(name);
+  if (!value) throw new Error(`${name} or ${name}_FILE is required`);
+  return value;
+}
+
 function configuration() {
   const publicURL = env("POSTFLIGHT_PUBLIC_URL", "https://guardianintelligence.org").replace(
     /\/$/,
@@ -73,8 +90,9 @@ function configuration() {
     issuer,
     internalIssuer: env("POSTFLIGHT_OIDC_INTERNAL_URL", issuer).replace(/\/$/, ""),
     clientID: env("POSTFLIGHT_OIDC_CLIENT_ID", "postflight-web"),
-    clientSecret: env("POSTFLIGHT_OIDC_CLIENT_SECRET"),
-    sessionSecret: env("POSTFLIGHT_SESSION_SECRET"),
+    clientSecret: requiredSecret("POSTFLIGHT_OIDC_CLIENT_SECRET"),
+    sessionSecret: requiredSecret("POSTFLIGHT_SESSION_SECRET"),
+    sessionSecretStandby: secretValue("POSTFLIGHT_SESSION_SECRET_STANDBY"),
     callbackURL: `${publicURL}/postflight/auth/callback`,
   };
 }
@@ -96,8 +114,7 @@ async function digest(value: string): Promise<Uint8Array> {
 }
 
 async function sealingKey(secret: string, purpose: string): Promise<CryptoKey> {
-  if (secret.length < 32)
-    throw new Error("POSTFLIGHT_SESSION_SECRET must be at least 32 characters");
+  if (secret.length < 32) throw new Error("the session seal must be at least 32 characters");
   const raw = await digest(`${purpose}\0${secret}`);
   return crypto.subtle.importKey("raw", raw.buffer as ArrayBuffer, { name: "AES-GCM" }, false, [
     "encrypt",
@@ -116,6 +133,21 @@ async function seal(value: unknown, purpose: string, secret: string): Promise<st
   output.set(iv);
   output.set(new Uint8Array(ciphertext), iv.length);
   return base64URL(output);
+}
+
+// Sealing always uses the active secret; the standby slot accepts values
+// minted before a rotation flipped which slot is active.
+async function unsealWithKeyring<T>(
+  value: string,
+  purpose: string,
+  cfg: { readonly sessionSecret: string; readonly sessionSecretStandby: string | undefined },
+): Promise<T> {
+  try {
+    return await unseal<T>(value, purpose, cfg.sessionSecret);
+  } catch (error) {
+    if (cfg.sessionSecretStandby === undefined) throw error;
+    return unseal<T>(value, purpose, cfg.sessionSecretStandby);
+  }
 }
 
 async function unseal<T>(value: string, purpose: string, secret: string): Promise<T> {
@@ -299,10 +331,10 @@ export async function completePostflightLogin(request: Request): Promise<Respons
 
   let transaction: AuthTransaction;
   try {
-    transaction = await unseal<AuthTransaction>(
+    transaction = await unsealWithKeyring<AuthTransaction>(
       sealedTransaction,
       transactionPurpose,
-      cfg.sessionSecret,
+      cfg,
     );
   } catch {
     return errorRedirect(cfg.publicURL, "transaction_invalid");
@@ -363,10 +395,10 @@ export async function readPostflightSession(request: Request): Promise<Postfligh
   const value = cookieValue(request, SESSION_COOKIE);
   if (!value) return null;
   try {
-    const session = await unseal<SealedPostflightSession>(
+    const session = await unsealWithKeyring<SealedPostflightSession>(
       value,
       sessionPurpose,
-      configuration().sessionSecret,
+      configuration(),
     );
     if (session.expiresAt <= Date.now() || !session.subject) return null;
     return {
@@ -424,10 +456,10 @@ export async function endPostflightSession(request: Request): Promise<Response> 
   const sealedSession = cookieValue(request, SESSION_COOKIE);
   if (sealedSession) {
     try {
-      const session = await unseal<SealedPostflightSession>(
+      const session = await unsealWithKeyring<SealedPostflightSession>(
         sealedSession,
         sessionPurpose,
-        cfg.sessionSecret,
+        cfg,
       );
       idToken = session.idToken || undefined;
     } catch {}

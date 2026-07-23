@@ -297,3 +297,117 @@ describe("validUserCode", () => {
     expect(validUserCode(undefined)).toBeNull();
   });
 });
+
+describe("session seal keyring", () => {
+  // A test-local copy of the sealed-cookie wire format: rotation only works
+  // if sessions minted before a deploy still unseal after it, so the format
+  // itself is load-bearing.
+  async function sealSession(session: unknown, secret: string): Promise<string> {
+    const purpose = "postflight:session:v1";
+    const raw = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(`${purpose}\0${secret}`),
+    );
+    const key = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt"]);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(purpose) },
+      key,
+      new TextEncoder().encode(JSON.stringify(session)),
+    );
+    const output = new Uint8Array(iv.length + ciphertext.byteLength);
+    output.set(iv);
+    output.set(new Uint8Array(ciphertext), iv.length);
+    return Buffer.from(output).toString("base64url");
+  }
+
+  const session = {
+    subject: "guardian-subject",
+    username: "canary",
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    idToken: "id-token",
+  };
+
+  beforeEach(() => {
+    process.env.POSTFLIGHT_PUBLIC_URL = publicURL;
+    process.env.POSTFLIGHT_OIDC_ISSUER = issuer;
+    process.env.POSTFLIGHT_OIDC_CLIENT_SECRET = "client-secret";
+  });
+
+  afterEach(() => {
+    for (const name of [
+      "POSTFLIGHT_PUBLIC_URL",
+      "POSTFLIGHT_OIDC_ISSUER",
+      "POSTFLIGHT_OIDC_CLIENT_SECRET",
+      "POSTFLIGHT_SESSION_SECRET",
+      "POSTFLIGHT_SESSION_SECRET_STANDBY",
+      "POSTFLIGHT_SESSION_SECRET_FILE",
+    ]) {
+      delete process.env[name];
+    }
+  });
+
+  it("accepts a session sealed with the standby secret after a rotation flip", async () => {
+    const retiring = "a".repeat(64);
+    process.env.POSTFLIGHT_SESSION_SECRET = "b".repeat(64);
+    process.env.POSTFLIGHT_SESSION_SECRET_STANDBY = retiring;
+
+    const response = await postflightSessionResponse(
+      new Request(`${publicURL}/postflight/auth/session`, {
+        headers: { cookie: `${SESSION_COOKIE}=${await sealSession(session, retiring)}` },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      authenticated: true,
+      user: { subject: "guardian-subject" },
+    });
+  });
+
+  it("rejects a session sealed with a secret no slot holds", async () => {
+    process.env.POSTFLIGHT_SESSION_SECRET = "b".repeat(64);
+    process.env.POSTFLIGHT_SESSION_SECRET_STANDBY = "c".repeat(64);
+
+    const response = await postflightSessionResponse(
+      new Request(`${publicURL}/postflight/auth/session`, {
+        headers: { cookie: `${SESSION_COOKIE}=${await sealSession(session, "a".repeat(64))}` },
+      }),
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("re-reads a *_FILE secret on every use", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "seal-"));
+    const sealPath = join(dir, "session-seal");
+    writeFileSync(sealPath, `${"a".repeat(64)}\n`);
+    process.env.POSTFLIGHT_SESSION_SECRET_FILE = sealPath;
+
+    const sealedWithFirst = await sealSession(session, "a".repeat(64));
+    const before = await postflightSessionResponse(
+      new Request(`${publicURL}/postflight/auth/session`, {
+        headers: { cookie: `${SESSION_COOKIE}=${sealedWithFirst}` },
+      }),
+    );
+    expect(before.status).toBe(200);
+
+    writeFileSync(sealPath, `${"b".repeat(64)}\n`);
+    const after = await postflightSessionResponse(
+      new Request(`${publicURL}/postflight/auth/session`, {
+        headers: { cookie: `${SESSION_COOKIE}=${sealedWithFirst}` },
+      }),
+    );
+    expect(after.status).toBe(401);
+
+    const reSealed = await postflightSessionResponse(
+      new Request(`${publicURL}/postflight/auth/session`, {
+        headers: { cookie: `${SESSION_COOKIE}=${await sealSession(session, "b".repeat(64))}` },
+      }),
+    );
+    expect(reSealed.status).toBe(200);
+  });
+});
