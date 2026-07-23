@@ -56,6 +56,7 @@ filegroup(
         "//src/products/viteplus-monorepo/packages/brand:package_manifest",
         "//src/products/viteplus-monorepo/packages/canary-journeys:package_manifest",
         "//src/products/viteplus-monorepo/packages/postflight-checkout:package_manifest",
+        "//src/products/viteplus-monorepo/packages/visual-harness:package_manifest",
     ] + glob(
         [
             ".changeset/*.md",
@@ -82,6 +83,7 @@ filegroup(
         "//src/products/viteplus-monorepo/packages/brand:sources",
         "//src/products/viteplus-monorepo/packages/canary-journeys:sources",
         "//src/products/viteplus-monorepo/packages/postflight-checkout:sources",
+        "//src/products/viteplus-monorepo/packages/visual-harness:sources",
     ] + glob(
         [
             ".changeset/*.md",
@@ -147,6 +149,7 @@ genrule(
         "//src/products/viteplus-monorepo/packages/brand:node_modules",
         "//src/products/viteplus-monorepo/packages/canary-journeys:node_modules",
         "//src/products/viteplus-monorepo/packages/postflight-checkout:node_modules",
+        "//src/products/viteplus-monorepo/packages/visual-harness:node_modules",
     ],
     outs = ["workspace_lint.stamp"],
     cmd = """
@@ -192,6 +195,7 @@ link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/apps/shor
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/brand/node_modules" "$$work/packages/brand/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/canary-journeys/node_modules" "$$work/packages/canary-journeys/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/postflight-checkout/node_modules" "$$work/packages/postflight-checkout/node_modules"
+link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/visual-harness/node_modules" "$$work/packages/visual-harness/node_modules"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
 export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
 export NODE_PATH="$$execroot/$(BINDIR)/src/products/viteplus-monorepo/node_modules$${NODE_PATH:+:$$NODE_PATH}"
