@@ -31,7 +31,7 @@ releases:
       image: ghcr.io/guardian-intelligence/canary-journeys@sha256:4ba2c77a51557e63ff3b7ad2a72c57b102c2d4a0f70eadacb5edc20a2e7a44c1
   shortty-web:
     prod:
-      image: ghcr.io/guardian-intelligence/shortty-web@sha256:57cd42d2f757490eae10703308a3f2f19c02215fe18723fbb58903b25f4bfa9f
+      image: ghcr.io/guardian-intelligence/shortty-web@sha256:78214f884a58887155cf1073b2959d960d76d4be38d7afd4d7cba84fd69a806f
   postflight-controlplane:
     prod:
       image: ghcr.io/guardian-intelligence/postflight-controlplane@sha256:559002b10c38c09efd5142100d0e259a7847b70626c4d2ec9e2b8ee0f76ca382
