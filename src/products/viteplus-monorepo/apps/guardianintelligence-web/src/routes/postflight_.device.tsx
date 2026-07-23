@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import * as v from "valibot";
 import { validUserCode } from "~/lib/postflight-auth";
+import { emitSpan } from "~/lib/telemetry/browser";
 import "~/styles/postflight.css";
 
 // A hand-edited or truncated link degrades to the empty form instead of an
@@ -75,6 +76,10 @@ function DeviceApprovalPage() {
           aria-disabled={!approveHref}
           className={`postflight-guardian-button${approveHref ? "" : " postflight-guardian-button--disabled"}`}
           href={approveHref}
+          onClick={() => {
+            // Funnel marker only — the one-time code never leaves the page.
+            if (approveHref) emitSpan("postflight.device_approve", {});
+          }}
         >
           Approve with GitHub
         </a>

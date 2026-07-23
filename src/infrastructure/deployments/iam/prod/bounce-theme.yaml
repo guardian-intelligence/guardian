@@ -1,9 +1,9 @@
-# guardian-bounce: the realm login theme that keeps Keycloak invisible. Only
-# two templates are overridden — the device-flow terminal page (info.ftl)
-# bounces straight back to the product surface, and the device code form
-# renders Guardian-branded for the expired/mistyped-code path. Every other
-# template falls through parent=keycloak and renders byte-identically to
-# stock, so nothing else (web login, canary journeys) changes.
+# guardian-bounce: the realm login theme that keeps Keycloak invisible. The
+# overridden templates either bounce straight back to the product surface
+# (login.ftl, info.ftl, error.ftl) or render Guardian-branded (the device
+# code form). Every other template falls through parent=keycloak and renders
+# byte-identically to stock, so nothing else (web login, canary journeys)
+# changes.
 #
 # Keycloak caches compiled templates: edits here must also bump the
 # guardian.dev/bounce-theme-checksum annotation in keycloak.yaml so the
@@ -24,16 +24,46 @@ data:
     parent=keycloak
   login.ftl: |
     <#-- Reached only when a flow loses its way back to the product: a GitHub
-         authorize denial forwarded into the browser flow, or a Keycloak URL
-         visited without the kc_idp_hint redirector. The realm has no
-         password or registration path, so there is nothing to render here —
-         return to the product surface, which can start a fresh hinted
-         sign-in. -->
+         authorize denial forwarded into the browser flow, an auth session
+         that went missing mid-flow (finished in a different browser context,
+         or timed out), or a Keycloak URL visited without the kc_idp_hint
+         redirector. The realm has no password or registration path, so there
+         is nothing to render here — return to the product surface, which can
+         start a fresh hinted sign-in. The loginTimeout comparison renders
+         through the request's own bundle, so the discriminator is
+         locale-proof: an interrupted flow must not read as a denial. -->
+    <#if message?? && message.summary == msg("loginTimeout")>
+    <#assign bounce = "https://guardianintelligence.org/postflight?auth_error=interrupted">
+    <#else>
+    <#assign bounce = "https://guardianintelligence.org/postflight?auth_error=access_denied">
+    </#if>
     <!DOCTYPE html>
     <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">
-    <meta http-equiv="refresh" content="0;url=https://guardianintelligence.org/postflight?auth_error=access_denied">
+    <meta http-equiv="refresh" content="0;url=${bounce}">
     <title>Guardian</title></head>
-    <body><a href="https://guardianintelligence.org/postflight?auth_error=access_denied">Continue</a></body></html>
+    <body><a href="${bounce}">Continue</a></body></html>
+  error.ftl: |
+    <#-- Malformed or replayed callbacks (bad state, missing cookies) land
+         here; stock Keycloak renders "We are sorry..." with its own chrome.
+         Render the message Guardian-branded with a way back to the product.
+         No auto-bounce: unlike login.ftl there is no restarted session to
+         resume, and the message is the only clue the visitor gets. -->
+    <!DOCTYPE html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">
+    <title>Guardian</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: flex; align-items: center;
+        justify-content: center; font-family: system-ui, sans-serif;
+        background: radial-gradient(120% 90% at 15% 0%, #2d1a6b 0%, #1b0f45 55%, #120a30 100%); }
+      .card { width: min(92vw, 390px); padding: 34px; border-radius: 14px;
+        background: #fcfcfd; color: #17141d; box-shadow: 0 35px 90px rgb(28 7 89 / 0.42); }
+      .card p { color: #5e5871; line-height: 1.5; }
+    </style></head>
+    <body><div class="card">
+      <h2>That didn't work</h2>
+      <#if message??><p>${kcSanitize(message.summary)?no_esc}</p></#if>
+      <p><a href="https://guardianintelligence.org/postflight">Back to Postflight</a></p>
+    </div></body></html>
   info.ftl: |
     <#-- Device-flow terminal pages bounce to the product surface; the
          messageHeader comparison renders through the same bundle the

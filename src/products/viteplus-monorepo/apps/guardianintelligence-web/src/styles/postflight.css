@@ -658,11 +658,13 @@
   color: #5e5871;
 }
 
-.postflight-device-error {
+.postflight-device-error,
+.postflight-auth-error {
   padding: 10px 12px;
   border: 1px solid rgb(178 34 52 / 0.35);
   border-radius: 10px;
   background: rgb(178 34 52 / 0.08);
   color: #8f1d2c;
   font-size: 14px;
+  text-align: left;
 }
