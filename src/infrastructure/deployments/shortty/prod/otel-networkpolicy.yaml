@@ -18,9 +18,17 @@ spec:
       k8s:app.kubernetes.io/name: otel-collector
   ingress:
     - fromEndpoints:
+        # Both names, like the egress side in networkpolicy.yaml: Flagger's
+        # primary clone renames the workload label, and its spans must not
+        # start silently dropping the day shortty grows a Canary.
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: tenant-guardian-prod
-            k8s:app.kubernetes.io/name: shortty-web
+          matchExpressions:
+            - key: k8s:app.kubernetes.io/name
+              operator: In
+              values:
+                - shortty-web
+                - shortty-web-primary
       toPorts:
         - ports:
             - port: "4318"

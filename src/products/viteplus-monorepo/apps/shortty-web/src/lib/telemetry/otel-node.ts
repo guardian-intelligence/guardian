@@ -38,8 +38,15 @@ async function start(): Promise<void> {
 }
 
 // Handlers await this before their first span so no request races the
-// provider registration into the no-op tracer.
-export const ready: Promise<void> = import.meta.env.SSR ? start() : Promise.resolve();
+// provider registration into the no-op tracer. Rejections are swallowed
+// here, not left to Node's unhandled-rejection default: a malformed
+// endpoint env (the OTLPTraceExporter constructor throws on one) must
+// degrade to the no-op tracer, never crash-loop the pod.
+export const ready: Promise<void> = import.meta.env.SSR
+  ? start().catch((error: unknown) => {
+      console.error("otel init failed; tracing disabled", error);
+    })
+  : Promise.resolve();
 
 export function tracer(): Tracer {
   return trace.getTracer("guardian/shortty-web");
