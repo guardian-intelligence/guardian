@@ -130,3 +130,19 @@ resource "cloudflare_ruleset" "rumi_cache_policy" {
     },
   ]
 }
+
+# The edge presents the managed origin-pull client certificate only when the
+# legacy tls_client_auth zone setting is also on — origin_tls_client_auth
+# alone records intent without changing handshakes. guardianintelligence.org
+# had this flipped outside the root; both zones now declare it.
+resource "cloudflare_zone_setting" "tls_client_auth" {
+  zone_id    = data.cloudflare_zone.guardianintelligence_org.id
+  setting_id = "tls_client_auth"
+  value      = "on"
+}
+
+resource "cloudflare_zone_setting" "rumi_tls_client_auth" {
+  zone_id    = data.cloudflare_zone.rumi_engineering.id
+  setting_id = "tls_client_auth"
+  value      = "on"
+}
