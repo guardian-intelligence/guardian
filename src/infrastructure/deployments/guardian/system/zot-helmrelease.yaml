@@ -69,6 +69,9 @@ spec:
       # digest, forcing a redundant upstream copy on every OCI referrers read.
       # The countersigner explicitly requests the one legacy CI signature tag
       # when needed, so referrer discovery must not sync those tags implicitly.
+      # On-demand sync is bounded below the node pull deadline. zot otherwise
+      # keeps a disconnected sync alive for three hours, so containerd exhausts
+      # its request before it can fall back to the upstream registry.
       #
       # accessControl is the write lock, not an auth system: without it zot
       # serves anonymous read-WRITE. The one writer is the countersigner's
@@ -166,6 +169,7 @@ spec:
                 {
                   "urls": ["https://ghcr.io"],
                   "onDemand": true,
+                  "syncTimeout": "2m",
                   "tlsVerify": true,
                   "preserveDigest": true,
                   "syncLegacyCosignTags": false,

@@ -35,6 +35,13 @@ converts docker-media-type manifests to OCI on sync, which changes digests
 — fatal for a fully digest-pinned estate and for every cosign signature
 served through the mirror.
 
+The on-demand `syncTimeout: 2m` is also load-bearing for fallback. zot's
+default is three hours and a disconnected request continues in the background;
+without the bound, the node's five-minute pull context expires while zot still
+owns the singleflight, so containerd never gets an opportunity to fall back to
+ghcr. Two minutes leaves a normal cache miss time to copy while preserving a
+meaningful upstream-fallback window.
+
 ## Fallback is redundancy we can hear, not silence
 
 A dead mirror with working fallback produces zero workload symptoms by

@@ -12,7 +12,7 @@ import (
 // the shared registry path past both the countersigner and mirror-canary
 // deadlines. The countersigner fetches the exact legacy CI signature tag in a
 // separate verification step, so implicit legacy-tag discovery must stay off.
-func TestZotReferrerSyncSkipsLegacyCosignTags(t *testing.T) {
+func TestZotOnDemandSyncIsBoundedAndSkipsLegacyCosignTags(t *testing.T) {
 	const manifest = "src/infrastructure/deployments/guardian/system/zot-helmrelease.yaml"
 
 	configJSON := ""
@@ -35,6 +35,7 @@ func TestZotReferrerSyncSkipsLegacyCosignTags(t *testing.T) {
 				Registries []struct {
 					URLs                 []string `json:"urls"`
 					OnDemand             bool     `json:"onDemand"`
+					SyncTimeout          string   `json:"syncTimeout"`
 					SyncLegacyCosignTags *bool    `json:"syncLegacyCosignTags"`
 				} `json:"registries"`
 			} `json:"sync"`
@@ -50,6 +51,9 @@ func TestZotReferrerSyncSkipsLegacyCosignTags(t *testing.T) {
 		}
 		if registry.SyncLegacyCosignTags == nil || *registry.SyncLegacyCosignTags {
 			t.Fatalf("%s: the on-demand ghcr sync must set syncLegacyCosignTags=false so OCI referrers reads do not enumerate and recopy legacy CI signature tags", manifest)
+		}
+		if registry.SyncTimeout != "2m" {
+			t.Fatalf("%s: on-demand ghcr sync timeout = %q, want 2m so a stalled mirror returns before the node pull deadline", manifest, registry.SyncTimeout)
 		}
 
 		return
