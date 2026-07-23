@@ -826,7 +826,6 @@ spec:
         name: guardian-source
   dependsOn:
     - name: guardian-system
-    - name: guardian-flagger
     - name: guardian-iam-prod
   prune: true
   wait: true

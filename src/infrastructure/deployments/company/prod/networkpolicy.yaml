@@ -1,10 +1,11 @@
-# company-site's own flows, following the repo's Cilium conventions
+# company-site's own egress flows, following the repo's Cilium conventions
 # (selecting an endpoint flips it to default-deny for the selected
 # direction; every rule below is therefore the complete allowed set).
-# Both selectors match BOTH app label values because Flagger's primary
-# clone suffixes the selector label value with -primary. company-site is a
-# stateless server; the Postflight OIDC callback exchanges authorization
-# codes with Keycloak over the namespace-local service.
+# Ingress admission lives in root-ingress-networkpolicy.yaml (the public
+# edge is the only caller). company-site is a stateless server; the
+# Postflight OIDC callback exchanges authorization codes with Keycloak over
+# the namespace-local service; keycloak-primary is Flagger's clone of the
+# Keycloak Deployment.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -16,22 +17,8 @@ metadata:
     guardian.dev/stage: prod
 spec:
   endpointSelector:
-    matchExpressions:
-      - key: app.kubernetes.io/name
-        operator: In
-        values:
-          - company-site
-          - company-site-primary
-  ingress:
-    # company-site-loadtester runs the HTTP and k6 gates against the canary
-    # Service during Flagger analysis.
-    - fromEndpoints:
-        - matchLabels:
-            app.kubernetes.io/name: company-site-loadtester
-      toPorts:
-        - ports:
-            - port: "8080"
-              protocol: TCP
+    matchLabels:
+      app.kubernetes.io/name: company-site
   egress:
     - toEndpoints:
         - matchLabels:
@@ -53,95 +40,4 @@ spec:
       toPorts:
         - ports:
             - port: "8080"
-              protocol: TCP
----
-# company-site-loadtester: webhook calls arrive from the Flagger controller;
-# the checks it executes go to the company-site pods (canary Service, the
-# pre-rollout stress gate), the public edge (the during-analysis canary-load
-# generator), DNS, and VictoriaMetrics remote-write for k6 results.
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: company-site-loadtester
-  namespace: tenant-guardian-prod
-  labels:
-    app.kubernetes.io/name: company-site-loadtester
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/stage: prod
-spec:
-  endpointSelector:
-    matchLabels:
-      app.kubernetes.io/name: company-site-loadtester
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: flagger
-            k8s:app.kubernetes.io/name: flagger
-      toPorts:
-        - ports:
-            - port: "8080"
-              protocol: TCP
-  egress:
-    - toEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: kube-system
-            k8s:k8s-app: kube-dns
-      toPorts:
-        - ports:
-            - port: "53"
-              protocol: UDP
-            - port: "53"
-              protocol: TCP
-    - toEndpoints:
-        - matchExpressions:
-            - key: app.kubernetes.io/name
-              operator: In
-              values:
-                - company-site
-                - company-site-primary
-      toPorts:
-        - ports:
-            - port: "8080"
-              protocol: TCP
-    - toEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: tenant-root
-            k8s:app.kubernetes.io/name: vminsert
-      toPorts:
-        - ports:
-            - port: "8480"
-              protocol: TCP
-    # canary-load runs through the public edge (Cloudflare -> origin nginx)
-    # so the ingress weight split applies and AOP is satisfied by the edge
-    # terminating the origin-pull handshake.
-    - toEntities:
-        - world
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
----
-# Ingress half of the remote-write path: tenant-root's generated isolation
-# does not admit grandchild-tenant namespaces; admit exactly the loadtester
-# pod that runs the deploy-time k6 stress gate.
-apiVersion: cilium.io/v2
-kind: CiliumClusterwideNetworkPolicy
-metadata:
-  name: tenant-root-vminsert-from-company-site-loadtester-prod
-  labels:
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/product: company
-spec:
-  endpointSelector:
-    matchLabels:
-      k8s:io.kubernetes.pod.namespace: tenant-root
-      k8s:app.kubernetes.io/name: vminsert
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: tenant-guardian-prod
-            k8s:app.kubernetes.io/name: company-site-loadtester
-      toPorts:
-        - ports:
-            - port: "8480"
               protocol: TCP
