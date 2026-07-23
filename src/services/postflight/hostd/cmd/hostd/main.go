@@ -26,8 +26,8 @@
 //	                              is tap on a filtered bridge; do not expose untrusted guests under user.
 //	HOSTD_GUEST_BRIDGE            existing filtered bridge used by tap mode. Its DHCP, DNS, host
 //	                              firewall, NAT, and per-port isolation are host infrastructure.
-//	HOSTD_TAP_UP_SCRIPT           root-owned tap attachment program (default
-//	                              /usr/local/libexec/postflight-tap-up)
+//	HOSTD_TAP_LIFECYCLE_PATH      root-owned tap lifecycle program (default
+//	                              /usr/local/libexec/postflight-tap)
 //	HOSTD_CHECKOUT_LISTEN_ADDR    checkout endpoint bind (default 127.0.0.1:8480). It carries
 //	                              tenant GitHub tokens over plaintext HTTP; under GUEST_NETWORK=user
 //	                              the loopback bind is itself guest-reachable (via 10.0.2.2), which
@@ -106,7 +106,7 @@ func run(logger *slog.Logger) error {
 		Launcher:     vm.NewSystemdLauncher(),
 		Guest:        guest,
 		GuestNetwork: cfg.guestNetwork,
-		TapUpScript:  cfg.tapUpScript,
+		TapLifecycle: vm.ExecTapLifecycle{Program: cfg.tapLifecyclePath},
 		Logger:       logger,
 	})
 	if err != nil {

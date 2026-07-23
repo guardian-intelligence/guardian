@@ -77,6 +77,28 @@ type fakeDisks struct {
 	device    string
 }
 
+type fakeTapLifecycle struct {
+	mu      sync.Mutex
+	up      []string
+	down    []string
+	upErr   error
+	downErr error
+}
+
+func (t *fakeTapLifecycle) Up(_ context.Context, name string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.up = append(t.up, name)
+	return t.upErr
+}
+
+func (t *fakeTapLifecycle) Down(_ context.Context, name string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.down = append(t.down, name)
+	return t.downErr
+}
+
 func newFakeDisks() *fakeDisks { return &fakeDisks{ensured: map[string]string{}} }
 
 func (d *fakeDisks) Ensure(_ context.Context, dataset, image string) (string, error) {
@@ -405,6 +427,44 @@ func TestLaunchPinsCanonicalRootDevice(t *testing.T) {
 	}
 	if got := strings.Join(record.Argv, " "); !strings.Contains(got, "file.filename=/dev/zd4242") {
 		t.Fatalf("durable argv did not pin canonical root device: %s", got)
+	}
+}
+
+func TestTapLifecycleSurroundsQEMU(t *testing.T) {
+	driver := newTestDriver(t, shortTempDir(t))
+	taps := &fakeTapLifecycle{}
+	driver.q.cfg.GuestNetwork = guestNetworkTap
+	driver.q.cfg.TapLifecycle = taps
+	ctx := context.Background()
+	if err := driver.q.Launch(ctx, "vm-a", testClass); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if len(taps.up) != 1 || taps.up[0] != "pft9f5f9ca7beef" {
+		t.Fatalf("tap up calls = %v", taps.up)
+	}
+	argv := strings.Join(driver.launcher.argv["vm-a"], " ")
+	if !strings.Contains(argv, "ifname=pft9f5f9ca7beef,script=no,downscript=no,vhost=on") {
+		t.Fatalf("QEMU did not open the host-prepared tap: %s", argv)
+	}
+	if err := driver.q.Destroy(ctx, "vm-a"); err != nil {
+		t.Fatalf("destroy: %v", err)
+	}
+	if len(taps.down) != 1 || taps.down[0] != taps.up[0] {
+		t.Fatalf("tap down calls = %v, up = %v", taps.down, taps.up)
+	}
+}
+
+func TestTapRemovedWhenQEMULaunchFails(t *testing.T) {
+	driver := newTestDriver(t, shortTempDir(t))
+	taps := &fakeTapLifecycle{}
+	driver.q.cfg.GuestNetwork = guestNetworkTap
+	driver.q.cfg.TapLifecycle = taps
+	driver.launcher.failing = true
+	if err := driver.q.Launch(context.Background(), "vm-a", testClass); err == nil {
+		t.Fatal("launch succeeded with a failing launcher")
+	}
+	if len(taps.up) != 1 || len(taps.down) != 1 || taps.up[0] != taps.down[0] {
+		t.Fatalf("tap lifecycle leaked across failed launch: up=%v down=%v", taps.up, taps.down)
 	}
 }
 

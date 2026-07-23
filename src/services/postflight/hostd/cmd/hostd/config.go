@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -29,7 +30,7 @@ type config struct {
 	syncInterval   time.Duration
 	guestNetwork   string
 	guestBridge    string
-	tapUpScript    string
+	tapLifecyclePath string
 
 	checkoutListenAddr  string
 	checkoutGuestOrigin string
@@ -88,7 +89,7 @@ func loadConfig() (config, error) {
 		syncInterval:        duration("HOSTD_SYNC_INTERVAL", "2s"),
 		guestNetwork:        envOr("HOSTD_GUEST_NETWORK", "none"),
 		guestBridge:         os.Getenv("HOSTD_GUEST_BRIDGE"),
-		tapUpScript:         envOr("HOSTD_TAP_UP_SCRIPT", "/usr/local/libexec/postflight-tap-up"),
+		tapLifecyclePath:    envOr("HOSTD_TAP_LIFECYCLE_PATH", "/usr/local/libexec/postflight-tap"),
 		checkoutListenAddr:  envOr("HOSTD_CHECKOUT_LISTEN_ADDR", "127.0.0.1:8480"),
 		checkoutGuestOrigin: required("HOSTD_CHECKOUT_GUEST_ORIGIN"),
 	}
@@ -100,6 +101,9 @@ func loadConfig() (config, error) {
 		}
 	default:
 		errs = append(errs, fmt.Errorf("HOSTD_GUEST_NETWORK: %q is not none, user, or tap", cfg.guestNetwork))
+	}
+	if !filepath.IsAbs(cfg.tapLifecyclePath) {
+		errs = append(errs, errors.New("HOSTD_TAP_LIFECYCLE_PATH must be absolute"))
 	}
 	if len(errs) > 0 {
 		return cfg, errors.Join(errs...)

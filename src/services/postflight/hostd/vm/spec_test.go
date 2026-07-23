@@ -88,12 +88,11 @@ func TestArgvTapNetwork(t *testing.T) {
 		StateDir:     "/var/lib/hostd/vms/pool-0001",
 		VsockCID:     3,
 		GuestNetwork: "tap",
-		TapUpScript:  "/usr/local/libexec/postflight-tap-up",
 	}
 	got := spec.Argv()
 	tail := strings.Join(got[len(got)-4:], "\n")
 	want := strings.Join([]string{
-		"-netdev", "tap,id=net0,ifname=pft22090518f15b,script=/usr/local/libexec/postflight-tap-up,downscript=no,vhost=on",
+		"-netdev", "tap,id=net0,ifname=pft22090518f15b,script=no,downscript=no,vhost=on",
 		"-device", "virtio-net-pci,netdev=net0,mac=02:00:00:00:00:03",
 	}, "\n")
 	if tail != want {

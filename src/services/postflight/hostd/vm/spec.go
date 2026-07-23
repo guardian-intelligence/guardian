@@ -47,9 +47,9 @@ const workspaceFilesystem = "ext4"
 // libslirp user-mode NIC.
 const guestNetworkUser = "user"
 
-// guestNetworkTap is the production egress datapath. QEMU creates one
-// short-lived tap per VM; a root-owned setup program attaches it to the
-// host's filtered bridge before the NIC becomes visible to the guest.
+// guestNetworkTap is the production egress datapath. Hostd creates one
+// short-lived tap per VM before QEMU starts and attaches it to the host's
+// filtered bridge. QEMU only opens the prepared interface.
 const guestNetworkTap = "tap"
 
 // workspaceMountOptions shape the guest-side mount. discard is load-bearing:
@@ -88,10 +88,9 @@ type LaunchSpec struct {
 	// no NIC (the guestd control channel is vsock, which needs none); "user"
 	// attaches a libslirp user-mode NIC giving the runner NAT egress to GitHub
 	// and reaching host services via the 10.0.2.2 gateway. The static shape
-	// keeps argv deterministic. "tap" attaches a vhost-accelerated tap through
-	// TapUpScript; the script must isolate the port on the configured bridge.
+	// keeps argv deterministic. "tap" opens a vhost-accelerated interface that
+	// hostd prepared before launching QEMU.
 	GuestNetwork string
-	TapUpScript string
 }
 
 func qmpSocketPath(stateDir string) string { return filepath.Join(stateDir, "qmp.sock") }
@@ -133,7 +132,7 @@ func (s LaunchSpec) Argv() []string {
 	} else if s.GuestNetwork == guestNetworkTap {
 		ifname, mac := tapIdentity(s.ID, s.VsockCID)
 		argv = append(argv,
-			"-netdev", "tap,id=net0,ifname="+ifname+",script="+s.TapUpScript+",downscript=no,vhost=on",
+			"-netdev", "tap,id=net0,ifname="+ifname+",script=no,downscript=no,vhost=on",
 			"-device", "virtio-net-pci,netdev=net0,mac="+mac,
 		)
 	}
