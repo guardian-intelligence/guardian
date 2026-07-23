@@ -3,10 +3,11 @@ import {
   BlobSource,
   EncodedPacketSink,
   Input,
+  UrlSource,
   type InputAudioTrack,
   type InputVideoTrack,
 } from "mediabunny";
-import type { ProbeSummary } from "./types";
+import type { MediaSource, ProbeSummary } from "./types";
 
 export interface OpenedInput {
   readonly input: Input;
@@ -15,12 +16,16 @@ export interface OpenedInput {
   readonly summary: ProbeSummary;
 }
 
-// Opens the dropped file lazily (BlobSource slices on demand — a multi-GB
-// file never fully enters memory) and builds the session summary the editor
-// runs on: dimensions, frame rate, bitrate, and the keyframe map for the
-// timeline's snap ticks and the remux fast path.
-export async function openInput(file: File): Promise<OpenedInput> {
-  const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(file) });
+// Opens the session source lazily — BlobSource slices a dropped file on
+// demand, UrlSource range-requests a remote mp4 — so a multi-GB source never
+// fully enters memory. Builds the session summary the editor runs on:
+// dimensions, frame rate, bitrate, and the keyframe map for the timeline's
+// snap ticks and the remux fast path.
+export async function openInput(source: MediaSource): Promise<OpenedInput> {
+  const input = new Input({
+    formats: ALL_FORMATS,
+    source: source instanceof File ? new BlobSource(source) : new UrlSource(source.url),
+  });
   const videoTrack = await input.getPrimaryVideoTrack();
   if (videoTrack === null) {
     throw new Error("This file has no video track we can read.");

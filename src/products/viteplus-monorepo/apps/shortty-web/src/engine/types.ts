@@ -1,6 +1,10 @@
 import type { PassRecord } from "./convergence";
 import type { VideoCodecChoice } from "./ladder";
 
+// A session source: a local file from the dropzone, or a remote mp4 (an X
+// post's CDN URL) that the engine reads with HTTP range requests.
+export type MediaSource = File | { readonly url: string; readonly name: string };
+
 export interface VideoTrackSummary {
   readonly width: number;
   readonly height: number;
@@ -38,7 +42,7 @@ export interface EncodeOutcome {
 }
 
 export type WorkerRequest =
-  | { readonly kind: "probe"; readonly id: number; readonly file: File }
+  | { readonly kind: "probe"; readonly id: number; readonly source: MediaSource }
   | {
       readonly kind: "thumbnails";
       readonly id: number;

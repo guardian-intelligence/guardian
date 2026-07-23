@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EncodeResult, ShorttyEngine, ThumbnailTile } from "~/engine/client";
 import { estimateSelection } from "~/engine/estimate";
 import { MAX_SELECTION_SECONDS } from "~/engine/limits";
-import type { ProbeSummary, SelectionRange } from "~/engine/types";
+import type { MediaSource, ProbeSummary, SelectionRange } from "~/engine/types";
 import { emitSpan } from "~/lib/telemetry/browser";
 import { formatBitrate, formatSeconds } from "~/lib/format";
 import { ResultCard } from "./result-card";
@@ -12,7 +12,7 @@ const TILE_COUNT = 16;
 
 export interface EditorProps {
   readonly engine: ShorttyEngine;
-  readonly file: File;
+  readonly source: MediaSource;
   readonly summary: ProbeSummary;
   readonly onReset: () => void;
 }
@@ -23,7 +23,7 @@ type Phase =
   | { kind: "done"; result: EncodeResult }
   | { kind: "failed"; message: string };
 
-export function Editor({ engine, file, summary, onReset }: EditorProps) {
+export function Editor({ engine, source, summary, onReset }: EditorProps) {
   const [selection, setSelection] = useState<SelectionRange>(() => ({
     startS: 0,
     endS: Math.min(summary.durationS, MAX_SELECTION_SECONDS),
@@ -33,8 +33,16 @@ export function Editor({ engine, file, summary, onReset }: EditorProps) {
   const [phase, setPhase] = useState<Phase>({ kind: "selecting" });
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  const previewUrl = useMemo(() => URL.createObjectURL(file), [file]);
-  useEffect(() => () => URL.revokeObjectURL(previewUrl), [previewUrl]);
+  // A remote source's CDN URL feeds the <video> element directly (media
+  // playback needs no CORS); a dropped file gets an object URL.
+  const previewUrl = useMemo(
+    () => (source instanceof File ? URL.createObjectURL(source) : source.url),
+    [source],
+  );
+  useEffect(() => {
+    if (!(source instanceof File)) return undefined;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [source, previewUrl]);
 
   useEffect(() => {
     let collected: ThumbnailTile[] = [];
@@ -94,7 +102,7 @@ export function Editor({ engine, file, summary, onReset }: EditorProps) {
     return (
       <ResultCard
         result={phase.result}
-        sourceName={file.name}
+        sourceName={source.name}
         onBack={() => setPhase({ kind: "selecting" })}
       />
     );
