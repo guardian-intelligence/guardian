@@ -7,6 +7,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -186,6 +188,34 @@ func TestRunnerWorkerInvocationContract(t *testing.T) {
 	} {
 		if IsRunnerWorkerExec(args) {
 			t.Fatalf("unsafe worker invocation was accepted: %q", args)
+		}
+	}
+}
+
+func TestRunnerWorkerNamespaceCommandPreservesImageGroups(t *testing.T) {
+	command, args := runnerWorkerNamespaceCommand(42, &syscall.Credential{
+		Uid: 1001, Gid: 1001, Groups: []uint32{999, 1001},
+	}, []string{"spawnclient", "10", "11"})
+	if command != "/usr/bin/nsenter" {
+		t.Fatalf("command = %q", command)
+	}
+	want := []string{
+		"/usr/bin/nsenter", "--target", "42", "--pid", "--mount", "--",
+		"/usr/bin/setpriv", "--reuid=1001", "--regid=1001", "--groups=999,1001",
+		"--inh-caps=-all", "--", "/opt/actions-runner/bin/Runner.Worker.real",
+		"spawnclient", "10", "11",
+	}
+	if len(args) != len(want) {
+		t.Fatalf("args = %q, want %q", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("args = %q, want %q", args, want)
+		}
+	}
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--setuid") || strings.HasPrefix(arg, "--setgid") {
+			t.Fatalf("nsenter credential option drops supplementary groups: %q", args)
 		}
 	}
 }
