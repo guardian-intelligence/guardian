@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web
-          image: ghcr.io/guardian-intelligence/shortty-web@sha256:acf7d254de3ee43f01bca4b3ae2a4f12bc55d9b67a7a957dc4b57ed0e2d4dac3 # {"$imagepolicy": "guardian-imageops:shortty-web"}
+          image: ghcr.io/guardian-intelligence/shortty-web:edge@sha256:acf7d254de3ee43f01bca4b3ae2a4f12bc55d9b67a7a957dc4b57ed0e2d4dac3 # {"$imagepolicy": "guardian-imageops:shortty-web"}
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
