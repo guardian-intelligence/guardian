@@ -49,6 +49,18 @@ spec:
             guardian.dev/component: alerting
           annotations:
             summary: alert-relay failed to deliver alerts to the ntfy sink after all retries.
+        - alert: AlertRelayEnrichmentFailing
+          expr: increase(relay_alerta_enrichment_failures_total{namespace="tenant-root",job="alert-relay"}[30m]) > 3
+          labels:
+            severity: warning
+            guardian.dev/component: alerting
+          annotations:
+            summary: alert-relay pages are going out without Alerta text enrichment.
+            description: >-
+              The relay's fetch-back of alert descriptions from Alerta keeps
+              failing (bad ALERTA_URL, missing/invalid API key, or Alerta
+              unreachable). Pages still deliver, but read as bare summary
+              lines.
         # Dashboard mirror of the relay's own dead-man page: the relay pages
         # ntfy directly when the Watchdog goes missing; this rule makes the
         # same condition visible through the normal alert pipeline (when that

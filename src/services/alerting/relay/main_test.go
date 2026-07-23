@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // alertaPayload mirrors what Alerta's slack plugin (alerta-contrib
@@ -1064,5 +1065,57 @@ func TestHandleSlackEnrichesAndRendersTokens(t *testing.T) {
 	}
 	if want := "Elevated X-link failures since 7:06:21 PM PDT."; !strings.HasPrefix(out.sent[0].Body, want+"\n") {
 		t.Errorf("body = %q, want prefix %q", out.sent[0].Body, want)
+	}
+}
+
+func TestTruncateUTF8NeverSplitsARune(t *testing.T) {
+	// "é" is 2 bytes; a 3-byte budget over "aéé" must cut before the
+	// second é, not through it.
+	if got := truncateUTF8("aéé", 4); got != "aé" {
+		t.Errorf("truncateUTF8 = %q, want %q", got, "aé")
+	}
+	if got := truncateUTF8("plain", 10); got != "plain" {
+		t.Errorf("short string mutated: %q", got)
+	}
+	long := strings.Repeat("☃", 1000) // 3-byte snowmen
+	cut := truncateUTF8(long, 2048)
+	if !utf8.ValidString(cut) {
+		t.Error("truncateUTF8 produced invalid UTF-8")
+	}
+	if len(cut) > 2048 {
+		t.Errorf("cut length = %d, want <= 2048", len(cut))
+	}
+}
+
+func TestEnrichFromAlertaMalformedURLCounts(t *testing.T) {
+	s := newTestServer(&fakeSink{})
+	s.cfg.alertaURL = "://not-a-url"
+	s.client = http.DefaultClient
+
+	base := notification{Title: "t", Body: alertaPayloadText(t)}
+	got := s.enrichFromAlerta(context.Background(), alertaPayloadText(t), base)
+	if got.Body != base.Body {
+		t.Errorf("malformed URL mutated the page: %+v", got)
+	}
+	if n := s.m.enrichFailures.Load(); n != 1 {
+		t.Errorf("enrichFailures = %d, want 1", n)
+	}
+}
+
+func TestHandleSlackLeavesUnparsedPayloadVerbatim(t *testing.T) {
+	out := &fakeSink{}
+	s := newTestServer(out)
+	s.loc = time.UTC
+	// Not valid JSON: the unparsed fallback must forward the raw bytes
+	// untouched, including anything that looks like a time token.
+	raw := "garbage with @pt:1768492800@ inside"
+	w := httptest.NewRecorder()
+	s.handleSlack(w, httptest.NewRequest("POST", "/slack", strings.NewReader(raw)))
+	s.inflight.Wait()
+	if len(out.sent) != 1 {
+		t.Fatalf("forwarded %d notifications, want 1", len(out.sent))
+	}
+	if out.sent[0].Body != raw {
+		t.Errorf("unparsed body mutated: %q", out.sent[0].Body)
 	}
 }
