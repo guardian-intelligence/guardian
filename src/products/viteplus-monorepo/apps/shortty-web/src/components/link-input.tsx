@@ -43,14 +43,14 @@ export function LinkInput({ onSource, onWarm, disabled }: LinkInputProps) {
   }, [link, busy, onSource, onWarm]);
 
   return (
-    <div>
-      <div className="my-6 flex items-center gap-4" aria-hidden="true">
-        <span className="h-px flex-1 bg-line-strong" />
-        <span className="text-xs uppercase tracking-widest text-mist-faint">or</span>
-        <span className="h-px flex-1 bg-line-strong" />
+    <div className="link-input">
+      <div className="link-input__divider" aria-hidden="true">
+        <span />
+        <span>or</span>
+        <span />
       </div>
       <form
-        className="glass flex items-center gap-2 p-2"
+        className="link-input__form"
         onSubmit={(e) => {
           e.preventDefault();
           submit();
@@ -64,23 +64,21 @@ export function LinkInput({ onSource, onWarm, disabled }: LinkInputProps) {
           disabled={disabled || busy}
           placeholder="Paste a link to an X post with a video"
           aria-label="Link to an X post with a video"
-          className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-mist placeholder:text-mist-faint focus:outline-none"
+          className="link-input__field"
         />
         <button
           type="submit"
           disabled={disabled || busy || link.trim() === ""}
-          className="rounded-xl border border-line-strong bg-white/[0.06] px-4 py-2 text-sm font-medium text-mist transition-colors hover:bg-white/[0.1] disabled:opacity-50"
+          className="link-input__submit"
         >
           Fetch
         </button>
       </form>
       {phase.kind === "resolving" && (
-        <p className="mt-3 text-center font-mono text-sm text-mist-faint">Looking up the post…</p>
+        <p className="link-input__message font-mono">Looking up the post…</p>
       )}
       {phase.kind === "failed" && (
-        <p className="mx-auto mt-3 max-w-md rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-center text-sm text-red-200">
-          {phase.message}
-        </p>
+        <p className="link-input__message link-input__message--error">{phase.message}</p>
       )}
     </div>
   );
