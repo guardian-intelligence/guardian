@@ -93,10 +93,10 @@ function Home() {
               <h1
                 id="shortty-title"
                 className="shortty-title"
-                data-copy="Any clip, under 4 MB"
+                data-copy={"Any clip, under 4\u202fMB"}
                 aria-label="Any clip, under 4 MB"
               >
-                Any clip, under 4&thinsp;MB
+                Any clip, under 4&#8239;MB
               </h1>
               <p className="shortty-hero__lede">
                 Pick up to a minute of any video. Get the best possible quality that fits — never a
