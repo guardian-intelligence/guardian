@@ -1,5 +1,8 @@
-# shortty-web's own flows. The app is a static-shell server: all media work
-# happens in the visitor's browser, so the pod needs no egress beyond DNS.
+# shortty-web's own flows. All media work happens in the visitor's browser;
+# the pod's only outbound need beyond DNS is the /api/resolve hop to X's
+# syndication endpoint. That egress is world:443 rather than a pinned FQDN —
+# a hostname pin would depend on Cilium's DNS proxy for no isolation gain
+# (see postflight-runner/networkpolicy.yaml for the same reasoning).
 # Public ingress arrives with node identity (hostNetwork root ingress) and is
 # admitted by the additive CCNP in root-ingress-networkpolicy.yaml; selecting
 # only egress here leaves that admit intact.
@@ -30,4 +33,10 @@ spec:
             - port: "53"
               protocol: UDP
             - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
               protocol: TCP

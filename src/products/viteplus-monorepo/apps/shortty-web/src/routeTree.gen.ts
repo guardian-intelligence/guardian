@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as HealthzRouteImport } from './routes/healthz'
 import { Route as LivezRouteImport } from './routes/livez'
+import { Route as ApiResolveRouteImport } from './routes/api/resolve'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +29,44 @@ const LivezRoute = LivezRouteImport.update({
   path: '/livez',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiResolveRoute = ApiResolveRouteImport.update({
+  id: '/api/resolve',
+  path: '/api/resolve',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
+  '/api/resolve': typeof ApiResolveRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
+  '/api/resolve': typeof ApiResolveRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
+  '/api/resolve': typeof ApiResolveRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/healthz' | '/livez'
+  fullPaths: '/' | '/healthz' | '/livez' | '/api/resolve'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/healthz' | '/livez'
-  id: '__root__' | '/' | '/healthz' | '/livez'
+  to: '/' | '/healthz' | '/livez' | '/api/resolve'
+  id: '__root__' | '/' | '/healthz' | '/livez' | '/api/resolve'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   HealthzRoute: typeof HealthzRoute
   LivezRoute: typeof LivezRoute
+  ApiResolveRoute: typeof ApiResolveRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +92,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LivezRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/resolve': {
+      id: '/api/resolve'
+      path: '/api/resolve'
+      fullPath: '/api/resolve'
+      preLoaderRoute: typeof ApiResolveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   HealthzRoute: HealthzRoute,
   LivezRoute: LivezRoute,
+  ApiResolveRoute: ApiResolveRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
