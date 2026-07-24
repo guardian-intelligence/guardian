@@ -40,27 +40,32 @@ const testGithubAppPEM = "-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n-----END 
 
 const testRunnerAppPEM = "-----BEGIN PRIVATE KEY-----\nnot-a-real-runner-key\n-----END PRIVATE KEY-----\n"
 
+const testCanaryLoopAppPEM = "-----BEGIN PRIVATE KEY-----\nnot-a-real-canary-loop-key\n-----END PRIVATE KEY-----\n"
+
 const testOriginCertificatePEM = "-----BEGIN CERTIFICATE-----\nnot-a-real-certificate\n-----END CERTIFICATE-----\n"
 
 const testOriginPrivateKeyPEM = "-----BEGIN EC PRIVATE KEY-----\nnot-a-real-origin-key\n-----END EC PRIVATE KEY-----\n"
 
 func testImportEnv() map[string]string {
 	return map[string]string{
-		"cloudflare_account_id":                  "account",
-		"cloudflare_r2_secret_access_key":        "r2-secret",
-		"cloudflare_r2_s3_api_endpoint":          "r2-endpoint",
-		"cloudflare_r2_access_key_id":            "r2-access",
-		"cloudflare_origin_certificate_b64":      base64.StdEncoding.EncodeToString([]byte(testOriginCertificatePEM)),
-		"cloudflare_origin_private_key_b64":      base64.StdEncoding.EncodeToString([]byte(testOriginPrivateKeyPEM)),
-		"guardian_alerting_ntfy_url":             "https://ntfy.sh/guardian-topic",
-		"platform_admin_password":                "admin-pass",
-		"platform_agent_password":                "agent-pass",
-		"github_promotions_app_private_key_b64":  base64.StdEncoding.EncodeToString([]byte(testGithubAppPEM)),
-		"github_runner_app_prod_app_id":          "3370540",
-		"github_runner_app_prod_webhook_secret":  "runner-webhook",
-		"github_runner_app_prod_private_key_b64": base64.StdEncoding.EncodeToString([]byte(testRunnerAppPEM)),
-		"zot_countersigner_password":             "zot-push-pass",
-		"github_projector_pat":                   "ghp-projector-pat",
+		"cloudflare_account_id":                         "account",
+		"cloudflare_r2_secret_access_key":               "r2-secret",
+		"cloudflare_r2_s3_api_endpoint":                 "r2-endpoint",
+		"cloudflare_r2_access_key_id":                   "r2-access",
+		"cloudflare_origin_certificate_b64":             base64.StdEncoding.EncodeToString([]byte(testOriginCertificatePEM)),
+		"cloudflare_origin_private_key_b64":             base64.StdEncoding.EncodeToString([]byte(testOriginPrivateKeyPEM)),
+		"guardian_alerting_ntfy_url":                    "https://ntfy.sh/guardian-topic",
+		"platform_admin_password":                       "admin-pass",
+		"platform_agent_password":                       "agent-pass",
+		"github_promotions_app_private_key_b64":         base64.StdEncoding.EncodeToString([]byte(testGithubAppPEM)),
+		"github_runner_app_prod_app_id":                 "3370540",
+		"github_runner_app_prod_webhook_secret":         "runner-webhook",
+		"github_runner_app_prod_private_key_b64":        base64.StdEncoding.EncodeToString([]byte(testRunnerAppPEM)),
+		"github_postflight_canary_loop_app_id":          "4382022",
+		"github_postflight_canary_loop_installation_id": "148677496",
+		"github_postflight_canary_loop_private_key_b64": base64.StdEncoding.EncodeToString([]byte(testCanaryLoopAppPEM)),
+		"zot_countersigner_password":                    "zot-push-pass",
+		"github_projector_pat":                          "ghp-projector-pat",
 	}
 }
 
@@ -69,8 +74,8 @@ func TestImportPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 9 {
-		t.Fatalf("plan length = %d, want 9", len(plan))
+	if len(plan) != 10 {
+		t.Fatalf("plan length = %d, want 10", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {
@@ -148,6 +153,16 @@ func TestImportPlan(t *testing.T) {
 	if runner.Data["githubAppPrivateKey"] != testRunnerAppPEM {
 		t.Fatal("postflight-runner githubAppPrivateKey did not round-trip through base64")
 	}
+	canaryLoop, ok := byPath["kv/data/guardian/guardian-mgmt/postflight-runner/canary-loop-github-app"]
+	if !ok {
+		t.Fatal("postflight canary-loop write missing")
+	}
+	if canaryLoop.Data["appId"] != "4382022" || canaryLoop.Data["installationId"] != "148677496" {
+		t.Fatalf("postflight canary-loop identity = %#v", canaryLoop.Data)
+	}
+	if canaryLoop.Data["githubAppPrivateKey"] != testCanaryLoopAppPEM {
+		t.Fatal("postflight canary-loop githubAppPrivateKey did not round-trip through base64")
+	}
 	zot, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian/zot-countersigner"]
 	if !ok {
 		t.Fatal("zot-countersigner write missing")
@@ -193,6 +208,16 @@ func TestImportPlanRejectsBadGithubKey(t *testing.T) {
 	if _, err := importPlan(env); err == nil {
 		t.Fatal("importPlan accepted a non-PEM payload for the runner app key")
 	}
+
+	env = testImportEnv()
+	env["github_postflight_canary_loop_private_key_b64"] = "%%% not base64 %%%"
+	if _, err := importPlan(env); err == nil {
+		t.Fatal("importPlan accepted invalid base64 for the canary-loop app key")
+	}
+	env["github_postflight_canary_loop_private_key_b64"] = base64.StdEncoding.EncodeToString([]byte("plain text, not a PEM"))
+	if _, err := importPlan(env); err == nil {
+		t.Fatal("importPlan accepted a non-PEM payload for the canary-loop app key")
+	}
 }
 
 func TestImportPlanOptionalKeycloakStages(t *testing.T) {
@@ -203,8 +228,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 9 {
-		t.Fatalf("plan length = %d, want 9 (base only)", len(plan))
+	if len(plan) != 10 {
+		t.Fatalf("plan length = %d, want 10 (base only)", len(plan))
 	}
 
 	env["PROD_GITHUB_CLIENT_SECRET"] = "prod-secret"
@@ -212,8 +237,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 10 {
-		t.Fatalf("plan length = %d, want 10 (9 base + prod)", len(plan))
+	if len(plan) != 11 {
+		t.Fatalf("plan length = %d, want 11 (10 base + prod)", len(plan))
 	}
 	byPath := map[string]secretWrite{}
 	for _, w := range plan {
@@ -232,8 +257,8 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan) != 11 {
-		t.Fatalf("plan length = %d, want 11 (9 base + two environments)", len(plan))
+	if len(plan) != 12 {
+		t.Fatalf("plan length = %d, want 12 (10 base + two environments)", len(plan))
 	}
 	byPath = map[string]secretWrite{}
 	for _, w := range plan {

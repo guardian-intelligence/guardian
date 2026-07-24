@@ -121,8 +121,10 @@ pkg_tar(
     name = "controlplane_layer",
     files = {
         ":controlplane": "app/controlplane",
+        "//src/services/postflight/canaryloop:canaryloop": "app/canary-loop",
     },
     modes = {
+        "app/canary-loop": "0755",
         "app/controlplane": "0755",
     },
 )

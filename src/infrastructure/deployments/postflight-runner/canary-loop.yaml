@@ -1,0 +1,154 @@
+# This CronJob exercises Postflight through the same boundary as a real
+# customer: a separate organization, a private repository, a normal pull
+# request, and a workflow_job event from GitHub. It alternates one file between
+# the merged and parent versions of vercel/turborepo#13426, waits for the
+# Postflight check, merges, and repeats.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postflight-canary-loop
+  namespace: postflight-runner
+  labels:
+    app.kubernetes.io/name: postflight-canary-loop
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: postflight
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: postflight-canary-loop
+            app.kubernetes.io/part-of: guardian
+            guardian.dev/product: postflight
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: canary-loop
+              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:d5afb2e593ecb748e4b2bb279efd582ddc05b9f5ccc3ac24f2f4d6333fb2a206 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
+              command:
+                - /app/canary-loop
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: GITHUB_APP_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: canary-loop-github-app
+                      key: GITHUB_APP_ID
+                - name: GITHUB_INSTALLATION_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: canary-loop-github-app
+                      key: GITHUB_INSTALLATION_ID
+                - name: GITHUB_APP_PRIVATE_KEY_PEM
+                  valueFrom:
+                    secretKeyRef:
+                      name: canary-loop-github-app
+                      key: GITHUB_APP_PRIVATE_KEY_PEM
+                - name: GITHUB_OWNER
+                  value: digital-guardian-software
+                - name: GITHUB_REPOSITORY
+                  value: postflight-canary
+                - name: GITHUB_BASE_BRANCH
+                  value: main
+                - name: TARGET_MERGE_COMMIT
+                  value: 1b95fcb4939cc9e5f35d498d1bcd2c3d1b43202d
+                - name: TARGET_PATH
+                  value: crates/turborepo-types/src/task_input_matching.rs
+                - name: UPSTREAM_PR
+                  value: vercel/turborepo#13426
+                - name: EXPECTED_CHECK
+                  value: targeted-rust-regression
+                - name: VMINSERT_URL
+                  value: http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: postflight-canary-loop
+  namespace: postflight-runner
+  labels:
+    app.kubernetes.io/name: postflight-canary-loop
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: postflight
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: postflight-canary-loop
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+# tenant-root's generated policy does not admit child-tenant namespaces, so
+# the VictoriaMetrics import path needs its matching ingress half.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-postflight-canary-loop
+  labels:
+    app.kubernetes.io/name: postflight-canary-loop
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: postflight
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: postflight-runner
+            k8s:app.kubernetes.io/name: postflight-canary-loop
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
