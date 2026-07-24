@@ -25,7 +25,7 @@ func TestGenericVictoriaLogsHardeningOwnership(t *testing.T) {
 
 	assertVLComponentHardening(t, nestedMap(t, spec, "vlinsert"), "select.disable", "true")
 	assertVLComponentHardening(t, nestedMap(t, spec, "vlselect"), "insert.disable", "true")
-	assertVLComponentHardening(t, nestedMap(t, spec, "vlstorage"), "retention.maxDiskUsagePercent", "85")
+	assertVLComponentHardening(t, nestedMap(t, spec, "vlstorage"), "retention.maxDiskUsagePercent", "80")
 }
 
 func TestGenericVictoriaLogsRetentionUsesOperatorMonthSyntax(t *testing.T) {
