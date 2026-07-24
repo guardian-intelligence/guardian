@@ -16,6 +16,7 @@ resources:
   - networkpolicy.yaml
   - observability.yaml
   - alertmanager-config.yaml
+  - alerting-plane-health.yaml
   - audit-alerts.yaml
   - blackbox-exporter.yaml
   - cilium-drop-metrics.yaml
