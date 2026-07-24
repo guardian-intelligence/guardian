@@ -17,6 +17,7 @@ GUARDIAN_MGMT_DNS_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-dns"
 GUARDIAN_MGMT_EDGE_POLICY_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-edge-policy"
 GUARDIAN_MGMT_CLOUDFLARE_TOKENS_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens"
 GUARDIAN_STRIPE_SANDBOX_ROOT = "src/infrastructure/bootstrap/guardian-stripe-sandbox"
+GUARDIAN_GITHUB_ROOT = "src/infrastructure/bootstrap/guardian-github"
 GUARDIAN_MGMT_TALM_ROOT = "src/infrastructure/talm"
 GUARDIAN_BACKEND_TFVARS = "src/infrastructure/bootstrap/backend.tfvars"
 TOFU_TARGET = "@multitool//tools/tofu"
@@ -122,6 +123,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt-edge-policy:root",
     "//src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens:root",
     "//src/infrastructure/bootstrap/guardian-stripe-sandbox:root",
+    "//src/infrastructure/bootstrap/guardian-github:root",
     "//src/infrastructure/base/admission:manifests",
     "//src/infrastructure/base/app-patches:manifests",
     "//src/infrastructure/base/platform-patches:manifests",
@@ -290,6 +292,7 @@ def _tofu_backend_roots(ctx, root):
             (GUARDIAN_MGMT_EDGE_POLICY_ROOT, "guardian-mgmt-edge-policy"),
             (GUARDIAN_MGMT_CLOUDFLARE_TOKENS_ROOT, "guardian-mgmt-cloudflare-tokens"),
             (GUARDIAN_STRIPE_SANDBOX_ROOT, "guardian-stripe-sandbox"),
+            (GUARDIAN_GITHUB_ROOT, "guardian-github"),
         ]
     if root == "guardian-mgmt":
         return [(GUARDIAN_MGMT_ROOT, "guardian-mgmt")]
@@ -301,7 +304,9 @@ def _tofu_backend_roots(ctx, root):
         return [(GUARDIAN_MGMT_CLOUDFLARE_TOKENS_ROOT, "guardian-mgmt-cloudflare-tokens")]
     if root == "guardian-stripe-sandbox":
         return [(GUARDIAN_STRIPE_SANDBOX_ROOT, "guardian-stripe-sandbox")]
-    ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, guardian-mgmt-dns, guardian-mgmt-edge-policy, guardian-mgmt-cloudflare-tokens, or guardian-stripe-sandbox\n")
+    if root == "guardian-github":
+        return [(GUARDIAN_GITHUB_ROOT, "guardian-github")]
+    ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, guardian-mgmt-dns, guardian-mgmt-edge-policy, guardian-mgmt-cloudflare-tokens, guardian-stripe-sandbox, or guardian-github\n")
     return None
 
 def _tofu_backend_init(ctx, roots, endpoint):
@@ -550,6 +555,7 @@ def _validate_impl(ctx):
         (GUARDIAN_MGMT_EDGE_POLICY_ROOT, "guardian-mgmt-edge-policy"),
         (GUARDIAN_MGMT_CLOUDFLARE_TOKENS_ROOT, "guardian-mgmt-cloudflare-tokens"),
         (GUARDIAN_STRIPE_SANDBOX_ROOT, "guardian-stripe-sandbox"),
+        (GUARDIAN_GITHUB_ROOT, "guardian-github"),
     ]:
         tofu_env = _tofu_validate_env(ctx, label)
         rc = _tofu_root(ctx, root, ["fmt", "-check"], "tofu fmt -check " + label, env = tofu_env)
@@ -2098,7 +2104,7 @@ tofu_init = task(
     summary = "Initialize OpenTofu S3 backends for management bootstrap roots; endpoint defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars.",
     args = {
         "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
-        "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, guardian-mgmt-dns, guardian-mgmt-edge-policy, guardian-mgmt-cloudflare-tokens, or guardian-stripe-sandbox."),
+        "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, guardian-mgmt-dns, guardian-mgmt-edge-policy, guardian-mgmt-cloudflare-tokens, guardian-stripe-sandbox, or guardian-github."),
     },
 )
 
