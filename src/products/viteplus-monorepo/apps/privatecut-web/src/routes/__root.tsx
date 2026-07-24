@@ -32,8 +32,17 @@ export const Route = createRootRoute({
       ...deployMetaTags(),
     ],
     links: [
-      { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
-      { rel: "icon", type: "image/png", sizes: "192x192", href: "/icon-192.png" },
+      {
+        rel: "icon",
+        type: "image/svg+xml",
+        sizes: "any",
+        href: "/favicon.svg?v=5fac7acaba97",
+      },
+      {
+        rel: "alternate icon",
+        type: "image/x-icon",
+        href: "/favicon.ico?v=eb1b6385402e",
+      },
       { rel: "apple-touch-icon", sizes: "180x180", href: "/apple-touch-icon.png" },
       { rel: "manifest", href: "/manifest.webmanifest" },
       {

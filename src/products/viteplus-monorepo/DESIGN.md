@@ -83,6 +83,7 @@ The PrivateCut badge at `rumi.engineering` uses Ink `#0a0a0e` as the full canvas
 and Argent `#e8e6f0` for the wings. The same 18.4% occupancy applies to:
 
 - `favicon.svg`
+- `favicon.ico` (16 px and 32 px fallback)
 - `apple-touch-icon.png`
 - `icon-192.png`
 - `icon-512.png`

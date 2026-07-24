@@ -1,0 +1,155 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
+
+npm_link_all_packages()
+
+HARNESS_SRCS = glob([
+    "package.json",
+    "bin/**/*",
+    "journeys/**/*",
+    "playwright.config.ts",
+    "src/**/*",
+    "test/**/*",
+    "tsconfig.json",
+    "vitest.config.ts",
+])
+
+filegroup(
+    name = "package_manifest",
+    srcs = ["package.json"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "sources",
+    srcs = HARNESS_SRCS,
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "pkg",
+    srcs = HARNESS_SRCS,
+    visibility = ["//visibility:public"],
+)
+
+genrule(
+    name = "checked",
+    srcs = [
+        ":node_modules",
+        ":node_modules/typescript",
+        ":node_modules/vite-plus",
+        ":sources",
+        # vite-plus-core resolves `vite-plus/binding` through the NODE_PATH
+        # fallback at the monorepo root, so the root link must be a declared
+        # input — without it the genrule only works when an unrelated build
+        # has already materialized root node_modules.
+        "//src/products/viteplus-monorepo:node_modules/vite-plus",
+        "//src/products/viteplus-monorepo:vp_node",
+        "//src/products/viteplus-monorepo:workspace_sources",
+    ],
+    outs = ["checked.stamp"],
+    cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+node="$$execroot/$(location //src/products/viteplus-monorepo:vp_node)"
+node_modules_root="$$execroot/$(BINDIR)/src/products/viteplus-monorepo/node_modules"
+package_node_modules="$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/visual-harness/node_modules"
+vp="$$package_node_modules/vite-plus/bin/vp"
+tsc="$$package_node_modules/typescript/bin/tsc"
+test -x "$$vp"
+test -f "$$tsc"
+work="$$(mktemp -d)"
+trap 'rm -rf "$$work"' EXIT
+for f in $(locations //src/products/viteplus-monorepo:workspace_sources); do
+  rel="$${f#src/products/viteplus-monorepo/}"
+  mkdir -p "$$work/$$(dirname "$$rel")"
+  cp "$$f" "$$work/$$rel"
+done
+link_node_modules() {
+  mkdir -p "$$2"
+  find "$$1" -mindepth 1 -maxdepth 1 -exec ln -s {} "$$2/" \\;
+}
+link_node_modules "$$node_modules_root" "$$work/node_modules"
+link_node_modules "$$package_node_modules" "$$work/packages/visual-harness/node_modules"
+export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
+export NODE_PATH="$$node_modules_root$${NODE_PATH:+:$$NODE_PATH}"
+export CI=true
+cd "$$work/packages/visual-harness"
+"$$node" "$$tsc" -p tsconfig.json
+"$$node" "$$vp" test run --config vitest.config.ts
+printf 'visual-harness checks ok\\n' > "$$execroot/$@"
+""",
+)
+
+genrule(
+    name = "harness_runtime",
+    srcs = [
+        ":node_modules/@playwright/test",
+        ":sources",
+    ],
+    outs = ["harness-runtime.tar"],
+    cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+work="$$(mktemp -d)"
+trap 'rm -rf "$$work"' EXIT
+app="$$work/app"
+mkdir -p "$$app/node_modules/@playwright"
+for f in $(locations :sources); do
+  rel="$${f#src/products/viteplus-monorepo/packages/visual-harness/}"
+  mkdir -p "$$app/$$(dirname "$$rel")"
+  cp "$$f" "$$app/$$rel"
+done
+for d in $(locations :node_modules/@playwright/test); do
+  case "$$d" in
+    */node_modules/@playwright/test) dest="$$app/node_modules/@playwright/test" ;;
+    */node_modules/playwright) dest="$$app/node_modules/playwright" ;;
+    */node_modules/playwright-core) dest="$$app/node_modules/playwright-core" ;;
+    *) continue ;;
+  esac
+  [ -e "$$dest" ] || cp -RL "$$execroot/$$d" "$$dest"
+done
+chmod -R u+w "$$work"
+tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \\
+  -cf "$$execroot/$@" -C "$$work" app
+""",
+)
+
+oci_image(
+    name = "image",
+    annotations = {
+        "org.opencontainers.image.description": "Guardian deterministic visual drift and fold canaries",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "guardian-visual-harness",
+    },
+    base = "@playwright_linux_amd64",
+    entrypoint = [
+        "node",
+        "/app/node_modules/@playwright/test/cli.js",
+        "test",
+        "--config",
+        "/app/playwright.config.ts",
+    ],
+    env = {
+        "HOME": "/tmp/home",
+    },
+    tars = [":harness_runtime"],
+    visibility = ["//visibility:public"],
+    workdir = "/app",
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/visual-harness:dev"],
+)
+
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/visual-harness",
+    visibility = ["//visibility:public"],
+)

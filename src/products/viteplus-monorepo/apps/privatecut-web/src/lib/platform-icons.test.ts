@@ -1,10 +1,13 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
-const publicDirectory = join(dirname(fileURLToPath(import.meta.url)), "../../public");
+const testDirectory = dirname(fileURLToPath(import.meta.url));
+const publicDirectory = join(testDirectory, "../../public");
+const rootRoutePath = join(testDirectory, "../routes/__root.tsx");
 const badgeBoundingBoxAreaRatio = 0.184;
 const wingsBounds = { width: 102.174, height: 120.823 };
 const badgeViewBoxSide = 140;
@@ -25,6 +28,10 @@ interface WebManifest {
 
 function readPublicFile(path: string): Buffer {
   return readFileSync(join(publicDirectory, path));
+}
+
+function assetVersion(path: string): string {
+  return createHash("sha256").update(readPublicFile(path)).digest("hex").slice(0, 12);
 }
 
 function readPngHeader(path: string) {
@@ -156,13 +163,28 @@ function expectRasterBadgeGeometry(path: string) {
 }
 
 describe("platform icons", () => {
-  it("gives Apple full-bleed square artwork instead of a pre-rounded icon", () => {
+  it("publishes cache-busted browser icons and full-bleed Apple artwork", () => {
     const favicon = readPublicFile("favicon.svg").toString("utf8");
+    const faviconIco = readPublicFile("favicon.ico");
+    const rootRoute = readFileSync(rootRoutePath, "utf8");
 
     expect(favicon).toContain('viewBox="105 106 140 140"');
     expect(favicon).toContain('<rect x="105" y="106" width="140" height="140"');
     expect(favicon).not.toMatch(/\brx=/);
     expectBadgeGeometry(favicon);
+    expect(faviconIco.readUInt16LE(0)).toBe(0);
+    expect(faviconIco.readUInt16LE(2)).toBe(1);
+    expect(faviconIco.readUInt16LE(4)).toBe(2);
+    expect([
+      [faviconIco.readUInt8(6), faviconIco.readUInt8(7), faviconIco.readUInt16LE(12)],
+      [faviconIco.readUInt8(22), faviconIco.readUInt8(23), faviconIco.readUInt16LE(28)],
+    ]).toEqual([
+      [16, 16, 32],
+      [32, 32, 32],
+    ]);
+    expect(rootRoute).toContain(`/favicon.svg?v=${assetVersion("favicon.svg")}`);
+    expect(rootRoute).toContain(`/favicon.ico?v=${assetVersion("favicon.ico")}`);
+    expect(rootRoute).not.toContain('rel: "icon", type: "image/png"');
 
     expect(readPngHeader("apple-touch-icon.png")).toEqual({
       width: 180,
