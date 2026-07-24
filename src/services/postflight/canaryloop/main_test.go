@@ -223,6 +223,37 @@ func TestRunRefusesAdditionalPullRequestFiles(t *testing.T) {
 	}
 }
 
+func TestPushMetricsLabelsCustomerRepository(t *testing.T) {
+	t.Parallel()
+
+	var body string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		payload, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read metrics body: %v", err)
+		}
+		body = string(payload)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	pushMetrics(
+		context.Background(),
+		server.Client(),
+		server.URL,
+		"digital-guardian-software",
+		"simulated-customer-go",
+		"created",
+		true,
+	)
+
+	want := "postflight_canary_loop_heartbeat{owner=\"digital-guardian-software\",repository=\"simulated-customer-go\",outcome=\"created\"} 1\n" +
+		"postflight_canary_loop_last_run_success{owner=\"digital-guardian-software\",repository=\"simulated-customer-go\"} 1\n"
+	if body != want {
+		t.Fatalf("metrics body = %q, want %q", body, want)
+	}
+}
+
 func newGitHubServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

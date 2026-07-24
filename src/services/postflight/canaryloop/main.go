@@ -112,7 +112,7 @@ func main() {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	token, err := mintInstallationToken(ctx, httpClient, cfg.apiBaseURL, cfg.appID, cfg.installationID, key, time.Now())
 	if err != nil {
-		pushMetrics(context.Background(), httpClient, cfg.metricsInsertURL, "failed", false)
+		pushMetrics(context.Background(), httpClient, cfg.metricsInsertURL, cfg.owner, cfg.repository, "failed", false)
 		slog.Error("github authentication", "err", err)
 		os.Exit(1)
 	}
@@ -128,11 +128,11 @@ func main() {
 	}
 	outcome, err := r.run(ctx)
 	if err != nil {
-		pushMetrics(context.Background(), httpClient, cfg.metricsInsertURL, "failed", false)
+		pushMetrics(context.Background(), httpClient, cfg.metricsInsertURL, cfg.owner, cfg.repository, "failed", false)
 		slog.Error("canary loop", "err", err)
 		os.Exit(1)
 	}
-	pushMetrics(context.Background(), httpClient, cfg.metricsInsertURL, outcome, true)
+	pushMetrics(context.Background(), httpClient, cfg.metricsInsertURL, cfg.owner, cfg.repository, outcome, true)
 	slog.Info("canary loop complete", "outcome", outcome)
 }
 
@@ -717,7 +717,12 @@ func shortSHA(sha string) string {
 	return sha[:12]
 }
 
-func pushMetrics(ctx context.Context, client *http.Client, endpoint, outcome string, success bool) {
+func pushMetrics(
+	ctx context.Context,
+	client *http.Client,
+	endpoint, owner, repository, outcome string,
+	success bool,
+) {
 	if endpoint == "" {
 		return
 	}
@@ -726,9 +731,13 @@ func pushMetrics(ctx context.Context, client *http.Client, endpoint, outcome str
 		value = 1
 	}
 	body := fmt.Sprintf(
-		"postflight_canary_loop_heartbeat{outcome=%q} 1\n"+
-			"postflight_canary_loop_last_run_success %d\n",
+		"postflight_canary_loop_heartbeat{owner=%q,repository=%q,outcome=%q} 1\n"+
+			"postflight_canary_loop_last_run_success{owner=%q,repository=%q} %d\n",
+		owner,
+		repository,
 		outcome,
+		owner,
+		repository,
 		value,
 	)
 	metricsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

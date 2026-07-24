@@ -21,9 +21,14 @@ spec:
             exported_instance: prod/postflight-canary-loop
           annotations:
             summary: "Postflight canary PR loop is failing"
-            description: "The latest canary controller run failed. Inspect the newest postflight-canary-loop Job in postflight-runner and the open pull request in digital-guardian-software/postflight-canary."
+            description: "The latest canary controller run failed for {{ $labels.owner }}/{{ $labels.repository }}. Inspect its newest postflight-canary-loop Job and open pull request."
         - alert: PostflightCanaryLoopAbsent
-          expr: absent_over_time(postflight_canary_loop_heartbeat[30m])
+          expr: |-
+            absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="postflight-canary"}[30m])
+            or absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="simulated-customer-node"}[30m])
+            or absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="simulated-customer-go"}[30m])
+            or absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="simulated-customer-python"}[30m])
+            or absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="simulated-customer-gradle"}[30m])
           for: 2m
           labels:
             severity: critical
@@ -31,9 +36,14 @@ spec:
             exported_instance: prod/postflight-canary-loop
           annotations:
             summary: "Postflight canary PR loop is stale"
-            description: "No canary heartbeat has reached VictoriaMetrics for 30 minutes. The CronJob, its GitHub App secret, or its network path is unavailable."
+            description: "No canary heartbeat for {{ $labels.owner }}/{{ $labels.repository }} has reached VictoriaMetrics for 30 minutes. Its CronJob, GitHub App secret, or network path is unavailable."
         - alert: PostflightCanaryLoopMissing
-          expr: absent(kube_cronjob_status_last_schedule_time{namespace="postflight-runner",cronjob="postflight-canary-loop"})
+          expr: |-
+            absent(kube_cronjob_status_last_schedule_time{namespace="postflight-runner",cronjob="postflight-canary-loop"})
+            or absent(kube_cronjob_status_last_schedule_time{namespace="postflight-runner",cronjob="postflight-canary-loop-node"})
+            or absent(kube_cronjob_status_last_schedule_time{namespace="postflight-runner",cronjob="postflight-canary-loop-go"})
+            or absent(kube_cronjob_status_last_schedule_time{namespace="postflight-runner",cronjob="postflight-canary-loop-python"})
+            or absent(kube_cronjob_status_last_schedule_time{namespace="postflight-runner",cronjob="postflight-canary-loop-gradle"})
           for: 15m
           labels:
             severity: warning
@@ -41,4 +51,4 @@ spec:
             exported_instance: prod/postflight-canary-loop
           annotations:
             summary: "Postflight canary CronJob is missing"
-            description: "kube-state-metrics has not reported postflight-canary-loop for 15 minutes."
+            description: "kube-state-metrics has not reported {{ $labels.cronjob }} for 15 minutes."
