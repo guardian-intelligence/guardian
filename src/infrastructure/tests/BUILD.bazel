@@ -14,6 +14,7 @@ go_test(
         "drbd_alerts_test.go",
         "electric_budget_test.go",
         "edge_hardening_test.go",
+        "flux_crd_discovery_test.go",
         "helpers_test.go",
         "images_lock_test.go",
         "k6_script_conformance_test.go",

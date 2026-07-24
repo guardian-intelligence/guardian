@@ -5,6 +5,7 @@ filegroup(
         "cozy-kubevirt-cdi-prometheus-source.yaml",
         "cozy-linstor-drbd-alerts.yaml",
         "cozy-multus-cpu-resources.yaml",
+        "flux-crd-discovery-refresh.yaml",
         "ingress-origin-edge.yaml",
         "ingress-origin-networkpolicy.yaml",
         "ingress-runtimeclass.yaml",
