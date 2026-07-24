@@ -134,10 +134,20 @@ spec:
         # could not run at all (canaries.md principle 4 — a canary that
         # can't run is a finding, not a skip). This is also what covers a
         # canary that has never succeeded, which the staleness rule below
-        # structurally cannot see.
+        # structurally cannot see (the vector(0) fallback: a failure with
+        # no success on record fires). Keyed to the LATEST terminal run,
+        # not the existence of a failed Job: failedJobsHistoryLimit keeps
+        # the last failed Job object around until the next failure, so an
+        # existence check can never resolve on success and one flake pages
+        # for days.
         - alert: ShorttyVisualCanaryFailing
           expr: |
-            max(kube_job_status_failed{namespace="tenant-guardian-prod",job_name=~"shortty-visual-canary-.*"}) > 0
+            max(kube_job_status_start_time{namespace="tenant-guardian-prod",job_name=~"shortty-visual-canary-.*"}
+                and on(namespace, job_name) kube_job_status_failed{namespace="tenant-guardian-prod",job_name=~"shortty-visual-canary-.*"} > 0)
+            >=
+            (max(kube_job_status_start_time{namespace="tenant-guardian-prod",job_name=~"shortty-visual-canary-.*"}
+                and on(namespace, job_name) kube_job_status_succeeded{namespace="tenant-guardian-prod",job_name=~"shortty-visual-canary-.*"} > 0)
+             or vector(0))
           for: 5m
           labels:
             severity: warn
