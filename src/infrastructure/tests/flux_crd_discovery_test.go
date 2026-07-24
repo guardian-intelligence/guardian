@@ -16,6 +16,9 @@ func TestFluxCRDDiscoveryEpoch(t *testing.T) {
 	assertNestedString(t, patch, "flux", "metadata", "name")
 	assertNestedString(t, patch, "cozy-fluxcd", "metadata", "namespace")
 	assertNestedString(t, patch, "disabled", "metadata", "annotations", "kustomize.toolkit.fluxcd.io/prune")
+	assertNestedString(t, patch, "Override", "metadata", "annotations", "kustomize.toolkit.fluxcd.io/ssa")
+	assertNestedString(t, patch, "flux", "spec", "selector", "matchLabels", "app.kubernetes.io/name")
+	assertNestedString(t, patch, "flux", "spec", "template", "metadata", "labels", "app.kubernetes.io/name")
 	assertNestedString(
 		t,
 		patch,
