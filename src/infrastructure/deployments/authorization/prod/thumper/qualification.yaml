@@ -10,12 +10,12 @@ steps:
   - op: CheckPermission
     resource: postflight_repository:qualification_{{ randomObjectID }}
     subject: guardian_account:alice
-    permission: manage_members
+    permission: manage
     consistency: AtLeastAsFresh
   - op: CheckPermission
     resource: postflight_repository:qualification_{{ randomObjectID }}
     subject: guardian_account:mallory
-    permission: manage_members
+    permission: manage
     expectNoPermission: true
     consistency: AtLeastAsFresh
   - op: DeleteRelationships
@@ -25,6 +25,6 @@ steps:
   - op: CheckPermission
     resource: postflight_repository:qualification_{{ randomObjectID }}
     subject: guardian_account:alice
-    permission: manage_members
+    permission: manage
     expectNoPermission: true
     consistency: AtLeastAsFresh
