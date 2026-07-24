@@ -1,0 +1,16 @@
+# Flux caches API discovery for the lifetime of its controller process. When a
+# CRD migration drops an old served version, health checks for the replacement
+# GVK can otherwise report healthy resources as NotFound until the controller
+# restarts. Bump this epoch only when the cluster's served CRD GVK set changes.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flux
+  namespace: cozy-fluxcd
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  template:
+    metadata:
+      annotations:
+        guardian.dev/api-discovery-epoch: external-secrets-v1
