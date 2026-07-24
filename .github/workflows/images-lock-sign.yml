@@ -1,17 +1,11 @@
 # Derives the GENERATED union images lock (declared + rendered, see
-# //src/infrastructure/imageset) and, on main, signs it and publishes the
+# //src/infrastructure/imageset) on main, signs it, and publishes the
 # signature bundle to ghcr keyed by the union's own sha256. The dark-uplink
 # haul is derived from the union and every blob in it is digest-addressed,
 # so a verified union plus offline digest verification of the haul covers
-# the whole bundle — no key infrastructure.
-#
-# On pull requests only the derive job runs: it is the full-checkout
-# enforcement that every rendered artifact ref is digest-pinned, disjoint
-# from the declared lock, and covered by the dark-mirror registries (the
-# Bazel conformance tests check the same invariants over their runfiles
-# subset; this job walks the real tree). It runs on every PR and classifies
-# the diff itself — required checks cannot be path-filtered without hanging
-# unrelated PRs — exiting in seconds when no union input changed.
+# the whole bundle — no key infrastructure. The pre-merge half — proving the
+# union derives at all from a full checkout — is a step of the build-and-test
+# gate.
 #
 # The sign-blob bundle JSON embeds the Fulcio certificate and Rekor proof,
 # so verification works offline given the pinned Sigstore trusted root and
@@ -23,7 +17,6 @@
 name: images-lock-sign
 
 on:
-  pull_request:
   push:
     branches: [main]
     paths:
@@ -49,44 +42,11 @@ defaults:
     shell: bash
 
 jobs:
-  derive:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          fetch-depth: 0
-
-      - name: Classify the diff
-        id: classify
-        run: |
-          changed="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")"
-          if grep -qE '^(src/infrastructure/(bootstrap/bundle/images\.declared\.lock|deployments/|base/|imageset/|cmd/imageset/|talm/values\.yaml)|go\.(mod|sum)|MODULE\.bazel(\.lock)?$|\.bazelversion|\.github/workflows/images-lock-sign\.yml)' <<<"$changed"; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-            echo "no union lock inputs changed; nothing to derive"
-          fi
-
-      - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
-        if: steps.classify.outputs.relevant == 'true'
-
-      - name: Derive the union lock
-        if: steps.classify.outputs.relevant == 'true'
-        run: |
-          bazelisk run //src/infrastructure/cmd/imageset -- \
-            --declared "$PWD/src/infrastructure/bootstrap/bundle/images.declared.lock" \
-            --repo-root "$PWD" \
-            --dark-mirror-values "$PWD/src/infrastructure/talm/values.yaml" \
-            --out "$PWD/images.lock.union"
-          sha256sum images.lock.union
-
   sign:
     # workflow_dispatch is allowed only where it is equivalent to a main
     # push: signing reviewed history is fine, signing arbitrary branches is
     # not.
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
