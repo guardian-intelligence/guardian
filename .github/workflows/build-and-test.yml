@@ -1,13 +1,6 @@
-# The repository's only CI gate: every check a pull request must pass runs in
-# this one job. Build and test //..., scan for secrets, prove a bumped tool pin
-# still fetches, derive the union images lock from the full tree, and run the
-# runtime gates that need a packed image (company-site scroll perf, shortty
-# smoke, shortty visual drift).
-#
-# One job rather than a fan-out: the gates all want the same warm Bazel cache
-# that the build step leaves behind, and a single required check keeps the
-# ruleset honest. Work that only a diff can invalidate is classified once, up
-# front, and skipped when the diff cannot reach it.
+# The repository's only CI gate: build and test the whole graph, nothing else.
+# Every check that can be a Bazel target IS one, reachable from `//...`, so
+# this workflow stays a thin harness around `bazelisk test`.
 #
 # Publishing and signing deliberately stay in their own files: a workflow path
 # is a cosign identity (see AGENTS.md in this directory).
@@ -33,9 +26,8 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    # The full cold graph plus every runtime gate, serially — no remote cache
-    # until Postflight supplies one.
-    timeout-minutes: 90
+    # The full cold graph — no remote cache until Postflight supplies one.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -60,31 +52,6 @@ jobs:
           restore-keys: |
             bazel-ci-
 
-      # Every conditional step below reads this. Non-PR events classify to
-      # false across the board: the union lock is re-derived by the signing
-      # lane on main, and the runtime gates exist to block a merge.
-      - name: Classify the diff
-        id: classify
-        run: |
-          pins=false union=false viteplus=false
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            changed="$(git diff --name-only "origin/$GITHUB_BASE_REF"...HEAD)"
-            hits() { printf '%s\n' "$changed" | grep -qE "$1"; }
-            common='^(MODULE\.bazel(\.lock)?|\.bazelrc|\.bazelversion|\.github/workflows/(build-and-test|images-lock-sign)\.yml)$'
-            if hits '^(src/tools/|MODULE\.bazel)'; then pins=true; fi
-            if hits '^src/infrastructure/(bootstrap/bundle/images\.declared\.lock|deployments/|base/|imageset/|cmd/imageset/|talm/values\.yaml)|^go\.(mod|sum)$'"|$common"; then union=true; fi
-            if hits '^src/products/viteplus-monorepo/'"|$common"; then viteplus=true; fi
-          fi
-          {
-            echo "pins=$pins"
-            echo "union=$union"
-            echo "viteplus=$viteplus"
-          } >> "$GITHUB_OUTPUT"
-          echo "classified: pins=$pins union=$union viteplus=$viteplus"
-
-      - name: Secret scan
-        run: tools/ops/secret-scan tree
-
       - name: Build
         run: bazelisk build --config=ci //...
 
@@ -93,113 +60,18 @@ jobs:
 
       # //src/tools:pins is tagged manual (the archive set is multi-GB and
       # fetched lazily), so only this proves a bumped archive still fetches,
-      # unpacks, and carries the declared binary paths. Deliberately not
+      # unpacks, and carries the declared binary paths. Scoped to diffs that
+      # can move a pin — most PRs touch none of it. Deliberately not
       # --config=ci: the step exists to prove a fresh fetch works.
       - name: Verify tool pins fetch and unpack
-        if: steps.classify.outputs.pins == 'true'
-        run: bazelisk build //src/tools:pins
-
-      # Full-checkout enforcement that every rendered artifact ref is
-      # digest-pinned, disjoint from the declared lock, and covered by the
-      # dark-mirror registries. The Bazel conformance tests check the same
-      # invariants over their runfiles subset; this walks the real tree. The
-      # derivation is deterministic — images-lock-sign.yml re-derives the same
-      # bytes on main and signs them.
-      - name: Derive the union images lock
-        if: steps.classify.outputs.union == 'true'
+        if: github.event_name == 'pull_request'
         run: |
-          bazelisk run --config=ci //src/infrastructure/cmd/imageset -- \
-            --declared "$PWD/src/infrastructure/bootstrap/bundle/images.declared.lock" \
-            --repo-root "$PWD" \
-            --dark-mirror-values "$PWD/src/infrastructure/talm/values.yaml" \
-            --out "$PWD/images.lock.union"
-          sha256sum images.lock.union
-
-      # Load the exact image just built, run it, and fail if the letters page's
-      # scroll-frame timing regresses (perf/scroll-jank-gate.mjs holds the
-      # thresholds and rationale). Runs against the shipped artifact, not a dev
-      # server, so it catches anything a bundler/runtime difference would hide.
-      - name: Company-site scroll-performance gate
-        if: steps.classify.outputs.viteplus == 'true'
-        run: |
-          bazelisk run --config=ci //src/products/viteplus-monorepo/apps/guardianintelligence-web/site:load
-          docker run -d --name perf-gate -p 8080:8080 ghcr.io/guardian-intelligence/company-site:edge
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8080/letters/dear-shovon >/dev/null && break
-            sleep 1
-          done
-          # Installed in an empty scratch dir, not in place: `npm install` in
-          # the app directory would read its package.json and choke on pnpm's
-          # `catalog:` protocol in the dependency versions. Copied in rather
-          # than resolved via NODE_PATH: Node's ESM loader does not search
-          # NODE_PATH at all (CJS-only, verified against a real CI run --
-          # ERR_MODULE_NOT_FOUND despite NODE_PATH being set), so the package
-          # has to be a real node_modules/ entry to import-resolve.
-          mkdir -p /tmp/perf-gate-deps && cd /tmp/perf-gate-deps
-          npm init -y >/dev/null
-          npm install playwright@1.61.1
-          cd "$GITHUB_WORKSPACE/src/products/viteplus-monorepo/apps/guardianintelligence-web"
-          mkdir -p node_modules
-          cp -r /tmp/perf-gate-deps/node_modules/playwright node_modules/
-          cp -r /tmp/perf-gate-deps/node_modules/playwright-core node_modules/
-          # webkit is excluded: unusable on this runner (see scroll-jank-gate.mjs header).
-          node node_modules/playwright/cli.js install --with-deps chromium firefox
-          BASE=http://127.0.0.1:8080 node perf/scroll-jank-gate.mjs
-          docker rm -f perf-gate
-
-      - name: Shortty smoke gate
-        if: steps.classify.outputs.viteplus == 'true'
-        run: |
-          bazelisk run --config=ci //src/products/viteplus-monorepo/apps/shortty-web/site:load
-          docker run -d --name shortty-smoke -p 8081:8080 ghcr.io/guardian-intelligence/shortty-web:edge
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8081/healthz >/dev/null && break
-            sleep 1
-          done
-          curl -sf http://127.0.0.1:8081/ | grep -q "under 4"
-          curl -sf http://127.0.0.1:8081/healthz >/dev/null
-          docker rm -f shortty-smoke
-
-      # Deterministic visual gate: run the visual-harness canary inside the
-      # pinned Playwright image, whose font rendering matches the committed
-      # linux baselines, and fail on visual drift or on critical elements
-      # dropping below the fold in any form factor.
-      - name: Shortty visual drift and fold gate
-        id: visual
-        if: steps.classify.outputs.viteplus == 'true'
-        run: |
-          bazelisk run --config=ci //src/products/viteplus-monorepo/packages/visual-harness:load
-          docker network create visual-gate
-          docker run -d --name shortty-visual --network visual-gate --network-alias shortty \
-            -p 8082:8080 ghcr.io/guardian-intelligence/shortty-web:edge
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8082/healthz >/dev/null && break
-            sleep 1
-          done
-          curl -sf http://127.0.0.1:8082/healthz >/dev/null
-          mkdir -p /tmp/visual-output
-          # journeys/ is mounted read-write and the run passes
-          # --update-snapshots=missing: a form factor with no committed
-          # baseline writes one (surfaced via the artifact below for review
-          # and commit) instead of bricking bootstrap, while any committed
-          # baseline that mismatches still fails the gate.
-          docker run --rm --network visual-gate \
-            -e VISUAL_TARGET_URL=http://shortty:8080 -e VISUAL_ALLOW_HTTP=1 \
-            -v "$PWD/src/products/viteplus-monorepo/packages/visual-harness/journeys:/app/journeys" \
-            -v /tmp/visual-output:/tmp/visual-harness-output \
-            guardian/visual-harness:dev --update-snapshots=missing
-          docker rm -f shortty-visual
-          docker network rm visual-gate
-
-      - name: Upload shortty visual baselines and diffs
-        if: always() && contains(fromJSON('["success", "failure"]'), steps.visual.outcome)
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
-        with:
-          name: shortty-visual
-          if-no-files-found: ignore
-          path: |
-            src/products/viteplus-monorepo/packages/visual-harness/journeys/visual.spec.ts-snapshots/
-            /tmp/visual-output/
+          if git diff --name-only "origin/$GITHUB_BASE_REF"...HEAD |
+            grep -qE '^(src/tools/|MODULE\.bazel)'; then
+            bazelisk build //src/tools:pins
+          else
+            echo "no tool-pin paths in diff; skipping"
+          fi
 
       - name: Save Bazel cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

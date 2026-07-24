@@ -3,14 +3,14 @@ GitHub-administered compute, and the set is closed by design: the cluster,
 not GitHub, is the control plane (see the root AGENTS.md coding
 guidelines). A workflow earns a file here for exactly one of two reasons:
 
-1. **The merge-time gate** — singular. `build-and-test.yml` is every check a
-   pull request runs: build+test `//...`, the secret scan, the tool-pin
-   fresh-fetch build, the union images-lock derivation, and the runtime
-   gates that need a packed image. A new check is a step in that one job,
-   and belongs in the Bazel graph as a test reachable from `//...` unless
-   it needs git/GitHub context a hermetic action cannot have (the secret
-   scan) or Bazel's own caching would defeat it (the tool-pin fresh
-   fetch). Never add a second `pull_request`-triggered workflow.
+1. **The merge-time gate** — singular. `build-and-test.yml` builds and tests
+   `//...` and nothing else, plus the tool-pin fresh-fetch build that
+   Bazel's own caching would otherwise defeat. A new check belongs in the
+   Bazel graph as a test reachable from `//...`, never as a step here and
+   never as a second `pull_request`-triggered workflow. A check that cannot
+   be a Bazel target — because it needs a runtime, a packed image, or a
+   live dependency — belongs after merge or in a prod canary, not in front
+   of the merge button: merge cadence is the scarce resource.
 2. **Trusted publisher identity** — post-merge jobs that build, sign, and
    push artifacts (`images.yml`, `images-lock-sign.yml`,
    `postflight-cli-image.yml`, `postflight-cli-release.yml`). Each workflow

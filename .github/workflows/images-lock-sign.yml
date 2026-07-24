@@ -3,9 +3,10 @@
 # signature bundle to ghcr keyed by the union's own sha256. The dark-uplink
 # haul is derived from the union and every blob in it is digest-addressed,
 # so a verified union plus offline digest verification of the haul covers
-# the whole bundle — no key infrastructure. The pre-merge half — proving the
-# union derives at all from a full checkout — is a step of the build-and-test
-# gate.
+# the whole bundle — no key infrastructure. A derivation that cannot be
+# produced fails here, after merge: the Bazel conformance suite checks the
+# same digest-pinning and dark-mirror-coverage invariants pre-merge over its
+# runfiles subset.
 #
 # The sign-blob bundle JSON embeds the Fulcio certificate and Rekor proof,
 # so verification works offline given the pinned Sigstore trusted root and
