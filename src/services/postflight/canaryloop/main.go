@@ -88,6 +88,10 @@ type checkRun struct {
 	Conclusion string `json:"conclusion"`
 }
 
+type pullRequestFile struct {
+	Filename string `json:"filename"`
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
@@ -349,6 +353,9 @@ func (r *runner) openCanaryPullRequests(ctx context.Context) ([]pullRequest, err
 }
 
 func (r *runner) reconcilePullRequest(ctx context.Context, pull pullRequest) (string, error) {
+	if err := r.validatePullRequest(ctx, pull); err != nil {
+		return "", err
+	}
 	path := r.repositoryPath("/commits/") + url.PathEscape(pull.Head.SHA) + "/check-runs"
 	var checks struct {
 		CheckRuns []checkRun `json:"check_runs"`
@@ -415,6 +422,60 @@ func (r *runner) reconcilePullRequest(ctx context.Context, pull pullRequest) (st
 		)
 	}
 	return "waiting", nil
+}
+
+func (r *runner) validatePullRequest(ctx context.Context, pull pullRequest) error {
+	path := r.repositoryPath("/pulls/") + strconv.Itoa(pull.Number) + "/files?per_page=100"
+	var files []pullRequestFile
+	if err := r.gh.doJSON(ctx, http.MethodGet, path, nil, &files); err != nil {
+		return err
+	}
+	if len(files) != 1 || files[0].Filename != r.cfg.targetPath {
+		return fmt.Errorf(
+			"pull request #%d changes %d files instead of only %s",
+			pull.Number,
+			len(files),
+			r.cfg.targetPath,
+		)
+	}
+
+	targetCommit, err := r.commit(ctx, r.cfg.targetCommit)
+	if err != nil {
+		return err
+	}
+	if len(targetCommit.Parents) != 1 {
+		return fmt.Errorf("target commit %s has %d parents; expected one", r.cfg.targetCommit, len(targetCommit.Parents))
+	}
+	appliedBlob, err := r.blobAt(ctx, r.cfg.targetPath, r.cfg.targetCommit)
+	if err != nil {
+		return err
+	}
+	revertedBlob, err := r.blobAt(ctx, r.cfg.targetPath, targetCommit.Parents[0].SHA)
+	if err != nil {
+		return err
+	}
+	baseBlob, err := r.blobAt(ctx, r.cfg.targetPath, r.cfg.baseBranch)
+	if err != nil {
+		return err
+	}
+	headBlob, err := r.blobAt(ctx, r.cfg.targetPath, pull.Head.SHA)
+	if err != nil {
+		return err
+	}
+
+	switch {
+	case strings.HasPrefix(pull.Head.Ref, branchPrefix+"revert-"):
+		if baseBlob != appliedBlob || headBlob != revertedBlob {
+			return fmt.Errorf("pull request #%d is not an exact upstream revert", pull.Number)
+		}
+	case strings.HasPrefix(pull.Head.Ref, branchPrefix+"reapply-"):
+		if baseBlob != revertedBlob || headBlob != appliedBlob {
+			return fmt.Errorf("pull request #%d is not an exact upstream reapply", pull.Number)
+		}
+	default:
+		return fmt.Errorf("pull request #%d has an invalid canary branch", pull.Number)
+	}
+	return nil
 }
 
 func (r *runner) pullExpired(pull pullRequest) bool {

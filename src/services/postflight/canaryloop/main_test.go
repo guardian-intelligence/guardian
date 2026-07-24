@@ -82,6 +82,7 @@ func TestRunWaitsForPostflightCheck(t *testing.T) {
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/repos/test/canary/pulls":
 			writeJSON(t, w, http.StatusOK, []any{testPullRequest(23, "head-sha", time.Now())})
+		case serveValidPullValidation(t, w, req):
 		case req.Method == http.MethodGet && req.URL.Path == "/repos/test/canary/commits/head-sha/check-runs":
 			writeJSON(t, w, http.StatusOK, map[string]any{
 				"check_runs": []any{
@@ -111,6 +112,7 @@ func TestRunMergesSuccessfulPostflightPullRequest(t *testing.T) {
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/repos/test/canary/pulls":
 			writeJSON(t, w, http.StatusOK, []any{testPullRequest(23, "head-sha", time.Now())})
+		case serveValidPullValidation(t, w, req):
 		case req.Method == http.MethodGet && req.URL.Path == "/repos/test/canary/commits/head-sha/check-runs":
 			writeJSON(t, w, http.StatusOK, map[string]any{
 				"check_runs": []any{
@@ -180,6 +182,7 @@ func TestRunFailsWhenPostflightCheckNeverAppears(t *testing.T) {
 		switch {
 		case req.Method == http.MethodGet && req.URL.Path == "/repos/test/canary/pulls":
 			writeJSON(t, w, http.StatusOK, []any{testPullRequest(23, "head-sha", now.Add(-maxPullAge-time.Minute))})
+		case serveValidPullValidation(t, w, req):
 		case req.Method == http.MethodGet && req.URL.Path == "/repos/test/canary/commits/head-sha/check-runs":
 			writeJSON(t, w, http.StatusOK, map[string]any{"check_runs": []any{}})
 		default:
@@ -193,6 +196,30 @@ func TestRunFailsWhenPostflightCheckNeverAppears(t *testing.T) {
 	_, err := r.run(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "did not appear") {
 		t.Fatalf("run error = %v, want missing check failure", err)
+	}
+}
+
+func TestRunRefusesAdditionalPullRequestFiles(t *testing.T) {
+	t.Parallel()
+
+	server := newGitHubServer(t, func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/repos/test/canary/pulls":
+			writeJSON(t, w, http.StatusOK, []any{testPullRequest(23, "head-sha", time.Now())})
+		case req.Method == http.MethodGet && req.URL.Path == "/repos/test/canary/pulls/23/files":
+			writeJSON(t, w, http.StatusOK, []any{
+				map[string]string{"filename": "target/file.go"},
+				map[string]string{"filename": "unexpected"},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.String())
+		}
+	})
+	defer server.Close()
+
+	_, err := testRunner(server.URL).run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "changes 2 files") {
+		t.Fatalf("run error = %v, want additional-file refusal", err)
 	}
 }
 
@@ -243,6 +270,30 @@ func testPullRequest(number int, headSHA string, createdAt time.Time) map[string
 			},
 		},
 	}
+}
+
+func serveValidPullValidation(t *testing.T, w http.ResponseWriter, req *http.Request) bool {
+	t.Helper()
+	switch {
+	case req.Method == http.MethodGet && req.URL.Path == "/repos/test/canary/pulls/23/files":
+		writeJSON(t, w, http.StatusOK, []any{map[string]string{"filename": "target/file.go"}})
+	case req.Method == http.MethodGet && req.URL.Path == "/repos/test/canary/git/commits/target":
+		writeJSON(t, w, http.StatusOK, testCommit("target", "target-tree", []string{"parent"}))
+	case req.Method == http.MethodGet && req.URL.Path == "/repos/test/canary/contents/target/file.go":
+		sha := map[string]string{
+			"target":   "applied-blob",
+			"parent":   "reverted-blob",
+			"main":     "applied-blob",
+			"head-sha": "reverted-blob",
+		}[req.URL.Query().Get("ref")]
+		if sha == "" {
+			return false
+		}
+		writeJSON(t, w, http.StatusOK, map[string]string{"type": "file", "sha": sha})
+	default:
+		return false
+	}
+	return true
 }
 
 func testCommit(sha, tree string, parents []string) map[string]any {
