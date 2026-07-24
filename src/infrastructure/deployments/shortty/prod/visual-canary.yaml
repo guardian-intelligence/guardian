@@ -1,0 +1,164 @@
+# Steady-state visual canary for shortty: the visual-harness journey suite run
+# against the production site every 30 minutes, failing on visual drift from
+# the committed baselines or on a critical element dropping below the fold in
+# any form factor. Baselines ship inside the image (journeys/** is part of the
+# image sources), so the comparison and the bytes it compares against move
+# together and a refresh is an ordinary reviewed PR.
+#
+# It runs against https://rumi.engineering, not an in-cluster Service: the
+# thing customers see includes the edge, so a regression introduced by cache
+# rules or edge policy has to be able to fail this.
+#
+# Deliberately no --update-snapshots: a missing baseline is a finding here,
+# not a bootstrap convenience. Self-blessing in prod would let a form factor
+# silently lose its baseline and report green forever.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: shortty-visual-canary
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: shortty-visual-canary
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # The suite walks every form factor at a fixed animation timestamp;
+      # 2m of harness timeout plus browser start and image pull.
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: shortty-visual-canary
+            app.kubernetes.io/part-of: guardian
+            guardian.dev/stage: prod
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 12345
+            runAsGroup: 12345
+            fsGroup: 12345
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: visual
+              image: ghcr.io/guardian-intelligence/visual-harness:edge@sha256:f87d7f49770fb141f067e6aa73fcf4d3b3facc1007d18df525f66043378b987b # {"$imagepolicy": "guardian-imageops:visual-harness"}
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: VISUAL_TARGET_URL
+                  value: https://rumi.engineering
+                - name: VISUAL_TARGET
+                  value: shortty
+                - name: VISUAL_OUTPUT_DIR
+                  value: /tmp/visual-harness-output
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 512Mi
+                limits:
+                  cpu: "2"
+                  memory: 2Gi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            # Chromium's sandbox, the harness output dir, and the image's
+            # HOME=/tmp/home all land here; the root filesystem stays
+            # read-only.
+            - name: tmp
+              emptyDir:
+                sizeLimit: 1Gi
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: shortty-visual-canary
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: shortty-visual-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: shortty-visual-canary
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # The canary reaches shortty the way a customer does: out to the
+    # Cloudflare edge, never to the in-cluster Service.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: shortty-visual-canary
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: shortty-visual-canary
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  groups:
+    - name: shortty-visual-canary-prod.rules
+      interval: 60s
+      rules:
+        # A failed run is a real finding: either shortty drifted from its
+        # baselines, a critical element fell below the fold, or the canary
+        # could not run at all (canaries.md principle 4 — a canary that
+        # can't run is a finding, not a skip). This is also what covers a
+        # canary that has never succeeded, which the staleness rule below
+        # structurally cannot see.
+        - alert: ShorttyVisualCanaryFailing
+          expr: |
+            max(kube_job_status_failed{namespace="tenant-guardian-prod",job_name=~"shortty-visual-canary-.*"}) > 0
+          for: 5m
+          labels:
+            severity: warn
+            guardian_stage: prod
+            exported_instance: prod/shortty-visual-canary
+          annotations:
+            summary: "shortty visual canary is failing"
+            description: "A shortty-visual-canary run failed against https://rumi.engineering: visual drift from a committed baseline, a critical element below the fold, or the harness failing to start. Pull the pod logs for the failing form factor; refresh baselines only after confirming the change was intended."
+        # Fires only once the canary has succeeded at least once: with no
+        # successful run the series does not exist and the expression is
+        # empty, so standing this up cannot page before first success. 95m
+        # tolerates two missed 30m cycles plus the run deadline and scrape
+        # lag.
+        - alert: ShorttyVisualCanaryStale
+          expr: |
+            time() - max(kube_cronjob_status_last_successful_time{namespace="tenant-guardian-prod",cronjob="shortty-visual-canary"}) > 5700
+          for: 5m
+          labels:
+            severity: warn
+            guardian_stage: prod
+            exported_instance: prod/shortty-visual-canary
+          annotations:
+            summary: "shortty visual canary has not succeeded recently"
+            description: "No successful shortty-visual-canary run in over 95 minutes (two missed 30m cycles). The CronJob may be suspended, unschedulable, or failing before it can report; check the Job history in tenant-guardian-prod."
