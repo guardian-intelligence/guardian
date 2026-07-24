@@ -48,7 +48,15 @@ spec:
             metrics:
               enabled:
                 - dns
-                - drop
+                # Namespace-level context, not pod or workload: this cluster
+                # runs CronJobs on minute schedules, and both `pod` and
+                # `workload-name` resolve a Job pod to its timestamped Job
+                # name — one new series per run, unbounded. Namespaces are a
+                # closed set, and namespace + traffic_direction + protocol
+                # narrows a denial to a handful of candidates. The
+                # reserved-identity fallback keeps world/host/remote-node
+                # sources labelled instead of collapsing them to empty.
+                - drop:sourceContext=namespace|reserved-identity;destinationContext=namespace|reserved-identity;labelsContext=traffic_direction
                 - tcp
                 - flow
                 - port-distribution

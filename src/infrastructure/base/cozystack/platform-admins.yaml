@@ -226,6 +226,18 @@ rules:
       - list
       - watch
   - apiGroups:
+      - cilium.io
+    resources:
+      - ciliumclusterwidenetworkpolicies
+      - ciliumendpoints
+      - ciliumidentities
+      - ciliumnetworkpolicies
+      - ciliumnodes
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
       - flagger.app
     resources:
       - alertproviders

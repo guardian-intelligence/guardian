@@ -8,6 +8,7 @@ go_test(
         "alert_tuning_test.go",
         "analytics_ddl_conformance_test.go",
         "cdi_alerts_test.go",
+        "cilium_drop_attribution_test.go",
         "cilium_node_identity_test.go",
         "cluster_domain_test.go",
         "core_metrics_wiring_test.go",
