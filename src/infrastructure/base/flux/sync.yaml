@@ -440,11 +440,11 @@ spec:
       kind: Certificate
       name: spicedb-server
       namespace: tenant-guardian-prod
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       name: spicedb-api-token-slot-a
       namespace: tenant-guardian-prod
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       name: spicedb-api-token-slot-b
       namespace: tenant-guardian-prod
@@ -457,7 +457,7 @@ spec:
       name: spicedb-postgres-restore-baseline-20260718
       namespace: tenant-guardian-prod
   healthCheckExprs:
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       current: >-
         has(status.conditions) &&
@@ -521,11 +521,11 @@ spec:
       kind: Deployment
       name: authorization
       namespace: tenant-guardian-prod
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       name: authorization-check-token
       namespace: tenant-guardian-prod
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       name: authorization-write-token
       namespace: tenant-guardian-prod
@@ -549,7 +549,7 @@ spec:
         (c.status == 'False' &&
         c.type == 'Migrating' &&
         c.reason == 'MigrationFailed'))
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       current: >-
         has(status.conditions) &&
@@ -682,11 +682,11 @@ spec:
   # Reconciling/Stalled conditions), so declare their Ready contract; a synced
   # ExternalSecret is what proves the OpenBao→Secret projection works.
   healthCheckExprs:
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ClusterSecretStore
       current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
       failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
       failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
@@ -859,7 +859,7 @@ spec:
   wait: true
   timeout: 10m
   healthCheckExprs:
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
       failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
@@ -894,11 +894,11 @@ spec:
   wait: true
   timeout: 15m
   healthCheckExprs:
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ClusterSecretStore
       current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
       failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
       failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
@@ -972,16 +972,16 @@ spec:
       kind: Deployment
       name: otel-collector
       namespace: guardian-analytics
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       name: analytics-ch-ingest
       namespace: guardian-analytics
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       name: payments-checkout-canary
       namespace: guardian-analytics
   healthCheckExprs:
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
       failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
@@ -1013,7 +1013,7 @@ spec:
   wait: true
   timeout: 15m
   healthCheckExprs:
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       current: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'True')
       failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
@@ -1097,12 +1097,12 @@ spec:
       kind: Deployment
       name: alert-relay
       namespace: tenant-root
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       name: alert-relay-config
       namespace: tenant-root
   healthCheckExprs:
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
       failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
@@ -1143,12 +1143,12 @@ spec:
       kind: Deployment
       name: postflight-controlplane
       namespace: postflight-runner
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       name: github-app
       namespace: postflight-runner
   healthCheckExprs:
-    - apiVersion: external-secrets.io/v1beta1
+    - apiVersion: external-secrets.io/v1
       kind: ExternalSecret
       current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
       failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
