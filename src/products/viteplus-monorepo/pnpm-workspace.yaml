@@ -58,8 +58,8 @@ catalog:
   valibot: 1.4.2
   # Pinned to specific versions so the on-host Verdaccio mirror does not
   # have to keep up with @latest publish drift on every install.
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.4
-  vite-plus: 0.2.4
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.5
+  vite-plus: 0.2.5
   vitest: 4.1.10
   web-vitals: 4.2.4
 
