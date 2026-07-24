@@ -67,6 +67,7 @@ House rules:
 - Metrics: `kubectl port-forward -n tenant-root svc/vmselect-shortterm 8481:8481`, then PromQL via `curl 127.0.0.1:8481/select/0/prometheus/api/v1/query --data-urlencode 'query=...'`.
 - Traces, spans, and analytics events: `kubectl port-forward -n tenant-root svc/chendpoint-clickhouse-analytics 9000:9000`, get the `ingest` password from `kubectl get secret -n guardian-analytics analytics-ch-ingest -o jsonpath='{.data.ingest}' | base64 -d`, then `clickhouse-client --host 127.0.0.1 --user ingest` and `SHOW CREATE TABLE guardian_analytics.events` / `guardian_analytics.otel_traces` for the schema actually being served.
 - Schema source: `src/infrastructure/deployments/analytics/system/{ddl-configmap.yaml,traces-configmap.yaml}`.
+- Dropped network flows: the Cilium agents export every `DROPPED`/`ERROR` flow as JSON on stdout, so they land in VictoriaLogs with the rest of the container logs. `hubble_drop_total` says a namespace is being denied; this says which peer, port, and policy. LogsQL: `kubernetes_container_name:cilium-agent AND _msg:POLICY_DENIED | unpack_json | keep _time, source, destination, IP, l4, drop_reason_desc, egress_denied_by`. There is no Hubble relay to query — see `src/infrastructure/base/platform-patches/cozystack-networking-hubble.yaml` for why.
 </observability>
 
 <coding_guidelines>

@@ -9,9 +9,12 @@
 # the cilium chart (hubble-relay, hubble-ui) can never start on a fresh
 # cluster, the helm upgrade stalls on it, and the whole platform deadlocks
 # behind "dependency 'cozy-cilium/cilium' is not ready". Hubble stays enabled
-# on the agents (hostNetwork, no CNI dependency) with metrics; run the Hubble
-# CLI against the agent sockets, or reintroduce relay/ui only in a package
-# layer that reconciles after kubeovn is Ready.
+# on the agents (hostNetwork, no CNI dependency) with metrics and the static
+# flow exporter; reintroduce relay/ui only in a package layer that reconciles
+# after kubeovn is Ready. Without relay there is no observer endpoint any
+# in-cluster reader can reach — the agents listen on :4244 behind mTLS and
+# the platform agent holds neither exec nor port-forward on cozy-cilium — so
+# the exported flow log is the readable record of what the datapath dropped.
 apiVersion: cozystack.io/v1alpha1
 kind: Package
 metadata:
@@ -64,3 +67,28 @@ spec:
                 - httpV2:exemplars=true;labelsContext=source_ip,source_namespace,source_workload,destination_ip,destination_namespace,destination_workload,traffic_direction
               serviceMonitor:
                 enabled: true
+            # Metrics say a policy is dropping something; they cannot say
+            # what. The drop counter is namespace-scoped by construction
+            # (pod/workload context mints a series per CronJob run), so a
+            # denial can be narrowed to a namespace and never to a port or a
+            # peer — three investigations have dead-ended there. The static
+            # exporter is the agent-side answer: it needs no pod networking,
+            # so it does not reintroduce the cold-boot deadlock that keeps
+            # relay and ui disabled above.
+            export:
+              static:
+                enabled: true
+                # stdout, not the default rotated hostPath file: fluent-bit
+                # already tails container logs into VictoriaLogs, whereas a
+                # file needs a new input in the platform-owned fluent-bit
+                # ConfigMap, which a chart upgrade replaces wholesale.
+                filePath: stdout
+                # Denied and errored flows only — the cluster drops ~0.3
+                # flows/s in steady state, so this is a rounding error
+                # against agent log volume, and it stays bounded because
+                # the alert that reads it fires on the same condition. An
+                # unfiltered export is every packet and is not affordable.
+                # Space-joined into hubble-export-allowlist, so each filter
+                # must be compact JSON.
+                allowList:
+                  - '{"verdict":["DROPPED","ERROR"]}'
