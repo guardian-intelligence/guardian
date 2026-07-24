@@ -18,6 +18,11 @@ import (
 	"github.com/bazelbuild/rules_go/go/runfiles"
 )
 
+var (
+	testAgentUser    = personas[defaultPersona].user
+	testAgentContext = personas[defaultPersona].user + "@" + clusterName
+)
+
 type recordedCall struct {
 	kind string
 	bin  string
@@ -430,12 +435,12 @@ current-context: unrelated
 	if err := json.Unmarshal(raw, &view); err != nil {
 		t.Fatalf("parse kubectl config view: %v", err)
 	}
-	if view.CurrentContext != agentContext {
-		t.Fatalf("current context = %q, want %q", view.CurrentContext, agentContext)
+	if view.CurrentContext != testAgentContext {
+		t.Fatalf("current context = %q, want %q", view.CurrentContext, testAgentContext)
 	}
 	contextNames := namesFromView(view.Contexts)
 	userNames := namesFromView(view.Users)
-	for _, name := range []string{"unrelated", agentContext} {
+	for _, name := range []string{"unrelated", testAgentContext} {
 		if !contextNames[name] {
 			t.Fatalf("contexts = %#v, missing %q", contextNames, name)
 		}
@@ -443,7 +448,7 @@ current-context: unrelated
 	if contextNames[adminContext] {
 		t.Fatalf("contexts = %#v, breakglass context remains", contextNames)
 	}
-	for _, name := range []string{"unrelated-user", agentUser} {
+	for _, name := range []string{"unrelated-user", testAgentUser} {
 		if !userNames[name] {
 			t.Fatalf("users = %#v, missing %q", userNames, name)
 		}
@@ -893,5 +898,28 @@ func assertNoAuthTemps(t *testing.T, dir string) {
 	}
 	if len(matches) != 0 {
 		t.Fatalf("temporary kubeconfigs remain: %#v", matches)
+	}
+}
+
+// Only the unattended rung may request offline_access: Keycloak grants the
+// realm role to that identity alone, so asking for the scope as a write
+// persona fails the device code exchange instead of yielding a shorter-lived
+// token. This is the enforcement mechanism behind "a write session needs a
+// human", so it is pinned here rather than left to the manifest alone.
+func TestOnlyUnattendedPersonaRequestsOfflineAccess(t *testing.T) {
+	if len(personas) == 0 {
+		t.Fatal("no personas declared")
+	}
+	for name, rung := range personas {
+		args := strings.Join(agentCredentialArgs(config{}, rung, rung.user), " ")
+		if got := strings.Contains(args, "offline_access"); got != rung.unattended {
+			t.Fatalf("persona %s: offline_access requested = %v, want %v", name, got, rung.unattended)
+		}
+		if !strings.Contains(args, "--exec-arg=--grant-type=device-code") {
+			t.Fatalf("persona %s: device-code grant missing", name)
+		}
+	}
+	if !personas[defaultPersona].unattended {
+		t.Fatalf("default persona %q must be the unattended rung", defaultPersona)
 	}
 }

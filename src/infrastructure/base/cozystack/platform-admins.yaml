@@ -1,15 +1,56 @@
 # Named operator identities for the platform Keycloak (cozy realm). Each human
-# and each long-horizon agent gets its own user so access is attributable and
+# and each agent persona gets its own user so access is attributable and
 # individually revocable. The apiserver maps preferred_username to the user
 # and Keycloak groups to Kubernetes RBAC groups.
 #
+# THE PERSONA LADDER
+#
+# A session chooses how much authority it carries by which identity it logs in
+# as. The rungs, weakest first:
+#
+#   read        cluster-wide read plus port-forward, nothing else. The default
+#               for agent sessions and for subagents that only need to observe.
+#               Holds offline_access, so it runs unattended indefinitely.
+#   write-basic read plus the routine repair verbs: delete pods and jobs, scale
+#               workloads, and mint namespace-scoped secrets-writer tokens.
+#   write-all   cluster-admin, for emergencies on sensitive systems.
+#   root        the x509 breakglass minted from the custody bundle
+#               (`aspect infra auth --platform-admin --reason`). Deliberately
+#               NOT a Keycloak identity: disaster recovery includes "Keycloak
+#               is down", so the last-resort credential cannot depend on it.
+#
+# The human-in-the-loop property is enforced by offline_access, not by a gate
+# anyone had to build. Only `read` carries the realm role, so only `read` can
+# refresh unattended; every write persona expires with its Keycloak session and
+# needs a fresh device approval from the operator to come back. Withholding one
+# realm role is what makes "an agent may observe freely but must ask before it
+# changes anything" true.
+#
+# No persona may read a secret value. `view` excludes Secrets and the OpenBao
+# management store is write-only to every namespace-scoped token. The single
+# named exception in the estate is `guardian-persona-analytics-read` (in the
+# analytics deployment), which grants `get` on two named telemetry Secrets
+# because what they unlock holds no PII. write-all is cluster-admin and can
+# therefore read Secrets by construction — that is the deliberate boundary of
+# the emergency rung, and why it is gated behind a per-session human approval.
+#
+# ADDING A PERSONA
+#
+# Copy a persona block below and change the name. A persona is exactly five
+# things, and TestPersonaLadderShape fails the build if any is missing or
+# inconsistent:
+#   1. a KeycloakRealmGroup `guardian-persona-<name>`
+#   2. a KeycloakRealmUser whose ONLY persona group is that group, with its
+#      password from an ESO Password generator
+#   3. ClusterRoleBindings from the group to the shared capability ClusterRoles
+#   4. a ValidatingAdmissionPolicy `guardian-persona-<name>` that denies every
+#      write the persona is not explicitly granted, matched on the group with a
+#      username fallback (a missing groups claim must not fail open)
+#   5. offline_access only if the persona is meant to run unattended
+#
 # The CRs live in tenant-root, not cozy-keycloak: the EDP keycloak-operator
 # watches all namespaces (WATCH_NAMESPACE unset), and tenant-root is the
-# namespace with an OpenBao secret scope, so the passwords ride the standard
-# ESO path (kv/guardian/guardian-mgmt/tenant-root/platform-admins, seeded
-# via the importer plan + a scoped secrets-writer write — see the
-# static-seal runbook, "Adding An Integration"). Passwords never appear in
-# Git or in the CR; the operator reads them from the projected Secret.
+# namespace with an OpenBao secret scope.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -18,7 +59,6 @@ metadata:
   labels:
     app.kubernetes.io/name: platform-admins
     app.kubernetes.io/part-of: guardian
-    guardian.dev/secret-scope: tenant-root
 spec:
   refreshInterval: 1h
   secretStoreRef:
@@ -66,63 +106,15 @@ spec:
     name: platform-admin-passwords
     key: platform-admin
 ---
-apiVersion: v1.edp.epam.com/v1
-kind: KeycloakRealmGroup
-metadata:
-  name: guardian-platform-agent
-  namespace: tenant-root
-  labels:
-    app.kubernetes.io/name: platform-admins
-    app.kubernetes.io/part-of: guardian
-spec:
-  name: guardian-platform-agent
-  realmRef:
-    kind: ClusterKeycloakRealm
-    name: keycloakrealm-cozy
----
-# platform-agent — the identity for long-horizon agent sessions on the
-# release runner and laptop (Devin/Codex/Claude). Distinct from
-# platform-admin so an agent credential leak is revocable without locking
-# the human out, and so audit logs separate agent actions from human ones.
-# Split into per-agent users when concurrency warrants it. The
-# offline_access realm role is what authorizes offline tokens
-# (kubelogin --oidc-extra-scope=offline_access): 30-day-idle refresh
-# tokens that reset on use, so an agent acting monthly stays logged in
-# indefinitely while remaining one-click revocable in Keycloak
-# (Sessions -> Offline). Without the role Keycloak fails code exchange
-# with "Offline tokens not allowed for the user or client".
-apiVersion: v1.edp.epam.com/v1
-kind: KeycloakRealmUser
-metadata:
-  name: platform-agent
-  namespace: tenant-root
-  labels:
-    app.kubernetes.io/name: platform-admins
-    app.kubernetes.io/part-of: guardian
-spec:
-  realmRef:
-    kind: ClusterKeycloakRealm
-    name: keycloakrealm-cozy
-  username: platform-agent
-  email: platform-agent@guardianintelligence.org
-  emailVerified: true
-  firstName: Platform
-  lastName: Agent
-  enabled: true
-  groups:
-    - guardian-platform-agent
-  roles:
-    - offline_access
-  passwordSecret:
-    name: platform-admin-passwords
-    key: platform-agent
----
+# Shared capability ClusterRoles. Personas are assembled by binding a subset of
+# these to the persona's group, so a capability is defined once and audited
+# once no matter how many personas carry it.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: guardian-platform-agent-cluster-view
+  name: guardian-persona-cluster-view
   labels:
-    app.kubernetes.io/name: platform-agent
+    app.kubernetes.io/name: platform-personas
     app.kubernetes.io/part-of: guardian
 rules:
   - apiGroups:
@@ -264,12 +256,31 @@ rules:
       - list
       - watch
 ---
+# Port-forward is a CONNECT verb but a read capability in practice: every
+# observability query in this repo (VictoriaLogs, VictoriaMetrics, ClickHouse)
+# reaches its service through one, so it belongs to `read` rather than being
+# held back with the repair verbs.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: guardian-platform-agent-maintenance
+  name: guardian-persona-portforward
   labels:
-    app.kubernetes.io/name: platform-agent
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods/portforward
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: guardian-persona-maintenance
+  labels:
+    app.kubernetes.io/name: platform-personas
     app.kubernetes.io/part-of: guardian
 rules:
   - apiGroups:
@@ -285,72 +296,24 @@ rules:
     verbs:
       - delete
   - apiGroups:
-      - ""
+      - apps
     resources:
-      - pods/portforward
+      - deployments/scale
+      - statefulsets/scale
     verbs:
-      - create
+      - update
+      - patch
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: guardian-platform-agent-cluster-view
-  labels:
-    app.kubernetes.io/name: platform-agent
-    app.kubernetes.io/part-of: guardian
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: guardian-platform-agent-cluster-view
-subjects:
-  - apiGroup: rbac.authorization.k8s.io
-    kind: Group
-    name: guardian-platform-agent
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: guardian-platform-agent-view
-  labels:
-    app.kubernetes.io/name: platform-agent
-    app.kubernetes.io/part-of: guardian
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: view
-subjects:
-  - apiGroup: rbac.authorization.k8s.io
-    kind: Group
-    name: guardian-platform-agent
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: guardian-platform-agent-maintenance
-  labels:
-    app.kubernetes.io/name: platform-agent
-    app.kubernetes.io/part-of: guardian
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: guardian-platform-agent-maintenance
-subjects:
-  - apiGroup: rbac.authorization.k8s.io
-    kind: Group
-    name: guardian-platform-agent
----
-# The agent's secret-write lane (docs/secrets.md "Permission model"): a
-# TokenRequest grant pinned to the per-namespace `secrets-writer`
-# ServiceAccounts, whose OpenBao role is write-only within its own subtree.
-# The agent mints these tokens headlessly while staying structurally unable
-# to read a Secret — `view` excludes Secrets and the admission policy below
-# denies everything else.
+# The secret-write lane (docs/secrets.md "Permission model"): a TokenRequest
+# grant pinned to the per-namespace `secrets-writer` ServiceAccounts, whose
+# OpenBao role is write-only within its own subtree. A persona holding this
+# writes a secret headlessly while remaining structurally unable to read one.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: guardian-platform-agent-secrets-writer-token
+  name: guardian-persona-secrets-writer-token
   labels:
-    app.kubernetes.io/name: platform-agent
+    app.kubernetes.io/name: platform-personas
     app.kubernetes.io/part-of: guardian
 rules:
   - apiGroups:
@@ -362,26 +325,109 @@ rules:
     verbs:
       - create
 ---
+# ============================= persona: read =============================
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakRealmGroup
+metadata:
+  name: guardian-persona-read
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+spec:
+  name: guardian-persona-read
+  realmRef:
+    kind: ClusterKeycloakRealm
+    name: keycloakrealm-cozy
+---
+# platform-agent — the read persona, and the identity long-horizon agent
+# sessions hold by default (Devin/Codex/Claude on the release runner or a
+# laptop). Distinct from platform-admin so an agent credential leak is
+# revocable without locking the human out, and so audit logs separate agent
+# actions from human ones. The offline_access realm role is what authorizes
+# offline tokens (kubelogin --oidc-extra-scope=offline_access): 30-day-idle
+# refresh tokens that reset on use, so an agent observing monthly stays logged
+# in indefinitely while remaining one-click revocable in Keycloak
+# (Sessions -> Offline). Without the role Keycloak fails code exchange with
+# "Offline tokens not allowed for the user or client".
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakRealmUser
+metadata:
+  name: platform-agent
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+spec:
+  realmRef:
+    kind: ClusterKeycloakRealm
+    name: keycloakrealm-cozy
+  username: platform-agent
+  email: platform-agent@guardianintelligence.org
+  emailVerified: true
+  firstName: Platform
+  lastName: Agent
+  enabled: true
+  groups:
+    - guardian-persona-read
+  roles:
+    - offline_access
+  passwordSecret:
+    name: platform-admin-passwords
+    key: platform-agent
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: guardian-platform-agent-secrets-writer-token
+  name: guardian-persona-read-view
   labels:
-    app.kubernetes.io/name: platform-agent
+    app.kubernetes.io/name: platform-personas
     app.kubernetes.io/part-of: guardian
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: guardian-platform-agent-secrets-writer-token
+  name: view
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: Group
-    name: guardian-platform-agent
+    name: guardian-persona-read
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-persona-read-cluster-view
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: guardian-persona-cluster-view
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-persona-read
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-persona-read-portforward
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: guardian-persona-portforward
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-persona-read
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: guardian-platform-agent-readonly
+  name: guardian-persona-read
 spec:
   failurePolicy: Fail
   matchConstraints:
@@ -398,31 +444,339 @@ spec:
         resources:
           - "*/*"
   matchConditions:
-    - name: platform-agent-identity
+    - name: persona-read-identity
       expression: >-
         request.userInfo.username.endsWith("#platform-agent") ||
-        "guardian-platform-agent" in request.userInfo.groups
+        "guardian-persona-read" in request.userInfo.groups
+  validations:
+    - expression: >-
+        request.operation == "CONNECT" && request.resource.group == "" &&
+        request.resource.resource == "pods" &&
+        has(request.subResource) && request.subResource == "portforward"
+      message: >-
+        the read persona may only open pod port-forwards; every other write is
+        denied. Re-authenticate as a write persona for repair verbs
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-persona-read
+spec:
+  policyName: guardian-persona-read
+  validationActions:
+    - Deny
+---
+# ========================== persona: write-basic ==========================
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata:
+  name: platform-write-basic
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+spec:
+  length: 64
+  digits: 8
+  symbols: 0
+  noUpper: false
+  allowRepeat: true
+---
+# The persona password is born in the cluster and nothing outside needs the
+# value, so it is generated here rather than carried in custody. CreatedOnce
+# pins it: a re-mint would silently invalidate the copy the operator holds.
+# Rotation is therefore deliberate — delete this ExternalSecret, let Flux
+# recreate it, and read the new value once.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: platform-write-basic
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+spec:
+  refreshPolicy: CreatedOnce
+  refreshInterval: "0"
+  target:
+    name: platform-write-basic
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: platform-write-basic
+---
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakRealmGroup
+metadata:
+  name: guardian-persona-write-basic
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+spec:
+  name: guardian-persona-write-basic
+  realmRef:
+    kind: ClusterKeycloakRealm
+    name: keycloakrealm-cozy
+---
+# platform-write-basic — routine repair. No offline_access, so the session dies
+# with its Keycloak session and every repair window starts with a device
+# approval the operator performs by hand.
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakRealmUser
+metadata:
+  name: platform-write-basic
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+spec:
+  realmRef:
+    kind: ClusterKeycloakRealm
+    name: keycloakrealm-cozy
+  username: platform-write-basic
+  email: platform-write-basic@guardianintelligence.org
+  emailVerified: true
+  firstName: Platform
+  lastName: Write Basic
+  enabled: true
+  groups:
+    - guardian-persona-write-basic
+  passwordSecret:
+    name: platform-write-basic
+    key: password
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-persona-write-basic-view
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-persona-write-basic
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-persona-write-basic-cluster-view
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: guardian-persona-cluster-view
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-persona-write-basic
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-persona-write-basic-portforward
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: guardian-persona-portforward
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-persona-write-basic
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-persona-write-basic-maintenance
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: guardian-persona-maintenance
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-persona-write-basic
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-persona-write-basic-secrets-writer-token
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: guardian-persona-secrets-writer-token
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-persona-write-basic
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-persona-write-basic
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - "*"
+        apiVersions:
+          - "*"
+        operations:
+          - CREATE
+          - UPDATE
+          - DELETE
+          - CONNECT
+        resources:
+          - "*/*"
+  matchConditions:
+    - name: persona-write-basic-identity
+      expression: >-
+        request.userInfo.username.endsWith("#platform-write-basic") ||
+        "guardian-persona-write-basic" in request.userInfo.groups
   validations:
     - expression: >-
         (request.operation == "DELETE" && !has(request.subResource) &&
           ((request.resource.group == "" && request.resource.resource == "pods") ||
            (request.resource.group == "batch" && request.resource.resource == "jobs"))) ||
         (request.operation == "CONNECT" && request.resource.group == "" &&
-          request.resource.resource == "pods" && request.subResource == "portforward") ||
+          request.resource.resource == "pods" &&
+          has(request.subResource) && request.subResource == "portforward") ||
+        (request.operation == "UPDATE" && request.resource.group == "apps" &&
+          has(request.subResource) && request.subResource == "scale" &&
+          (request.resource.resource == "deployments" ||
+           request.resource.resource == "statefulsets")) ||
         (request.operation == "CREATE" && request.resource.group == "" &&
           request.resource.resource == "serviceaccounts" &&
           has(request.subResource) && request.subResource == "token" &&
           has(request.name) && request.name == "secrets-writer")
       message: >-
-        platform-agent is read-only except for deleting pods and jobs,
-        opening pod port-forwards, and minting secrets-writer
-        ServiceAccount tokens
+        the write-basic persona may only delete pods and jobs, scale workloads,
+        open pod port-forwards, and mint secrets-writer ServiceAccount tokens
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: guardian-platform-agent-readonly
+  name: guardian-persona-write-basic
 spec:
-  policyName: guardian-platform-agent-readonly
+  policyName: guardian-persona-write-basic
   validationActions:
     - Deny
+---
+# =========================== persona: write-all ===========================
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata:
+  name: platform-write-all
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+spec:
+  length: 64
+  digits: 8
+  symbols: 0
+  noUpper: false
+  allowRepeat: true
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: platform-write-all
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+spec:
+  refreshPolicy: CreatedOnce
+  refreshInterval: "0"
+  target:
+    name: platform-write-all
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: platform-write-all
+---
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakRealmGroup
+metadata:
+  name: guardian-persona-write-all
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+spec:
+  name: guardian-persona-write-all
+  realmRef:
+    kind: ClusterKeycloakRealm
+    name: keycloakrealm-cozy
+---
+# platform-write-all — cluster-admin for emergencies on sensitive systems. It
+# carries no ValidatingAdmissionPolicy because there is no write to withhold;
+# the rung exists to acknowledge that some incidents need everything. Its
+# containment is temporal rather than spatial: no offline_access, so it cannot
+# persist past its Keycloak session, and every use starts with a device
+# approval. Reach for `root` only when Keycloak itself is unavailable.
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakRealmUser
+metadata:
+  name: platform-write-all
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+spec:
+  realmRef:
+    kind: ClusterKeycloakRealm
+    name: keycloakrealm-cozy
+  username: platform-write-all
+  email: platform-write-all@guardianintelligence.org
+  emailVerified: true
+  firstName: Platform
+  lastName: Write All
+  enabled: true
+  groups:
+    - guardian-persona-write-all
+  passwordSecret:
+    name: platform-write-all
+    key: password
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-persona-write-all
+  labels:
+    app.kubernetes.io/name: platform-personas
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-persona-write-all

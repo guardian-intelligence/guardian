@@ -1874,6 +1874,15 @@ def _watch_impl(ctx):
     )
 
 
+# The persona ladder (src/infrastructure/base/cozystack/platform-admins.yaml).
+# Keep in lockstep with personas in src/infrastructure/cmd/guardian_auth/main.go;
+# TestPersonaLadderTaskLockstep fails the build if the two drift.
+PERSONA_USERS = {
+    "read": "platform-agent",
+    "write-basic": "platform-write-basic",
+    "write-all": "platform-write-all",
+}
+
 def _auth_impl(ctx):
     if ctx.args.platform_agent == ctx.args.platform_admin:
         ctx.std.io.stderr.write("ERROR: pass exactly one of --platform-agent or --platform-admin\n")
@@ -1925,11 +1934,19 @@ def _auth_platform_agent(ctx, guardian_auth, command_args):
         ctx.std.io.stderr.write("ERROR: HOME is not set\n")
         return 1
 
+    persona = ctx.args.persona
+    if persona not in PERSONA_USERS:
+        ctx.std.io.stderr.write("ERROR: --persona must be one of " + ", ".join(sorted(PERSONA_USERS)) + "\n")
+        return 1
+    persona_user = PERSONA_USERS[persona]
+
     args = []
     args.extend(command_args)
     args.extend([
         "--mode",
         "agent",
+        "--persona",
+        persona,
         "--kubelogin",
         bin_dir + "/kubectl-oidc_login",
         "--oidc-issuer",
@@ -1937,13 +1954,17 @@ def _auth_platform_agent(ctx, guardian_auth, command_args):
         "--oidc-client-id",
         PLATFORM_OIDC_CLIENT_ID,
         "--oidc-cache-dir",
-        home + "/.kube/cache/oidc-login-platform-agent",
+        home + "/.kube/cache/oidc-login-" + persona_user,
     ])
     ctx.std.io.stderr.write(
-        "authenticating platform-agent@guardian-mgmt (first login prints a device-code URL — open it in a browser on any machine)\n"
-        + "IMPORTANT: approve the device login as the platform-agent user (use a private window if another Keycloak session is active); only platform-agent holds the offline_access role, so any other identity fails the exchange with 'not_allowed'\n",
+        "authenticating " + persona_user + "@guardian-mgmt (first login prints a device-code URL — open it in a browser on any machine)\n" +
+        "IMPORTANT: approve the device login as the " + persona_user + " user (use a private window if another Keycloak session is active); the identity you approve as is the authority the session carries\n",
     )
-    return checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), label = "guardian auth platform-agent")
+    if persona != "read":
+        ctx.std.io.stderr.write(
+            "this is a write persona: it holds no offline_access, so the session expires with its Keycloak session and cannot refresh unattended\n",
+        )
+    return checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), label = "guardian auth " + persona_user)
 
 def _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args):
     reason = ctx.args.reason.strip()
@@ -2178,7 +2199,8 @@ auth = task(
         "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override for disaster recovery, e.g. a node public API while zone DNS is dark. Defaults to " + GUARDIAN_MGMT_KUBE_API + "."),
         "nodes": args.string(default = "", description = "Optional comma-separated Talos target overrides for platform-admin disaster recovery. Must be paired one-for-one with --endpoints."),
         "platform_admin": args.boolean(default = False, description = "Breakglass: escalated x509 system:masters credentials from the Talos custody bundle (secrets.yaml + talm.key). Audit-logged; requires --reason."),
-        "platform_agent": args.boolean(default = False, description = "Daily driver: OIDC via the platform Keycloak with an offline token (30-day idle window, resets on use, revocable in Keycloak); removes any breakglass context and credentials after OIDC verification."),
+        "persona": args.string(default = "read", description = "Persona to assume with --platform-agent: read (unattended, cluster-wide read plus port-forward), write-basic (pod/job delete, scale, secrets-writer token mint), or write-all (cluster-admin). Only read holds offline_access, so every write persona needs a fresh device approval and expires with its Keycloak session."),
+        "platform_agent": args.boolean(default = False, description = "Daily driver: OIDC via the platform Keycloak. With --persona=read (the default) the session holds an offline token (30-day idle window, resets on use, revocable in Keycloak); removes any breakglass context and credentials after OIDC verification."),
         "reason": args.string(default = "", description = "Why breakglass escalation is needed. Required with --platform-admin; paged to the operations topic and appended to the breakglass ledgers."),
         "root": args.string(default = GUARDIAN_MGMT_TALM_ROOT, description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),

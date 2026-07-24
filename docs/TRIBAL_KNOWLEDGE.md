@@ -16,11 +16,16 @@ User must pay $10/mo to enable CloudFlare LB with 3 endpoints (1 for each ingres
   source of truth and it changes on reimage. Port 50000 is open on those
   IPs from the operator workstation.
 - The kube API is reachable via the default `~/.kube/config`, whose only
-  standing identity is the `platform-agent` OIDC context (set up with
-  `aspect infra auth --platform-agent`). There is no standing admin
-  kubeconfig anywhere on disk; breakglass x509 is minted on demand with
+  standing identity is the `read` persona (the `platform-agent` OIDC context,
+  set up with `aspect infra auth --platform-agent`): cluster-wide read plus
+  port-forward, and the only rung that refreshes unattended. Repair verbs come
+  from `--persona=write-basic` and emergencies from `--persona=write-all`;
+  neither holds `offline_access`, so each costs an operator device approval and
+  expires with its Keycloak session. There is no standing admin kubeconfig
+  anywhere on disk; breakglass x509 is minted on demand with
   `aspect infra auth --platform-admin --reason "<why>"` and dies with its
-  short cert lifetime.
+  short cert lifetime. The ladder lives in
+  `src/infrastructure/base/cozystack/platform-admins.yaml`.
 - Machine config applies are per-node, base plus overlay:
   `talm apply -f nodes/<node>.yaml -f nodes/<node>-overlay.yaml`.
 
