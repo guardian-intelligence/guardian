@@ -15,15 +15,15 @@ var eventsIngested = promauto.NewCounterVec(prometheus.CounterOpts{
 }, []string{"trust_tier", "country", "asn"})
 
 // Per-event-name counts exist so product alerts (VMRules) can fire on what
-// users actually experienced — e.g. shortty.link_failed — without a
+// users actually experienced — e.g. privatecut.link_failed — without a
 // ClickHouse query path. The name label is confined to this allowlist, not
 // the registry: registered PREFIXES admit arbitrary client-chosen suffixes,
 // which would otherwise be a cardinality faucet anyone on the internet can
 // open.
 var meteredEventNames = map[string]struct{}{
-	"shortty.link_submitted": {},
-	"shortty.link_resolved":  {},
-	"shortty.link_failed":    {},
+	"privatecut.link_submitted": {},
+	"privatecut.link_resolved":  {},
+	"privatecut.link_failed":    {},
 }
 
 var eventsByName = promauto.NewCounterVec(prometheus.CounterOpts{

@@ -41,7 +41,7 @@ var (
 		"app_chrome.",
 		"page_shell.",
 		"beacon.",
-		"shortty.",
+		"privatecut.",
 	}
 	knownVitals = map[string]struct{}{
 		"LCP": {}, "CLS": {}, "INP": {}, "TTFB": {}, "FCP": {},

@@ -77,9 +77,9 @@ corner radius or silhouette. Do not pre-round app-icon artwork, and do not add
 extra mask-specific scaling when the invariant already fits inside the
 platform safe zone.
 
-### Shortty
+### PrivateCut
 
-The Shortty badge at `rumi.engineering` uses Ink `#0a0a0e` as the full canvas
+The PrivateCut badge at `rumi.engineering` uses Ink `#0a0a0e` as the full canvas
 and Argent `#e8e6f0` for the wings. The same 18.4% occupancy applies to:
 
 - `favicon.svg`
@@ -94,6 +94,6 @@ The standard and maskable Android files remain separate manifest entries, but
 their internal geometry is identical. Platform masking changes the outer
 silhouette, not the Guardian mark's scale.
 
-`apps/shortty-web/src/lib/platform-icons.test.ts` is the executable contract:
+`apps/privatecut-web/src/lib/platform-icons.test.ts` is the executable contract:
 it checks the SVG transform, exported PNG foreground bounds, opaque
 background, dimensions, and manifest purposes.

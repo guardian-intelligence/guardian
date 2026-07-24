@@ -120,7 +120,7 @@ postflight CLI release train, whose Stage opens channel-pin PRs that the
 The ruleset (required checks + the bot bypass) is the enforcement's
 load-bearing half and lives outside Git — re-assert it when recreating the
 repo: `gh api repos/<owner>/<repo>/rulesets` with required checks `build`,
-`derive`, `site-perf-gate`, `shortty-smoke-gate` and the
+`derive`, `site-perf-gate`, `privatecut-smoke-gate` and the
 guardian-promotions App as bypass actor, plus allow-auto-merge.
 
 This deliberately weakens the old invariant "pin == the digest CI builds

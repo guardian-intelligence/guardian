@@ -1,0 +1,162 @@
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+
+npm_link_all_packages()
+
+filegroup(
+    name = "package_manifest",
+    srcs = ["package.json"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "sources",
+    srcs = glob([
+        "package.json",
+        "public/**/*",
+        "src/**/*",
+        "tsconfig.json",
+        "vite.config.ts",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+genrule(
+    name = "tanstack_output_layer",
+    srcs = [
+        ":node_modules",
+        ":node_modules/vite-plus",
+        ":sources",
+        "//src/products/viteplus-monorepo:.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.2.4/dir",
+        "//src/products/viteplus-monorepo:vp_node",
+        "//src/products/viteplus-monorepo:workspace_sources",
+        # tsc resolves @guardian/brand's package.json "exports" straight to
+        # its .tsx SOURCE (no prebuilt .d.ts), so typechecking the app
+        # type-checks brand's source in place -- which needs brand's own
+        # node_modules (react/react-dom/@types) reachable by directory
+        # walk-up from brand's location in this sandbox, not just the app's.
+        "//src/products/viteplus-monorepo/packages/brand:node_modules",
+        ":node_modules/typescript",
+    ],
+    outs = ["privatecut-web-output.tar"],
+    cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+node="$$execroot/$(location //src/products/viteplus-monorepo:vp_node)"
+node_modules_root="$$execroot/$(BINDIR)/src/products/viteplus-monorepo/apps/privatecut-web/node_modules"
+vp="$$node_modules_root/vite-plus/bin/vp"
+tsc="$$node_modules_root/typescript/bin/tsc"
+test -n "$$node_modules_root"
+test -x "$$vp"
+test -f "$$tsc"
+export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
+export NODE_PATH="$$node_modules_root$${NODE_PATH:+:$$NODE_PATH}"
+export CI=true
+cd "$$execroot/src/products/viteplus-monorepo/apps/privatecut-web"
+rm -rf node_modules
+ln -s "$$node_modules_root" node_modules
+rm -rf .output
+# Mirrors package.json's own "build" script (single source of truth:
+# typecheck + test + build, in that order) -- a developer running
+# `pnpm run build` locally gets the identical gate CI enforces here, and a
+# real type error or test regression fails the image build itself rather
+# than shipping silently through Vite's transpile-only bundler. tsc is
+# invoked via its exact Bazel-resolved path, NOT `vp exec tsc` (which
+# package.json's own script uses) -- `vp exec` spawns external binaries via
+# PATH lookup, and this sandbox's node_modules has no .bin/ symlink farm
+# (unlike a real `pnpm install`, which is what makes `vp exec` safe to use
+# from package.json).
+"$$node" "$$tsc" -p tsconfig.json
+"$$node" "$$vp" test run
+"$$node" "$$vp" build
+test -s .output/server/index.mjs
+# Nitro's output carries the only nondeterminism in the image: nitro.json
+# stamps the build wall-clock, the server bundle embeds static-asset "mtime"
+# metadata, and the public-assets manifest's key order follows readdir order.
+# Normalize timestamps to the epoch (matching the tar's --mtime) and sort the
+# manifest keys so the same sources always produce the same digest — the
+# privatecut-web-image workflow enforces pin == built digest on that basis.
+sed -i 's/"date": "[^"]*"/"date": "1970-01-01T00:00:00.000Z"/' .output/nitro.json
+find .output/server -name '*.mjs' -exec sed -i 's/"mtime": "[^"]*"/"mtime": "1970-01-01T00:00:00.000Z"/g' {} +
+# Machine-specific absolute paths in chunk contents (and therefore in the
+# content-hashed chunk names) are prevented at the source: vite.config.ts
+# sets rolldown's experimental.attachDebugInfo to "none" and relativizes the
+# TanStack route-manifest filePaths. Guard that both stay effective — paths
+# baked in at hash time cannot be scrubbed here.
+if grep -rlE 'execroot/_main|"filePath": "/' .output/server >/dev/null 2>&1; then
+  echo "machine-specific absolute paths leaked into the server bundle" >&2
+  exit 1
+fi
+"$$node" -e '
+const fs = require("fs");
+const p = ".output/server/index.mjs";
+let s = fs.readFileSync(p, "utf8");
+const m = s.match(/var public_assets_data_default = (\\{[\\s\\S]*?\\n\\});/);
+if (!m) throw new Error("public assets manifest not found in " + p);
+const obj = JSON.parse(m[1]);
+const sorted = Object.fromEntries(Object.keys(obj).sort().map((k) => [k, obj[k]]));
+s = s.replace(m[1], JSON.stringify(sorted, null, "\t"));
+// Nitro derives its lazy-handler variable suffixes from machine-specific
+// paths (_lazy_<suffix>). index.mjs is not content-hash-named, so renaming
+// them by order of first appearance is safe and machine-invariant.
+const ids = [...new Set(s.match(/_lazy_[A-Za-z0-9]+/g) || [])];
+ids.forEach((id, i) => { s = s.split(id).join("_lazy_h" + i); });
+fs.writeFileSync(p, s);
+'
+tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+  --mode=u=rwX,go=rX \
+  --transform 's#^\\./#app/#' \
+  -cf "$$execroot/$@" -C .output .
+rm -rf .output node_modules
+""",
+    tags = [
+        "no-remote",
+        "no-sandbox",
+    ],
+)
+
+pkg_tar(
+    name = "node_layer",
+    files = {
+        "//src/products/viteplus-monorepo:vp_node": "usr/bin/node",
+        "@cacert_pem//file": "etc/ssl/certs/ca-certificates.crt",
+    },
+    modes = {
+        "usr/bin/node": "0755",
+        "etc/ssl/certs/ca-certificates.crt": "0644",
+    },
+)
+
+oci_image(
+    name = "image",
+    annotations = {
+        "org.opencontainers.image.description": "PrivateCut — clip any video to under 4 MB, in the browser",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "guardian-privatecut-web",
+    },
+    base = "@distroless_cc_base_linux_amd64",
+    entrypoint = [
+        "/usr/bin/node",
+        "/app/server/index.mjs",
+    ],
+    env = {
+        "HOST": "0.0.0.0",
+        "NODE_ENV": "production",
+        "PORT": "8080",
+        "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
+    },
+    exposed_ports = ["8080/tcp"],
+    tars = [
+        ":node_layer",
+        ":tanstack_output_layer",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/privatecut-web:dev"],
+)

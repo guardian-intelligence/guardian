@@ -3,6 +3,6 @@
 # package walk out of node_modules.
 src/products/viteplus-monorepo/node_modules
 src/products/viteplus-monorepo/apps/guardianintelligence-web/node_modules
-src/products/viteplus-monorepo/apps/shortty-web/node_modules
+src/products/viteplus-monorepo/apps/privatecut-web/node_modules
 src-old
 .claude/worktrees

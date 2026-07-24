@@ -1,1 +1,0 @@
-ghcr.io/guardian-intelligence/shortty-web:edge

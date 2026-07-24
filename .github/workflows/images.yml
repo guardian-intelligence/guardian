@@ -1,7 +1,7 @@
 # First-party image publisher. One matrix workflow for every service and web
 # image: the universal `build` check already builds and tests //... on every
 # PR, so PR-side this runs only the runtime gates that need the packed image
-# (company-site scroll-perf, shortty smoke); on pushes to main it rebuilds and
+# (company-site scroll-perf, privatecut smoke); on pushes to main it rebuilds and
 # pushes exactly the images whose inputs changed. Images are not signed —
 # provenance enforcement is the digest-pinning admission policy plus the
 # reviewed-main-only path to `edge` (docs/supply-chain-design.md). The
@@ -65,7 +65,7 @@ jobs:
         run: |
           names=(alert-relay analytics-ingest authorization canary-journeys
             cockpit payments payments-canary postflight-controlplane
-            company-site shortty-web visual-harness)
+            company-site privatecut-web visual-harness)
           declare -A watch=(
             [alert-relay]='^src/services/alerting/'
             [analytics-ingest]='^src/products/analytics/|^src/proto/'
@@ -76,7 +76,7 @@ jobs:
             [payments-canary]='^src/services/payments/'
             [postflight-controlplane]='^src/services/postflight/'
             [company-site]='^src/products/viteplus-monorepo/'
-            [shortty-web]='^src/products/viteplus-monorepo/'
+            [privatecut-web]='^src/products/viteplus-monorepo/'
             [visual-harness]='^src/products/viteplus-monorepo/packages/visual-harness/|^src/products/viteplus-monorepo/pnpm-(lock|workspace)\.yaml$'
           )
           declare -A push_target=(
@@ -89,7 +89,7 @@ jobs:
             [payments-canary]='//src/services/payments/canary:push'
             [postflight-controlplane]='//src/services/postflight/controlplane:push'
             [company-site]='//src/products/viteplus-monorepo/apps/guardianintelligence-web/site:push'
-            [shortty-web]='//src/products/viteplus-monorepo/apps/shortty-web/site:push'
+            [privatecut-web]='//src/products/viteplus-monorepo/apps/privatecut-web/site:push'
             [visual-harness]='//src/products/viteplus-monorepo/packages/visual-harness:push'
           )
           go_images=' alert-relay analytics-ingest authorization cockpit payments payments-canary postflight-controlplane '
@@ -183,9 +183,9 @@ jobs:
         if: always()
         run: docker rm -f perf-gate || true
 
-  # Runtime gate for shortty: load the exact image just built, run it, and
+  # Runtime gate for privatecut: load the exact image just built, run it, and
   # require a healthy serve of the app shell.
-  shortty-smoke-gate:
+  privatecut-smoke-gate:
     needs: classify
     if: github.event_name == 'pull_request' && needs.classify.outputs.viteplus == 'true'
     runs-on: ubuntu-latest
@@ -197,8 +197,8 @@ jobs:
 
       - name: Load and smoke-test the built image
         run: |
-          bazelisk run //src/products/viteplus-monorepo/apps/shortty-web/site:load
-          docker run -d --name shortty-smoke -p 8080:8080 ghcr.io/guardian-intelligence/shortty-web:edge
+          bazelisk run //src/products/viteplus-monorepo/apps/privatecut-web/site:load
+          docker run -d --name privatecut-smoke -p 8080:8080 ghcr.io/guardian-intelligence/privatecut-web:edge
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:8080/healthz >/dev/null && break
             sleep 1
@@ -208,13 +208,13 @@ jobs:
 
       - name: Stop smoke container
         if: always()
-        run: docker rm -f shortty-smoke || true
+        run: docker rm -f privatecut-smoke || true
 
-  # Deterministic visual gate for shortty: load the exact images just built,
+  # Deterministic visual gate for privatecut: load the exact images just built,
   # run the visual-harness canary inside the pinned Playwright image (whose
   # font rendering matches the committed linux baselines), and fail on visual
   # drift or on critical elements dropping below the fold in any form factor.
-  shortty-visual-gate:
+  privatecut-visual-gate:
     needs: classify
     if: github.event_name == 'pull_request' && needs.classify.outputs.viteplus == 'true'
     runs-on: ubuntu-latest
@@ -226,11 +226,11 @@ jobs:
 
       - name: Load and run the built images
         run: |
-          bazelisk run //src/products/viteplus-monorepo/apps/shortty-web/site:load
+          bazelisk run //src/products/viteplus-monorepo/apps/privatecut-web/site:load
           bazelisk run //src/products/viteplus-monorepo/packages/visual-harness:load
           docker network create visual-gate
-          docker run -d --name shortty-visual --network visual-gate --network-alias shortty \
-            -p 8080:8080 ghcr.io/guardian-intelligence/shortty-web:edge
+          docker run -d --name privatecut-visual --network visual-gate --network-alias privatecut \
+            -p 8080:8080 ghcr.io/guardian-intelligence/privatecut-web:edge
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:8080/healthz >/dev/null && break
             sleep 1
@@ -246,7 +246,7 @@ jobs:
           # and commit) instead of bricking bootstrap, while any committed
           # baseline that mismatches still fails the gate.
           docker run --rm --network visual-gate \
-            -e VISUAL_TARGET_URL=http://shortty:8080 -e VISUAL_ALLOW_HTTP=1 \
+            -e VISUAL_TARGET_URL=http://privatecut:8080 -e VISUAL_ALLOW_HTTP=1 \
             -v "$PWD/src/products/viteplus-monorepo/packages/visual-harness/journeys:/app/journeys" \
             -v /tmp/visual-output:/tmp/visual-harness-output \
             guardian/visual-harness:dev --update-snapshots=missing
@@ -255,7 +255,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
-          name: shortty-visual
+          name: privatecut-visual
           if-no-files-found: ignore
           path: |
             src/products/viteplus-monorepo/packages/visual-harness/journeys/visual.spec.ts-snapshots/
@@ -264,7 +264,7 @@ jobs:
       - name: Stop visual-gate containers
         if: always()
         run: |
-          docker rm -f shortty-visual || true
+          docker rm -f privatecut-visual || true
           docker network rm visual-gate || true
 
   # Push only for the canonical main history — not for PRs, and not for

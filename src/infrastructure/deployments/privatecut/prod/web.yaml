@@ -1,0 +1,186 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: privatecut-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: privatecut-web
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: web
+    guardian.dev/product: privatecut
+    guardian.dev/stage: prod
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: privatecut-web
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: privatecut-web
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: web
+        guardian.dev/product: privatecut
+        guardian.dev/stage: prod
+        guardian.dev/otel: producer
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: privatecut-web
+              app.kubernetes.io/part-of: guardian
+              guardian.dev/stage: prod
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: ghcr.io/guardian-intelligence/privatecut-web:edge@sha256:96a8324658ce9dafcf0e68c87d4ee8f42c3c42fde052a2280a047a44f30cb718 # {"$imagepolicy": "guardian-imageops:privatecut-web"}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: GUARDIAN_SITE
+              value: prod
+            - name: GUARDIAN_DEPLOY_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            # The running image's own ref, kept in lockstep with the
+            # container image by the same Flux setter marker: it surfaces as
+            # the guardian:image meta tag (event props) and the trace
+            # resource's service.version, so any event or trace names the
+            # exact deployment that served it.
+            - name: GUARDIAN_IMAGE
+              value: ghcr.io/guardian-intelligence/privatecut-web:edge@sha256:96a8324658ce9dafcf0e68c87d4ee8f42c3c42fde052a2280a047a44f30cb718 # {"$imagepolicy": "guardian-imageops:privatecut-web"}
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: http://otel-collector.guardian-analytics.svc.cozy.local:4318/v1/traces
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+              ephemeral-storage: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: privatecut-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: privatecut-web
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: web
+    guardian.dev/product: privatecut
+    guardian.dev/stage: prod
+spec:
+  type: ClusterIP
+  internalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: privatecut-web
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: privatecut-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: privatecut-web
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: privatecut
+    guardian.dev/stage: prod
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: privatecut-web
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: privatecut-web
+  namespace: tenant-guardian-prod
+  annotations:
+    # Same edge trust chain as the apex: Cloudflare terminates public TLS,
+    # proves itself to the origin via AOP mTLS, and only then is the
+    # verified-IP header chain trustworthy. The origin-pull CA Secret
+    # already lives in this namespace (company kustomization).
+    nginx.ingress.kubernetes.io/auth-tls-secret: tenant-guardian-prod/cloudflare-origin-pull-ca
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+    nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  labels:
+    app.kubernetes.io/name: privatecut-web
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: privatecut
+    guardian.dev/stage: prod
+spec:
+  ingressClassName: tenant-root
+  # rumi.engineering is not covered by the controller's default certificate
+  # (the guardianintelligence.org Origin CA cert); this per-Ingress tls
+  # block registers the zone's own Origin CA cert for SNI selection.
+  tls:
+    - hosts:
+        - rumi.engineering
+      secretName: privatecut-origin-tls
+  rules:
+    - host: rumi.engineering
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: privatecut-web
+                port:
+                  number: 80
