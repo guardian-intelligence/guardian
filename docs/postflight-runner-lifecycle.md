@@ -105,7 +105,8 @@ listener state to a replacement VM.
 One manifest couples the workspace ZFS snapshot GUID, root and tool volume
 generations, process image digest, guest image and kernel digests, QEMU/CRIU
 format versions, CPU compatibility, SNP measurement and minimum TCB, tenant,
-repository, branch, monotonic generation number, and wrapped DEK.
+repository, branch, monotonic generation number, and the fleet's key
+reference (derivation salt on Confidential, wrapped DEK on Lightning).
 
 The donor sequence is:
 
