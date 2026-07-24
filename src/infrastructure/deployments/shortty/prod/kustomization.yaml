@@ -7,3 +7,4 @@ resources:
   - root-ingress-networkpolicy.yaml
   - otel-networkpolicy.yaml
   - observability.yaml
+  - visual-canary.yaml
