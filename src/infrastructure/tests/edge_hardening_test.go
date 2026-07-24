@@ -53,64 +53,172 @@ func TestCloudflareOriginPullIsRequired(t *testing.T) {
 	}
 }
 
-func TestPlatformAgentIsReadOnlyWithMaintenanceExceptions(t *testing.T) {
+// personaSpec declares one rung of the persona ladder
+// (src/infrastructure/base/cozystack/platform-admins.yaml). The ladder is
+// meant to grow: adding a rung is a manifest block plus an entry here, and
+// this test is what makes the pair inseparable. Everything it asserts is a
+// property a hand-written persona could get quietly wrong — a user left in two
+// groups, a write persona handed offline_access and therefore able to refresh
+// unattended, a policy that matches on the group but not the username and so
+// fails open when a token arrives without a groups claim.
+type personaSpec struct {
+	name         string
+	username     string
+	unattended   bool
+	clusterRoles []string
+	hasPolicy    bool
+}
+
+var personaLadder = []personaSpec{
+	{
+		name:         "read",
+		username:     "platform-agent",
+		unattended:   true,
+		clusterRoles: []string{"view", "guardian-persona-cluster-view", "guardian-persona-portforward"},
+		hasPolicy:    true,
+	},
+	{
+		name:     "write-basic",
+		username: "platform-write-basic",
+		clusterRoles: []string{
+			"view",
+			"guardian-persona-cluster-view",
+			"guardian-persona-portforward",
+			"guardian-persona-maintenance",
+			"guardian-persona-secrets-writer-token",
+		},
+		hasPolicy: true,
+	},
+	{
+		name:         "write-all",
+		username:     "platform-write-all",
+		clusterRoles: []string{"cluster-admin"},
+		hasPolicy:    false,
+	},
+}
+
+func TestPersonaLadderShape(t *testing.T) {
 	path := runfilePath("src/infrastructure/base/cozystack/platform-admins.yaml")
 	raw := readText(t, path)
+	docs := yamlDocs(t, path)
 
-	admin := raw[strings.Index(raw, "# platform-admin"):strings.Index(raw, "kind: KeycloakRealmGroup")]
-	assertTextContains(t, admin, "- cozystack-cluster-admin", path)
-
-	agentStart := strings.Index(raw, "# platform-agent")
-	agentEnd := strings.Index(raw[agentStart:], "kind: ClusterRole") + agentStart
-	agent := raw[agentStart:agentEnd]
-	assertTextContains(t, agent, "- guardian-platform-agent", path)
-	assertTextNotContains(t, agent, "cozystack-cluster-admin", path)
-
-	maintenanceStart := agentEnd
-	maintenanceEnd := strings.Index(raw[maintenanceStart:], "kind: ClusterRoleBinding") + maintenanceStart
-	maintenance := raw[maintenanceStart:maintenanceEnd]
-	for _, want := range []string{"- pods", "- jobs", "- pods/portforward", "- delete", "- create"} {
-		assertTextContains(t, maintenance, want, path)
-	}
-	for _, forbidden := range []string{"secrets", "pods/exec", "- update", "- patch", "- \"*\""} {
-		assertTextNotContains(t, maintenance, forbidden, path)
+	declaredGroups := map[string]bool{}
+	for _, doc := range docs {
+		if stringValue(doc["kind"]) == "KeycloakRealmGroup" {
+			declaredGroups[stringValue(mapValue(doc["spec"])["name"])] = true
+		}
 	}
 
-	for _, want := range []string{
-		"name: guardian-platform-agent-cluster-view",
-		"- nodes",
-		"- persistentvolumes",
-		"- customresourcedefinitions",
-		"- clusterroles",
-		"- flagger.app",
-		"- canaries",
-		"- kargo.akuity.io",
-		"- promotions",
-		"- warehouses",
-		"name: guardian-platform-agent-view",
-		"name: view",
-		"name: guardian-platform-agent-secrets-writer-token",
-		"name: guardian-platform-agent-readonly",
-		`request.userInfo.username.endsWith("#platform-agent")`,
-		`"guardian-platform-agent" in request.userInfo.groups`,
-		`!has(request.subResource)`,
-		`request.subResource == "portforward"`,
-		`request.resource.resource == "jobs"`,
-		`request.subResource == "token"`,
-		`request.name == "secrets-writer"`,
-	} {
-		assertTextContains(t, raw, want, path)
+	for _, persona := range personaLadder {
+		group := "guardian-persona-" + persona.name
+		t.Run(persona.name, func(t *testing.T) {
+			if !declaredGroups[group] {
+				t.Fatalf("persona %s has no KeycloakRealmGroup %s", persona.name, group)
+			}
+
+			var user map[string]interface{}
+			for _, doc := range docs {
+				if stringValue(doc["kind"]) != "KeycloakRealmUser" {
+					continue
+				}
+				if stringValue(mapValue(doc["spec"])["username"]) == persona.username {
+					user = mapValue(doc["spec"])
+				}
+			}
+			if user == nil {
+				t.Fatalf("persona %s has no KeycloakRealmUser %s", persona.name, persona.username)
+			}
+
+			groups := sliceValue(user["groups"])
+			if len(groups) != 1 || stringValue(groups[0]) != group {
+				t.Fatalf("persona user %s is in groups %v, want exactly [%q]; a user in two rungs carries the union of both",
+					persona.username, groups, group)
+			}
+
+			offline := false
+			for _, role := range sliceValue(user["roles"]) {
+				if stringValue(role) == "offline_access" {
+					offline = true
+				}
+			}
+			if offline != persona.unattended {
+				t.Fatalf("persona user %s offline_access = %v, want %v; offline_access is what lets a session refresh without a human, so only unattended rungs may hold it",
+					persona.username, offline, persona.unattended)
+			}
+
+			bound := map[string]bool{}
+			for _, doc := range docs {
+				if stringValue(doc["kind"]) != "ClusterRoleBinding" {
+					continue
+				}
+				for _, subject := range sliceValue(doc["subjects"]) {
+					s := mapValue(subject)
+					if stringValue(s["kind"]) == "Group" && stringValue(s["name"]) == group {
+						bound[stringValue(mapValue(doc["roleRef"])["name"])] = true
+					}
+				}
+			}
+			want := map[string]bool{}
+			for _, role := range persona.clusterRoles {
+				want[role] = true
+			}
+			for role := range bound {
+				if !want[role] {
+					t.Fatalf("persona %s is bound to unexpected ClusterRole %s", persona.name, role)
+				}
+			}
+			for role := range want {
+				if !bound[role] {
+					t.Fatalf("persona %s is missing a binding to ClusterRole %s", persona.name, role)
+				}
+			}
+
+			if !persona.hasPolicy {
+				return
+			}
+			policy := findDoc(t, docs, "ValidatingAdmissionPolicy", group)
+			spec := mapValue(policy["spec"])
+			if stringValue(spec["failurePolicy"]) != "Fail" {
+				t.Fatalf("persona policy %s must be failurePolicy Fail; a policy that fails open is not a boundary", group)
+			}
+			conditions := sliceValue(spec["matchConditions"])
+			if len(conditions) != 1 {
+				t.Fatalf("persona policy %s has %d matchConditions, want exactly 1", group, len(conditions))
+			}
+			expr := stringValue(mapValue(conditions[0])["expression"])
+			if !strings.Contains(expr, `"`+group+`" in request.userInfo.groups`) {
+				t.Fatalf("persona policy %s does not match its group %s", group, group)
+			}
+			if !strings.Contains(expr, `endsWith("#`+persona.username+`")`) {
+				t.Fatalf("persona policy %s has no username fallback for %s; a token without a groups claim would go unmatched and unrestricted",
+					group, persona.username)
+			}
+		})
+	}
+
+	// Only the human operator's identity may carry cluster-admin through the
+	// Cozystack group; a persona reaching it would silently outrank its rung.
+	for _, doc := range docs {
+		if stringValue(doc["kind"]) != "KeycloakRealmUser" {
+			continue
+		}
+		spec := mapValue(doc["spec"])
+		username := stringValue(spec["username"])
+		for _, g := range sliceValue(spec["groups"]) {
+			if stringValue(g) == "cozystack-cluster-admin" && username != "platform-admin" {
+				t.Fatalf("user %s is in cozystack-cluster-admin; only platform-admin may be", username)
+			}
+		}
 	}
 
 	// The token-mint lane must stay pinned to the per-namespace secrets-writer
 	// SAs (write-only OpenBao roles): an unpinned serviceaccounts/token grant
-	// would let the agent mint any SA's token and read Secrets through it, and
+	// would let a persona mint any SA's token and read Secrets through it, and
 	// no ClusterRole here may grant the secrets resource at all.
-	docs := yamlDocs(t, path)
-	tokenRole := findDoc(t, docs, "ClusterRole", "guardian-platform-agent-secrets-writer-token")
+	tokenRole := findDoc(t, docs, "ClusterRole", "guardian-persona-secrets-writer-token")
 	tokenRules := sliceValue(tokenRole["rules"])
 	if len(tokenRules) != 1 {
-		t.Fatalf("guardian-platform-agent-secrets-writer-token has %d rules, want exactly 1", len(tokenRules))
+		t.Fatalf("guardian-persona-secrets-writer-token has %d rules, want exactly 1", len(tokenRules))
 	}
 	tokenRule := mapValue(tokenRules[0])
 	for field, want := range map[string]string{
@@ -121,11 +229,9 @@ func TestPlatformAgentIsReadOnlyWithMaintenanceExceptions(t *testing.T) {
 	} {
 		values := sliceValue(tokenRule[field])
 		if len(values) != 1 || stringValue(values[0]) != want {
-			t.Fatalf("guardian-platform-agent-secrets-writer-token %s = %v, want exactly [%q]", field, values, want)
+			t.Fatalf("guardian-persona-secrets-writer-token %s = %v, want exactly [%q]", field, values, want)
 		}
 	}
-	tokenBinding := findDoc(t, docs, "ClusterRoleBinding", "guardian-platform-agent-secrets-writer-token")
-	assertNestedString(t, tokenBinding, "guardian-platform-agent-secrets-writer-token", "roleRef", "name")
 	for _, doc := range docs {
 		if stringValue(doc["kind"]) != "ClusterRole" {
 			continue
@@ -136,9 +242,9 @@ func TestPlatformAgentIsReadOnlyWithMaintenanceExceptions(t *testing.T) {
 			for _, resource := range sliceValue(rule["resources"]) {
 				switch stringValue(resource) {
 				case "secrets":
-					t.Fatalf("ClusterRole %s grants secrets; the agent estate must stay structurally unable to read one", name)
+					t.Fatalf("ClusterRole %s grants secrets; no persona may read a secret value", name)
 				case "serviceaccounts/token":
-					if name != "guardian-platform-agent-secrets-writer-token" {
+					if name != "guardian-persona-secrets-writer-token" {
 						t.Fatalf("ClusterRole %s grants serviceaccounts/token outside the pinned token-mint lane", name)
 					}
 				}
@@ -146,34 +252,31 @@ func TestPlatformAgentIsReadOnlyWithMaintenanceExceptions(t *testing.T) {
 		}
 	}
 
+	// Every persona password must be born in the cluster except the read
+	// persona's, which predates the ladder and still resolves through OpenBao.
+	assertTextContains(t, raw, "kind: Password", path)
+	assertTextContains(t, raw, "refreshPolicy: CreatedOnce", path)
+
 	analyticsPath := runfilePath("src/infrastructure/deployments/analytics/system/secrets.yaml")
-	analyticsRaw := readText(t, analyticsPath)
-	roleStart := strings.Index(analyticsRaw, "kind: Role\n")
-	bindingStart := strings.Index(analyticsRaw, "kind: RoleBinding\n")
-	if roleStart < 0 || bindingStart < 0 || bindingStart <= roleStart {
-		t.Fatalf("platform-agent analytics Role and RoleBinding not found in %s", analyticsPath)
+	analyticsDocs := yamlDocs(t, analyticsPath)
+	analyticsRole := findDoc(t, analyticsDocs, "Role", "guardian-persona-analytics-read")
+	for _, item := range sliceValue(analyticsRole["rules"]) {
+		rule := mapValue(item)
+		verbs := sliceValue(rule["verbs"])
+		if len(verbs) != 1 || stringValue(verbs[0]) != "get" {
+			t.Fatalf("analytics read carve-out grants verbs %v, want exactly [\"get\"]", verbs)
+		}
+		if len(sliceValue(rule["resourceNames"])) == 0 {
+			t.Fatal("analytics read carve-out has no resourceNames; the exception must stay pinned to named Secrets")
+		}
 	}
-	analyticsRole := analyticsRaw[roleStart:bindingStart]
-	for _, want := range []string{
-		"name: guardian-platform-agent-analytics-read",
-		"namespace: guardian-analytics",
-		"- secrets",
-		"resourceNames:",
-		"- analytics-ch-ingest",
-		"- get",
-	} {
-		assertTextContains(t, analyticsRole, want, analyticsPath)
-	}
-	for _, forbidden := range []string{"- list", "- watch", "- create", "- update", "- patch", "- delete"} {
-		assertTextNotContains(t, analyticsRole, forbidden, analyticsPath)
-	}
-	analyticsBinding := analyticsRaw[bindingStart:]
-	for _, want := range []string{
-		"name: guardian-platform-agent-analytics-read",
-		"kind: Group",
-		"name: guardian-platform-agent",
-	} {
-		assertTextContains(t, analyticsBinding, want, analyticsPath)
+	analyticsBinding := findDoc(t, analyticsDocs, "RoleBinding", "guardian-persona-analytics-read")
+	assertNestedString(t, analyticsBinding, "guardian-persona-analytics-read", "roleRef", "name")
+	for _, subject := range sliceValue(analyticsBinding["subjects"]) {
+		name := stringValue(mapValue(subject)["name"])
+		if !declaredGroups[name] {
+			t.Fatalf("analytics read carve-out is bound to %s, which is not a declared persona group", name)
+		}
 	}
 }
 

@@ -98,27 +98,34 @@ never leak the root of trust that rebuilds it.
   - `guardian-reader-<ns>` — SA `secrets-reader`, read-only, what ESO
     authenticates as (1h token TTL);
   - `guardian-writer-<ns>` — SA `secrets-writer`, write-only within the same
-    subtree, 10-minute token TTL. The platform-agent identity mints these
-    tokens itself through a TokenRequest grant scoped to the
-    `secrets-writer` SAs (RBAC and admission policy:
-    `src/infrastructure/base/cozystack/platform-admins.yaml`), so an agent
-    writes a secret headlessly while the management store stays unreadable
-    to it: the writer policies grant no read capability, so the
+    subtree, 10-minute token TTL. A session mints these tokens itself
+    through a TokenRequest grant scoped to the `secrets-writer` SAs, so a
+    secret is written headlessly while the management store stays
+    unreadable: the writer policies grant no read capability, so the
     mint-token→login→read escalation is closed by the store's no-read
-    classification itself, independent of any other grant. On the
-    Kubernetes side the agent identity carries the built-in `view` role,
-    which excludes Secrets, behind a fail-closed
-    ValidatingAdmissionPolicy.
-- **The agent read boundary is a data classification, not a blanket ban.**
-  Credentials that unlock PII, customer data, or a privilege escalation are
-  never agent-readable — and the OpenBao management store
-  (`kv/guardian/guardian-mgmt/*`) is treated as that class wholesale. An
-  individual Kubernetes Secret that unlocks only non-PII operational data
-  may be granted a narrow, explicit, named read: the Role
-  `guardian-platform-agent-analytics-read`
-  (`src/infrastructure/deployments/analytics/system/secrets.yaml`) grants
-  `get` on `analytics-ch-ingest` alone — ClickHouse holds only non-PII
-  telemetry — and is the precedent for the readable class.
+    classification itself, independent of any other grant.
+- **Sessions carry authority by persona, not by being an agent.** A session
+  chooses a rung of the ladder when it authenticates — `read` (cluster-wide
+  read plus port-forward, unattended), `write-basic` (delete pods and jobs,
+  scale workloads, mint secrets-writer tokens), `write-all` (cluster-admin
+  for emergencies), and `root`, the x509 breakglass that deliberately does
+  not depend on Keycloak. Each rung is a Keycloak group bound to its own
+  ClusterRoles behind its own fail-closed ValidatingAdmissionPolicy:
+  `src/infrastructure/base/cozystack/platform-admins.yaml`, which also
+  documents how to add a rung. Only `read` holds the `offline_access` realm
+  role, so only `read` refreshes unattended; every write persona expires
+  with its Keycloak session and needs a fresh device approval from the
+  operator. That single withheld role is the whole human-in-the-loop
+  mechanism — an agent observes freely and asks before it changes anything.
+- **No persona reads a secret value.** `view` excludes Secrets, and the
+  OpenBao management store (`kv/guardian/guardian-mgmt/*`) is no-read
+  wholesale. The single named exception is the Role
+  `guardian-persona-analytics-read`
+  (`src/infrastructure/deployments/analytics/system/secrets.yaml`), which
+  grants `get` on two named telemetry Secrets because ClickHouse holds only
+  non-PII data. `write-all` is cluster-admin and can therefore read Secrets
+  by construction — the deliberate boundary of the emergency rung, and why
+  it is gated behind a per-session human approval.
 - OpenBao config is **O(1) in the number of integrations**: a new secret in
   an existing namespace never touches OpenBao config. Only *structural*
   changes (a new consumer namespace, a new mount or auth method) edit the

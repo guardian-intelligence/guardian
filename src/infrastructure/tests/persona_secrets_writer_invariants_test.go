@@ -38,11 +38,11 @@ func secretsWriterTokenGrantPresent(t *testing.T, docs []map[string]interface{})
 	for _, doc := range docs {
 		metadata := mapValue(doc["metadata"])
 		if stringValue(doc["kind"]) == "ClusterRole" &&
-			stringValue(metadata["name"]) == "guardian-platform-agent-secrets-writer-token" {
+			stringValue(metadata["name"]) == "guardian-persona-secrets-writer-token" {
 			return true
 		}
 		if stringValue(doc["kind"]) == "ValidatingAdmissionPolicy" &&
-			stringValue(metadata["name"]) == "guardian-platform-agent-readonly" {
+			stringValue(metadata["name"]) == "guardian-persona-write-basic" {
 			for _, validation := range sliceValue(mapValue(doc["spec"])["validations"]) {
 				expr := stringValue(mapValue(validation)["expression"])
 				if strings.Contains(expr, `request.operation == "CREATE"`) &&

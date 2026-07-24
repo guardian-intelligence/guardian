@@ -98,9 +98,9 @@ func TestCiliumDropAlertThresholdIsStatedInNotifications(t *testing.T) {
 func TestPlatformAgentCanReadCiliumPolicies(t *testing.T) {
 	path := runfilePath("src/infrastructure/base/cozystack/platform-admins.yaml")
 	raw := readText(t, path)
-	start := strings.Index(raw, "name: guardian-platform-agent-cluster-view")
+	start := strings.Index(raw, "name: guardian-persona-cluster-view")
 	if start < 0 {
-		t.Fatal("guardian-platform-agent-cluster-view is missing")
+		t.Fatal("guardian-persona-cluster-view is missing")
 	}
 	clusterView := raw[start:]
 	if end := strings.Index(clusterView, "\n---"); end > 0 {

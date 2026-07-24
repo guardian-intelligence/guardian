@@ -13,23 +13,61 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
 
 const (
-	agentContext = "platform-agent@guardian-mgmt"
-	agentUser    = "platform-agent"
 	adminContext = "admin@guardian-mgmt"
 	adminUser    = "admin@guardian-mgmt"
 	clusterName  = "guardian-mgmt"
+
+	defaultPersona = "read"
 
 	defaultKubeAPIServer = "https://k8s.guardianintelligence.org:6443"
 	defaultTalosEndpoint = "k8s.guardianintelligence.org"
 )
 
+// personas maps a rung of the persona ladder to the Keycloak identity that
+// carries it (src/infrastructure/base/cozystack/platform-admins.yaml). Only the
+// unattended rung is granted the offline_access realm role, so requesting the
+// scope anywhere else fails the code exchange outright ("Offline tokens not
+// allowed for the user or client") rather than silently yielding a session
+// token. Asking for a write persona is asking the operator to approve a device
+// login that will expire with its Keycloak session.
+type persona struct {
+	user       string
+	unattended bool
+}
+
+var personas = map[string]persona{
+	"read":        {user: "platform-agent", unattended: true},
+	"write-basic": {user: "platform-write-basic"},
+	"write-all":   {user: "platform-write-all"},
+}
+
+// personaFor resolves a persona name, treating the empty string as the default
+// rung so a programmatic config need not restate it.
+func personaFor(name string) persona {
+	if name == "" {
+		return personas[defaultPersona]
+	}
+	return personas[name]
+}
+
+func personaNames() []string {
+	names := make([]string, 0, len(personas))
+	for name := range personas {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 type config struct {
 	Mode          string
+	Persona       string
 	Kubectl       string
 	Talm          string
 	Talosctl      string
@@ -192,6 +230,7 @@ func main() {
 func parseFlags() config {
 	var cfg config
 	flag.StringVar(&cfg.Mode, "mode", "", "authentication mode: agent or admin")
+	flag.StringVar(&cfg.Persona, "persona", defaultPersona, "persona to assume in agent mode: "+strings.Join(personaNames(), ", "))
 	flag.StringVar(&cfg.Kubectl, "kubectl", "", "path to kubectl")
 	flag.StringVar(&cfg.Talm, "talm", "", "path to Talm (admin mode)")
 	flag.StringVar(&cfg.Talosctl, "talosctl", "", "path to talosctl (admin mode)")
@@ -251,6 +290,11 @@ func resolveKubeconfigPath(path string, fs fileSystem) (string, error) {
 func validateConfig(cfg config) error {
 	if cfg.Mode != "agent" && cfg.Mode != "admin" {
 		return errors.New("--mode must be agent or admin")
+	}
+	if cfg.Mode == "agent" && cfg.Persona != "" {
+		if _, ok := personas[cfg.Persona]; !ok {
+			return fmt.Errorf("--persona must be one of %s", strings.Join(personaNames(), ", "))
+		}
 	}
 	for _, required := range []struct {
 		name  string
@@ -411,7 +455,31 @@ func validateKubernetesAPI(server string) error {
 	return nil
 }
 
+// agentCredentialArgs builds the kubeconfig exec credential for a persona.
+// offline_access is appended only for the unattended rung: Keycloak grants the
+// realm role to that identity alone, so requesting the scope as a write persona
+// fails the device code exchange outright rather than silently downgrading.
+func agentCredentialArgs(cfg config, rung persona, agentUser string) []string {
+	args := []string{
+		"config", "set-credentials", agentUser,
+		"--exec-api-version=client.authentication.k8s.io/v1beta1",
+		"--exec-command=" + cfg.Kubelogin,
+		"--exec-arg=get-token",
+		"--exec-arg=--oidc-issuer-url=" + cfg.OIDCIssuer,
+		"--exec-arg=--oidc-client-id=" + cfg.OIDCClientID,
+		"--exec-arg=--grant-type=device-code",
+		"--exec-arg=--token-cache-dir=" + cfg.OIDCCacheDir,
+	}
+	if rung.unattended {
+		args = append(args, "--exec-arg=--oidc-extra-scope=offline_access")
+	}
+	return args
+}
+
 func (a *application) runAgent(ctx context.Context, candidates []accessCandidate) error {
+	rung := personaFor(a.cfg.Persona)
+	agentUser := rung.user
+	agentContext := agentUser + "@" + clusterName
 	candidate, err := a.selectAgentCandidate(ctx, candidates)
 	if err != nil {
 		return err
@@ -431,17 +499,7 @@ func (a *application) runAgent(ctx context.Context, candidates []accessCandidate
 	steps := [][]string{
 		{"config", "unset", "users." + agentUser},
 		{"config", "set-cluster", clusterName, "--server=" + candidate.KubernetesAPI, "--certificate-authority=" + a.cfg.CA, "--embed-certs=true"},
-		{
-			"config", "set-credentials", agentUser,
-			"--exec-api-version=client.authentication.k8s.io/v1beta1",
-			"--exec-command=" + a.cfg.Kubelogin,
-			"--exec-arg=get-token",
-			"--exec-arg=--oidc-issuer-url=" + a.cfg.OIDCIssuer,
-			"--exec-arg=--oidc-client-id=" + a.cfg.OIDCClientID,
-			"--exec-arg=--grant-type=device-code",
-			"--exec-arg=--oidc-extra-scope=offline_access",
-			"--exec-arg=--token-cache-dir=" + a.cfg.OIDCCacheDir,
-		},
+		agentCredentialArgs(a.cfg, rung, agentUser),
 		{"config", "set-context", agentContext, "--cluster=" + clusterName, "--user=" + agentUser},
 		{"config", "use-context", agentContext},
 	}
