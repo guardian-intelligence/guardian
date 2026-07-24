@@ -42,7 +42,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: controlplane
-          image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:c43dd138eca995d3dce89b8169f7a7ccf6a272bcfc398cd2f73a56c22975e413 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
+          image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:e5e51956f2f645b0b9fa4ea221021f2ea42b10cc20fa3835f80d284aeb04ade4 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
