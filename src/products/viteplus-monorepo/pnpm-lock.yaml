@@ -79,8 +79,8 @@ catalogs:
       specifier: 3.2.0
       version: 3.2.0
     effect:
-      specifier: 3.21.4
-      version: 3.21.4
+      specifier: 3.22.0
+      version: 3.22.0
     gray-matter:
       specifier: 4.0.3
       version: 4.0.3
@@ -378,7 +378,7 @@ importers:
         version: 3.0.1
       effect:
         specifier: 'catalog:'
-        version: 3.21.4
+        version: 3.22.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2117,8 +2117,8 @@ packages:
     resolution: {integrity: sha512-k8DaKGP6r1G30Lx8V4+pCsLzKr8vLmV2paqEj1Y55GdAgJuIqpRp5FfajGF8KtwMxCz9qJc6wUIJnm053d/WCw==}
     engines: {node: '>=12'}
 
-  effect@3.21.4:
-    resolution: {integrity: sha512-B89v/xSgPbl1J2Ai2u18jxq3odpFauU1rC6/eSs4FeNHi72kwKdJp12VGigvRV2lK+kRnx+OOz41XV8guZd4gQ==}
+  effect@3.22.0:
+    resolution: {integrity: sha512-jhYFe0zTlIRqYFrKTS+6luhmS/Tm0f+JLo0K9KUxvtFab1SUGEszQi2ehOP6QzAZvy831lDmTwwzvVDZSPNz3g==}
 
   electron-to-chromium@1.5.332:
     resolution: {integrity: sha512-7OOtytmh/rINMLwaFTbcMVvYXO3AUm029X0LcyfYk0B557RlPkdpTpnH9+htMlfu5dKwOmT0+Zs2Aw+lnn6TeQ==}
@@ -4685,7 +4685,7 @@ snapshots:
   dotenv@17.4.1:
     optional: true
 
-  effect@3.21.4:
+  effect@3.22.0:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 3.23.2
