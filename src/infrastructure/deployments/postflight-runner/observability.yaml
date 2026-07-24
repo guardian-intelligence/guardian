@@ -1,0 +1,44 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: postflight-canary-loop
+  namespace: postflight-runner
+  labels:
+    app.kubernetes.io/name: postflight-canary-loop
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: postflight
+spec:
+  groups:
+    - name: postflight-canary-loop.rules
+      interval: 30s
+      rules:
+        - alert: PostflightCanaryLoopFailing
+          expr: last_over_time(postflight_canary_loop_last_run_success[20m]) == 0
+          for: 2m
+          labels:
+            severity: critical
+            guardian_stage: prod
+            exported_instance: prod/postflight-canary-loop
+          annotations:
+            summary: "Postflight canary PR loop is failing"
+            description: "The latest canary controller run failed. Inspect the newest postflight-canary-loop Job in postflight-runner and the open pull request in digital-guardian-software/postflight-canary."
+        - alert: PostflightCanaryLoopAbsent
+          expr: absent_over_time(postflight_canary_loop_heartbeat[30m])
+          for: 2m
+          labels:
+            severity: critical
+            guardian_stage: prod
+            exported_instance: prod/postflight-canary-loop
+          annotations:
+            summary: "Postflight canary PR loop is stale"
+            description: "No canary heartbeat has reached VictoriaMetrics for 30 minutes. The CronJob, its GitHub App secret, or its network path is unavailable."
+        - alert: PostflightCanaryLoopMissing
+          expr: absent(kube_cronjob_status_last_schedule_time{namespace="postflight-runner",cronjob="postflight-canary-loop"})
+          for: 15m
+          labels:
+            severity: warning
+            guardian_stage: prod
+            exported_instance: prod/postflight-canary-loop
+          annotations:
+            summary: "Postflight canary CronJob is missing"
+            description: "kube-state-metrics has not reported postflight-canary-loop for 15 minutes."
