@@ -1,0 +1,175 @@
+# The alerting plane's own instrumentation. Everything else in this directory
+# decides when to page; nothing watched the deciders.
+#
+# Two scrapes were missing entirely. The platform's `monitoring-system` chart
+# ships a VMServiceScrape named `vmalert` selecting
+# `app.kubernetes.io/instance: vmalert`, but the Service that same chart
+# creates is labelled `instance: vmalert-shortterm` — the selector has matched
+# nothing since the cluster was built, so the instance that evaluates every
+# platform VMRule reported no metrics at all. Alertmanager had no scrape under
+# any name. A rule that errors evaluates to nothing and a notification that
+# fails is dropped silently, so both blind spots fail open: the pager goes
+# quiet and looks healthy.
+#
+# These are declared here rather than by patching the platform objects, which
+# a chart upgrade replaces wholesale.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: vmalert-shortterm
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: vmalert-shortterm
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: monitoring
+      app.kubernetes.io/instance: vmalert-shortterm
+      app.kubernetes.io/name: vmalert
+      managed-by: vm-operator
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+# The Service is headless, so this discovers every replica. That is the point:
+# Alertmanager gossip replicates silences and the notification log but not
+# alerts, and vmalert's notifier is the headless name with Go keep-alive
+# pinning it to whichever replica it connected to — so per-replica series are
+# the only way to see where alert state actually lives.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: alertmanager
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: alertmanager
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: monitoring
+      app.kubernetes.io/instance: alertmanager
+      app.kubernetes.io/name: vmalertmanager
+      managed-by: vm-operator
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: alerting-plane-health
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: alerting-plane-health
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  groups:
+    - name: alerting-plane-health.rules
+      interval: 30s
+      rules:
+        - alert: AlertmanagerNotificationsFailing
+          # A page that Alertmanager could not deliver is the one failure the
+          # pager cannot report on its own behalf.
+          expr: |
+            sum by (integration) (increase(alertmanager_notifications_failed_total[10m])) > 0
+          for: 5m
+          labels:
+            severity: critical
+            guardian_component: alerting
+            exported_instance: guardian-mgmt/alertmanager
+          annotations:
+            summary: "Alertmanager failed to deliver {{ $value }} {{ $labels.integration }} notifications in 10m"
+            description: >-
+              Alertmanager accepted alerts it could not hand to its receiver.
+              Alerta is the only receiver, so pages raised in this window did
+              not reach a human. Check the alerta pod and the relay, then read
+              alertmanager_notifications_total by integration for the split.
+        - alert: AlertmanagerConfigReloadFailed
+          # The config is a Secret this repo owns; a bad edit leaves the last
+          # good config running and the declared one unapplied.
+          expr: |
+            min by (pod) (alertmanager_config_last_reload_successful) == 0
+          for: 10m
+          labels:
+            severity: critical
+            guardian_component: alerting
+            exported_instance: guardian-mgmt/alertmanager
+          annotations:
+            summary: "Alertmanager on {{ $labels.pod }} is running a stale config"
+            description: >-
+              The rendered alertmanager.yaml was rejected, so routing and
+              receivers are whatever last loaded successfully — not what Git
+              declares. Compare the mounted Secret against
+              deployments/alerting/alertmanager-config.yaml.
+        - alert: AlertmanagerClusterDegraded
+          expr: |
+            min(alertmanager_cluster_members) < 3
+          for: 15m
+          labels:
+            severity: warning
+            guardian_component: alerting
+            exported_instance: guardian-mgmt/alertmanager
+          annotations:
+            summary: "Alertmanager gossip sees {{ $value }} of 3 members"
+            description: >-
+              Gossip carries silences and the notification log. A partitioned
+              replica re-sends notifications another replica already delivered
+              and does not honour silences set elsewhere.
+        - alert: RuleEvaluatorRuleErrors
+          # The VictoriaLogs evaluator already has this; the instance that
+          # evaluates every platform rule did not, because it was unscraped.
+          expr: |
+            sum by (pod) (increase(vmalert_alerting_rules_errors_total{job="vmalert-vmalert-shortterm"}[10m])) > 0
+          for: 5m
+          labels:
+            severity: critical
+            guardian_component: alerting
+            exported_instance: guardian-mgmt/vmalert-shortterm
+          annotations:
+            summary: "vmalert-shortterm failed {{ $value }} rule evaluations in 10m"
+            description: >-
+              A rule that errors produces no series, so every alert it would
+              have raised is silently absent. Read
+              vmalert_alerting_rules_errors_total by group to find which.
+        - alert: RuleEvaluatorNotificationErrors
+          expr: |
+            sum by (pod) (increase(vmalert_alerts_send_errors_total{job="vmalert-vmalert-shortterm"}[10m])) > 0
+          for: 5m
+          labels:
+            severity: critical
+            guardian_component: alerting
+            exported_instance: guardian-mgmt/vmalert-shortterm
+          annotations:
+            summary: "vmalert-shortterm could not hand {{ $value }} alerts to Alertmanager in 10m"
+            description: >-
+              Firing rules are not reaching Alertmanager, so nothing
+              downstream can page. Check the notifier URL and the
+              Alertmanager pods.
+        - alert: AlertingPlaneScrapeDuplicated
+          # 2026-07-24 (#1134): two scrapes of one Hubble endpoint doubled
+          # every sum() that did not select a job, and the step change read as
+          # a traffic event for three days. The scrapes above exist because a
+          # platform selector matches nothing today; if an upgrade fixes it,
+          # these become duplicates and the same class of error returns here.
+          expr: |
+            count by (namespace, pod) (up{namespace="tenant-root", pod=~"vmalert.*"}) > 1
+          for: 15m
+          labels:
+            severity: warning
+            guardian_component: alerting
+            exported_instance: guardian-mgmt/alerting-plane
+          annotations:
+            summary: "{{ $labels.pod }} is scraped by {{ $value }} jobs"
+            description: >-
+              Two scrapes of one metrics endpoint double every aggregation
+              that does not select a job. Most likely a platform upgrade
+              repaired the chart's own VMServiceScrape selector, which makes
+              the one declared in deployments/alerting/alerting-plane-health.yaml
+              redundant — delete ours, not theirs.
