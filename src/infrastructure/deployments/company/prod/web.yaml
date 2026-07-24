@@ -76,8 +76,9 @@ spec:
             # The BFF reads these files on every use, so a rotation lands via
             # the kubelet's Secret-mount sync with no pod roll. Seal rotation
             # ceremony: swap the two SESSION_SECRET paths (the standby becomes
-            # the sealer), then after the 30m session TTL force-sync the
-            # retired slot's generator.
+            # the sealer), then after the 30m session TTL delete the retired
+            # slot's ExternalSecret and let Flux recreate it (CreatedOnce
+            # ignores force-sync annotations).
             - name: POSTFLIGHT_OIDC_CLIENT_SECRET_FILE
               value: /auth-secrets/oidc-client-secret
             - name: POSTFLIGHT_SESSION_SECRET_FILE
