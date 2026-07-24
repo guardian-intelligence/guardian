@@ -132,7 +132,10 @@ func browserResolverRules(pageURL string) (string, error) {
 	if err != nil || parsed.Hostname() == "" {
 		return "", fmt.Errorf("canary URL has no host: %q", pageURL)
 	}
-	return "MAP * ~NOTFOUND, EXCLUDE " + parsed.Hostname(), nil
+	// localhost is excluded alongside the origin because the DevTools
+	// endpoint chromedp drives lives there; Chrome's own documentation for
+	// this flag never writes a rule without that exclusion.
+	return "MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE " + parsed.Hostname(), nil
 }
 
 func browserPayment(

@@ -88,6 +88,10 @@ func TestBrowserResolutionIsConfinedToTheCanaryOrigin(t *testing.T) {
 			if !strings.HasSuffix(rules, "EXCLUDE "+tc.host) {
 				t.Fatalf("rules do not admit exactly %q: %q", tc.host, rules)
 			}
+			// chromedp drives the DevTools endpoint over loopback.
+			if !strings.Contains(rules, "EXCLUDE localhost") {
+				t.Fatalf("rules do not admit loopback: %q", rules)
+			}
 		})
 	}
 
