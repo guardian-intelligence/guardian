@@ -252,8 +252,8 @@ func TestOpenBaoFluxOrderingConformance(t *testing.T) {
 	assertDependsOn(t, dns, "guardian-system")
 	// kstatus treats ESO CRs as trivially Current, so wait:true alone is
 	// vacuous for them; the CEL expressions are what make the wait real.
-	assertHealthCheckExpr(t, dns, "external-secrets.io/v1beta1", "ClusterSecretStore")
-	assertHealthCheckExpr(t, dns, "external-secrets.io/v1beta1", "ExternalSecret")
+	assertHealthCheckExpr(t, dns, "external-secrets.io/v1", "ClusterSecretStore")
+	assertHealthCheckExpr(t, dns, "external-secrets.io/v1", "ExternalSecret")
 }
 
 // The declared OpenBao security inventory must stay declared. It now lives in

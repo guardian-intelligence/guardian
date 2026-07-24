@@ -10,7 +10,7 @@
 # via the importer plan + a scoped secrets-writer write — see the
 # static-seal runbook, "Adding An Integration"). Passwords never appear in
 # Git or in the CR; the operator reads them from the projected Secret.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: platform-admin-passwords
