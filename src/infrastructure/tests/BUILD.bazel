@@ -72,7 +72,6 @@ go_test(
         "//src/infrastructure/deployments/authorization/operator:manifests",
         "//src/infrastructure/deployments/authorization/prod:manifests",
         "//src/infrastructure/deployments/cockpit:manifests",
-        "//src/infrastructure/deployments/company/previews:manifests",
         "//src/infrastructure/deployments/company/prod:manifests",
         "//src/infrastructure/deployments/guardian/flagger:manifests",
         "//src/infrastructure/deployments/guardian/imageops:manifests",

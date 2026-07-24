@@ -3,18 +3,19 @@ GitHub-administered compute, and the set is closed by design: the cluster,
 not GitHub, is the control plane (see the root AGENTS.md coding
 guidelines). A workflow earns a file here for exactly one of two reasons:
 
-1. **Merge-time gate** — a required or advisory check validating untrusted
-   PR code. The safelist: the universal Bazel gate (`build.yml`: build+test
-   `//...`, secret scan, tool-pin fetch verification) and the
-   pin-provenance gates (the `*-gate` jobs in `*-image.yml`, which
-   cosign-verify moved image pins). A new gate belongs in the Bazel
-   graph as a test reachable from `//...` unless it needs git/GitHub
-   context a hermetic action cannot have (the secret scan) or Bazel's own
-   caching would defeat it (the tool-pin fresh-fetch build).
+1. **The merge-time gate** — singular. `build-and-test.yml` is every check a
+   pull request runs: build+test `//...`, the secret scan, the tool-pin
+   fresh-fetch build, the union images-lock derivation, and the runtime
+   gates that need a packed image. A new check is a step in that one job,
+   and belongs in the Bazel graph as a test reachable from `//...` unless
+   it needs git/GitHub context a hermetic action cannot have (the secret
+   scan) or Bazel's own caching would defeat it (the tool-pin fresh
+   fetch). Never add a second `pull_request`-triggered workflow.
 2. **Trusted publisher identity** — post-merge jobs that build, sign, and
-   push artifacts (`*-image.yml` main-push jobs, `images-lock-sign.yml`).
-   Each workflow file path IS a cosign/Fulcio identity the cluster
-   verifies. NEVER rename these files; thin them in place.
+   push artifacts (`images.yml`, `images-lock-sign.yml`,
+   `postflight-cli-image.yml`, `postflight-cli-release.yml`). Each workflow
+   file path IS a cosign/Fulcio identity the cluster and the world verify.
+   NEVER rename these files; thin them in place.
 
 Nothing else: schedulers, preview environments, promotion glue, and any
 form of cluster administration run in-cluster. YAML residents of that

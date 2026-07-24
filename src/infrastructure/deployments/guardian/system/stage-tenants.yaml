@@ -14,11 +14,12 @@ spec:
   monitoring: false
   seaweedfs: false
 ---
-# previews is not a promotion stage: it holds ephemeral per-PR deployments of
-# company-site, written to the `previews` branch by CI and reconciled by the
-# guardian-company-previews Kustomization. Same isolation posture as the
-# stages; the tenant-root ingress is admitted by the Cilium pair in
-# deployments/company/previews.
+# previews is not a promotion stage and carries no workloads: it is the
+# always-present, always-empty namespace the admission canaries probe
+# (deployments/guardian/system/vap-denial-canary.yaml) and the narrowest
+# binding scope for the policies still rolling out in strict mode
+# (base/admission/{workload-priority,image-provenance}.yaml). Deleting it
+# would move those probes into a namespace that holds real workloads.
 apiVersion: apps.cozystack.io/v1alpha1
 kind: Tenant
 metadata:

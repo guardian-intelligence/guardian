@@ -1,9 +1,0 @@
-apiVersion: v2
-name: company-site-preview
-description: >-
-  One PR preview of company-site: Deployment/Service/Ingress/DNSEndpoint
-  parameterised by (pr, image digest, commit sha). Instantiated as a
-  values-only HelmRelease per PR on the machine-managed `previews` branch;
-  the manifest shape lives here on main where it is reviewed and versioned.
-type: application
-version: 0.1.0

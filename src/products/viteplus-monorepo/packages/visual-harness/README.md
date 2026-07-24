@@ -71,7 +71,8 @@ compare against**: font antialiasing differs per OS, so baselines must be
 generated inside the pinned Playwright image, never on a laptop.
 macOS-suffixed snapshot files must not be committed.
 
-The `shortty-visual-gate` CI job runs with `--update-snapshots=missing`: a
+The visual gate step of `build-and-test` runs with
+`--update-snapshots=missing`: a
 form factor without a committed baseline gets one generated against the exact
 built shortty image and uploaded in the `shortty-visual` artifact — download
 it (`gh run download -n shortty-visual`), review, and commit. Once committed,

@@ -1,17 +1,12 @@
 # First-party image publisher. One matrix workflow for every service and web
-# image: the universal `build` check already builds and tests //... on every
-# PR, so PR-side this runs only the runtime gates that need the packed image
-# (company-site scroll-perf, shortty smoke); on pushes to main it rebuilds and
-# pushes exactly the images whose inputs changed. Images are not signed —
-# provenance enforcement is the digest-pinning admission policy plus the
-# reviewed-main-only path to `edge` (docs/supply-chain-design.md). The
-# released postflight CLI keeps its own signed lane
-# (postflight-cli-image.yml).
+# image: on pushes to main it rebuilds and pushes exactly the images whose
+# inputs changed. Images are not signed — provenance enforcement is the
+# digest-pinning admission policy plus the reviewed-main-only path to `edge`
+# (docs/supply-chain-design.md). The released postflight CLI keeps its own
+# signed lane (postflight-cli-image.yml).
 name: images
 
 on:
-  pull_request:
-    branches: [main]
   push:
     branches: [main]
     # Deployment pin files are deliberately NOT triggers: a pin-only
@@ -45,8 +40,8 @@ defaults:
     shell: bash
 
 concurrency:
-  group: images-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: images-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   classify:
@@ -54,7 +49,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       images: ${{ steps.classify.outputs.images }}
-      viteplus: ${{ steps.classify.outputs.viteplus }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -96,9 +90,7 @@ jobs:
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'
 
           all=false changed=""
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            changed="$(git diff --name-only "origin/$GITHUB_BASE_REF"...HEAD)"
-          elif [[ "${{ github.event_name }}" == "push" ]]; then
+          if [[ "${{ github.event_name }}" == "push" ]]; then
             base="${{ github.event.before }}"
             if [[ "$base" =~ ^0+$ ]] || ! git cat-file -e "$base" 2>/dev/null; then
               all=true
@@ -126,150 +118,12 @@ jobs:
                 '{name: $name, target: $target}'
             done | jq -sc .)"
           fi
-          viteplus=false
-          if [[ "$all" == true ]] || hits "^src/products/viteplus-monorepo/|$common"; then
-            viteplus=true
-          fi
           echo "images=$images" >> "$GITHUB_OUTPUT"
-          echo "viteplus=$viteplus" >> "$GITHUB_OUTPUT"
-          echo "classified: viteplus=$viteplus images=$images"
+          echo "classified: images=$images"
 
-  # Runtime performance gate for the company site: load the exact image just
-  # built, run it, and fail the check if the letters page's scroll-frame
-  # timing regresses (perf/scroll-jank-gate.mjs, thresholds + rationale
-  # there). Runs against the shipped artifact, not a dev server, so it
-  # catches anything a bundler/runtime difference would otherwise hide.
-  site-perf-gate:
-    needs: classify
-    if: github.event_name == 'pull_request' && needs.classify.outputs.viteplus == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-
-      - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
-
-      - name: Load and run the built image
-        run: |
-          bazelisk run //src/products/viteplus-monorepo/apps/guardianintelligence-web/site:load
-          docker run -d --name perf-gate -p 8080:8080 ghcr.io/guardian-intelligence/company-site:edge
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8080/letters/dear-shovon >/dev/null && break
-            sleep 1
-          done
-
-      - name: Runtime performance gate
-        working-directory: src/products/viteplus-monorepo/apps/guardianintelligence-web
-        run: |
-          # Installed in an empty scratch dir, not in place: `npm install` in
-          # this directory would read this app's package.json and choke on
-          # pnpm's `catalog:` protocol in its dependency versions. Copied in
-          # rather than resolved via NODE_PATH: Node's ESM loader does not
-          # search NODE_PATH at all (CJS-only, verified against a real CI run
-          # -- ERR_MODULE_NOT_FOUND despite NODE_PATH being set), so the
-          # package has to be a real node_modules/ entry to import-resolve.
-          mkdir -p /tmp/perf-gate-deps && cd /tmp/perf-gate-deps
-          npm init -y >/dev/null
-          npm install playwright@1.61.1
-          cd - >/dev/null
-          mkdir -p node_modules
-          cp -r /tmp/perf-gate-deps/node_modules/playwright node_modules/
-          cp -r /tmp/perf-gate-deps/node_modules/playwright-core node_modules/
-          # webkit is excluded: unusable on this runner (see scroll-jank-gate.mjs header).
-          node node_modules/playwright/cli.js install --with-deps chromium firefox
-          BASE=http://127.0.0.1:8080 node perf/scroll-jank-gate.mjs
-
-      - name: Stop perf-gate container
-        if: always()
-        run: docker rm -f perf-gate || true
-
-  # Runtime gate for shortty: load the exact image just built, run it, and
-  # require a healthy serve of the app shell.
-  shortty-smoke-gate:
-    needs: classify
-    if: github.event_name == 'pull_request' && needs.classify.outputs.viteplus == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-
-      - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
-
-      - name: Load and smoke-test the built image
-        run: |
-          bazelisk run //src/products/viteplus-monorepo/apps/shortty-web/site:load
-          docker run -d --name shortty-smoke -p 8080:8080 ghcr.io/guardian-intelligence/shortty-web:edge
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8080/healthz >/dev/null && break
-            sleep 1
-          done
-          curl -sf http://127.0.0.1:8080/ | grep -q "under 4"
-          curl -sf http://127.0.0.1:8080/healthz >/dev/null
-
-      - name: Stop smoke container
-        if: always()
-        run: docker rm -f shortty-smoke || true
-
-  # Deterministic visual gate for shortty: load the exact images just built,
-  # run the visual-harness canary inside the pinned Playwright image (whose
-  # font rendering matches the committed linux baselines), and fail on visual
-  # drift or on critical elements dropping below the fold in any form factor.
-  shortty-visual-gate:
-    needs: classify
-    if: github.event_name == 'pull_request' && needs.classify.outputs.viteplus == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-
-      - uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3.0.0
-
-      - name: Load and run the built images
-        run: |
-          bazelisk run //src/products/viteplus-monorepo/apps/shortty-web/site:load
-          bazelisk run //src/products/viteplus-monorepo/packages/visual-harness:load
-          docker network create visual-gate
-          docker run -d --name shortty-visual --network visual-gate --network-alias shortty \
-            -p 8080:8080 ghcr.io/guardian-intelligence/shortty-web:edge
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8080/healthz >/dev/null && break
-            sleep 1
-          done
-          curl -sf http://127.0.0.1:8080/healthz >/dev/null
-
-      - name: Visual drift + fold gate
-        run: |
-          mkdir -p /tmp/visual-output
-          # journeys/ is mounted read-write and the run passes
-          # --update-snapshots=missing: a form factor with no committed
-          # baseline writes one (surfaced via the artifact below for review
-          # and commit) instead of bricking bootstrap, while any committed
-          # baseline that mismatches still fails the gate.
-          docker run --rm --network visual-gate \
-            -e VISUAL_TARGET_URL=http://shortty:8080 -e VISUAL_ALLOW_HTTP=1 \
-            -v "$PWD/src/products/viteplus-monorepo/packages/visual-harness/journeys:/app/journeys" \
-            -v /tmp/visual-output:/tmp/visual-harness-output \
-            guardian/visual-harness:dev --update-snapshots=missing
-
-      - name: Upload baselines and diff artifacts
-        if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
-        with:
-          name: shortty-visual
-          if-no-files-found: ignore
-          path: |
-            src/products/viteplus-monorepo/packages/visual-harness/journeys/visual.spec.ts-snapshots/
-            /tmp/visual-output/
-
-      - name: Stop visual-gate containers
-        if: always()
-        run: |
-          docker rm -f shortty-visual || true
-          docker network rm visual-gate || true
-
-  # Push only for the canonical main history — not for PRs, and not for
-  # workflow_dispatch on arbitrary branches (a dispatch push would retag
-  # `edge` with bytes that never went through review).
+  # Push only for the canonical main history — not for workflow_dispatch on
+  # arbitrary branches (a dispatch push would retag `edge` with bytes that
+  # never went through review).
   publish:
     needs: classify
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.classify.outputs.images != '[]'
