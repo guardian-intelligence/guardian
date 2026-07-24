@@ -2,6 +2,7 @@
 # Installed via `git config core.hooksPath tools/git-hooks` by
 # scripts/bootstrap (every developer, agent, and CI environment runs it).
 # Refuses the commit while custody-shaped files exist in the workspace —
-# even gitignored — and content-scans the staged changes. CI runs the same
-# script in tree mode, so bypassing the hook only moves the failure.
+# even gitignored — and content-scans the staged changes. This is the local
+# half of the defence; GitHub's push protection is the half that cannot be
+# bypassed with --no-verify.
 exec "$(git rev-parse --show-toplevel)/tools/ops/secret-scan" staged
