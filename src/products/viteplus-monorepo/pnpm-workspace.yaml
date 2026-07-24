@@ -23,7 +23,7 @@ catalog:
   # Must match the Playwright version baked into MODULE.bazel's pinned
   # mcr.microsoft.com/playwright digest — journeys run against the browsers
   # that image carries, and Playwright refuses mismatched browser revisions.
-  "@playwright/test": 1.61.0
+  "@playwright/test": 1.61.1
   "@resvg/resvg-js": 2.6.2
   "@sigstore/bundle": 5.0.0
   "@tailwindcss/vite": ^4
