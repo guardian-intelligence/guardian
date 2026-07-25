@@ -1,0 +1,53 @@
+# privatecut-web's own flows. All media work happens in the visitor's browser;
+# the pod's only outbound need beyond DNS is the /api/resolve hop to X's
+# syndication endpoint. That egress is world:443 rather than a pinned FQDN —
+# a hostname pin would depend on Cilium's DNS proxy for no isolation gain
+# (see postflight-runner/networkpolicy.yaml for the same reasoning).
+# Public ingress arrives with node identity (hostNetwork root ingress) and is
+# admitted by the additive CCNP in root-ingress-networkpolicy.yaml; selecting
+# only egress here leaves that admit intact.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: privatecut-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: privatecut-web
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - privatecut-web
+          - privatecut-web-primary
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # OTLP/HTTP to the analytics collector: the resolve route's server-side
+    # spans. The collector's own namespaced policy cannot admit a foreign
+    # namespace, so otel-networkpolicy.yaml carries the matching ingress.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: guardian-analytics
+            k8s:app.kubernetes.io/name: otel-collector
+      toPorts:
+        - ports:
+            - port: "4318"
+              protocol: TCP

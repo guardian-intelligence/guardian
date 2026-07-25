@@ -1,0 +1,23 @@
+load("@rules_oci//oci:defs.bzl", "oci_load", "oci_push")
+
+alias(
+    name = "image",
+    actual = "//src/products/viteplus-monorepo/apps/privatecut-web:image",
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ":repo_tags.txt",
+)
+
+# Pushed by CI (.github/workflows/images.yml) on merges to main. ghcr.io is public and
+# survives cluster reimages, so cold boots need no registry repopulation.
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/privatecut-web",
+    visibility = ["//visibility:public"],
+)

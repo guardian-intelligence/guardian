@@ -38,7 +38,7 @@
     "**/bower_components/**",
     "src/infrastructure/deployments/company/**",
     "src/infrastructure/deployments/payments/**",
-    "src/infrastructure/deployments/shortty/**",
+    "src/infrastructure/deployments/privatecut/**",
     "src/infrastructure/deployments/postflight-runner/**",
     "src/infrastructure/deployments/iam/prod/journey-canary.yaml",
     "src/infrastructure/deployments/products/prod/cockpit-events.yaml",

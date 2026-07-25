@@ -1,0 +1,1 @@
+ghcr.io/guardian-intelligence/privatecut-web:edge

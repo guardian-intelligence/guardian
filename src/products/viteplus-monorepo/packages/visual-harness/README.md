@@ -52,7 +52,7 @@ Configured by env, mirroring the journey canaries:
 | Variable              | Default                      | Meaning                                                           |
 | --------------------- | ---------------------------- | ----------------------------------------------------------------- |
 | `VISUAL_TARGET_URL`   | (required)                   | Absolute URL; HTTPS unless loopback or `VISUAL_ALLOW_HTTP=1`      |
-| `VISUAL_TARGET`       | `shortty`                    | Target profile in `src/targets/` (critical selectors, tolerances) |
+| `VISUAL_TARGET`       | `privatecut`                 | Target profile in `src/targets/` (critical selectors, tolerances) |
 | `VISUAL_FORM_FACTORS` | `all`                        | Comma list from `src/form-factors.ts`                             |
 | `VISUAL_SEEK_MS`      | `3600`                       | Frozen animation timestamp                                        |
 | `VISUAL_TIMEOUT`      | `2m`                         | Per-test budget, Go-duration, 1m–5m                               |
@@ -72,7 +72,7 @@ generated inside the pinned Playwright image, never on a laptop.
 macOS-suffixed snapshot files must not be committed.
 
 Run the canary with `--update-snapshots=missing` and a form factor without a
-committed baseline gets one generated against the exact built shortty image,
+committed baseline gets one generated against the exact built privatecut image,
 left in the output directory to review and commit. Once committed, any
 mismatch fails the run with the diff alongside it. To capture or refresh
 baselines after an intentional visual change, on a linux box:

@@ -59,7 +59,7 @@ jobs:
         run: |
           names=(alert-relay analytics-ingest authorization canary-journeys
             cockpit payments payments-canary postflight-controlplane
-            company-site shortty-web visual-harness)
+            company-site privatecut-web visual-harness)
           declare -A watch=(
             [alert-relay]='^src/services/alerting/'
             [analytics-ingest]='^src/products/analytics/|^src/proto/'
@@ -70,7 +70,7 @@ jobs:
             [payments-canary]='^src/services/payments/'
             [postflight-controlplane]='^src/services/postflight/'
             [company-site]='^src/products/viteplus-monorepo/'
-            [shortty-web]='^src/products/viteplus-monorepo/'
+            [privatecut-web]='^src/products/viteplus-monorepo/'
             [visual-harness]='^src/products/viteplus-monorepo/packages/visual-harness/|^src/products/viteplus-monorepo/pnpm-(lock|workspace)\.yaml$'
           )
           declare -A push_target=(
@@ -83,7 +83,7 @@ jobs:
             [payments-canary]='//src/services/payments/canary:push'
             [postflight-controlplane]='//src/services/postflight/controlplane:push'
             [company-site]='//src/products/viteplus-monorepo/apps/guardianintelligence-web/site:push'
-            [shortty-web]='//src/products/viteplus-monorepo/apps/shortty-web/site:push'
+            [privatecut-web]='//src/products/viteplus-monorepo/apps/privatecut-web/site:push'
             [visual-harness]='//src/products/viteplus-monorepo/packages/visual-harness:push'
           )
           go_images=' alert-relay analytics-ingest authorization cockpit payments payments-canary postflight-controlplane '

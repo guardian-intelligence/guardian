@@ -138,7 +138,7 @@ check "cloudflare_load_balancer_origins" {
   }
 }
 
-# rumi.engineering — the Shortty product edge. Proxied A records straight to
+# rumi.engineering — the PrivateCut product edge. Proxied A records straight to
 # the three ASH origins: no Cloudflare Load Balancer for this zone, so there
 # is no per-request origin health steering — an origin outage surfaces as
 # 1/3 of requests erroring until the record set is amended. Accepted for a
@@ -162,7 +162,7 @@ resource "cloudflare_dns_record" "rumi_engineering_apex" {
   content = each.value.public_ipv4
   ttl     = 1
   proxied = true
-  comment = "shortty ${each.key} product edge"
+  comment = "privatecut ${each.key} product edge"
 }
 
 # CAA policy for the zone, owned here rather than inherited from its
@@ -183,5 +183,5 @@ resource "cloudflare_dns_record" "rumi_engineering_caa" {
     tag   = "issue"
     value = each.value
   }
-  comment = "shortty edge certificate issuance policy"
+  comment = "privatecut edge certificate issuance policy"
 }

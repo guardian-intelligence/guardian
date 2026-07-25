@@ -1,5 +1,5 @@
 import { parseFormFactors, type FormFactor } from "./form-factors.ts";
-import { shorttyTarget } from "./targets/shortty.ts";
+import { privatecutTarget } from "./targets/privatecut.ts";
 
 export interface TargetConfig {
   name: string;
@@ -17,14 +17,14 @@ export interface CanaryConfig {
 }
 
 export const TARGETS: Record<string, TargetConfig> = {
-  [shorttyTarget.name]: shorttyTarget,
+  [privatecutTarget.name]: privatecutTarget,
 };
 
 const MIN_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 300_000;
 const MAX_SEEK_MS = 60_000;
 
-// The longest intro animation on shortty ends at 3.6s; seeking past it keeps
+// The longest intro animation on privatecut ends at 3.6s; seeking past it keeps
 // baselines out of the transient intro phase even when reduced-motion is off.
 const DEFAULT_SEEK_MS = 3_600;
 
@@ -59,7 +59,7 @@ export function loadCanaryConfig(env: Record<string, string | undefined>): Canar
     throw new Error("VISUAL_TARGET_URL must use HTTPS (or HTTP with VISUAL_ALLOW_HTTP=1)");
   }
 
-  const targetName = env.VISUAL_TARGET?.trim() || "shortty";
+  const targetName = env.VISUAL_TARGET?.trim() || "privatecut";
   const target = TARGETS[targetName];
   if (!target) {
     throw new Error(

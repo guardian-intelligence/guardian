@@ -21,7 +21,7 @@ describe("parseGoDuration", () => {
 describe("loadCanaryConfig", () => {
   it("applies defaults", () => {
     const cfg = loadCanaryConfig(baseEnv);
-    expect(cfg.target.name).toBe("shortty");
+    expect(cfg.target.name).toBe("privatecut");
     expect(cfg.formFactors).toEqual(FORM_FACTORS);
     expect(cfg.seekMs).toBe(3_600);
     expect(cfg.timeoutMs).toBe(120_000);
@@ -44,8 +44,8 @@ describe("loadCanaryConfig", () => {
   });
 
   it("allows plain HTTP when explicitly opted in", () => {
-    const env = { VISUAL_TARGET_URL: "http://shortty:8080", VISUAL_ALLOW_HTTP: "1" };
-    expect(loadCanaryConfig(env).targetUrl).toBe("http://shortty:8080");
+    const env = { VISUAL_TARGET_URL: "http://privatecut:8080", VISUAL_ALLOW_HTTP: "1" };
+    expect(loadCanaryConfig(env).targetUrl).toBe("http://privatecut:8080");
   });
 
   it("bounds the timeout", () => {

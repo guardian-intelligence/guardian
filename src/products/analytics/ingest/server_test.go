@@ -281,18 +281,18 @@ func TestMeteredEventNamesCounter(t *testing.T) {
 	srv, sink := newTestStack(t)
 	client := publishClient(srv)
 
-	failedBefore := testutil.ToFloat64(eventsByName.WithLabelValues("local", "shortty.link_failed"))
-	submittedBefore := testutil.ToFloat64(eventsByName.WithLabelValues("local", "shortty.link_submitted"))
-	unmeteredBefore := testutil.ToFloat64(eventsByName.WithLabelValues("local", "shortty.encode_completed"))
+	failedBefore := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.link_failed"))
+	submittedBefore := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.link_submitted"))
+	unmeteredBefore := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.encode_completed"))
 
 	req := connect.NewRequest(&analyticsv1.PublishRequest{
 		SentAtUnixMs: 1_800_000_000_000,
 		Events: []*analyticsv1.Event{
-			{Name: "shortty.link_failed", Path: "/", PropsJson: `{"code":"not_found"}`},
-			{Name: "shortty.link_submitted", Path: "/"},
-			// Registered via the shortty. prefix but not allowlisted for the
+			{Name: "privatecut.link_failed", Path: "/", PropsJson: `{"code":"not_found"}`},
+			{Name: "privatecut.link_submitted", Path: "/"},
+			// Registered via the privatecut. prefix but not allowlisted for the
 			// metric: accepted as a row, never a label value.
-			{Name: "shortty.encode_completed", Path: "/"},
+			{Name: "privatecut.encode_completed", Path: "/"},
 		},
 	})
 	res, err := client.Publish(context.Background(), req)
@@ -304,13 +304,13 @@ func TestMeteredEventNamesCounter(t *testing.T) {
 	}
 	waitRows(t, sink, 3)
 
-	if d := testutil.ToFloat64(eventsByName.WithLabelValues("local", "shortty.link_failed")) - failedBefore; d != 1 {
+	if d := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.link_failed")) - failedBefore; d != 1 {
 		t.Errorf("link_failed delta = %v, want 1", d)
 	}
-	if d := testutil.ToFloat64(eventsByName.WithLabelValues("local", "shortty.link_submitted")) - submittedBefore; d != 1 {
+	if d := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.link_submitted")) - submittedBefore; d != 1 {
 		t.Errorf("link_submitted delta = %v, want 1", d)
 	}
-	if d := testutil.ToFloat64(eventsByName.WithLabelValues("local", "shortty.encode_completed")) - unmeteredBefore; d != 0 {
+	if d := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.encode_completed")) - unmeteredBefore; d != 0 {
 		t.Errorf("unmetered name delta = %v, want 0", d)
 	}
 }

@@ -14,7 +14,7 @@ const IPHONE_UA =
 const IPAD_UA =
   "Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
 
-// Widths bracket the shortty-web breakpoints (64rem/58.75rem/40rem =
+// Widths bracket the privatecut-web breakpoints (64rem/58.75rem/40rem =
 // 1024/940/640 CSS px) so every distinct responsive layout has coverage.
 // 1920×1080 at deviceScaleFactor 2 captures a physical 3840×2160 frame.
 export const FORM_FACTORS: readonly FormFactor[] = [

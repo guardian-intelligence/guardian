@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { FORM_FACTORS, formFactor, parseFormFactors } from "../src/form-factors.ts";
 
 describe("form factors", () => {
-  it("covers every shortty breakpoint band", () => {
+  it("covers every privatecut breakpoint band", () => {
     const widths = FORM_FACTORS.map((f) => f.width);
     expect(widths.some((w) => w > 1024)).toBe(true);
     expect(widths.some((w) => w > 640 && w < 1024)).toBe(true);

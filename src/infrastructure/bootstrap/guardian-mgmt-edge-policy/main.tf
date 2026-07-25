@@ -82,7 +82,7 @@ resource "cloudflare_ruleset" "cache_policy" {
   ]
 }
 
-# rumi.engineering (Shortty) carries the same origin-trust posture as the
+# rumi.engineering (PrivateCut) carries the same origin-trust posture as the
 # apex: AOP on, strict origin TLS, no Bot Fight Mode (it would challenge the
 # first-party POST beacons), and no edge caching of /api/.
 data "cloudflare_zone" "rumi_engineering" {
@@ -112,7 +112,7 @@ resource "cloudflare_bot_management" "rumi_engineering" {
 
 resource "cloudflare_ruleset" "rumi_cache_policy" {
   zone_id = data.cloudflare_zone.rumi_engineering.id
-  name    = "shortty edge cache policy"
+  name    = "privatecut edge cache policy"
   kind    = "zone"
   phase   = "http_request_cache_settings"
 

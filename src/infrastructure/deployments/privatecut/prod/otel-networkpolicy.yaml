@@ -1,0 +1,35 @@
+# The otel-collector's namespaced policy admits producers from its own
+# namespace only (a fromEndpoints matchLabels without a namespace key never
+# crosses namespaces), so each cross-namespace producer is a deliberate,
+# reviewed admit — same pattern as guardian-analytics-otel-from-payments.
+# privatecut-web speaks OTLP/HTTP (Node exporter), hence 4318 rather than the
+# Go producers' 4317.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: guardian-analytics-otel-from-privatecut-web
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: privatecut
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: guardian-analytics
+      k8s:app.kubernetes.io/name: otel-collector
+  ingress:
+    - fromEndpoints:
+        # Both names, like the egress side in networkpolicy.yaml: Flagger's
+        # primary clone renames the workload label, and its spans must not
+        # start silently dropping the day privatecut grows a Canary.
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-guardian-prod
+          matchExpressions:
+            - key: k8s:app.kubernetes.io/name
+              operator: In
+              values:
+                - privatecut-web
+                - privatecut-web-primary
+      toPorts:
+        - ports:
+            - port: "4318"
+              protocol: TCP
