@@ -6,21 +6,24 @@ import (
 )
 
 // workspaceScopeKey is the job-shape identity of one workspace lineage.
-// Every dimension comes from data the queued-job ingest already holds.
+// Every dimension comes from data the queued-job ingest already holds plus
+// the runner class's guest_arch/workspace_epoch pair.
 type workspaceScopeKey struct {
-	Org          string
-	Repo         string
-	ScopeRef     string
-	WorkflowPath string
-	JobName      string
-	MatrixKey    string
-	RunnerClass  string
+	Org            string
+	Repo           string
+	ScopeRef       string
+	WorkflowPath   string
+	JobName        string
+	MatrixKey      string
+	RunnerClass    string
+	GuestArch      string
+	WorkspaceEpoch string
 }
 
 const sqlEnsureWorkspaceScope = `
-INSERT INTO workspace_scopes (org, repo, scope_ref, workflow_path, job_name, matrix_key, runner_class)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-ON CONFLICT (org, repo, scope_ref, workflow_path, job_name, matrix_key, runner_class)
+INSERT INTO workspace_scopes (org, repo, scope_ref, workflow_path, job_name, matrix_key, runner_class, guest_arch, workspace_epoch)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (org, repo, scope_ref, workflow_path, job_name, matrix_key, runner_class, guest_arch, workspace_epoch)
 DO UPDATE SET updated_at = now()
 RETURNING scope_id::text`
 
@@ -29,9 +32,21 @@ RETURNING scope_id::text`
 func (s *pgStore) EnsureWorkspaceScope(ctx context.Context, key workspaceScopeKey) (string, error) {
 	var scopeID string
 	err := s.pool.QueryRow(ctx, sqlEnsureWorkspaceScope,
-		key.Org, key.Repo, key.ScopeRef, key.WorkflowPath, key.JobName, key.MatrixKey, key.RunnerClass,
+		key.Org, key.Repo, key.ScopeRef, key.WorkflowPath, key.JobName, key.MatrixKey,
+		key.RunnerClass, key.GuestArch, key.WorkspaceEpoch,
 	).Scan(&scopeID)
 	return scopeID, err
+}
+
+// RunnerClassScopeKey reads the class's contribution to the workspace scope
+// key: its guest architecture and the deliberately-bumped workspace epoch.
+// pgx.ErrNoRows means no capacity will ever serve the class, so the caller
+// keys no lineage.
+func (s *pgStore) RunnerClassScopeKey(ctx context.Context, class string) (guestArch, workspaceEpoch string, err error) {
+	err = s.pool.QueryRow(ctx,
+		`SELECT guest_arch, workspace_epoch FROM runner_classes WHERE class = $1`, class,
+	).Scan(&guestArch, &workspaceEpoch)
+	return guestArch, workspaceEpoch, err
 }
 
 // sqlPromoteScopePointer is THE compare-and-swap: the pointer advances only
@@ -122,6 +137,37 @@ WHERE g.state IN ('retained', 'discarded')
 
 func (s *pgStore) SweepReapableGenerations(ctx context.Context) (int64, error) {
 	tag, err := s.pool.Exec(ctx, sqlSweepReapableGenerations)
+	return tag.RowsAffected(), err
+}
+
+// sqlRetireOrphanedScopePointers: when a class's guest_arch or
+// workspace_epoch moves, every scope minted under the old pair stops being
+// resolvable — no future job reads it, so no promotion would ever displace
+// its committed generation and the reapable sweep would treat that
+// still-referenced 'committed' row as live forever. Detach the pointer and
+// retire the generation so the retained→reapable path reclaims the dataset.
+// The prior self-join carries the pre-update pointer into RETURNING, which
+// otherwise only sees the new NULL; scope-then-generation lock order matches
+// the promotion CAS.
+const sqlRetireOrphanedScopePointers = `
+WITH orphaned AS (
+    UPDATE workspace_scopes s
+    SET current_generation_id = NULL, updated_at = now()
+    FROM runner_classes c, workspace_scopes prior
+    WHERE c.class = s.runner_class
+      AND prior.scope_id = s.scope_id
+      AND (s.guest_arch <> c.guest_arch OR s.workspace_epoch <> c.workspace_epoch)
+      AND s.current_generation_id IS NOT NULL
+    RETURNING prior.current_generation_id AS generation
+)
+UPDATE workspace_generations g
+SET state = 'retained', updated_at = now()
+FROM orphaned o
+WHERE g.generation = o.generation
+  AND g.state = 'committed'`
+
+func (s *pgStore) RetireOrphanedScopePointers(ctx context.Context) (int64, error) {
+	tag, err := s.pool.Exec(ctx, sqlRetireOrphanedScopePointers)
 	return tag.RowsAffected(), err
 }
 
