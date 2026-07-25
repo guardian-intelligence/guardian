@@ -46,6 +46,7 @@ type jitMintRequest struct {
 	Name          string   `json:"name"`
 	RunnerGroupID int64    `json:"runner_group_id"`
 	Labels        []string `json:"labels"`
+	WorkFolder    string   `json:"work_folder"`
 }
 
 type fakeGitHub struct {
@@ -66,6 +67,9 @@ func (f *fakeGitHub) handler(t *testing.T) http.Handler {
 		var request jitMintRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Errorf("decode JIT request: %v", err)
+		}
+		if request.WorkFolder != syncproto.RunnerWorkRoot {
+			t.Errorf("JIT work_folder = %q, want %q", request.WorkFolder, syncproto.RunnerWorkRoot)
 		}
 		f.mu.Lock()
 		f.mints = append(f.mints, request)

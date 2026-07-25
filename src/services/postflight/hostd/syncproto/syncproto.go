@@ -29,6 +29,13 @@ type PlatformReport struct {
 	CRIUVersion   string `json:"criu_version"`
 }
 
+// RunnerWorkRoot is the physical _work tree on the guest's durable home
+// volume. JIT configs must carry it as an absolute work_folder: the runner
+// install's default _work is a symlink here, and actions that glob under an
+// unresolved $GITHUB_WORKSPACE (setup-python's cache hashFiles) drop every
+// match when the walked real paths don't share that prefix.
+const RunnerWorkRoot = "/home/runner/_work"
+
 type SlotReport struct {
 	Class     string `json:"class"`
 	Total     int    `json:"total"`
