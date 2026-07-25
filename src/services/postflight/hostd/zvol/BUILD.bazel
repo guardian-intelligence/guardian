@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "exec.go",
         "fake.go",
+        "transfer.go",
         "zvol.go",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol",

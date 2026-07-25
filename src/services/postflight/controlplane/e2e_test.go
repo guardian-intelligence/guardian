@@ -1353,7 +1353,7 @@ FROM generate_series(1, 150) AS i`,
 		pgx.QueryExecModeSimpleProtocol, e2eClass, trustClassPR); err != nil {
 		t.Fatal(err)
 	}
-	plans, err := store.ListJobPlans(ctx, "host-bound")
+	plans, err := store.ListJobPlans(ctx, "host-bound", time.Now().Add(-time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1749,4 +1749,218 @@ func TestSingleHostDefaultsServeQueuedDemand(t *testing.T) {
 	})
 	// The consumed listener's budget slot re-opens from the standby pool.
 	waitForStableExposure(t, control.pool, "host-e2e", e2eClass, "2/3")
+}
+
+func getJobPlans(t *testing.T, origin, hostID string) syncproto.JobPlanSnapshot {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, origin+syncproto.JobPlanPath+"?host_id="+hostID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+e2eSyncSecret)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		detail, _ := io.ReadAll(response.Body)
+		t.Fatalf("job plans returned %s: %s", response.Status, detail)
+	}
+	var snapshot syncproto.JobPlanSnapshot
+	if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+const e2eTransferOrigin = "http://10.75.0.1:8482"
+
+// seedTransferScenario places the demand's source generation on
+// host-xfer-a with a base generation resident on the requesting host, so
+// routing decisions have both sides to reason about.
+func seedTransferScenario(t *testing.T, control *e2eControlPlane, requesterHostID string) {
+	t.Helper()
+	ctx := context.Background()
+	scopeID, err := (&pgStore{pool: control.pool}).EnsureWorkspaceScope(ctx, workspaceScopeKey{
+		Org: "acme", Repo: "widget", ScopeRef: "main", WorkflowPath: ".github/workflows/ci.yml",
+		JobName: "build", RunnerClass: e2eClass, GuestArch: "x86_64", WorkspaceEpoch: "epoch-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(ctx, `
+INSERT INTO workspace_generations (generation, host_id, runner_class, state, scope_id)
+VALUES ('gen-base', $1, $2, 'committed', $3::uuid)`, requesterHostID, e2eClass, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(ctx, `
+INSERT INTO workspace_generations (
+    generation, host_id, runner_class, state, scope_id, source_generation,
+    process_digest, criu_version, sealed_at
+) VALUES ('gen-transfer', 'host-xfer-a', $1, 'committed', $2::uuid, 'gen-base',
+    'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+    'Version: 4.2', now())`, e2eClass, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(ctx, `
+UPDATE github_provider_demands SET workspace_scope_id = $1::uuid, source_generation = 'gen-transfer'
+WHERE provider_job_id = $2`, scopeID, e2eJobID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOffHostGenerationRoutesTransferSpecEndToEnd(t *testing.T) {
+	control := startE2EControlPlane(t)
+	const hostB = "host-xfer-b"
+	seedTransferScenario(t, control, hostB)
+
+	// The owning host advertises its transfer origin; the requesting host
+	// offers capacity for the class.
+	postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: "host-xfer-a", BootID: "boot-a", TransferOrigin: e2eTransferOrigin,
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1}},
+	})
+	if got := queryString(t, control.pool, `SELECT transfer_origin FROM hosts WHERE host_id = 'host-xfer-a'`); got != e2eTransferOrigin {
+		t.Fatalf("advertised transfer origin = %q", got)
+	}
+
+	hostReport := syncproto.SyncRequest{
+		HostID: hostB, BootID: "boot-b",
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1, Listening: 1}},
+		Members: []syncproto.PoolMemberReport{{
+			MemberID: "member-xfer-b", VMID: "vm-xfer-b", Class: e2eClass, Image: "golden", State: syncproto.MemberListening,
+		}},
+	}
+	postHostSync(t, control.server.URL, hostReport)
+	waitFor(t, "capacity pool intent", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pools WHERE runner_class = $1 AND desired_count > 0`, e2eClass) == "1"
+	})
+	postHostSync(t, control.server.URL, hostReport)
+	runnerName := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = 'member-xfer-b'`)
+	if runnerName == "" {
+		t.Fatal("member was not allocated to the warm pool")
+	}
+
+	// The prepositioned plan for host B carries the generation with its
+	// transfer routing instead of a blanked generation.
+	snapshot := getJobPlans(t, control.server.URL, hostB)
+	if len(snapshot.Plans) != 1 {
+		t.Fatalf("plans = %+v", snapshot.Plans)
+	}
+	plan := snapshot.Plans[0]
+	if plan.Workspace.Generation != "gen-transfer" || plan.Tool.Generation != "gen-transfer" {
+		t.Fatalf("plan generations = %+v", plan)
+	}
+	if plan.Transfer == nil || plan.Transfer.Origin != e2eTransferOrigin ||
+		plan.Transfer.Generation != "gen-transfer" || plan.Transfer.Base != "gen-base" {
+		t.Fatalf("plan transfer = %+v", plan.Transfer)
+	}
+	if plan.Process.Generation != "gen-transfer" || plan.Process.ExpectedDigest == "" {
+		t.Fatalf("plan process = %+v", plan.Process)
+	}
+	// The owning host itself keeps the plain resident view.
+	ownSnapshot := getJobPlans(t, control.server.URL, "host-xfer-a")
+	if len(ownSnapshot.Plans) != 1 || ownSnapshot.Plans[0].Transfer != nil ||
+		ownSnapshot.Plans[0].Workspace.Generation != "gen-transfer" {
+		t.Fatalf("owner plans = %+v", ownSnapshot.Plans)
+	}
+
+	// GitHub selects the listener on host B; the bound assignment persists
+	// the routing and the desired state carries it.
+	assigned := hostReport
+	assigned.Members = []syncproto.PoolMemberReport{{
+		MemberID: "member-xfer-b", VMID: "vm-xfer-b", Class: e2eClass, Image: "golden", State: syncproto.MemberAssigned,
+		Assignment: &syncproto.ObservedAssignment{
+			RequestID: "request-9001", JobID: "protocol-job-9001", CheckRunID: e2eCheckRunID,
+			RunnerName: runnerName, JobDisplayName: "build",
+			Identity: syncproto.JobIdentity{
+				RunID: "777", RunAttempt: 1, RunnerName: runnerName,
+				Repository: e2eRepo, WorkflowJob: "build",
+			},
+		},
+	}}
+	response := postHostSync(t, control.server.URL, assigned)
+	if len(response.Assignments) != 1 {
+		t.Fatalf("desired assignments = %+v", response.Assignments)
+	}
+	desired := response.Assignments[0]
+	if desired.Workspace.Generation != "gen-transfer" || desired.Transfer == nil ||
+		desired.Transfer.Origin != e2eTransferOrigin || desired.Transfer.Generation != "gen-transfer" ||
+		desired.Transfer.Base != "gen-base" {
+		t.Fatalf("desired assignment transfer = %+v", desired.Transfer)
+	}
+	if desired.Process.Generation != "gen-transfer" || desired.Process.ExpectedDigest == "" {
+		t.Fatalf("desired process = %+v", desired.Process)
+	}
+
+	// The assigned host's transfer evidence lands beside restore evidence.
+	report := assigned
+	report.Assignments = []syncproto.AssignmentReport{{
+		AssignmentID: desired.AssignmentID, MemberID: desired.MemberID,
+		RequestID: desired.RequestID, JobID: desired.JobID,
+		State:    syncproto.AssignmentRunning,
+		Transfer: &syncproto.TransferReport{Outcome: "used", Bytes: 4096, Millis: 1200, Incremental: true},
+	}}
+	postHostSync(t, control.server.URL, report)
+	if got := queryString(t, control.pool, `
+SELECT transfer_outcome || ':' || transfer_bytes::text || ':' || transfer_millis::text || ':' || transfer_incremental::text
+FROM runner_job_assignments WHERE assignment_id::text = $1`, desired.AssignmentID); got != "used:4096:1200:true" {
+		t.Fatalf("persisted transfer evidence = %q", got)
+	}
+	if got := queryString(t, control.pool, `
+SELECT transfer_origin || '|' || transfer_base || '|' || source_generation
+FROM runner_job_assignments WHERE assignment_id::text = $1`, desired.AssignmentID); got != e2eTransferOrigin+"|gen-base|gen-transfer" {
+		t.Fatalf("persisted transfer routing = %q", got)
+	}
+}
+
+func TestOffHostGenerationWithoutAdvertisementStaysBlanked(t *testing.T) {
+	control := startE2EControlPlane(t)
+	const hostB = "host-xfer-b"
+	seedTransferScenario(t, control, hostB)
+	ctx := context.Background()
+
+	// The owning host syncs without advertising a transfer origin.
+	postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: "host-xfer-a", BootID: "boot-a",
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1}},
+	})
+	postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: hostB, BootID: "boot-b",
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1}},
+	})
+	snapshot := getJobPlans(t, control.server.URL, hostB)
+	if len(snapshot.Plans) != 1 || snapshot.Plans[0].Workspace.Generation != "" ||
+		snapshot.Plans[0].Transfer != nil || snapshot.Plans[0].Process.Generation != "" {
+		t.Fatalf("plans without advertisement = %+v", snapshot.Plans)
+	}
+
+	// Advertising makes it routable; going stale blanks it again.
+	postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: "host-xfer-a", BootID: "boot-a", TransferOrigin: e2eTransferOrigin,
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1}},
+	})
+	snapshot = getJobPlans(t, control.server.URL, hostB)
+	if len(snapshot.Plans) != 1 || snapshot.Plans[0].Transfer == nil {
+		t.Fatalf("plans after advertisement = %+v", snapshot.Plans)
+	}
+	if _, err := control.pool.Exec(ctx, `UPDATE hosts SET last_sync_at = now() - interval '1 hour' WHERE host_id = 'host-xfer-a'`); err != nil {
+		t.Fatal(err)
+	}
+	snapshot = getJobPlans(t, control.server.URL, hostB)
+	if len(snapshot.Plans) != 1 || snapshot.Plans[0].Workspace.Generation != "" || snapshot.Plans[0].Transfer != nil {
+		t.Fatalf("plans with stale owner = %+v", snapshot.Plans)
+	}
+}
+
+func TestMalformedTransferOriginIsNotStored(t *testing.T) {
+	control := startE2EControlPlane(t)
+	postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: "host-xfer-mal", BootID: "boot-mal", TransferOrigin: "10.75.0.1:8482",
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1}},
+	})
+	if got := queryString(t, control.pool, `SELECT transfer_origin FROM hosts WHERE host_id = 'host-xfer-mal'`); got != "" {
+		t.Fatalf("malformed origin stored as %q", got)
+	}
 }

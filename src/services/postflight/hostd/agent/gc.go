@@ -63,6 +63,52 @@ func (a *Agent) collectOrphans(ctx context.Context, _ *vmView, assignments map[s
 			a.logger.Error("collecting orphan assignment volumes", "assignment_id", assignmentID, "err", err)
 		}
 	}
+
+	a.collectTransfers(ctx, assignments, desiredAssignments)
+}
+
+// collectTransfers reclaims the transfer cache. Cached generations are
+// derived state — re-fetchable from their owning host — so unlike resident
+// generations they need no control-plane reap verb: any cache entry no live
+// assignment routes at goes. ZFS keeps the sweep safe; an entry a sealed
+// generation still descends from refuses destruction as busy.
+func (a *Agent) collectTransfers(ctx context.Context, assignments map[string]*assignment, desiredAssignments map[string]syncproto.DesiredAssignment) {
+	store, ok := a.zvols.(zvol.TransferStore)
+	if !ok {
+		return
+	}
+	transfers, err := store.ListTransfers(ctx)
+	if err != nil {
+		a.logger.Error("listing transfer cache for gc", "err", err)
+		return
+	}
+	if len(transfers) == 0 {
+		return
+	}
+	referenced := map[zvol.GenerationID]bool{}
+	for _, record := range assignments {
+		record.mu.Lock()
+		if generation := record.spec.Workspace.Generation; generation != "" {
+			referenced[zvol.GenerationID(generation)] = true
+		}
+		record.mu.Unlock()
+	}
+	for _, desired := range desiredAssignments {
+		if generation := desired.Workspace.Generation; generation != "" {
+			referenced[zvol.GenerationID(generation)] = true
+		}
+	}
+	for _, generation := range transfers {
+		if referenced[generation] {
+			continue
+		}
+		err := store.DestroyTransfer(ctx, generation)
+		if err == nil {
+			a.metrics.TransfersCollected.Add(1)
+		} else if !errors.Is(err, zvol.ErrNotFound) && !errors.Is(err, zvol.ErrBusy) {
+			a.logger.Error("collecting transfer cache", "generation", generation, "err", err)
+		}
+	}
 }
 
 func (a *Agent) destroyAssignmentVolumes(ctx context.Context, id zvol.AssignmentID) error {

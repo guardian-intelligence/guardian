@@ -270,6 +270,10 @@ func (a *Agent) stepAssignment(ctx context.Context, record *assignment, view *vm
 			a.failClosed(ctx, record, admission.Reason)
 			return
 		}
+		if !a.ensureTransferred(ctx, record) {
+			return
+		}
+		a.finalizeTransferEvidence(record)
 		started := time.Now()
 		a.appendTrace(record.trace, record, "generation_materialization_started", nil)
 		if err := a.materialize(ctx, record); err != nil {
@@ -445,7 +449,7 @@ func (a *Agent) materialize(ctx context.Context, record *assignment) error {
 		a.logger.Info("postflight.hostd.volume.materialized", "assignment_id", spec.AssignmentID, "role", "tool", "duration_ns", time.Since(started).Nanoseconds())
 	}()
 	processGeneration := zvol.GenerationID("")
-	if spec.Process.ExpectedDigest != "" {
+	if spec.Process.ExpectedDigest != "" && !record.coldProcess {
 		processGeneration = zvol.GenerationID(spec.Process.Generation)
 	}
 	processSize := spec.Process.SizeBytes
@@ -474,12 +478,16 @@ func (a *Agent) materialize(ctx context.Context, record *assignment) error {
 }
 
 func (a *Agent) rendezvous(record *assignment) vm.Rendezvous {
-	return vm.Rendezvous{
+	rendezvous := vm.Rendezvous{
 		MemberID: record.spec.MemberID, AssignmentID: record.spec.AssignmentID,
 		WorkspaceDevice: record.device, WorkspaceMountpoint: workspaceMountpoint(record.spec.RepositoryFullName),
 		ToolDevice: record.toolDevice, ProcessDevice: record.processDevice,
 		CheckpointDigest: record.spec.Process.ExpectedDigest, CheckpointVersion: record.spec.Process.ExpectedVersion,
 	}
+	if record.coldProcess {
+		rendezvous.CheckpointDigest, rendezvous.CheckpointVersion = "", ""
+	}
+	return rendezvous
 }
 
 func (a *Agent) authorization(record *assignment) vm.Authorization {

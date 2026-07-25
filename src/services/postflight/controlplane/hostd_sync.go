@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -68,7 +69,7 @@ func (s *syncServer) handleSync(w http.ResponseWriter, r *http.Request) {
 		attribute.Int("members", len(request.Members)), attribute.Int("assignments", len(request.Assignments)))
 
 	hostStarted := time.Now()
-	if err := s.st.UpsertHostSync(ctx, request.HostID, request.BootID, request.Slots); err != nil {
+	if err := s.st.UpsertHostSync(ctx, request.HostID, request.BootID, sanitizeTransferOrigin(request.TransferOrigin), request.Slots); err != nil {
 		s.syncError(w, request.HostID, "host inventory", err)
 		return
 	}
@@ -89,7 +90,7 @@ func (s *syncServer) handleSync(w http.ResponseWriter, r *http.Request) {
 	intentElapsed := time.Since(intentStarted)
 
 	membersStarted := time.Now()
-	if err := s.st.ApplyHostMembers(ctx, request.HostID, request.Members); err != nil {
+	if err := s.st.ApplyHostMembers(ctx, request.HostID, s.liveCutoff(), request.Members); err != nil {
 		s.syncError(w, request.HostID, "pool members", err)
 		return
 	}
@@ -97,7 +98,7 @@ func (s *syncServer) handleSync(w http.ResponseWriter, r *http.Request) {
 
 	assignmentsStarted := time.Now()
 	for _, report := range request.Assignments {
-		if err := s.st.ApplyAssignmentReport(ctx, request.HostID, report, time.Now().Add(s.sealTimeout)); err != nil {
+		if err := s.st.ApplyAssignmentReport(ctx, request.HostID, s.liveCutoff(), report, time.Now().Add(s.sealTimeout)); err != nil {
 			s.syncError(w, request.HostID, "assignment report", err)
 			return
 		}
@@ -140,6 +141,27 @@ func (s *syncServer) handleSync(w http.ResponseWriter, r *http.Request) {
 func (s *syncServer) syncError(w http.ResponseWriter, hostID, operation string, err error) {
 	slog.Error("hostd sync", "host_id", hostID, "operation", operation, "err", err)
 	writeProblems(w, []problem{problemSyncUnavailable()})
+}
+
+// liveCutoff is the sync recency below which a host cannot serve transfers:
+// routing a job at a dead source would burn the fetch budget on a doomed
+// pull instead of starting the cold build immediately.
+func (s *syncServer) liveCutoff() time.Time {
+	return time.Now().Add(-s.hostOfflineTimeout)
+}
+
+// sanitizeTransferOrigin stores only an origin the fleet can actually dial;
+// anything else degrades that host to non-serving instead of poisoning every
+// routed assignment.
+func sanitizeTransferOrigin(origin string) string {
+	if origin == "" || len(origin) > 256 {
+		return ""
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return ""
+	}
+	return origin
 }
 
 func (s *syncServer) desiredState(ctx context.Context, request syncproto.SyncRequest) (syncproto.SyncResponse, error) {
@@ -192,6 +214,11 @@ func (s *syncServer) desiredState(ctx context.Context, request syncproto.SyncReq
 			desired.Process.Generation = row.ScopeGeneration
 			desired.Process.ExpectedDigest = row.ProcessDigest
 			desired.Process.ExpectedVersion = row.ProcessVersion
+		}
+		if row.ScopeGeneration != "" && row.TransferOrigin != "" {
+			desired.Transfer = &syncproto.TransferSpec{
+				Origin: row.TransferOrigin, Generation: row.ScopeGeneration, Base: row.TransferBase,
+			}
 		}
 		if desiredState == syncproto.DesiredAssignmentSeal {
 			desired.SealGeneration = row.SealGeneration

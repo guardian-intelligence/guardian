@@ -131,7 +131,7 @@ func (s *syncServer) handleJobPlans(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *syncServer) jobPlanSnapshot(ctx context.Context, hostID string) (syncproto.JobPlanSnapshot, error) {
-	rows, err := s.st.ListJobPlans(ctx, hostID)
+	rows, err := s.st.ListJobPlans(ctx, hostID, s.liveCutoff())
 	if err != nil {
 		return syncproto.JobPlanSnapshot{}, err
 	}
@@ -152,6 +152,11 @@ func (s *syncServer) jobPlanSnapshot(ctx context.Context, hostID string) (syncpr
 			plan.Process.Generation = row.SourceGeneration
 			plan.Process.ExpectedDigest = row.ProcessDigest
 			plan.Process.ExpectedVersion = row.ProcessVersion
+		}
+		if row.SourceGeneration != "" && row.TransferOrigin != "" {
+			plan.Transfer = &syncproto.TransferSpec{
+				Origin: row.TransferOrigin, Generation: row.SourceGeneration, Base: row.TransferBase,
+			}
 		}
 		plans = append(plans, plan)
 	}

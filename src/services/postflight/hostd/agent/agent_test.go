@@ -16,6 +16,7 @@ import (
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/guestproto"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/transfer"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
@@ -767,5 +768,184 @@ func TestExitedRunnerCheckpointsBeforeVMTeardownAndSeals(t *testing.T) {
 	a.Tick(context.Background())
 	if len(a.traces) != 0 {
 		t.Fatalf("retired trace files remain open: %d assignments=%+v zvol=%v", len(a.traces), a.Snapshot(), volumes.Journal)
+	}
+}
+
+func startTransferSource(t *testing.T, secret string) (*zvol.Fake, *httptest.Server) {
+	t.Helper()
+	source := zvol.NewFake()
+	server, err := transfer.New(transfer.Config{Store: source, Secret: []byte(secret)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+	return source, httpServer
+}
+
+func tickUntil(t *testing.T, a *Agent, what string, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		a.Tick(context.Background())
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%s did not happen in time", what)
+}
+
+const testTransferProcessDigest = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+
+func transferAssignmentSpec(member syncproto.DesiredPoolMember, origin, generation string) syncproto.DesiredAssignment {
+	spec := assignmentSpec(0, member)
+	spec.Workspace.Generation = generation
+	spec.Tool.Generation = generation
+	spec.Process.Generation = generation
+	spec.Process.ExpectedDigest = testTransferProcessDigest
+	spec.Process.ExpectedVersion = "Version: 4.2"
+	spec.Transfer = &syncproto.TransferSpec{Origin: origin, Generation: generation}
+	return spec
+}
+
+func TestTransferSpecPullsRemoteGenerationAndMaterializesWarm(t *testing.T) {
+	source, sourceServer := startTransferSource(t, "credential")
+	source.SeedGeneration("gen-remote", 1<<20)
+	a, vms, volumes := newTestAgent(t, 1)
+	members := poolMembers(t, a, vms, 1)
+	spec := transferAssignmentSpec(members[0], sourceServer.URL, "gen-remote")
+	assignVM(t, vms, members[0], spec)
+	a.HandleSync(syncproto.SyncResponse{BootID: a.bootID, Members: members,
+		Assignments: []syncproto.DesiredAssignment{spec}, PoolTargets: map[string]int{string(testRunnerClass): 1}})
+
+	tickUntil(t, a, "warm materialization", func() bool {
+		return volumes.HasWorkspace(zvol.AssignmentID(spec.AssignmentID))
+	})
+	if !volumes.HasTransfer("gen-remote") {
+		t.Fatal("fetch did not land the generation in the transfer cache")
+	}
+	_, workspaces, err := volumes.Inventory(context.Background())
+	if err != nil || len(workspaces) != 1 || workspaces[0].Source != "gen-remote" {
+		t.Fatalf("workspace after transfer = %+v, %v", workspaces, err)
+	}
+	snapshot := a.Snapshot()
+	if len(snapshot) != 1 || snapshot[0].State != syncproto.AssignmentBinding {
+		t.Fatalf("assignment after transfer = %+v", snapshot)
+	}
+	if rendezvous, found := vms.RendezvousFor(vm.ID(members[0].VMID)); !found || rendezvous.CheckpointDigest != testTransferProcessDigest {
+		t.Fatalf("warm rendezvous checkpoint = %+v found=%t", rendezvous, found)
+	}
+	report, err := a.Report(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Generations) != 0 {
+		t.Fatalf("transfer cache leaked into the residency report: %+v", report.Generations)
+	}
+	if len(report.Assignments) != 1 || report.Assignments[0].Transfer == nil ||
+		report.Assignments[0].Transfer.Outcome != "used" {
+		t.Fatalf("transfer evidence = %+v", report.Assignments[0].Transfer)
+	}
+	if a.Metrics().WarmTransfers.Load() != 1 || a.Metrics().FailedTransfers.Load() != 0 {
+		t.Fatalf("transfer metrics = warm %d failed %d",
+			a.Metrics().WarmTransfers.Load(), a.Metrics().FailedTransfers.Load())
+	}
+}
+
+func TestTransferFailureFallsBackToColdMaterialization(t *testing.T) {
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "source exploded", http.StatusInternalServerError)
+	}))
+	defer failing.Close()
+	a, vms, volumes := newTestAgent(t, 1)
+	members := poolMembers(t, a, vms, 1)
+	spec := transferAssignmentSpec(members[0], failing.URL, "gen-remote")
+	assignVM(t, vms, members[0], spec)
+	a.HandleSync(syncproto.SyncResponse{BootID: a.bootID, Members: members,
+		Assignments: []syncproto.DesiredAssignment{spec}, PoolTargets: map[string]int{string(testRunnerClass): 1}})
+
+	tickUntil(t, a, "cold materialization", func() bool {
+		return volumes.HasWorkspace(zvol.AssignmentID(spec.AssignmentID))
+	})
+	_, workspaces, err := volumes.Inventory(context.Background())
+	if err != nil || len(workspaces) != 1 || workspaces[0].Source != "" {
+		t.Fatalf("workspace after failed transfer = %+v, %v", workspaces, err)
+	}
+	snapshot := a.Snapshot()
+	if len(snapshot) != 1 || snapshot[0].State != syncproto.AssignmentBinding {
+		t.Fatalf("assignment must proceed cold, got %+v", snapshot)
+	}
+	// The failed transfer must also drop the process-restore expectation:
+	// an expected digest over the empty fallback volume would fail the
+	// guest's restore closed.
+	if rendezvous, found := vms.RendezvousFor(vm.ID(members[0].VMID)); !found ||
+		rendezvous.CheckpointDigest != "" || rendezvous.CheckpointVersion != "" {
+		t.Fatalf("cold rendezvous = %+v found=%t", rendezvous, found)
+	}
+	report, err := a.Report(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Assignments) != 1 || report.Assignments[0].Transfer == nil ||
+		report.Assignments[0].Transfer.Outcome != "failed-cold" {
+		t.Fatalf("transfer evidence = %+v", report.Assignments[0].Transfer)
+	}
+	if a.Metrics().FailedTransfers.Load() != 1 || a.Metrics().WarmTransfers.Load() != 0 {
+		t.Fatalf("transfer metrics = warm %d failed %d",
+			a.Metrics().WarmTransfers.Load(), a.Metrics().FailedTransfers.Load())
+	}
+}
+
+func TestAbsentRemoteGenerationRecordsAbsentAndRunsCold(t *testing.T) {
+	// The source serves the protocol but no longer holds the generation.
+	_, sourceServer := startTransferSource(t, "credential")
+	a, vms, volumes := newTestAgent(t, 1)
+	members := poolMembers(t, a, vms, 1)
+	spec := transferAssignmentSpec(members[0], sourceServer.URL, "gen-vanished")
+	assignVM(t, vms, members[0], spec)
+	a.HandleSync(syncproto.SyncResponse{BootID: a.bootID, Members: members,
+		Assignments: []syncproto.DesiredAssignment{spec}, PoolTargets: map[string]int{string(testRunnerClass): 1}})
+	tickUntil(t, a, "cold materialization", func() bool {
+		return volumes.HasWorkspace(zvol.AssignmentID(spec.AssignmentID))
+	})
+	report, err := a.Report(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Assignments) != 1 || report.Assignments[0].Transfer == nil ||
+		report.Assignments[0].Transfer.Outcome != "absent" {
+		t.Fatalf("transfer evidence = %+v", report.Assignments[0].Transfer)
+	}
+}
+
+func TestUnreferencedTransferCacheIsCollected(t *testing.T) {
+	a, _, volumes := newTestAgent(t, 1)
+	volumes.SeedTransfer("gen-stale", 1<<20)
+	a.HandleSync(syncproto.SyncResponse{BootID: a.bootID, PoolTargets: map[string]int{string(testRunnerClass): 0}})
+	a.Tick(context.Background())
+	if volumes.HasTransfer("gen-stale") {
+		t.Fatal("unreferenced transfer cache survived gc")
+	}
+	if a.Metrics().TransfersCollected.Load() != 1 {
+		t.Fatalf("collected metric = %d", a.Metrics().TransfersCollected.Load())
+	}
+}
+
+func TestReferencedTransferCacheSurvivesGC(t *testing.T) {
+	source, sourceServer := startTransferSource(t, "credential")
+	source.SeedGeneration("gen-kept", 1<<20)
+	a, vms, volumes := newTestAgent(t, 1)
+	members := poolMembers(t, a, vms, 1)
+	spec := transferAssignmentSpec(members[0], sourceServer.URL, "gen-kept")
+	assignVM(t, vms, members[0], spec)
+	a.HandleSync(syncproto.SyncResponse{BootID: a.bootID, Members: members,
+		Assignments: []syncproto.DesiredAssignment{spec}, PoolTargets: map[string]int{string(testRunnerClass): 1}})
+	tickUntil(t, a, "warm materialization", func() bool {
+		return volumes.HasWorkspace(zvol.AssignmentID(spec.AssignmentID))
+	})
+	a.Tick(context.Background())
+	if !volumes.HasTransfer("gen-kept") {
+		t.Fatal("gc reclaimed a transfer the live assignment references")
 	}
 }
