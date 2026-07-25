@@ -41,7 +41,7 @@ spec:
     # routine info-level promotion events do not.
     alerts:
       - name: ops
-        severity: warn
+        severity: warning
         providerRef:
           name: alert-relay
           namespace: flagger

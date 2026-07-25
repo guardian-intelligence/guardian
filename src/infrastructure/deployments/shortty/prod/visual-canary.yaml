@@ -150,7 +150,7 @@ spec:
              or vector(0))
           for: 5m
           labels:
-            severity: warn
+            severity: warning
             guardian_stage: prod
             exported_instance: prod/shortty-visual-canary
           annotations:
@@ -166,7 +166,7 @@ spec:
             time() - max(kube_cronjob_status_last_successful_time{namespace="tenant-guardian-prod",cronjob="shortty-visual-canary"}) > 5700
           for: 5m
           labels:
-            severity: warn
+            severity: warning
             guardian_stage: prod
             exported_instance: prod/shortty-visual-canary
           annotations:
