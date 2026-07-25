@@ -15,7 +15,7 @@
 #               workloads, and mint namespace-scoped secrets-writer tokens.
 #   write-all   cluster-admin, for emergencies on sensitive systems.
 #   root        the x509 breakglass minted from the custody bundle
-#               (`aspect infra auth --platform-admin --reason`). Deliberately
+#               (`aspect infra auth --persona=root --reason`). Deliberately
 #               NOT a Keycloak identity: disaster recovery includes "Keycloak
 #               is down", so the last-resort credential cannot depend on it.
 #
@@ -25,6 +25,13 @@
 # needs a fresh device approval from the operator to come back. Withholding one
 # realm role is what makes "an agent may observe freely but must ask before it
 # changes anything" true.
+#
+# `--persona` names the rung a session is asking for; the authority it actually
+# receives is whatever the identity that approves the device login already has.
+# The two agree when the operator approves as the matching user, which is the
+# normal path, and a session can never exceed the approver — but the flag labels
+# a session rather than constraining it, so read it as intent, not enforcement.
+# Enforcement is the group bindings and policies below.
 #
 # No persona may read a secret value. `view` excludes Secrets and the OpenBao
 # management store is write-only to every namespace-scoped token. The single

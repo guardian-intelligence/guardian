@@ -16,9 +16,17 @@ runbooks in `src/infrastructure/runbooks/`, and the design docs in `docs/`.
 
 ## Authenticating to the Cluster
 
+Sessions carry authority by persona. The default is `read`; ask for a higher
+rung only when you need it.
+
 ```sh
-aspect infra auth --platform-agent
+aspect infra auth                        # read: cluster-wide read + port-forward, unattended
+aspect infra auth --persona=write-basic  # delete pods/jobs, scale, mint secrets-writer tokens
+aspect infra auth --persona=write-all    # cluster-admin, for emergencies
 ```
+
+Only `read` holds `offline_access`, so every other rung expires with its
+Keycloak session and needs a fresh device approval.
 
 ## Bootstrapping the cluster
 
@@ -26,4 +34,4 @@ This repo has first class support for various levels of bootstrapping.
 
 1. Bootstrap (first time, no backups to restore from, airgapped landing zone pattern): `src/infrastructure/runbooks/cold-boot-bootstrap.md`
 2. Disaster recovery (cluster non-operational, backups available): `src/infrastructure/runbooks/cold-boot-bootstrap.md` (use custody bundle)
-3. Break-glass (cluster operational, root access for debugging/emergencies): `aspect infra auth --platform-admin --reason "<why>" # Audit logged, pages human`
+3. Break-glass (cluster operational, root access for debugging/emergencies): `aspect infra auth --persona=root --reason "<why>" # Audit logged, pages human`
