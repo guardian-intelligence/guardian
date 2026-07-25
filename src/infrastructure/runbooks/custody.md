@@ -135,7 +135,7 @@ leaked:
   `talosconfig` (`-o`). Afterwards the old x509 admin kubeconfigs are dead,
   OIDC logins are untouched, and the custody bundle is stale: refresh the
   local Talm operator state, verify `aspect infra talos` and a fresh
-  `aspect infra auth --platform-admin --reason "post-rotation verification"`,
+  `aspect infra auth --persona=root --reason "post-rotation verification"`,
   then `create` a new snapshot. Rehearse this before it is needed — it is a
   drill like any other.
 - **the unseal key** — rotate the static seal per

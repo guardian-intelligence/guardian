@@ -24,7 +24,7 @@ automountServiceAccountToken: false
 # importer (kv .../tenant-guardian/github-projector): a classic PAT scoped
 # to write:packages only, held by the machine account guardian-projector
 # (docs/secrets.md).
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: release-projector-ghcr

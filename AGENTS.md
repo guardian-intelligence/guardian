@@ -28,7 +28,7 @@ The loop is: worktree → change → PR/CI → merge → babysit convergence →
 Optional:
 
 * Learn what development tooling exists with `aspect --help`
-* Install tools and confirm access if this is first time setup: `eval "$(scripts/bootstrap.sh path)" && aspect tools install && eval "$(aspect tools path)" && aspect infra auth --platform-agent` (auth required for babysitting your change after merge). Tool shims installed by `aspect tools install` are available in `./.guardian/tools/bin`.
+* Install tools and confirm access if this is first time setup: `eval "$(scripts/bootstrap.sh path)" && aspect tools install && eval "$(aspect tools path)" && aspect infra auth` (auth required for babysitting your change after merge). Tool shims installed by `aspect tools install` are available in `./.guardian/tools/bin`.
 
 
 ```sh
@@ -59,7 +59,8 @@ Common post-merge issues:
 
 House rules:
 - Do not use administration CLIs as a second control plane, use them for reads. Rely on Flux to converge the cluster after merge.
-- If relevant to your task, clean up any hanging resources post-merge. Write access is audit logged and pages a human. Write access requires `aspect infra auth --platform-admin --reason "<why>"`.
+- Sessions carry authority by persona: `aspect infra auth --persona=<rung>`. The default `read` gives cluster-wide read plus port-forward and stays logged in unattended. Repair verbs (delete a wedged pod, scale a workload, mint a secrets-writer token) need `write-basic`, and emergencies need `write-all`; neither holds `offline_access`, so each costs the operator a device approval and expires with its Keycloak session. Ask for the rung you need rather than assuming you have it. The ladder and how to extend it: `src/infrastructure/base/cozystack/platform-admins.yaml`.
+- If relevant to your task, clean up any hanging resources post-merge. `--persona=root --reason "<why>"` is the x509 breakglass minted from the custody bundle; it is audit logged, pages a human, and is only for when Keycloak itself is unavailable.
 </development_loop>
 
 <observability>
@@ -67,6 +68,7 @@ House rules:
 - Metrics: `kubectl port-forward -n tenant-root svc/vmselect-shortterm 8481:8481`, then PromQL via `curl 127.0.0.1:8481/select/0/prometheus/api/v1/query --data-urlencode 'query=...'`.
 - Traces, spans, and analytics events: `kubectl port-forward -n tenant-root svc/chendpoint-clickhouse-analytics 9000:9000`, get the `ingest` password from `kubectl get secret -n guardian-analytics analytics-ch-ingest -o jsonpath='{.data.ingest}' | base64 -d`, then `clickhouse-client --host 127.0.0.1 --user ingest` and `SHOW CREATE TABLE guardian_analytics.events` / `guardian_analytics.otel_traces` for the schema actually being served.
 - Schema source: `src/infrastructure/deployments/analytics/system/{ddl-configmap.yaml,traces-configmap.yaml}`.
+- Dropped network flows: the Cilium agents export every `DROPPED`/`ERROR` flow as JSON on stdout, so they land in VictoriaLogs with the rest of the container logs. `hubble_drop_total` says a namespace is being denied; this says which peer, port, and policy. LogsQL: `kubernetes_container_name:cilium-agent AND _msg:POLICY_DENIED | unpack_json | keep _time, source, destination, IP, l4, drop_reason_desc, egress_denied_by`. There is no Hubble relay to query — see `src/infrastructure/base/platform-patches/cozystack-networking-hubble.yaml` for why.
 </observability>
 
 <coding_guidelines>

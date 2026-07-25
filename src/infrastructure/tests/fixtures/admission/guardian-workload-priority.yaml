@@ -1,6 +1,5 @@
-# Preview workloads render from a Helm chart template, not plain YAML, so
-# the mutation's behavior is pinned here: templates without a priority class
-# get the floor, templates that chose one are untouched.
+# The mutation's behavior is pinned here: pod templates without a priority
+# class get the floor, templates that chose one are untouched.
 policy: guardian-workload-priority
 cases:
   - name: deployment without a priority class gets the floor
@@ -8,13 +7,13 @@ cases:
     object:
       apiVersion: apps/v1
       kind: Deployment
-      metadata: {name: preview-site, namespace: tenant-guardian-previews}
+      metadata: {name: unpinned, namespace: tenant-guardian-previews}
       spec:
         selector:
-          matchLabels: {app: preview-site}
+          matchLabels: {app: unpinned}
         template:
           metadata:
-            labels: {app: preview-site}
+            labels: {app: unpinned}
           spec:
             containers:
               - name: site

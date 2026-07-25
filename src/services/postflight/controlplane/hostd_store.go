@@ -33,10 +33,11 @@ const (
 
 const (
 	sqlUpsertHost = `
-INSERT INTO hosts (host_id, boot_id, last_sync_at)
-VALUES ($1, $2, now())
+INSERT INTO hosts (host_id, boot_id, transfer_origin, last_sync_at)
+VALUES ($1, $2, $3, now())
 ON CONFLICT (host_id) DO UPDATE SET
-    boot_id = EXCLUDED.boot_id, last_sync_at = now(), updated_at = now()`
+    boot_id = EXCLUDED.boot_id, transfer_origin = EXCLUDED.transfer_origin,
+    last_sync_at = now(), updated_at = now()`
 
 	sqlUpsertHostSlot = `
 INSERT INTO host_slots (host_id, class, total, booting, listening, busy)
@@ -46,13 +47,13 @@ ON CONFLICT (host_id, class) DO UPDATE SET
     listening = EXCLUDED.listening, busy = EXCLUDED.busy, updated_at = now()`
 )
 
-func (s *pgStore) UpsertHostSync(ctx context.Context, hostID, bootID string, slots []syncproto.SlotReport) error {
+func (s *pgStore) UpsertHostSync(ctx context.Context, hostID, bootID, transferOrigin string, slots []syncproto.SlotReport) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, sqlUpsertHost, hostID, bootID); err != nil {
+	if _, err := tx.Exec(ctx, sqlUpsertHost, hostID, bootID, transferOrigin); err != nil {
 		return err
 	}
 	classes := make([]string, 0, len(slots))
@@ -180,14 +181,64 @@ FOR SHARE OF m, p, h`, hostID, bootID, memberID, vmID).Scan(
 	return member, err
 }
 
-func (s *pgStore) ListPoolMembersNeedingJIT(ctx context.Context, limit int) ([]poolMemberForJIT, error) {
+// ListPoolMembersNeedingJIT exposes warm standbys as GitHub listeners up to a
+// per-host×class budget of listenerFloor plus the count of active demands
+// whose frozen source generation lives on the host, clamped to the host's
+// divided pool-target share. A class with active demand that would otherwise
+// expose zero listeners fleet-wide gets one warm member anyway.
+func (s *pgStore) ListPoolMembersNeedingJIT(ctx context.Context, limit, listenerFloor int, liveCutoff time.Time) ([]poolMemberForJIT, error) {
 	rows, err := s.pool.Query(ctx, `
-SELECT m.member_id, m.runner_name, m.runner_class, p.org_id, p.installation_id
-FROM runner_pool_members m
-JOIN runner_pools p ON p.pool_id = m.pool_id
-WHERE m.state = 'warm' AND m.jit_config = '' AND p.enabled
-ORDER BY m.created_at
-LIMIT $1`, limit)
+WITH `+sqlLiveHostShares+`,
+active_demands AS (
+    SELECT d.runner_class, d.source_generation
+    FROM github_provider_demands d
+    JOIN github_workflow_jobs j USING (provider_job_id)
+    WHERE d.state IN ('demand_recorded', 'capacity_requested')
+      AND j.status IN ('queued', 'in_progress') AND j.check_run_id > 0
+),
+exposed_members AS (
+    SELECT m.host_id, m.runner_class
+    FROM runner_pool_members m
+    WHERE m.state IN ('preparing', 'listening')
+       OR (m.state = 'warm' AND m.jit_config <> '')
+),
+budgets AS (
+    SELECT s.host_id, s.class,
+           LEAST(s.share, $2 + (SELECT count(*) FROM active_demands d
+                                JOIN workspace_generations g ON g.generation = d.source_generation
+                                WHERE g.host_id = s.host_id AND d.runner_class = s.class))
+           - (SELECT count(*) FROM exposed_members e
+              WHERE e.host_id = s.host_id AND e.runner_class = s.class) AS headroom
+    FROM host_shares s
+),
+candidates AS (
+    SELECT m.member_id, m.runner_name, m.runner_class, p.org_id, p.installation_id,
+           m.created_at, b.headroom,
+           row_number() OVER (PARTITION BY m.host_id, m.runner_class
+                              ORDER BY m.created_at, m.member_id) AS standby_rank
+    FROM runner_pool_members m
+    JOIN runner_pools p ON p.pool_id = m.pool_id
+    JOIN budgets b ON b.host_id = m.host_id AND b.class = m.runner_class
+    WHERE m.state = 'warm' AND m.jit_config = '' AND p.enabled
+),
+selected AS (
+    SELECT member_id, runner_name, runner_class, org_id, installation_id, created_at
+    FROM candidates
+    WHERE standby_rank <= headroom
+),
+rescued AS (
+    SELECT DISTINCT ON (c.runner_class)
+           c.member_id, c.runner_name, c.runner_class, c.org_id, c.installation_id, c.created_at
+    FROM candidates c
+    WHERE EXISTS (SELECT 1 FROM active_demands d WHERE d.runner_class = c.runner_class)
+      AND NOT EXISTS (SELECT 1 FROM selected s WHERE s.runner_class = c.runner_class)
+      AND NOT EXISTS (SELECT 1 FROM exposed_members e WHERE e.runner_class = c.runner_class)
+    ORDER BY c.runner_class, c.created_at, c.member_id
+)
+SELECT member_id, runner_name, runner_class, org_id, installation_id
+FROM (SELECT * FROM selected UNION ALL SELECT * FROM rescued) exposable
+ORDER BY created_at
+LIMIT $3`, liveCutoff, listenerFloor, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +270,7 @@ WHERE member_id = $1`, memberID, reason)
 	return err
 }
 
-func (s *pgStore) ApplyHostMembers(ctx context.Context, hostID string, reports []syncproto.PoolMemberReport) error {
+func (s *pgStore) ApplyHostMembers(ctx context.Context, hostID string, liveCutoff time.Time, reports []syncproto.PoolMemberReport) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -256,7 +307,7 @@ WHERE runner_pool_members.host_id = EXCLUDED.host_id
 			return err
 		}
 		if report.Assignment != nil {
-			if err := bindObservedAssignment(ctx, tx, hostID, report); err != nil {
+			if err := bindObservedAssignment(ctx, tx, hostID, liveCutoff, report); err != nil {
 				return err
 			}
 		}
@@ -296,7 +347,7 @@ WHERE member_id = $1 AND pool_id IS NULL`, memberID, poolID)
 	return err
 }
 
-func bindObservedAssignment(ctx context.Context, tx pgx.Tx, hostID string, member syncproto.PoolMemberReport) error {
+func bindObservedAssignment(ctx context.Context, tx pgx.Tx, hostID string, liveCutoff time.Time, member syncproto.PoolMemberReport) error {
 	observed := member.Assignment
 	if observed == nil || observed.RequestID == "" || observed.JobID == "" || observed.CheckRunID <= 0 ||
 		observed.RunnerName == "" || observed.Identity.RunID == "" || observed.Identity.RunAttempt <= 0 {
@@ -378,20 +429,26 @@ INSERT INTO runner_job_assignments (
     assignment_id, member_id, provider_job_id, host_id, request_id, protocol_job_id, check_run_id,
     runner_name, job_display_name, run_id, run_attempt, repository,
     workflow_job, state, workspace_scope_id, source_generation,
-    source_process_digest, source_process_version, timing_json
+    source_process_digest, source_process_version, transfer_origin, transfer_base, timing_json
 )
 SELECT d.plan_id, $1, i.provider_job_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
        'observed', d.workspace_scope_id,
-       COALESCE(CASE WHEN g.host_id = $2 THEN d.source_generation END, ''),
-       COALESCE(CASE WHEN g.host_id = $2 AND g.process_valid THEN g.process_digest END, ''),
-       COALESCE(CASE WHEN g.host_id = $2 AND g.process_valid THEN g.criu_version END, ''), $12::jsonb
+       COALESCE(CASE WHEN g.host_id = $2 OR owner.transfer_origin <> '' THEN d.source_generation END, ''),
+       COALESCE(CASE WHEN (g.host_id = $2 OR owner.transfer_origin <> '') AND g.process_valid THEN g.process_digest END, ''),
+       COALESCE(CASE WHEN (g.host_id = $2 OR owner.transfer_origin <> '') AND g.process_valid THEN g.criu_version END, ''),
+       COALESCE(CASE WHEN g.host_id <> $2 THEN owner.transfer_origin END, ''),
+       COALESCE(CASE WHEN g.host_id <> $2 AND owner.transfer_origin <> '' THEN base_g.generation END, ''),
+       $12::jsonb
 FROM github_job_intents i
 JOIN github_provider_demands d ON d.provider_job_id = i.provider_job_id
 LEFT JOIN workspace_generations g ON g.generation = d.source_generation
+LEFT JOIN hosts owner ON owner.host_id = g.host_id AND owner.host_id <> $2 AND owner.last_sync_at >= $14
+LEFT JOIN workspace_generations base_g ON base_g.generation = g.source_generation
+    AND base_g.host_id = $2 AND base_g.state IN ('committed', 'retained')
 WHERE i.provider_job_id = $13
 RETURNING assignment_id::text`, member.MemberID, hostID, observed.RequestID, observed.JobID, observed.CheckRunID,
 		runnerName, observed.JobDisplayName, observed.Identity.RunID, observed.Identity.RunAttempt,
-		observed.Identity.Repository, observed.Identity.WorkflowJob, string(timing), providerJobID).Scan(&assignmentID); err != nil {
+		observed.Identity.Repository, observed.Identity.WorkflowJob, string(timing), providerJobID, liveCutoff).Scan(&assignmentID); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE runner_pool_members SET state = 'assigned', updated_at = now() WHERE member_id = $1`, member.MemberID); err != nil {
@@ -401,13 +458,13 @@ RETURNING assignment_id::text`, member.MemberID, hostID, observed.RequestID, obs
 	return err
 }
 
-func (s *pgStore) BindObservedAssignment(ctx context.Context, hostID, memberID string, observed syncproto.ObservedAssignment) error {
+func (s *pgStore) BindObservedAssignment(ctx context.Context, hostID string, liveCutoff time.Time, memberID string, observed syncproto.ObservedAssignment) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err := bindObservedAssignment(ctx, tx, hostID, syncproto.PoolMemberReport{
+	if err := bindObservedAssignment(ctx, tx, hostID, liveCutoff, syncproto.PoolMemberReport{
 		MemberID: memberID, Assignment: &observed,
 	}); err != nil {
 		return err
@@ -421,7 +478,7 @@ func assignmentExists(ctx context.Context, tx pgx.Tx, memberID string) (bool, er
 	return exists, err
 }
 
-func (s *pgStore) ApplyAssignmentReport(ctx context.Context, hostID string, report syncproto.AssignmentReport, sealDeadline time.Time) error {
+func (s *pgStore) ApplyAssignmentReport(ctx context.Context, hostID string, liveCutoff time.Time, report syncproto.AssignmentReport, sealDeadline time.Time) error {
 	if report.AssignmentID == "" || report.MemberID == "" || report.RequestID == "" || report.JobID == "" {
 		return nil
 	}
@@ -431,7 +488,7 @@ func (s *pgStore) ApplyAssignmentReport(ctx context.Context, hostID string, repo
 	}
 	defer tx.Rollback(ctx)
 	if report.Observed != nil {
-		if err := bindObservedAssignment(ctx, tx, hostID, syncproto.PoolMemberReport{
+		if err := bindObservedAssignment(ctx, tx, hostID, liveCutoff, syncproto.PoolMemberReport{
 			MemberID: report.MemberID, Assignment: report.Observed,
 		}); err != nil {
 			return err
@@ -466,10 +523,16 @@ FOR UPDATE OF a`, report.AssignmentID, report.MemberID, hostID, report.RequestID
 	if report.Restore != nil {
 		restore = *report.Restore
 	}
+	transfer := syncproto.TransferReport{}
+	if report.Transfer != nil {
+		transfer = *report.Transfer
+	}
 	if _, err := tx.Exec(ctx, `
 UPDATE runner_job_assignments SET
     restore_outcome = $2, restore_failure_class = $3,
     restore_failure_code = $4, process_invalidated = $5,
+    transfer_outcome = $8, transfer_bytes = $9,
+    transfer_millis = $10, transfer_incremental = $11,
     reason = $6,
     timing_json = (
         SELECT COALESCE(jsonb_agg(point ORDER BY first_seen), '[]'::jsonb)
@@ -483,7 +546,8 @@ UPDATE runner_job_assignments SET
     updated_at = now()
 WHERE assignment_id::text = $1`, report.AssignmentID, restore.Outcome,
 		restore.FailureClass, restore.FailureCode, restore.ProcessInvalidated,
-		report.Reason, string(timing)); err != nil {
+		report.Reason, string(timing), transfer.Outcome, transfer.Bytes,
+		transfer.Millis, transfer.Incremental); err != nil {
 		return err
 	}
 	if restore.ProcessInvalidated && sourceGeneration != "" {
@@ -636,6 +700,7 @@ type desiredAssignmentRow struct {
 	RunnerClass, ScopeGeneration                        string
 	WorkspaceBytes, ToolBytes, ProcessBytes             int64
 	ProcessDigest, ProcessVersion                       string
+	TransferOrigin, TransferBase                        string
 	SealGeneration, CheckpointDigest, CheckpointVersion string
 }
 
@@ -648,25 +713,37 @@ type jobPlanRow struct {
 	JobDisplayName                                    string
 	WorkspaceBytes, ToolBytes, ProcessBytes           int64
 	ProcessDigest, ProcessVersion                     string
+	TransferOrigin, TransferBase                      string
 }
 
-func (s *pgStore) ListJobPlans(ctx context.Context, hostID string) ([]jobPlanRow, error) {
+// jobPlanBroadcastLimit bounds every host's long-polled plan snapshot; jobs
+// past the window enter it as earlier plans resolve or their demands settle.
+const jobPlanBroadcastLimit = 100
+
+func (s *pgStore) ListJobPlans(ctx context.Context, hostID string, liveCutoff time.Time) ([]jobPlanRow, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT d.plan_id::text, d.provider_job_id, d.provider_installation_id,
        d.provider_repository_id, d.repository_full_name, d.runner_class,
        j.check_run_id, d.provider_run_id::text, d.provider_run_attempt::integer,
-       j.name, CASE WHEN g.host_id = $1 THEN d.source_generation ELSE '' END,
+       j.name,
+       CASE WHEN g.host_id = $1 OR owner.transfer_origin <> '' THEN d.source_generation ELSE '' END,
        c.disk_bytes, c.tool_disk_bytes, c.process_disk_bytes,
-       CASE WHEN g.host_id = $1 AND g.process_valid THEN g.process_digest ELSE '' END,
-       CASE WHEN g.host_id = $1 AND g.process_valid THEN g.criu_version ELSE '' END
+       CASE WHEN (g.host_id = $1 OR owner.transfer_origin <> '') AND g.process_valid THEN g.process_digest ELSE '' END,
+       CASE WHEN (g.host_id = $1 OR owner.transfer_origin <> '') AND g.process_valid THEN g.criu_version ELSE '' END,
+       COALESCE(owner.transfer_origin, ''),
+       COALESCE(CASE WHEN owner.transfer_origin <> '' THEN base_g.generation END, '')
 FROM github_provider_demands d
 JOIN github_workflow_jobs j USING (provider_job_id)
 JOIN runner_classes c ON c.class = d.runner_class
 JOIN host_slots slots ON slots.host_id = $1 AND slots.class = d.runner_class AND slots.total > 0
 LEFT JOIN workspace_generations g ON g.generation = d.source_generation
+LEFT JOIN hosts owner ON owner.host_id = g.host_id AND owner.host_id <> $1 AND owner.last_sync_at >= $3
+LEFT JOIN workspace_generations base_g ON base_g.generation = g.source_generation
+    AND base_g.host_id = $1 AND base_g.state IN ('committed', 'retained')
 WHERE d.state IN ('demand_recorded', 'capacity_requested')
   AND j.status IN ('queued', 'in_progress') AND j.check_run_id > 0
-ORDER BY d.provider_job_id`, hostID)
+ORDER BY d.provider_job_id
+LIMIT $2`, hostID, jobPlanBroadcastLimit, liveCutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -680,6 +757,7 @@ ORDER BY d.provider_job_id`, hostID)
 			&row.CheckRunID, &row.RunID, &row.RunAttempt, &row.JobDisplayName,
 			&row.SourceGeneration, &row.WorkspaceBytes, &row.ToolBytes, &row.ProcessBytes,
 			&row.ProcessDigest, &row.ProcessVersion,
+			&row.TransferOrigin, &row.TransferBase,
 		); err != nil {
 			return nil, err
 		}
@@ -696,6 +774,7 @@ SELECT a.assignment_id::text, a.member_id, a.request_id, a.protocol_job_id, a.ch
        m.runner_class, a.source_generation,
        c.disk_bytes, c.tool_disk_bytes, c.process_disk_bytes,
        a.source_process_digest, a.source_process_version,
+       a.transfer_origin, a.transfer_base,
        a.seal_generation, a.checkpoint_digest, a.checkpoint_version
 FROM runner_job_assignments a
 JOIN runner_pool_members m ON m.member_id = a.member_id
@@ -718,6 +797,7 @@ ORDER BY a.created_at`, hostID)
 			&row.RunnerClass, &row.ScopeGeneration,
 			&row.WorkspaceBytes, &row.ToolBytes, &row.ProcessBytes,
 			&row.ProcessDigest, &row.ProcessVersion,
+			&row.TransferOrigin, &row.TransferBase,
 			&row.SealGeneration, &row.CheckpointDigest, &row.CheckpointVersion,
 		); err != nil {
 			return nil, err
@@ -744,13 +824,35 @@ func (s *pgStore) ListReapGenerations(ctx context.Context, hostID string) ([]str
 	return generations, rows.Err()
 }
 
-func (s *pgStore) ListHostPoolTargets(ctx context.Context, hostID string) (map[string]int, error) {
+// sqlLiveHostShares divides each class's fleet-wide pool target across the
+// live hosts offering that class: every host gets the floor share, the first
+// fleet-target-mod-N hosts by host_id get one extra, and each share is
+// clamped by the host's own slot total. Hosts past the $1 liveness cutoff
+// hold no share.
+const sqlLiveHostShares = `
+live_hosts AS (
+    SELECT hs.class, hs.host_id, hs.total,
+           COALESCE((SELECT sum(p.desired_count) FROM runner_pools p
+                     WHERE p.runner_class = hs.class AND p.enabled), 0)::bigint AS fleet_target,
+           row_number() OVER (PARTITION BY hs.class ORDER BY hs.host_id) AS host_rank,
+           count(*) OVER (PARTITION BY hs.class) AS host_count
+    FROM host_slots hs
+    JOIN hosts h ON h.host_id = hs.host_id
+    WHERE hs.total > 0 AND h.last_sync_at >= $1
+), host_shares AS (
+    SELECT l.host_id, l.class,
+           LEAST(l.total, l.fleet_target / l.host_count +
+                 CASE WHEN l.host_rank <= l.fleet_target % l.host_count THEN 1 ELSE 0 END)::integer AS share
+    FROM live_hosts l
+)`
+
+func (s *pgStore) ListHostPoolTargets(ctx context.Context, hostID string, liveCutoff time.Time) (map[string]int, error) {
 	rows, err := s.pool.Query(ctx, `
-SELECT slots.class, LEAST(slots.total, COALESCE(sum(p.desired_count), 0))::integer
+WITH `+sqlLiveHostShares+`
+SELECT slots.class, COALESCE(shares.share, 0)
 FROM host_slots slots
-LEFT JOIN runner_pools p ON p.runner_class = slots.class AND p.enabled
-WHERE slots.host_id = $1
-GROUP BY slots.class, slots.total`, hostID)
+LEFT JOIN host_shares shares ON shares.host_id = slots.host_id AND shares.class = slots.class
+WHERE slots.host_id = $2`, liveCutoff, hostID)
 	if err != nil {
 		return nil, err
 	}

@@ -17,6 +17,7 @@ GUARDIAN_MGMT_DNS_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-dns"
 GUARDIAN_MGMT_EDGE_POLICY_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-edge-policy"
 GUARDIAN_MGMT_CLOUDFLARE_TOKENS_ROOT = "src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens"
 GUARDIAN_STRIPE_SANDBOX_ROOT = "src/infrastructure/bootstrap/guardian-stripe-sandbox"
+GUARDIAN_GITHUB_ROOT = "src/infrastructure/bootstrap/guardian-github"
 GUARDIAN_MGMT_TALM_ROOT = "src/infrastructure/talm"
 GUARDIAN_BACKEND_TFVARS = "src/infrastructure/bootstrap/backend.tfvars"
 TOFU_TARGET = "@multitool//tools/tofu"
@@ -122,6 +123,7 @@ INFRA_FILEGROUPS = [
     "//src/infrastructure/bootstrap/guardian-mgmt-edge-policy:root",
     "//src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens:root",
     "//src/infrastructure/bootstrap/guardian-stripe-sandbox:root",
+    "//src/infrastructure/bootstrap/guardian-github:root",
     "//src/infrastructure/base/admission:manifests",
     "//src/infrastructure/base/app-patches:manifests",
     "//src/infrastructure/base/platform-patches:manifests",
@@ -290,6 +292,7 @@ def _tofu_backend_roots(ctx, root):
             (GUARDIAN_MGMT_EDGE_POLICY_ROOT, "guardian-mgmt-edge-policy"),
             (GUARDIAN_MGMT_CLOUDFLARE_TOKENS_ROOT, "guardian-mgmt-cloudflare-tokens"),
             (GUARDIAN_STRIPE_SANDBOX_ROOT, "guardian-stripe-sandbox"),
+            (GUARDIAN_GITHUB_ROOT, "guardian-github"),
         ]
     if root == "guardian-mgmt":
         return [(GUARDIAN_MGMT_ROOT, "guardian-mgmt")]
@@ -301,7 +304,9 @@ def _tofu_backend_roots(ctx, root):
         return [(GUARDIAN_MGMT_CLOUDFLARE_TOKENS_ROOT, "guardian-mgmt-cloudflare-tokens")]
     if root == "guardian-stripe-sandbox":
         return [(GUARDIAN_STRIPE_SANDBOX_ROOT, "guardian-stripe-sandbox")]
-    ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, guardian-mgmt-dns, guardian-mgmt-edge-policy, guardian-mgmt-cloudflare-tokens, or guardian-stripe-sandbox\n")
+    if root == "guardian-github":
+        return [(GUARDIAN_GITHUB_ROOT, "guardian-github")]
+    ctx.std.io.stderr.write("ERROR: --root must be all, guardian-mgmt, guardian-mgmt-dns, guardian-mgmt-edge-policy, guardian-mgmt-cloudflare-tokens, guardian-stripe-sandbox, or guardian-github\n")
     return None
 
 def _tofu_backend_init(ctx, roots, endpoint):
@@ -550,6 +555,7 @@ def _validate_impl(ctx):
         (GUARDIAN_MGMT_EDGE_POLICY_ROOT, "guardian-mgmt-edge-policy"),
         (GUARDIAN_MGMT_CLOUDFLARE_TOKENS_ROOT, "guardian-mgmt-cloudflare-tokens"),
         (GUARDIAN_STRIPE_SANDBOX_ROOT, "guardian-stripe-sandbox"),
+        (GUARDIAN_GITHUB_ROOT, "guardian-github"),
     ]:
         tofu_env = _tofu_validate_env(ctx, label)
         rc = _tofu_root(ctx, root, ["fmt", "-check"], "tofu fmt -check " + label, env = tofu_env)
@@ -1868,12 +1874,28 @@ def _watch_impl(ctx):
     )
 
 
+# The persona ladder (src/infrastructure/base/cozystack/platform-admins.yaml).
+# Keep in lockstep with personas in src/infrastructure/cmd/guardian_auth/main.go;
+# TestPersonaLadderTaskLockstep fails the build if the two drift.
+# `root` maps to no Keycloak identity on purpose: it is x509 minted from the
+# custody bundle, the one rung that still works when Keycloak is down.
+PERSONA_USERS = {
+    "read": "platform-agent",
+    "write-basic": "platform-write-basic",
+    "write-all": "platform-write-all",
+    "root": "",
+}
+
 def _auth_impl(ctx):
-    if ctx.args.platform_agent == ctx.args.platform_admin:
-        ctx.std.io.stderr.write("ERROR: pass exactly one of --platform-agent or --platform-admin\n")
+    persona = ctx.args.persona
+    if persona not in PERSONA_USERS:
+        ctx.std.io.stderr.write("ERROR: --persona must be one of " + ", ".join(sorted(PERSONA_USERS)) + "\n")
         return 1
-    if ctx.args.platform_agent and (ctx.args.endpoints != "" or ctx.args.nodes != ""):
-        ctx.std.io.stderr.write("ERROR: --endpoints and --nodes apply only to --platform-admin; use --kube-api-server for a platform-agent override\n")
+    if persona != "root" and (ctx.args.endpoints != "" or ctx.args.nodes != ""):
+        ctx.std.io.stderr.write("ERROR: --endpoints and --nodes apply only to --persona=root; use --kube-api-server for an override\n")
+        return 1
+    if persona != "root" and ctx.args.reason.strip() != "":
+        ctx.std.io.stderr.write("ERROR: --reason applies only to --persona=root\n")
         return 1
 
     target = ctx.args.install_path
@@ -1905,11 +1927,11 @@ def _auth_impl(ctx):
     if ctx.args.kube_api_server != "":
         command_args.extend(["--kube-api-server", ctx.args.kube_api_server])
 
-    if ctx.args.platform_agent:
-        return _auth_platform_agent(ctx, guardian_auth, command_args)
-    return _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args)
+    if persona == "root":
+        return _auth_breakglass(ctx, guardian_auth, kubectl, target, command_args)
+    return _auth_oidc_persona(ctx, guardian_auth, persona, command_args)
 
-def _auth_platform_agent(ctx, guardian_auth, command_args):
+def _auth_oidc_persona(ctx, guardian_auth, persona, command_args):
     bin_dir = install_bazel_tool_shims(ctx, [("kubectl-oidc_login", KUBELOGIN_TARGET)], ".guardian/tools/bin")
     if bin_dir == "":
         return 1
@@ -1919,11 +1941,13 @@ def _auth_platform_agent(ctx, guardian_auth, command_args):
         ctx.std.io.stderr.write("ERROR: HOME is not set\n")
         return 1
 
+    persona_user = PERSONA_USERS[persona]
+
     args = []
     args.extend(command_args)
     args.extend([
-        "--mode",
-        "agent",
+        "--persona",
+        persona,
         "--kubelogin",
         bin_dir + "/kubectl-oidc_login",
         "--oidc-issuer",
@@ -1931,18 +1955,22 @@ def _auth_platform_agent(ctx, guardian_auth, command_args):
         "--oidc-client-id",
         PLATFORM_OIDC_CLIENT_ID,
         "--oidc-cache-dir",
-        home + "/.kube/cache/oidc-login-platform-agent",
+        home + "/.kube/cache/oidc-login-" + persona_user,
     ])
     ctx.std.io.stderr.write(
-        "authenticating platform-agent@guardian-mgmt (first login prints a device-code URL — open it in a browser on any machine)\n"
-        + "IMPORTANT: approve the device login as the platform-agent user (use a private window if another Keycloak session is active); only platform-agent holds the offline_access role, so any other identity fails the exchange with 'not_allowed'\n",
+        "authenticating " + persona_user + "@guardian-mgmt (first login prints a device-code URL — open it in a browser on any machine)\n" +
+        "IMPORTANT: approve the device login as the " + persona_user + " user (use a private window if another Keycloak session is active); the identity you approve as is the authority the session carries\n",
     )
-    return checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), label = "guardian auth platform-agent")
+    if persona != "read":
+        ctx.std.io.stderr.write(
+            "this is a write persona: it holds no offline_access, so the session expires with its Keycloak session and cannot refresh unattended\n",
+        )
+    return checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), label = "guardian auth " + persona_user)
 
-def _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args):
+def _auth_breakglass(ctx, guardian_auth, kubectl, target, command_args):
     reason = ctx.args.reason.strip()
     if reason == "":
-        ctx.std.io.stderr.write("ERROR: --reason is required: breakglass escalation to system:masters is audit-logged\n")
+        ctx.std.io.stderr.write("ERROR: --persona=root requires --reason: breakglass escalation to system:masters is audit-logged\n")
         return 1
 
     root = _workspace_path_if_relative(ctx, ctx.args.root)
@@ -1974,8 +2002,8 @@ def _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args):
     args = []
     args.extend(command_args)
     args.extend([
-        "--mode",
-        "admin",
+        "--persona",
+        "root",
         "--talm",
         talm,
         "--talosctl",
@@ -1985,7 +2013,7 @@ def _auth_platform_admin(ctx, guardian_auth, kubectl, target, command_args):
         "--talosconfig",
         talosconfig,
     ])
-    rc = checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), label = "guardian auth platform-admin")
+    rc = checked_spawn(ctx, guardian_auth, args, cwd = ws_path(ctx), label = "guardian auth root")
     if cleanup_root:
         _cleanup_mint_root(ctx)
     if rc != 0:
@@ -2098,7 +2126,7 @@ tofu_init = task(
     summary = "Initialize OpenTofu S3 backends for management bootstrap roots; endpoint defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars.",
     args = {
         "endpoint": args.string(default = "", description = "Optional S3-compatible backend endpoint override. Defaults to AWS_ENDPOINT_URL_S3, then the checked-in Cloudflare account backend tfvars."),
-        "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, guardian-mgmt-dns, guardian-mgmt-edge-policy, guardian-mgmt-cloudflare-tokens, or guardian-stripe-sandbox."),
+        "root": args.string(default = "all", description = "OpenTofu root to initialize: all, guardian-mgmt, guardian-mgmt-dns, guardian-mgmt-edge-policy, guardian-mgmt-cloudflare-tokens, guardian-stripe-sandbox, or guardian-github."),
     },
 )
 
@@ -2164,16 +2192,15 @@ auth = task(
     implementation = _auth_impl,
     name = "auth",
     group = ["infra"],
-    summary = "Authenticate kubectl to guardian-mgmt through the tested guardian_auth binary against the stable API endpoint " + GUARDIAN_MGMT_KUBE_API + " with the committed cluster CA. Both modes verify a staged kubeconfig before atomically installing it. --platform-agent installs the OIDC daily-driver context; --platform-admin mints breakglass x509 credentials from the Talos custody bundle and retains the audit behavior.",
+    summary = "Authenticate kubectl to guardian-mgmt as a persona, through the tested guardian_auth binary against the stable API endpoint " + GUARDIAN_MGMT_KUBE_API + " with the committed cluster CA. Every persona verifies a staged kubeconfig before atomically installing it. read, write-basic, and write-all are OIDC device logins against the platform Keycloak; root mints breakglass x509 credentials from the Talos custody bundle and retains the audit behavior.",
     args = {
         "audit_ntfy_url": args.string(default = BREAKGLASS_NTFY_URL, description = "ntfy URL paged with the breakglass reason."),
-        "endpoints": args.string(default = "", description = "Optional comma-separated Talos endpoint overrides for platform-admin disaster recovery. Must be paired one-for-one with --nodes; defaults to " + GUARDIAN_MGMT_API_HOST + "."),
+        "endpoints": args.string(default = "", description = "Optional comma-separated Talos endpoint overrides for --persona=root disaster recovery. Must be paired one-for-one with --nodes; defaults to " + GUARDIAN_MGMT_API_HOST + "."),
         "install_path": args.string(default = "", description = "Kubeconfig file to write. Defaults to ~/.kube/config."),
         "kube_api_server": args.string(default = "", description = "Optional Kubernetes API server override for disaster recovery, e.g. a node public API while zone DNS is dark. Defaults to " + GUARDIAN_MGMT_KUBE_API + "."),
-        "nodes": args.string(default = "", description = "Optional comma-separated Talos target overrides for platform-admin disaster recovery. Must be paired one-for-one with --endpoints."),
-        "platform_admin": args.boolean(default = False, description = "Breakglass: escalated x509 system:masters credentials from the Talos custody bundle (secrets.yaml + talm.key). Audit-logged; requires --reason."),
-        "platform_agent": args.boolean(default = False, description = "Daily driver: OIDC via the platform Keycloak with an offline token (30-day idle window, resets on use, revocable in Keycloak); removes any breakglass context and credentials after OIDC verification."),
-        "reason": args.string(default = "", description = "Why breakglass escalation is needed. Required with --platform-admin; paged to the operations topic and appended to the breakglass ledgers."),
+        "nodes": args.string(default = "", description = "Optional comma-separated Talos target overrides for --persona=root disaster recovery. Must be paired one-for-one with --endpoints."),
+        "persona": args.string(default = "read", description = "Rung of the persona ladder to assume: read (default; unattended, cluster-wide read plus port-forward), write-basic (pod/job delete, scale, secrets-writer token mint), write-all (cluster-admin), or root (breakglass x509 system:masters from the Talos custody bundle; audit-logged, requires --reason). Only read holds offline_access, so every other rung needs a fresh device approval and expires with its Keycloak session."),
+        "reason": args.string(default = "", description = "Why breakglass escalation is needed. Required with --persona=root and rejected otherwise; paged to the operations topic and appended to the breakglass ledgers."),
         "root": args.string(default = GUARDIAN_MGMT_TALM_ROOT, description = "Talm root containing gitignored secrets.yaml and talosconfig."),
         "talosconfig": args.string(default = "", description = "Optional talosconfig path. Defaults to <root>/talosconfig."),
     },

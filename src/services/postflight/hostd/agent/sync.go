@@ -113,6 +113,7 @@ func (a *Agent) applyDesired(response syncproto.SyncResponse) {
 	desiredAssignments := make(map[string]syncproto.DesiredAssignment, len(response.Assignments))
 	quarantinedJobs := map[string]bool{}
 	for _, spec := range response.Assignments {
+		a.sanitizeTransfer(&spec)
 		if err := validateAssignment(spec); err != nil {
 			a.metrics.RejectedAssignments.Add(1)
 			quarantinedJobs[spec.AssignmentID] = true
@@ -199,6 +200,7 @@ func (a *Agent) buildReport(ctx context.Context) (syncproto.SyncRequest, error) 
 	a.mu.Unlock()
 	request := syncproto.SyncRequest{
 		HostID: a.cfg.HostID, BootID: a.bootID,
+		TransferOrigin: a.cfg.TransferOrigin,
 		Platform: syncproto.PlatformReport{
 			QEMUVersion: a.cfg.Platform.QEMUVersion, KernelRelease: a.cfg.Platform.KernelRelease,
 			OSImageID: a.cfg.Platform.OSImageID, MachineType: a.cfg.Platform.MachineType,

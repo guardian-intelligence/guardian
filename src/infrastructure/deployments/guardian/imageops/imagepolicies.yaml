@@ -178,3 +178,32 @@ spec:
       order: asc
   digestReflectionPolicy: Always
   interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: visual-harness
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  image: ghcr.io/guardian-intelligence/visual-harness
+  interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: visual-harness
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  imageRepositoryRef:
+    name: visual-harness
+  filterTags:
+    pattern: '^edge$'
+  policy:
+    alphabetical:
+      order: asc
+  digestReflectionPolicy: Always
+  interval: 1m0s

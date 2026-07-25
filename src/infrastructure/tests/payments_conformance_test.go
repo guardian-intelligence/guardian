@@ -195,3 +195,47 @@ func TestPaymentsTraceAndFluxConformance(t *testing.T) {
 		assertTextContains(t, paymentsFlux, dependency, "guardian-payments-prod Kustomization")
 	}
 }
+
+// The checkout canary drives a real browser at the public apex, which
+// Cloudflare serves with `alt-svc: h3=":443"`. If its egress admits TCP/443
+// alone, Chromium still races a QUIC attempt, the policy drops it, and every
+// run pays a fallback no customer pays — the canary would be measuring a path
+// nobody takes while still reporting green.
+func TestCheckoutCanaryEgressAdmitsTheProtocolsRealBrowsersUse(t *testing.T) {
+	path := runfilePath("src/infrastructure/deployments/analytics/system/networkpolicy.yaml")
+
+	var canary map[string]interface{}
+	for _, doc := range yamlDocs(t, path) {
+		if stringValue(nestedValue(t, doc, "metadata", "name")) == "payments-checkout-canary" {
+			canary = doc
+		}
+	}
+	if canary == nil {
+		t.Fatalf("%s has no payments-checkout-canary policy", path)
+	}
+
+	protocols := map[string]bool{}
+	for _, rule := range sliceValue(nestedValue(t, canary, "spec", "egress")) {
+		entities := map[string]bool{}
+		for _, entity := range sliceValue(mapValue(rule)["toEntities"]) {
+			entities[stringValue(entity)] = true
+		}
+		if !entities["world"] {
+			continue
+		}
+		for _, toPort := range sliceValue(mapValue(rule)["toPorts"]) {
+			for _, port := range sliceValue(mapValue(toPort)["ports"]) {
+				p := mapValue(port)
+				if stringValue(p["port"]) == "443" {
+					protocols[stringValue(p["protocol"])] = true
+				}
+			}
+		}
+	}
+
+	for _, want := range []string{"TCP", "UDP"} {
+		if !protocols[want] {
+			t.Fatalf("checkout canary world egress does not admit %s/443; HTTP/3 is the path real browsers take", want)
+		}
+	}
+}

@@ -50,7 +50,7 @@ metadata:
     guardian.dev/tenant-id: gi-guardian
 automountServiceAccountToken: false
 ---
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ClusterSecretStore
 metadata:
   name: tenant-guardian-openbao
@@ -81,7 +81,7 @@ spec:
 # importer (kv .../tenant-guardian/zot-countersigner): `htpasswd` is the file
 # line zot's auth mount consumes, `password` is the docker login the
 # countersigner presents.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: zot-countersigner-auth

@@ -37,8 +37,9 @@ tightening is pod-selector CiliumNetworkPolicies (the `deployments/iam` pattern)
 
 Stage tenants are **static and long-lived**. Tenant deletion is a known-fragile
 operation on the 1.5.x line (unpinned deletion-hook image, multiple upstream wedge
-modes), so no flow may delete/recreate tenants — per-PR previews are Deployments
-inside the one `previews` tenant, never tenants themselves.
+modes), so no flow may delete/recreate tenants — ephemeral per-PR workloads, if
+they ever return, are Deployments inside an existing tenant, never tenants
+themselves.
 
 ## Consequences
 

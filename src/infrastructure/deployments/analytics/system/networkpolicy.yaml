@@ -122,9 +122,17 @@ spec:
         - ports:
             - port: "8123"
               protocol: TCP
+    # The canary drives headless Chromium against the public apex, which
+    # Cloudflare serves with `alt-svc: h3=":443"` — a real browser therefore
+    # reaches it over HTTP/3. UDP/443 is not optional hardening surface: TCP
+    # alone leaves Chromium racing a QUIC attempt that the policy drops, so
+    # every run pays the fallback and the canary reports a path no customer
+    # takes.
     - toEntities:
         - world
       toPorts:
         - ports:
             - port: "443"
               protocol: TCP
+            - port: "443"
+              protocol: UDP

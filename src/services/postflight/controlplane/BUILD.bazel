@@ -44,6 +44,8 @@ go_library(
 		"migrations/007_durable_runner_model.sql",
 		"migrations/008_provider_acquisition_boundary.sql",
         "migrations/009_prepositioned_job_plans.sql",
+        "migrations/010_workspace_scope_epochs.sql",
+        "migrations/011_generation_transfer_lane.sql",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/controlplane",
     visibility = ["//visibility:private"],
@@ -121,8 +123,10 @@ pkg_tar(
     name = "controlplane_layer",
     files = {
         ":controlplane": "app/controlplane",
+        "//src/services/postflight/canaryloop:canaryloop": "app/canary-loop",
     },
     modes = {
+        "app/canary-loop": "0755",
         "app/controlplane": "0755",
     },
 )

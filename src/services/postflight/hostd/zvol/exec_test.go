@@ -3,8 +3,10 @@ package zvol
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -41,6 +43,7 @@ func execDriver(t *testing.T) *Exec {
 	t.Cleanup(func() {
 		_, _ = driver.run(context.Background(), "destroy", "-r", root+"/ws")
 		_, _ = driver.run(context.Background(), "destroy", "-r", root+"/gen")
+		_, _ = driver.run(context.Background(), "destroy", "-r", root+"/xfer")
 		_, _ = driver.run(context.Background(), "destroy", "-r", root+"/process-state")
 		_, _ = driver.run(context.Background(), "destroy", "-r", root+"/tool-state")
 	})
@@ -197,6 +200,182 @@ func TestExecSealRetryAfterPartialSeal(t *testing.T) {
 	}
 	if err := driver.DestroyToolGeneration(ctx, "gen-2"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Two roots under the scratch dataset stand in for two hosts sharing a pool;
+// send/recv between them exercises the same stream mechanics as the VLAN
+// transfer lane, including GUID-matched incremental receive.
+func execTransferPair(t *testing.T) (*Exec, *Exec) {
+	t.Helper()
+	root := os.Getenv("HOSTD_ZFS_TEST_ROOT")
+	if root == "" {
+		t.Skip("set HOSTD_ZFS_TEST_ROOT to a scratch dataset to run Exec tests")
+	}
+	if _, err := exec.LookPath("zfs"); err != nil {
+		t.Skip("zfs binary not available")
+	}
+	ctx := context.Background()
+	pair := make([]*Exec, 0, 2)
+	for _, suffix := range []string{"/xfer-host-a", "/xfer-host-b"} {
+		driver := &Exec{Root: root + suffix, Timeout: time.Minute}
+		if ok, err := driver.exists(ctx, driver.Root); err != nil {
+			t.Fatal(err)
+		} else if !ok {
+			if _, err := driver.run(ctx, "create", "-p", driver.Root); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := driver.Prepare(ctx); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = driver.run(context.Background(), "destroy", "-r", driver.Root)
+		})
+		pair = append(pair, driver)
+	}
+	return pair[0], pair[1]
+}
+
+func transferSet(t *testing.T, source, destination *Exec, generation GenerationID, from GenerationID, wantIncremental bool) {
+	t.Helper()
+	ctx := context.Background()
+	for _, tree := range TransferTrees {
+		plan, err := source.ResolveSend(ctx, generation, tree, from)
+		if err != nil {
+			t.Fatalf("resolve %s %s: %v", generation, tree, err)
+		}
+		if plan.Incremental != wantIncremental {
+			t.Fatalf("%s %s incremental = %t, want %t", generation, tree, plan.Incremental, wantIncremental)
+		}
+		reader, writer := io.Pipe()
+		sent := make(chan error, 1)
+		go func() {
+			_, err := source.Send(ctx, plan, writer)
+			writer.CloseWithError(err)
+			sent <- err
+		}()
+		if err := destination.ReceiveGeneration(ctx, generation, tree, reader); err != nil {
+			t.Fatalf("receive %s %s: %v", generation, tree, err)
+		}
+		if err := <-sent; err != nil {
+			t.Fatalf("send %s %s: %v", generation, tree, err)
+		}
+	}
+}
+
+func TestExecTransferLifecycle(t *testing.T) {
+	hostA, hostB := execTransferPair(t)
+	ctx := context.Background()
+
+	// Host A seals gen-t1 from a cold build.
+	if _, err := hostA.EnsureWorkspace(ctx, "xfer-assignment-1", "", 64<<20); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hostA.EnsureProcess(ctx, "xfer-assignment-1", "", 64<<20); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hostA.EnsureTool(ctx, "xfer-assignment-1", "", 64<<20); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hostA.SealSet(ctx, "xfer-assignment-1", "gen-t1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostA.DestroyWorkspace(ctx, "xfer-assignment-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostA.DestroyProcess(ctx, "xfer-assignment-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostA.DestroyTool(ctx, "xfer-assignment-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Full transfer to host B; the cache is not residency.
+	transferSet(t, hostA, hostB, "gen-t1", "", false)
+	resident, cached, err := hostB.GenerationState(ctx, "gen-t1")
+	if err != nil || resident || !cached {
+		t.Fatalf("host B state resident=%t cached=%t err=%v", resident, cached, err)
+	}
+	generations, _, err := hostB.Inventory(ctx)
+	if err != nil || len(generations) != 0 {
+		t.Fatalf("host B inventory saw the transfer cache: %+v, %v", generations, err)
+	}
+	// Receiving again is a no-op.
+	if err := hostB.ReceiveGeneration(ctx, "gen-t1", TreeWorkspace, strings.NewReader("")); err != nil {
+		t.Fatalf("idempotent receive: %v", err)
+	}
+
+	// Host B materializes warm from the cache and the provenance survives an
+	// idempotent re-ensure.
+	clone, err := hostB.EnsureWorkspace(ctx, "xfer-assignment-2", "gen-t1", 64<<20)
+	if err != nil || clone.Source != "gen-t1" || clone.SourceSnapshotGUID == "" {
+		t.Fatalf("clone from cache = %+v, %v", clone, err)
+	}
+	again, err := hostB.EnsureWorkspace(ctx, "xfer-assignment-2", "gen-t1", 64<<20)
+	if err != nil || again.Source != "gen-t1" || again.SourceSnapshotGUID != clone.SourceSnapshotGUID {
+		t.Fatalf("re-ensure from cache = %+v, %v", again, err)
+	}
+	if _, err := hostB.EnsureProcess(ctx, "xfer-assignment-2", "gen-t1", 64<<20); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hostB.EnsureTool(ctx, "xfer-assignment-2", "gen-t1", 64<<20); err != nil {
+		t.Fatal(err)
+	}
+
+	// The cache refuses to die under a live clone, then B seals gen-t2 whose
+	// lineage descends from the cached snapshot.
+	if err := hostB.DestroyTransfer(ctx, "gen-t1"); err == nil {
+		t.Fatal("destroyed the transfer cache under a live workspace clone")
+	}
+	if _, err := hostB.SealSet(ctx, "xfer-assignment-2", "gen-t2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostB.DestroyWorkspace(ctx, "xfer-assignment-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostB.DestroyProcess(ctx, "xfer-assignment-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostB.DestroyTool(ctx, "xfer-assignment-2"); err != nil {
+		t.Fatal(err)
+	}
+	// Post-seal the promoted generation owns the lineage; the cache is still
+	// its origin and stays busy.
+	if err := hostB.DestroyTransfer(ctx, "gen-t1"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("transfer cache destroy under sealed descendant = %v, want busy", err)
+	}
+
+	// Incremental hop back: A still holds gen-t1 resident, so B's gen-t2 —
+	// whose origin is the GUID-preserved copy of gen-t1@sealed — transfers
+	// incrementally and A's recv resolves the origin by GUID.
+	transferSet(t, hostB, hostA, "gen-t2", "gen-t1", true)
+	if _, cached, err := hostA.GenerationState(ctx, "gen-t2"); err != nil || !cached {
+		t.Fatalf("host A incremental receive cached=%t err=%v", cached, err)
+	}
+	warm, err := hostA.EnsureWorkspace(ctx, "xfer-assignment-3", "gen-t2", 64<<20)
+	if err != nil || warm.Source != "gen-t2" {
+		t.Fatalf("host A clone from incremental cache = %+v, %v", warm, err)
+	}
+	if err := hostA.DestroyWorkspace(ctx, "xfer-assignment-3"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A base the source cannot prove as the direct parent degrades to full.
+	plan, err := hostB.ResolveSend(ctx, "gen-t2", TreeWorkspace, "gen-unrelated")
+	if err != nil || plan.Incremental {
+		t.Fatalf("unrelated base plan = %+v, %v", plan, err)
+	}
+
+	// With no dependents left the caches reap; absent twice is ErrNotFound.
+	if err := hostA.DestroyTransfer(ctx, "gen-t2"); err != nil {
+		t.Fatalf("reap host A cache: %v", err)
+	}
+	if err := hostA.DestroyTransfer(ctx, "gen-t2"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second reap = %v", err)
+	}
+	if transfers, err := hostA.ListTransfers(ctx); err != nil || len(transfers) != 0 {
+		t.Fatalf("host A transfers after reap = %v, %v", transfers, err)
 	}
 }
 

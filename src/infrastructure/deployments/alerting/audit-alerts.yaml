@@ -2,7 +2,7 @@
 # logs (Talos audit policy -> fluent-bit -> VictoriaLogs, log_source=audit_log).
 #
 # Complements the mint-time breakglass audit (`aspect infra auth
-# --platform-admin` pages when a cert is MINTED — #464): this pages when
+# --persona=root` pages when a cert is MINTED — #464): this pages when
 # `system:masters` is USED. Post CA-rotation (runbooks/cert-rotation.md,
 # 2026-07-07) the expected baseline outside the carve-outs is ZERO, so a
 # single hit is a page, not a trend.

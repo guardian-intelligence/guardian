@@ -1,6 +1,6 @@
-// Runtime performance promotion gate for the letters treatment. Required
-// check (site-perf-gate in the images workflow): fails the build if the
+// Runtime performance check for the letters treatment: exits non-zero if the
 // letters page's scroll-frame timing regresses past the thresholds below.
+// Run it by hand against a built site before shipping a letters change.
 //
 //   vp build && PORT=4179 HOST=127.0.0.1 node .output/server/index.mjs &
 //   node perf/scroll-jank-gate.mjs

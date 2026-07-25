@@ -4,5 +4,7 @@ resources:
   - namespace.yaml
   - secrets.yaml
   - controlplane.yaml
+  - canary-loop.yaml
   - ingress.yaml
   - networkpolicy.yaml
+  - observability.yaml

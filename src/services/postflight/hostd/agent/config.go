@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
@@ -39,6 +40,10 @@ type Config struct {
 	// host stops offering listeners and rejects an assignment before attaching
 	// tenant volumes. Zero disables the gate.
 	StorageMinimumAvailableBytes int64
+	// TransferOrigin is where peer hosts reach this host's generation-transfer
+	// listener on the private transfer VLAN, advertised to the control plane
+	// every sync. Empty means this host serves no generations.
+	TransferOrigin string
 
 	Platform PlatformFingerprint
 }
@@ -80,6 +85,12 @@ func (c *Config) validate() error {
 	}
 	if c.StorageMinimumAvailableBytes < 0 {
 		return fmt.Errorf("agent: StorageMinimumAvailableBytes must not be negative")
+	}
+	if c.TransferOrigin != "" {
+		origin, err := url.Parse(c.TransferOrigin)
+		if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Host == "" {
+			return fmt.Errorf("agent: TransferOrigin %q is not an http(s) origin", c.TransferOrigin)
+		}
 	}
 	return nil
 }

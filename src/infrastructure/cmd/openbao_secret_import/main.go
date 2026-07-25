@@ -259,6 +259,9 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		"github_runner_app_prod_app_id",
 		"github_runner_app_prod_webhook_secret",
 		"github_runner_app_prod_private_key_b64",
+		"github_postflight_canary_loop_app_id",
+		"github_postflight_canary_loop_installation_id",
+		"github_postflight_canary_loop_private_key_b64",
 		"github_projector_pat",
 		"zot_countersigner_password",
 	}
@@ -277,6 +280,10 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		return nil, err
 	}
 	runnerAppKey, err := decodePEMEnv(env, "github_runner_app_prod_private_key_b64")
+	if err != nil {
+		return nil, err
+	}
+	canaryLoopAppKey, err := decodePEMEnv(env, "github_postflight_canary_loop_private_key_b64")
 	if err != nil {
 		return nil, err
 	}
@@ -365,6 +372,16 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				"appId":               env["github_runner_app_prod_app_id"],
 				"webhookSecret":       env["github_runner_app_prod_webhook_secret"],
 				"githubAppPrivateKey": runnerAppKey,
+			},
+		},
+		// The canary controller uses a separate App and installation restricted
+		// to the dedicated Postflight canary repository.
+		{
+			APIPath: "kv/data/guardian/guardian-mgmt/postflight-runner/canary-loop-github-app",
+			Data: map[string]string{
+				"appId":               env["github_postflight_canary_loop_app_id"],
+				"installationId":      env["github_postflight_canary_loop_installation_id"],
+				"githubAppPrivateKey": canaryLoopAppKey,
 			},
 		},
 		// zot push credential for the image countersigner: operator-minted

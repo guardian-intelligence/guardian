@@ -16,7 +16,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
 
-const rendezvousTraceSchema = 7
+const rendezvousTraceSchema = 8
 
 type traceState struct {
 	memberID   string
@@ -57,6 +57,17 @@ type traceEvent struct {
 	Clock      *traceClock      `json:"clock,omitempty"`
 	Checkpoint *traceCheckpoint `json:"checkpoint,omitempty"`
 	Restore    *traceRestore    `json:"restore,omitempty"`
+	Transfer   *traceTransfer   `json:"transfer,omitempty"`
+}
+
+type traceTransfer struct {
+	Origin      string `json:"origin,omitempty"`
+	Generation  string `json:"generation,omitempty"`
+	Base        string `json:"base,omitempty"`
+	Outcome     string `json:"outcome,omitempty"`
+	Bytes       int64  `json:"bytes,omitempty"`
+	Millis      int64  `json:"millis,omitempty"`
+	Incremental bool   `json:"incremental,omitempty"`
 }
 
 type traceVolume struct {

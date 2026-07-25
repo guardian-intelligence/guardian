@@ -12,7 +12,7 @@ the relay's dead-man polls Alertmanager for the always-firing `Watchdog`
 alert and pages on silence, so "no news" is a detectable state, not a hope.
 
 Everything below is copy-paste executable with the default kubeconfig
-(the `platform-agent` OIDC context; `aspect infra auth --platform-agent`
+(the `read` persona OIDC context; `aspect infra auth`
 sets it up). Run it after any change
 to the relay, the Monitoring app values, or the Kargo detection stack —
 an alerting pipeline without a passing drill is assumed broken.

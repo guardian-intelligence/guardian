@@ -24,8 +24,13 @@ data:
         interval: 60s
         rules:
           - alert: CanaryRedactionBroken
+            # vmalert and vlselect both echo this rule's own query text into
+            # their logs (vlselect logs the full requestURI on failed or slow
+            # queries), so both must be excluded or the tripwire trips on its
+            # own reflection. Neither carries canary output, so the exclusion
+            # costs no real coverage.
             expr: |
-              log_source:container_log "guardian-canary-honeytoken-9f2e6c81d4b7" -kubernetes_pod_name:vmalert-vlogs*
+              log_source:container_log "guardian-canary-honeytoken-9f2e6c81d4b7" -kubernetes_pod_name:vmalert-vlogs* -kubernetes_pod_name:vlselect-*
               | stats by (kubernetes_namespace_name, kubernetes_pod_name) count() as hits
             keep_firing_for: 30m
             labels:

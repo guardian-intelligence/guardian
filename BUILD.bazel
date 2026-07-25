@@ -7,6 +7,15 @@ exports_files([
     "AGENTS.md",
 ])
 
+# .github is part of this package (no BUILD file below it), so the workflow
+# sources reach tests from here. //src/infrastructure/tests holds the gate
+# workflow's job key against the status check main's ruleset requires.
+filegroup(
+    name = "workflows",
+    srcs = glob([".github/workflows/*.yml"]),
+    visibility = ["//visibility:public"],
+)
+
 # A workflow using a third-party action ref that the GitHub-side allowlist
 # does not carry dies post-merge as a startup_failure: no jobs, no logs, no
 # page. This holds every `uses:` ref to .github/actions-allowlist.json (the

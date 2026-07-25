@@ -23,4 +23,4 @@ spec:
     useStrictSecurity: true
     disableAutomountServiceAccountToken: true
     extraArgs:
-      retention.maxDiskUsagePercent: "85"
+      retention.maxDiskUsagePercent: "80"

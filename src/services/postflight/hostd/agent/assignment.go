@@ -36,6 +36,15 @@ type assignment struct {
 	exit             int
 	reason           string
 	restore          *syncproto.RestoreReport
+	transfer         *transferState
+	transferReport   *syncproto.TransferReport
+	// coldProcess suppresses the process-restore expectation after a failed
+	// transfer: presenting an expected digest over the empty fallback volume
+	// would make the guest fail the restore closed on integrity, and a
+	// transfer failure must never fail the job. The spec itself stays
+	// untouched so later syncs of the same assignment do not read as a
+	// mutation.
+	coldProcess bool
 	checkpoint       *syncproto.CheckpointArtifact
 	sealGen          string
 	timing           []syncproto.TimingPoint
@@ -56,7 +65,7 @@ func (a *assignment) report() syncproto.AssignmentReport {
 		AssignmentID: a.spec.AssignmentID, MemberID: a.spec.MemberID,
 		RequestID: a.spec.RequestID, JobID: a.spec.JobID, State: a.state,
 		ExitCode: a.exit, Reason: a.reason, SealedGeneration: a.sealGen,
-		Checkpoint: a.checkpoint, Restore: a.restore,
+		Checkpoint: a.checkpoint, Restore: a.restore, Transfer: a.transferReport,
 		Timing:   append([]syncproto.TimingPoint(nil), a.timing...),
 		Observed: a.observed,
 	}

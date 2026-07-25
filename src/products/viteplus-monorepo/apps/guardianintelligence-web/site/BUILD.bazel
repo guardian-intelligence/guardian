@@ -21,14 +21,3 @@ oci_push(
     repository = "ghcr.io/guardian-intelligence/company-site",
     visibility = ["//visibility:public"],
 )
-
-# Pushed by CI (.github/workflows/company-site-preview.yml) for every PR
-# preview: digest only, no tag, so `edge` remains owned by merges to main and
-# concurrent PRs cannot race each other. Preview deployments pin the digest.
-oci_push(
-    name = "push_preview",
-    image = ":image",
-    remote_tags = [],
-    repository = "ghcr.io/guardian-intelligence/company-site",
-    visibility = ["//visibility:public"],
-)

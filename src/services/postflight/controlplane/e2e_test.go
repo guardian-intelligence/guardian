@@ -46,6 +46,7 @@ type jitMintRequest struct {
 	Name          string   `json:"name"`
 	RunnerGroupID int64    `json:"runner_group_id"`
 	Labels        []string `json:"labels"`
+	WorkFolder    string   `json:"work_folder"`
 }
 
 type fakeGitHub struct {
@@ -66,6 +67,9 @@ func (f *fakeGitHub) handler(t *testing.T) http.Handler {
 		var request jitMintRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Errorf("decode JIT request: %v", err)
+		}
+		if request.WorkFolder != syncproto.RunnerWorkRoot {
+			t.Errorf("JIT work_folder = %q, want %q", request.WorkFolder, syncproto.RunnerWorkRoot)
 		}
 		f.mu.Lock()
 		f.mints = append(f.mints, request)
@@ -213,7 +217,142 @@ INSERT INTO runner_job_assignments (
 	}
 }
 
-func startE2EControlPlane(t *testing.T) *e2eControlPlane {
+func TestWorkspaceEpochMigrationPreservesScopeIdentity(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := pool.Exec(ctx, `CREATE TABLE schema_migrations (
+		version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"001_initial.sql", "002_hostd_scheduler.sql", "003_workspace_generations.sql",
+		"004_provider_installations.sql", "005_confidential_generations.sql",
+		"006_durable_tool_generations.sql", "007_durable_runner_model.sql",
+		"008_provider_acquisition_boundary.sql", "009_prepositioned_job_plans.sql",
+	} {
+		if err := applyMigration(ctx, pool, name); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	seeded := queryString(t, pool, `
+INSERT INTO workspace_scopes (org, repo, scope_ref, workflow_path, job_name, matrix_key, runner_class)
+VALUES ('acme', 'widget', 'main', '.github/workflows/ci.yml', 'build', '', $1)
+RETURNING scope_id::text`, e2eClass)
+
+	if err := applyMigration(ctx, pool, "010_workspace_scope_epochs.sql"); err != nil {
+		t.Fatal(err)
+	}
+	w := &worker{st: &pgStore{pool: pool}}
+	resolved := w.resolveWorkspaceScope(ctx, e2eRepo, e2eClass, trustClassBranch,
+		apiWorkflowRun{Path: ".github/workflows/ci.yml", HeadBranch: "main"}, "build", "")
+	if resolved != seeded {
+		t.Fatalf("post-migration resolution minted scope %q, want pre-migration scope %q", resolved, seeded)
+	}
+	if got := queryString(t, pool, `SELECT count(*)::text FROM workspace_scopes`); got != "1" {
+		t.Fatalf("workspace_scopes rows = %s, want 1", got)
+	}
+}
+
+func TestWorkspaceEpochBumpResolvesNewColdScope(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := applyMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	w := &worker{st: &pgStore{pool: pool}}
+	run := apiWorkflowRun{Path: ".github/workflows/ci.yml", HeadBranch: "main"}
+	warm := w.resolveWorkspaceScope(ctx, e2eRepo, e2eClass, trustClassBranch, run, "build", "")
+	if warm == "" {
+		t.Fatal("initial resolution recorded no scope")
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO workspace_generations (generation, host_id, runner_class, state, scope_id)
+VALUES ('gen-epoch-1', 'host-e2e', $1, 'committed', $2::uuid)`, e2eClass, warm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+UPDATE workspace_scopes SET current_generation_id = 'gen-epoch-1', home_host_id = 'host-e2e'
+WHERE scope_id = $1::uuid`, warm); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE runner_classes SET workspace_epoch = 'epoch-2' WHERE class = $1`, e2eClass); err != nil {
+		t.Fatal(err)
+	}
+	cold := w.resolveWorkspaceScope(ctx, e2eRepo, e2eClass, trustClassBranch, run, "build", "")
+	if cold == "" || cold == warm {
+		t.Fatalf("post-bump resolution = %q, want a scope distinct from %q", cold, warm)
+	}
+	if got := queryString(t, pool, `SELECT COALESCE(current_generation_id, '<nil>') FROM workspace_scopes WHERE scope_id = $1::uuid`, cold); got != "<nil>" {
+		t.Fatalf("post-bump scope current_generation_id = %q, want none", got)
+	}
+	if got := queryString(t, pool, `SELECT workspace_epoch FROM workspace_scopes WHERE scope_id = $1::uuid`, cold); got != "epoch-2" {
+		t.Fatalf("post-bump scope epoch = %q", got)
+	}
+}
+
+func TestWorkspaceEpochBumpReapsAbandonedGenerations(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := applyMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := &pgStore{pool: pool}
+	w := &worker{st: store}
+	abandoned := w.resolveWorkspaceScope(ctx, e2eRepo, e2eClass, trustClassBranch,
+		apiWorkflowRun{Path: ".github/workflows/ci.yml", HeadBranch: "main"}, "build", "")
+	if _, err := pool.Exec(ctx, `
+INSERT INTO workspace_generations (generation, host_id, runner_class, state, scope_id)
+VALUES ('gen-abandoned', 'host-e2e', $1, 'committed', $2::uuid)`, e2eClass, abandoned); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+UPDATE workspace_scopes SET current_generation_id = 'gen-abandoned', home_host_id = 'host-e2e'
+WHERE scope_id = $1::uuid`, abandoned); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE runner_classes SET workspace_epoch = 'epoch-2' WHERE class = $1`, e2eClass); err != nil {
+		t.Fatal(err)
+	}
+
+	retired, err := store.RetireOrphanedScopePointers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired != 1 {
+		t.Fatalf("retired generations = %d, want 1", retired)
+	}
+	if got := queryString(t, pool, `SELECT COALESCE(current_generation_id, '<nil>') FROM workspace_scopes WHERE scope_id = $1::uuid`, abandoned); got != "<nil>" {
+		t.Fatalf("abandoned scope pointer = %q, want detached", got)
+	}
+	if got := queryString(t, pool, `SELECT state FROM workspace_generations WHERE generation = 'gen-abandoned'`); got != "retained" {
+		t.Fatalf("abandoned generation state = %q, want retained", got)
+	}
+	if _, err := store.SweepReapableGenerations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := queryString(t, pool, `SELECT state FROM workspace_generations WHERE generation = 'gen-abandoned'`); got != "reapable" {
+		t.Fatalf("abandoned generation state = %q, want reapable", got)
+	}
+	if again, err := store.RetireOrphanedScopePointers(ctx); err != nil || again != 0 {
+		t.Fatalf("second retirement sweep = %d, %v, want a no-op", again, err)
+	}
+}
+
+func startE2EControlPlane(t *testing.T, reconfigure ...func(*config)) *e2eControlPlane {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	pool, err := pgxpool.New(ctx, pgtest.Start(t))
@@ -236,8 +375,12 @@ func startE2EControlPlane(t *testing.T) *e2eControlPlane {
 		apiBaseURL: githubServer.URL, runnerClassPrefix: "postflight-",
 		workerInterval: time.Hour, workerBatchSize: 16, maxDeliveryTries: 8,
 		hostdSyncSecret: e2eSyncSecret, schedulerEnabled: true,
-		schedulerInterval: 10 * time.Millisecond, runnerPoolSize: 2, sealTimeout: 10 * time.Second,
+		schedulerInterval: 10 * time.Millisecond, runnerPoolSize: 2, listenerFloor: 2,
+		sealTimeout: 10 * time.Second,
 		verdictTimeout: time.Hour, hostOfflineTimeout: time.Minute,
+	}
+	for _, mutate := range reconfigure {
+		mutate(&cfg)
 	}
 	client, err := newGitHubClient(cfg)
 	if err != nil {
@@ -307,11 +450,15 @@ INSERT INTO github_provider_demands (
 }
 
 func startE2EHost(t *testing.T, origin string) (*agent.Agent, *vm.Fake, *zvol.Fake, context.CancelFunc) {
+	return startE2EHostForClass(t, origin, "host-e2e", e2eClass, 2)
+}
+
+func startE2EHostForClass(t *testing.T, origin, hostID, class string, slots int) (*agent.Agent, *vm.Fake, *zvol.Fake, context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	volumes := zvol.NewFake()
 	vms := vm.NewFake()
-	vms.Images[e2eClass] = "golden"
+	vms.Images[vm.Class(class)] = "golden"
 	vms.OnAttach = func(device string) {
 		index := strings.LastIndex(device, "/ws/")
 		if index < 0 {
@@ -338,8 +485,8 @@ func startE2EHost(t *testing.T, origin string) (*agent.Agent, *vm.Fake, *zvol.Fa
 		volumes.SetToolAttached(id, false)
 	}
 	instance, err := agent.New(agent.Config{
-		HostID: "host-e2e", ControlPlaneOrigin: origin,
-		Slots: map[vm.Class]int{e2eClass: 2}, Images: map[vm.Class]string{e2eClass: "golden"},
+		HostID: hostID, ControlPlaneOrigin: origin,
+		Slots: map[vm.Class]int{vm.Class(class): slots}, Images: map[vm.Class]string{vm.Class(class): "golden"},
 		SyncInterval: 20 * time.Millisecond, CheckoutGuestOrigin: "http://198.51.100.1:8480",
 	}, volumes, vms, e2eSyncSecret, make([]byte, 32), agent.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -570,7 +717,7 @@ func TestWarmPoolLocalAssignmentAndRecoverableRestoreEndToEnd(t *testing.T) {
 	const sourceProcessDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	scopeID, err := (&pgStore{pool: control.pool}).EnsureWorkspaceScope(context.Background(), workspaceScopeKey{
 		Org: "acme", Repo: "widget", ScopeRef: "main", WorkflowPath: ".github/workflows/ci.yml",
-		JobName: "build", RunnerClass: e2eClass,
+		JobName: "build", RunnerClass: e2eClass, GuestArch: "x86_64", WorkspaceEpoch: "epoch-1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1072,5 +1219,748 @@ INSERT INTO github_provider_demands (
 		if got := queryString(t, control.pool, `SELECT provider_job_id::text FROM runner_job_assignments WHERE check_run_id = $1`, checkRunID); got != fmt.Sprint(providerJobID) {
 			t.Fatalf("check run %d bound provider job %q, want %d", checkRunID, got, providerJobID)
 		}
+	}
+}
+
+func TestPoolTargetsSplitAcrossLiveHosts(t *testing.T) {
+	control := startE2EControlPlane(t)
+	ctx := context.Background()
+	const class = "postflight-split-2404"
+	if _, err := control.pool.Exec(ctx, `
+INSERT INTO runner_classes (class, cpu_cores, memory_bytes, disk_bytes)
+VALUES ($1, 4, 17179869184, 85899345920)`, class); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(ctx, `
+INSERT INTO runner_pools (org_id, installation_id, runner_class, desired_count)
+VALUES ('acme', $1, $2, 6)`, e2eInstallationID, class); err != nil {
+		t.Fatal(err)
+	}
+	syncHost := func(hostID string) syncproto.SyncResponse {
+		return postHostSync(t, control.server.URL, syncproto.SyncRequest{
+			HostID: hostID, BootID: "boot-" + hostID,
+			Slots: []syncproto.SlotReport{{Class: class, Total: 6}},
+		})
+	}
+	syncHost("host-split-a")
+	syncHost("host-split-b")
+	first := syncHost("host-split-a")
+	second := syncHost("host-split-b")
+	if first.PoolTargets[class] != 3 || second.PoolTargets[class] != 3 {
+		t.Fatalf("pool targets = %d/%d, want 3/3",
+			first.PoolTargets[class], second.PoolTargets[class])
+	}
+	if _, err := control.pool.Exec(ctx, `UPDATE hosts SET last_sync_at = now() - interval '1 hour' WHERE host_id = 'host-split-b'`); err != nil {
+		t.Fatal(err)
+	}
+	first = syncHost("host-split-a")
+	if got := first.PoolTargets[class]; got != 6 {
+		t.Fatalf("survivor pool target = %d, want 6", got)
+	}
+}
+
+func TestListHostPoolTargetsDivisionAndClamp(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := applyMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := &pgStore{pool: pool}
+	const class = "postflight-division-2404"
+	if _, err := pool.Exec(ctx, `
+INSERT INTO runner_classes (class, cpu_cores, memory_bytes, disk_bytes)
+VALUES ($1, 4, 17179869184, 85899345920);
+INSERT INTO runner_pools (org_id, installation_id, runner_class, desired_count)
+VALUES ('acme', 123, $1, 7);
+INSERT INTO hosts (host_id, boot_id, last_sync_at) VALUES
+    ('host-div-a', 'boot', now()), ('host-div-b', 'boot', now()),
+    ('host-div-c', 'boot', now() - interval '1 hour');
+INSERT INTO host_slots (host_id, class, total) VALUES
+    ('host-div-a', $1, 10), ('host-div-b', $1, 10), ('host-div-c', $1, 10)`,
+		pgx.QueryExecModeSimpleProtocol, class); err != nil {
+		t.Fatal(err)
+	}
+	cutoff := time.Now().Add(-time.Minute)
+	target := func(hostID string) int {
+		t.Helper()
+		targets, err := store.ListHostPoolTargets(ctx, hostID, cutoff)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return targets[class]
+	}
+	// Remainder goes to the lowest host_id; the stale host holds no share.
+	if a, b, c := target("host-div-a"), target("host-div-b"), target("host-div-c"); a != 4 || b != 3 || c != 0 {
+		t.Fatalf("targets = %d/%d/%d, want 4/3/0", a, b, c)
+	}
+	// A share is clamped by the host's own slot total without redistribution.
+	if _, err := pool.Exec(ctx, `UPDATE host_slots SET total = 2 WHERE host_id = 'host-div-a' AND class = $1`, class); err != nil {
+		t.Fatal(err)
+	}
+	if a, b := target("host-div-a"), target("host-div-b"); a != 2 || b != 3 {
+		t.Fatalf("clamped targets = %d/%d, want 2/3", a, b)
+	}
+	// A host with no slot capacity for the class absorbs no share.
+	if _, err := pool.Exec(ctx, `UPDATE host_slots SET total = 0 WHERE host_id = 'host-div-b' AND class = $1`, class); err != nil {
+		t.Fatal(err)
+	}
+	if a, b := target("host-div-a"), target("host-div-b"); a != 2 || b != 0 {
+		t.Fatalf("zero-slot targets = %d/%d, want 2/0", a, b)
+	}
+	// A class without enabled pools targets zero everywhere.
+	if _, err := pool.Exec(ctx, `UPDATE runner_pools SET enabled = false WHERE runner_class = $1`, class); err != nil {
+		t.Fatal(err)
+	}
+	if a := target("host-div-a"); a != 0 {
+		t.Fatalf("disabled-pool target = %d, want 0", a)
+	}
+}
+
+func TestJobPlanBroadcastIsBounded(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := applyMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := &pgStore{pool: pool}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO hosts (host_id, boot_id, last_sync_at) VALUES ('host-bound', 'boot', now());
+INSERT INTO host_slots (host_id, class, total) VALUES ('host-bound', $1, 2);
+INSERT INTO github_workflow_jobs (
+    provider_job_id, provider_run_id, provider_run_attempt,
+    provider_repository_id, provider_installation_id, repository_full_name,
+    name, status, labels_json, runner_class, head_branch, check_run_id
+)
+SELECT 500000 + i, 600000 + i, 1, 4242, 123, 'acme/widget',
+       'build', 'queued', ('["' || $1 || '"]')::jsonb, $1, 'main', 700000 + i
+FROM generate_series(1, 150) AS i;
+INSERT INTO github_provider_demands (
+    provider_job_id, provider_installation_id, provider_repository_id,
+    repository_full_name, provider_run_id, provider_run_attempt,
+    trust_class, runner_class, state
+)
+SELECT 500000 + i, 123, 4242, 'acme/widget', 600000 + i, 1,
+       $2, $1, 'demand_recorded'
+FROM generate_series(1, 150) AS i`,
+		pgx.QueryExecModeSimpleProtocol, e2eClass, trustClassPR); err != nil {
+		t.Fatal(err)
+	}
+	plans, err := store.ListJobPlans(ctx, "host-bound", time.Now().Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) != jobPlanBroadcastLimit {
+		t.Fatalf("broadcast plans = %d, want %d", len(plans), jobPlanBroadcastLimit)
+	}
+	for i, plan := range plans {
+		if want := int64(500001 + i); plan.ProviderJobID != want {
+			t.Fatalf("plan %d has provider job %d, want %d", i, plan.ProviderJobID, want)
+		}
+	}
+}
+
+func TestObservedAssignmentRevivesCapacityFailedDemand(t *testing.T) {
+	control := startE2EControlPlane(t)
+	ctx := context.Background()
+	store := &pgStore{pool: control.pool}
+	if err := store.MarkProviderDemandFailed(ctx, e2eJobID, []problem{problemCapacityTimeout(e2eClass)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "capacity_failed" {
+		t.Fatalf("demand state = %q", got)
+	}
+	if _, err := control.pool.Exec(ctx, `DELETE FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID); err != nil {
+		t.Fatal(err)
+	}
+
+	_, vms, _, _ := startE2EHost(t, control.server.URL)
+	waitFor(t, "registered listeners", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening'`) == "2"
+	})
+	if got := queryString(t, control.pool, `SELECT count(*)::text FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID); got != "0" {
+		t.Fatalf("terminal demand regrew %s job intents before any observation", got)
+	}
+	statuses, err := vms.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected vm.Status
+	for _, status := range statuses {
+		if status.Phase == vm.PhaseListening {
+			selected = status
+			break
+		}
+	}
+	if selected.ID == "" {
+		t.Fatal("no listening VM")
+	}
+	runnerName := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, selected.Incarnation)
+	if runnerName == "" {
+		t.Fatal("pool member has no runner name")
+	}
+	run := apiWorkflowRun{
+		ID: e2eRunID, Event: "push", Path: ".github/workflows/ci.yml",
+		HeadBranch: "main", HeadSHA: strings.Repeat("c", 40), RunAttempt: 1,
+	}
+	run.HeadRepository.FullName = e2eRepo
+	run.Repository.ID = e2eRepositoryID
+	run.Repository.FullName = e2eRepo
+	control.github.setRun(run, []apiWorkflowJob{{
+		ID: e2eJobID, RunID: e2eRunID, RunAttempt: 1, Name: "build", Status: "in_progress",
+		Labels: []string{e2eClass}, RunnerID: 101, RunnerName: runnerName,
+		CheckRunURL: fmt.Sprintf("https://api.github.com/repos/%s/check-runs/%d", e2eRepo, e2eCheckRunID),
+		HeadSHA:     run.HeadSHA, HeadBranch: run.HeadBranch, WorkflowName: "CI",
+	}})
+
+	identity := vm.JobIdentity{
+		RunID: strconv.FormatInt(e2eRunID, 10), RunAttempt: 1, RunnerName: runnerName,
+		Repository: e2eRepo, WorkflowJob: "build",
+	}
+	if !vms.MarkAssigned(selected.ID, vm.Assignment{
+		RequestID: "request-revive", JobID: "protocol-job-revive", CheckRunID: e2eCheckRunID,
+		RunnerName: runnerName, JobDisplayName: "build", Identity: identity,
+	}) {
+		t.Fatal("local listener did not accept assignment")
+	}
+	var rendezvous vm.Rendezvous
+	waitFor(t, "revived rendezvous", func() bool {
+		var found bool
+		rendezvous, found = vms.RendezvousFor(selected.ID)
+		return found
+	})
+	if got := queryString(t, control.pool, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "demand_recorded" {
+		t.Fatalf("revived demand state = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID); got != "observed" {
+		t.Fatalf("revived intent state = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT member_id FROM runner_job_assignments WHERE provider_job_id = $1`, e2eJobID); got != selected.Incarnation {
+		t.Fatalf("revived assignment member = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT problem_count::text || ':' || primary_problem_code FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "1:pool.capacity_timeout" {
+		t.Fatalf("revival erased the demand problem ledger: %q", got)
+	}
+	if !vms.MarkBound(selected.ID) {
+		t.Fatal("revived assignment did not bind")
+	}
+	waitFor(t, "revived authorization", func() bool {
+		authorization, found := vms.AuthorizationFor(selected.ID)
+		return found && authorization.MemberID == selected.Incarnation &&
+			authorization.AssignmentID == rendezvous.AssignmentID
+	})
+	clock := vm.ClockSample{UnixNS: time.Now().UnixNano(), Synchronized: true, Clocksource: "kvm-clock"}
+	if !vms.MarkWorkerReady(selected.ID, clock) || !vms.MarkHookBlocked(selected.ID, identity) || !vms.MarkReady(selected.ID, clock) {
+		t.Fatal("customer worker was not released")
+	}
+	waitFor(t, "running revived assignment", func() bool {
+		return queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE provider_job_id = $1`, e2eJobID) == "running"
+	})
+	if got := queryString(t, control.pool, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "assigned" {
+		t.Fatalf("running demand state = %q", got)
+	}
+}
+
+func TestObservedAssignmentBindsCrossRepoJob(t *testing.T) {
+	control := startE2EControlPlane(t)
+	const (
+		hostID            = "host-cross-repo"
+		bootID            = "boot-cross-repo"
+		memberID          = "member-cross-repo"
+		vmID              = "vm-cross-repo"
+		crossRepo         = "acme/gadget"
+		crossRepositoryID = int64(4343)
+		crossRunID        = int64(781)
+		crossJobID        = int64(9005)
+		crossCheckRunID   = int64(8005)
+	)
+	hostReport := syncproto.SyncRequest{
+		HostID: hostID, BootID: bootID,
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1, Listening: 1}},
+		Members: []syncproto.PoolMemberReport{{
+			MemberID: memberID, VMID: vmID, Class: e2eClass, Image: "golden", State: syncproto.MemberListening,
+		}},
+	}
+	postHostSync(t, control.server.URL, hostReport)
+	waitFor(t, "capacity pool intent", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pools WHERE runner_class = $1 AND desired_count > 0`, e2eClass) == "1"
+	})
+	postHostSync(t, control.server.URL, hostReport)
+	runnerName := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, memberID)
+	if runnerName == "" {
+		t.Fatal("cross-repo member was not allocated to the warm pool")
+	}
+	waitFor(t, "repo-A intent", func() bool {
+		return queryString(t, control.pool, `SELECT state FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID) == "queued"
+	})
+
+	run := apiWorkflowRun{
+		ID: crossRunID, Event: "push", Path: ".github/workflows/ci.yml",
+		HeadBranch: "main", HeadSHA: strings.Repeat("d", 40), RunAttempt: 1,
+	}
+	run.HeadRepository.FullName = crossRepo
+	run.Repository.ID = crossRepositoryID
+	run.Repository.FullName = crossRepo
+	control.github.setRun(run, []apiWorkflowJob{{
+		ID: crossJobID, RunID: crossRunID, RunAttempt: 1, Name: "build", Status: "in_progress",
+		Labels: []string{e2eClass}, RunnerID: 102, RunnerName: runnerName,
+		CheckRunURL: fmt.Sprintf("https://api.github.com/repos/%s/check-runs/%d", crossRepo, crossCheckRunID),
+		HeadSHA:     run.HeadSHA, HeadBranch: run.HeadBranch, WorkflowName: "CI",
+	}})
+
+	resolved := postJobPlanResolve(t, control.server.URL, syncproto.JobPlanResolveRequest{
+		HostID: hostID, BootID: bootID, MemberID: memberID, VMID: vmID,
+		Assignment: syncproto.ObservedAssignment{
+			RequestID: "request-cross-repo", JobID: "protocol-job-cross-repo", CheckRunID: crossCheckRunID,
+			RunnerName: runnerName, JobDisplayName: "build",
+			Identity: syncproto.JobIdentity{
+				RunID: strconv.FormatInt(crossRunID, 10), RunAttempt: 1, RunnerName: runnerName,
+				Repository: crossRepo, WorkflowJob: "build-key",
+			},
+		},
+	})
+	if resolved.Plan.ExecutionID != strconv.FormatInt(crossJobID, 10) || resolved.Plan.CheckRunID != crossCheckRunID ||
+		resolved.Plan.RepositoryFullName != crossRepo || resolved.Plan.RepositoryID != crossRepositoryID {
+		t.Fatalf("resolved plan = %+v", resolved.Plan)
+	}
+	if got := queryString(t, control.pool, `SELECT repository_full_name || ':' || state FROM github_provider_demands WHERE provider_job_id = $1`, crossJobID); got != crossRepo+":demand_recorded" {
+		t.Fatalf("cross-repo demand = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM github_job_intents WHERE provider_job_id = $1`, crossJobID); got != "observed" {
+		t.Fatalf("cross-repo intent state = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT repository || ':' || member_id FROM runner_job_assignments WHERE provider_job_id = $1`, crossJobID); got != crossRepo+":"+memberID {
+		t.Fatalf("cross-repo assignment = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT s.repo FROM workspace_scopes s JOIN github_provider_demands d ON d.workspace_scope_id = s.scope_id WHERE d.provider_job_id = $1`, crossJobID); got != "gadget" {
+		t.Fatalf("cross-repo workspace scope repo = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT count(*)::text FROM runner_job_assignments WHERE provider_job_id = $1`, e2eJobID); got != "0" {
+		t.Fatalf("repo-A job gained %s assignments from repo-B's observation", got)
+	}
+	if got := queryString(t, control.pool, `SELECT state || ':' || request_id FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID); got != "queued:" {
+		t.Fatalf("repo-A intent = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "demand_recorded" {
+		t.Fatalf("repo-A demand state = %q", got)
+	}
+}
+
+const biasClass = "postflight-bias-2404"
+
+func seedBiasFleet(t *testing.T, pool *pgxpool.Pool, desired int) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+INSERT INTO runner_classes (class, cpu_cores, memory_bytes, disk_bytes)
+VALUES ($1, 4, 17179869184, 85899345920);
+INSERT INTO runner_pools (org_id, installation_id, runner_class, desired_count)
+VALUES ('acme', $2, $1, $3)`, pgx.QueryExecModeSimpleProtocol, biasClass, e2eInstallationID, desired); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// seedBiasHosts registers both hosts before their agents start so every
+// sync — including each host's first — divides the fleet target two ways.
+func seedBiasHosts(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+INSERT INTO hosts (host_id, boot_id, last_sync_at) VALUES
+    ('host-bias-a', 'preboot', now()), ('host-bias-b', 'preboot', now());
+INSERT INTO host_slots (host_id, class, total) VALUES
+    ('host-bias-a', $1, 6), ('host-bias-b', $1, 6)`,
+		pgx.QueryExecModeSimpleProtocol, biasClass); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func seedBiasDemand(t *testing.T, pool *pgxpool.Pool, jobID, checkRunID int64, sourceGeneration string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+INSERT INTO github_workflow_jobs (
+    provider_job_id, provider_run_id, provider_run_attempt,
+    provider_repository_id, provider_installation_id, repository_full_name,
+    name, status, labels_json, runner_class, head_branch, check_run_id
+) VALUES ($1, $2, 1, $3, $4, $5, 'build', 'queued', $6::jsonb, $7, 'main', $8)`,
+		jobID, jobID+100, e2eRepositoryID, e2eInstallationID, e2eRepo,
+		`["`+biasClass+`"]`, biasClass, checkRunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO github_provider_demands (
+    provider_job_id, provider_installation_id, provider_repository_id,
+    repository_full_name, provider_run_id, provider_run_attempt,
+    trust_class, runner_class, source_generation, state
+) VALUES ($1, $2, $3, $4, $5, 1, $6, $7, $8, 'demand_recorded')`,
+		jobID, e2eInstallationID, e2eRepositoryID, e2eRepo, jobID+100,
+		trustClassPR, biasClass, sourceGeneration); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitForStableExposure waits for a host×class to settle at exactly
+// exposed/standby listener counts and stay there across scheduler ticks.
+func waitForStableExposure(t *testing.T, pool *pgxpool.Pool, hostID, class, want string) {
+	t.Helper()
+	read := func() string {
+		return queryString(t, pool, `
+SELECT count(*) FILTER (WHERE state IN ('preparing', 'listening') OR (state = 'warm' AND jit_config <> ''))::text
+       || '/' || count(*) FILTER (WHERE state = 'warm' AND jit_config = '')::text
+FROM runner_pool_members WHERE host_id = $1 AND runner_class = $2`, hostID, class)
+	}
+	waitFor(t, fmt.Sprintf("%s exposure %s", hostID, want), func() bool { return read() == want })
+	time.Sleep(250 * time.Millisecond)
+	if got := read(); got != want {
+		t.Fatalf("%s exposure settled at %q, want %q", hostID, got, want)
+	}
+}
+
+func TestListenerFloorLimitsExposureAcrossHosts(t *testing.T) {
+	control := startE2EControlPlane(t, func(cfg *config) {
+		cfg.listenerFloor = 1
+		cfg.runnerPoolSize = 6
+	})
+	seedBiasFleet(t, control.pool, 6)
+	seedBiasHosts(t, control.pool)
+	startE2EHostForClass(t, control.server.URL, "host-bias-a", biasClass, 6)
+	startE2EHostForClass(t, control.server.URL, "host-bias-b", biasClass, 6)
+	waitForStableExposure(t, control.pool, "host-bias-a", biasClass, "1/3")
+	waitForStableExposure(t, control.pool, "host-bias-b", biasClass, "1/3")
+}
+
+func TestHomedDemandRaisesHostExposure(t *testing.T) {
+	control := startE2EControlPlane(t, func(cfg *config) {
+		cfg.listenerFloor = 1
+		cfg.runnerPoolSize = 6
+	})
+	ctx := context.Background()
+	const generation = "generation-bias-a"
+	seedBiasFleet(t, control.pool, 6)
+	store := &pgStore{pool: control.pool}
+	scopeID, err := store.EnsureWorkspaceScope(ctx, workspaceScopeKey{
+		Org: "acme", Repo: "widget", ScopeRef: "main", WorkflowPath: ".github/workflows/ci.yml",
+		JobName: "build", RunnerClass: biasClass, GuestArch: "x86_64", WorkspaceEpoch: "epoch-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(ctx, `
+INSERT INTO workspace_generations (generation, host_id, runner_class, state, scope_id, sealed_at)
+VALUES ($1, 'host-bias-a', $2, 'committed', $3::uuid, now())`, generation, biasClass, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(ctx, `
+UPDATE workspace_scopes SET current_generation_id = $1, home_host_id = 'host-bias-a'
+WHERE scope_id = $2::uuid`, generation, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	seedBiasDemand(t, control.pool, 9101, 8101, generation)
+	if _, err := control.pool.Exec(ctx, `
+UPDATE github_provider_demands SET workspace_scope_id = $2::uuid WHERE provider_job_id = $1`, int64(9101), scopeID); err != nil {
+		t.Fatal(err)
+	}
+	seedBiasHosts(t, control.pool)
+	startE2EHostForClass(t, control.server.URL, "host-bias-a", biasClass, 6)
+	startE2EHostForClass(t, control.server.URL, "host-bias-b", biasClass, 6)
+	waitForStableExposure(t, control.pool, "host-bias-a", biasClass, "2/3")
+	waitForStableExposure(t, control.pool, "host-bias-b", biasClass, "1/3")
+}
+
+func TestGenerationlessDemandLeavesFloorExposure(t *testing.T) {
+	control := startE2EControlPlane(t, func(cfg *config) {
+		cfg.listenerFloor = 1
+		cfg.runnerPoolSize = 6
+	})
+	seedBiasFleet(t, control.pool, 6)
+	seedBiasDemand(t, control.pool, 9102, 8102, "")
+	seedBiasHosts(t, control.pool)
+	startE2EHostForClass(t, control.server.URL, "host-bias-a", biasClass, 6)
+	startE2EHostForClass(t, control.server.URL, "host-bias-b", biasClass, 6)
+	waitForStableExposure(t, control.pool, "host-bias-a", biasClass, "1/3")
+	waitForStableExposure(t, control.pool, "host-bias-b", biasClass, "1/3")
+}
+
+func TestHomedDemandExposureClampsAtHostShare(t *testing.T) {
+	control := startE2EControlPlane(t, func(cfg *config) {
+		cfg.listenerFloor = 1
+		cfg.runnerPoolSize = 6
+	})
+	const generation = "generation-clamp-a"
+	seedBiasFleet(t, control.pool, 6)
+	if _, err := control.pool.Exec(context.Background(), `
+INSERT INTO workspace_generations (generation, host_id, runner_class, state, sealed_at)
+VALUES ($1, 'host-bias-a', $2, 'committed', now())`, generation, biasClass); err != nil {
+		t.Fatal(err)
+	}
+	for i := int64(0); i < 5; i++ {
+		seedBiasDemand(t, control.pool, 9200+i, 8200+i, generation)
+	}
+	seedBiasHosts(t, control.pool)
+	startE2EHostForClass(t, control.server.URL, "host-bias-a", biasClass, 6)
+	startE2EHostForClass(t, control.server.URL, "host-bias-b", biasClass, 6)
+	waitForStableExposure(t, control.pool, "host-bias-a", biasClass, "3/3")
+	waitForStableExposure(t, control.pool, "host-bias-b", biasClass, "1/3")
+}
+
+func TestZeroFloorActiveDemandExposesOneListener(t *testing.T) {
+	control := startE2EControlPlane(t, func(cfg *config) { cfg.listenerFloor = 0 })
+	startE2EHost(t, control.server.URL)
+	waitForStableExposure(t, control.pool, "host-e2e", e2eClass, "1/1")
+}
+
+func TestSingleHostDefaultsServeQueuedDemand(t *testing.T) {
+	control := startE2EControlPlane(t, func(cfg *config) { cfg.runnerPoolSize = 6 })
+	_, vms, _, _ := startE2EHostForClass(t, control.server.URL, "host-e2e", e2eClass, 6)
+	waitForStableExposure(t, control.pool, "host-e2e", e2eClass, "2/4")
+	statuses, err := vms.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected vm.Status
+	for _, status := range statuses {
+		if status.Phase == vm.PhaseListening {
+			selected = status
+			break
+		}
+	}
+	if selected.ID == "" {
+		t.Fatal("no listening VM")
+	}
+	runnerName := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, selected.Incarnation)
+	if !vms.MarkAssigned(selected.ID, vm.Assignment{
+		RequestID: "request-floor", JobID: "protocol-job-floor", CheckRunID: e2eCheckRunID,
+		RunnerName: runnerName, JobDisplayName: "build",
+		Identity: vm.JobIdentity{
+			RunID: "777", RunAttempt: 1, RunnerName: runnerName,
+			Repository: e2eRepo, WorkflowJob: "build",
+		},
+	}) {
+		t.Fatal("floor listener did not accept assignment")
+	}
+	waitFor(t, "queued demand bound to a floor listener", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_job_assignments WHERE provider_job_id = $1`, e2eJobID) == "1"
+	})
+	// The consumed listener's budget slot re-opens from the standby pool.
+	waitForStableExposure(t, control.pool, "host-e2e", e2eClass, "2/3")
+}
+
+func getJobPlans(t *testing.T, origin, hostID string) syncproto.JobPlanSnapshot {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, origin+syncproto.JobPlanPath+"?host_id="+hostID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+e2eSyncSecret)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		detail, _ := io.ReadAll(response.Body)
+		t.Fatalf("job plans returned %s: %s", response.Status, detail)
+	}
+	var snapshot syncproto.JobPlanSnapshot
+	if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+const e2eTransferOrigin = "http://10.75.0.1:8482"
+
+// seedTransferScenario places the demand's source generation on
+// host-xfer-a with a base generation resident on the requesting host, so
+// routing decisions have both sides to reason about.
+func seedTransferScenario(t *testing.T, control *e2eControlPlane, requesterHostID string) {
+	t.Helper()
+	ctx := context.Background()
+	scopeID, err := (&pgStore{pool: control.pool}).EnsureWorkspaceScope(ctx, workspaceScopeKey{
+		Org: "acme", Repo: "widget", ScopeRef: "main", WorkflowPath: ".github/workflows/ci.yml",
+		JobName: "build", RunnerClass: e2eClass, GuestArch: "x86_64", WorkspaceEpoch: "epoch-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(ctx, `
+INSERT INTO workspace_generations (generation, host_id, runner_class, state, scope_id)
+VALUES ('gen-base', $1, $2, 'committed', $3::uuid)`, requesterHostID, e2eClass, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(ctx, `
+INSERT INTO workspace_generations (
+    generation, host_id, runner_class, state, scope_id, source_generation,
+    process_digest, criu_version, sealed_at
+) VALUES ('gen-transfer', 'host-xfer-a', $1, 'committed', $2::uuid, 'gen-base',
+    'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+    'Version: 4.2', now())`, e2eClass, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(ctx, `
+UPDATE github_provider_demands SET workspace_scope_id = $1::uuid, source_generation = 'gen-transfer'
+WHERE provider_job_id = $2`, scopeID, e2eJobID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOffHostGenerationRoutesTransferSpecEndToEnd(t *testing.T) {
+	control := startE2EControlPlane(t)
+	const hostB = "host-xfer-b"
+	seedTransferScenario(t, control, hostB)
+
+	// The owning host advertises its transfer origin; the requesting host
+	// offers capacity for the class.
+	postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: "host-xfer-a", BootID: "boot-a", TransferOrigin: e2eTransferOrigin,
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1}},
+	})
+	if got := queryString(t, control.pool, `SELECT transfer_origin FROM hosts WHERE host_id = 'host-xfer-a'`); got != e2eTransferOrigin {
+		t.Fatalf("advertised transfer origin = %q", got)
+	}
+
+	hostReport := syncproto.SyncRequest{
+		HostID: hostB, BootID: "boot-b",
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1, Listening: 1}},
+		Members: []syncproto.PoolMemberReport{{
+			MemberID: "member-xfer-b", VMID: "vm-xfer-b", Class: e2eClass, Image: "golden", State: syncproto.MemberListening,
+		}},
+	}
+	postHostSync(t, control.server.URL, hostReport)
+	waitFor(t, "capacity pool intent", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pools WHERE runner_class = $1 AND desired_count > 0`, e2eClass) == "1"
+	})
+	postHostSync(t, control.server.URL, hostReport)
+	runnerName := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = 'member-xfer-b'`)
+	if runnerName == "" {
+		t.Fatal("member was not allocated to the warm pool")
+	}
+
+	// The prepositioned plan for host B carries the generation with its
+	// transfer routing instead of a blanked generation.
+	snapshot := getJobPlans(t, control.server.URL, hostB)
+	if len(snapshot.Plans) != 1 {
+		t.Fatalf("plans = %+v", snapshot.Plans)
+	}
+	plan := snapshot.Plans[0]
+	if plan.Workspace.Generation != "gen-transfer" || plan.Tool.Generation != "gen-transfer" {
+		t.Fatalf("plan generations = %+v", plan)
+	}
+	if plan.Transfer == nil || plan.Transfer.Origin != e2eTransferOrigin ||
+		plan.Transfer.Generation != "gen-transfer" || plan.Transfer.Base != "gen-base" {
+		t.Fatalf("plan transfer = %+v", plan.Transfer)
+	}
+	if plan.Process.Generation != "gen-transfer" || plan.Process.ExpectedDigest == "" {
+		t.Fatalf("plan process = %+v", plan.Process)
+	}
+	// The owning host itself keeps the plain resident view.
+	ownSnapshot := getJobPlans(t, control.server.URL, "host-xfer-a")
+	if len(ownSnapshot.Plans) != 1 || ownSnapshot.Plans[0].Transfer != nil ||
+		ownSnapshot.Plans[0].Workspace.Generation != "gen-transfer" {
+		t.Fatalf("owner plans = %+v", ownSnapshot.Plans)
+	}
+
+	// GitHub selects the listener on host B; the bound assignment persists
+	// the routing and the desired state carries it.
+	assigned := hostReport
+	assigned.Members = []syncproto.PoolMemberReport{{
+		MemberID: "member-xfer-b", VMID: "vm-xfer-b", Class: e2eClass, Image: "golden", State: syncproto.MemberAssigned,
+		Assignment: &syncproto.ObservedAssignment{
+			RequestID: "request-9001", JobID: "protocol-job-9001", CheckRunID: e2eCheckRunID,
+			RunnerName: runnerName, JobDisplayName: "build",
+			Identity: syncproto.JobIdentity{
+				RunID: "777", RunAttempt: 1, RunnerName: runnerName,
+				Repository: e2eRepo, WorkflowJob: "build",
+			},
+		},
+	}}
+	response := postHostSync(t, control.server.URL, assigned)
+	if len(response.Assignments) != 1 {
+		t.Fatalf("desired assignments = %+v", response.Assignments)
+	}
+	desired := response.Assignments[0]
+	if desired.Workspace.Generation != "gen-transfer" || desired.Transfer == nil ||
+		desired.Transfer.Origin != e2eTransferOrigin || desired.Transfer.Generation != "gen-transfer" ||
+		desired.Transfer.Base != "gen-base" {
+		t.Fatalf("desired assignment transfer = %+v", desired.Transfer)
+	}
+	if desired.Process.Generation != "gen-transfer" || desired.Process.ExpectedDigest == "" {
+		t.Fatalf("desired process = %+v", desired.Process)
+	}
+
+	// The assigned host's transfer evidence lands beside restore evidence.
+	report := assigned
+	report.Assignments = []syncproto.AssignmentReport{{
+		AssignmentID: desired.AssignmentID, MemberID: desired.MemberID,
+		RequestID: desired.RequestID, JobID: desired.JobID,
+		State:    syncproto.AssignmentRunning,
+		Transfer: &syncproto.TransferReport{Outcome: "used", Bytes: 4096, Millis: 1200, Incremental: true},
+	}}
+	postHostSync(t, control.server.URL, report)
+	if got := queryString(t, control.pool, `
+SELECT transfer_outcome || ':' || transfer_bytes::text || ':' || transfer_millis::text || ':' || transfer_incremental::text
+FROM runner_job_assignments WHERE assignment_id::text = $1`, desired.AssignmentID); got != "used:4096:1200:true" {
+		t.Fatalf("persisted transfer evidence = %q", got)
+	}
+	if got := queryString(t, control.pool, `
+SELECT transfer_origin || '|' || transfer_base || '|' || source_generation
+FROM runner_job_assignments WHERE assignment_id::text = $1`, desired.AssignmentID); got != e2eTransferOrigin+"|gen-base|gen-transfer" {
+		t.Fatalf("persisted transfer routing = %q", got)
+	}
+}
+
+func TestOffHostGenerationWithoutAdvertisementStaysBlanked(t *testing.T) {
+	control := startE2EControlPlane(t)
+	const hostB = "host-xfer-b"
+	seedTransferScenario(t, control, hostB)
+	ctx := context.Background()
+
+	// The owning host syncs without advertising a transfer origin.
+	postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: "host-xfer-a", BootID: "boot-a",
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1}},
+	})
+	postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: hostB, BootID: "boot-b",
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1}},
+	})
+	snapshot := getJobPlans(t, control.server.URL, hostB)
+	if len(snapshot.Plans) != 1 || snapshot.Plans[0].Workspace.Generation != "" ||
+		snapshot.Plans[0].Transfer != nil || snapshot.Plans[0].Process.Generation != "" {
+		t.Fatalf("plans without advertisement = %+v", snapshot.Plans)
+	}
+
+	// Advertising makes it routable; going stale blanks it again.
+	postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: "host-xfer-a", BootID: "boot-a", TransferOrigin: e2eTransferOrigin,
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1}},
+	})
+	snapshot = getJobPlans(t, control.server.URL, hostB)
+	if len(snapshot.Plans) != 1 || snapshot.Plans[0].Transfer == nil {
+		t.Fatalf("plans after advertisement = %+v", snapshot.Plans)
+	}
+	if _, err := control.pool.Exec(ctx, `UPDATE hosts SET last_sync_at = now() - interval '1 hour' WHERE host_id = 'host-xfer-a'`); err != nil {
+		t.Fatal(err)
+	}
+	snapshot = getJobPlans(t, control.server.URL, hostB)
+	if len(snapshot.Plans) != 1 || snapshot.Plans[0].Workspace.Generation != "" || snapshot.Plans[0].Transfer != nil {
+		t.Fatalf("plans with stale owner = %+v", snapshot.Plans)
+	}
+}
+
+func TestMalformedTransferOriginIsNotStored(t *testing.T) {
+	control := startE2EControlPlane(t)
+	postHostSync(t, control.server.URL, syncproto.SyncRequest{
+		HostID: "host-xfer-mal", BootID: "boot-mal", TransferOrigin: "10.75.0.1:8482",
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1}},
+	})
+	if got := queryString(t, control.pool, `SELECT transfer_origin FROM hosts WHERE host_id = 'host-xfer-mal'`); got != "" {
+		t.Fatalf("malformed origin stored as %q", got)
 	}
 }

@@ -30,6 +30,9 @@ type config struct {
 	schedulerEnabled  bool
 	schedulerInterval time.Duration
 	runnerPoolSize    int
+	// listenerFloor is the per-host, per-class baseline of exposed GitHub
+	// listeners kept registered regardless of demand.
+	listenerFloor int
 	// sealTimeout bounds how long an assignment may wait for its host to confirm
 	// a requested workspace seal before the candidate is discarded.
 	sealTimeout time.Duration
@@ -89,6 +92,15 @@ func loadConfig() (config, error) {
 		}
 		return n
 	}
+	nonNegativeInt := func(key, fallback string) int {
+		v := envOr(key, fallback)
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			errs = append(errs, fmt.Errorf("%s: %q is not a non-negative integer", key, v))
+			return 0
+		}
+		return n
+	}
 
 	cfg := config{
 		appID:              requiredID("GITHUB_APP_ID"),
@@ -106,6 +118,7 @@ func loadConfig() (config, error) {
 		schedulerEnabled:   os.Getenv("SCHEDULER_ENABLED") == "true",
 		schedulerInterval:  duration("SCHEDULER_INTERVAL", "500ms"),
 		runnerPoolSize:     positiveInt("RUNNER_POOL_SIZE", "6"),
+		listenerFloor:      nonNegativeInt("LISTENER_FLOOR", "2"),
 		sealTimeout:        duration("ASSIGNMENT_SEAL_TIMEOUT", "10m"),
 		verdictTimeout:     duration("GENERATION_VERDICT_TIMEOUT", "1h"),
 		hostOfflineTimeout: duration("HOST_OFFLINE_TIMEOUT", "5m"),

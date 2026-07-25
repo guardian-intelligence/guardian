@@ -18,6 +18,11 @@ import (
 	"github.com/bazelbuild/rules_go/go/runfiles"
 )
 
+var (
+	testAgentUser    = personas[defaultPersona].user
+	testAgentContext = personas[defaultPersona].user + "@" + clusterName
+)
+
 type recordedCall struct {
 	kind string
 	bin  string
@@ -163,12 +168,12 @@ func TestValidateConfigRequiresPairedOverrides(t *testing.T) {
 	}
 }
 
-func TestValidateConfigRejectsTalosOverridesInAgentMode(t *testing.T) {
+func TestValidateConfigRejectsTalosOverridesOnOIDCPersonas(t *testing.T) {
 	cfg := baseAgentConfig(t.TempDir())
 	cfg.Endpoints = "203.0.113.1"
 	cfg.Nodes = "203.0.113.1"
-	if err := validateConfig(cfg); err == nil || !strings.Contains(err.Error(), "only to admin mode") {
-		t.Fatalf("validateConfig() error = %v, want admin-only override error", err)
+	if err := validateConfig(cfg); err == nil || !strings.Contains(err.Error(), "only to --persona=root") {
+		t.Fatalf("validateConfig() error = %v, want root-only override error", err)
 	}
 }
 
@@ -430,12 +435,12 @@ current-context: unrelated
 	if err := json.Unmarshal(raw, &view); err != nil {
 		t.Fatalf("parse kubectl config view: %v", err)
 	}
-	if view.CurrentContext != agentContext {
-		t.Fatalf("current context = %q, want %q", view.CurrentContext, agentContext)
+	if view.CurrentContext != testAgentContext {
+		t.Fatalf("current context = %q, want %q", view.CurrentContext, testAgentContext)
 	}
 	contextNames := namesFromView(view.Contexts)
 	userNames := namesFromView(view.Users)
-	for _, name := range []string{"unrelated", agentContext} {
+	for _, name := range []string{"unrelated", testAgentContext} {
 		if !contextNames[name] {
 			t.Fatalf("contexts = %#v, missing %q", contextNames, name)
 		}
@@ -443,7 +448,7 @@ current-context: unrelated
 	if contextNames[adminContext] {
 		t.Fatalf("contexts = %#v, breakglass context remains", contextNames)
 	}
-	for _, name := range []string{"unrelated-user", agentUser} {
+	for _, name := range []string{"unrelated-user", testAgentUser} {
 		if !userNames[name] {
 			t.Fatalf("users = %#v, missing %q", userNames, name)
 		}
@@ -565,7 +570,7 @@ func TestRunAdminMintFailureLeavesDestinationUnchanged(t *testing.T) {
 		return nil
 	}}
 	app := testApplication(cfg, runner)
-	err := app.runAdmin(context.Background(), defaultCandidates())
+	err := app.runBreakglass(context.Background(), defaultCandidates())
 	if err == nil || !strings.Contains(err.Error(), "mint admin") {
 		t.Fatalf("runAdmin() error = %v", err)
 	}
@@ -586,7 +591,7 @@ func TestRunAdminKubeconfigMintFailureRemovesPartialCredentials(t *testing.T) {
 		return nil
 	}}
 	app := testApplication(cfg, runner)
-	if err := app.runAdmin(context.Background(), defaultCandidates()); err == nil || !strings.Contains(err.Error(), "mint admin") {
+	if err := app.runBreakglass(context.Background(), defaultCandidates()); err == nil || !strings.Contains(err.Error(), "mint admin") {
 		t.Fatalf("runAdmin() error = %v, want mint failure", err)
 	}
 	assertFileEquals(t, cfg.Kubeconfig, original)
@@ -611,7 +616,7 @@ func TestRunAdminVerificationFailureLeavesDestinationUnchanged(t *testing.T) {
 		return nil
 	}
 	app := testApplication(cfg, runner)
-	err := app.runAdmin(context.Background(), defaultCandidates())
+	err := app.runBreakglass(context.Background(), defaultCandidates())
 	if err == nil || !strings.Contains(err.Error(), "verify minted admin") {
 		t.Fatalf("runAdmin() error = %v", err)
 	}
@@ -643,7 +648,7 @@ func TestRunAdminFailoverMintsExactPairVerifiesThenPreservesMerge(t *testing.T) 
 		return nil
 	}
 	app := testApplication(cfg, runner)
-	if err := app.runAdmin(context.Background(), defaultCandidates()); err != nil {
+	if err := app.runBreakglass(context.Background(), defaultCandidates()); err != nil {
 		t.Fatalf("runAdmin() error = %v", err)
 	}
 	assertFileEquals(t, cfg.Kubeconfig, merged)
@@ -697,7 +702,7 @@ func TestRunAdminPreparesTalosconfigAndUsesMintedClusterName(t *testing.T) {
 		return nil
 	}
 	app := testApplication(cfg, runner)
-	if err := app.runAdmin(context.Background(), defaultCandidates()[:1]); err != nil {
+	if err := app.runBreakglass(context.Background(), defaultCandidates()[:1]); err != nil {
 		t.Fatalf("runAdmin() error = %v", err)
 	}
 	talosconfig := -1
@@ -736,7 +741,7 @@ func TestRunAdminFinalRenameFailureLeavesDestinationUnchanged(t *testing.T) {
 	}
 	app := testApplication(cfg, runner)
 	app.fs = &nthRenameFailFS{failAt: 2}
-	if err := app.runAdmin(context.Background(), defaultCandidates()[:1]); err == nil || !strings.Contains(err.Error(), "atomically install") {
+	if err := app.runBreakglass(context.Background(), defaultCandidates()[:1]); err == nil || !strings.Contains(err.Error(), "atomically install") {
 		t.Fatalf("runAdmin() error = %v, want final install failure", err)
 	}
 	assertFileEquals(t, cfg.Kubeconfig, original)
@@ -746,13 +751,13 @@ func TestRunAdminFinalRenameFailureLeavesDestinationUnchanged(t *testing.T) {
 
 func baseAgentConfig(dir string) config {
 	return config{
-		Mode:          "agent",
+		Persona:       "read",
 		Kubectl:       "/tools/kubectl",
 		Kubelogin:     "/tools/kubectl-oidc_login",
 		CA:            "/repo/ca.crt",
 		Kubeconfig:    filepath.Join(dir, "config"),
 		OIDCIssuer:    "https://keycloak.example/realms/platform",
-		OIDCClientID:  "guardian-platform-agent",
+		OIDCClientID:  "kubernetes-device",
 		OIDCCacheDir:  filepath.Join(dir, "oidc-cache"),
 		KubeAPIServer: defaultKubeAPIServer,
 		ProbeTimeout:  time.Second,
@@ -763,7 +768,7 @@ func baseAdminConfig(dir string) config {
 	talmRoot := filepath.Join(dir, "talm")
 	_ = os.MkdirAll(talmRoot, 0o700)
 	return config{
-		Mode:          "admin",
+		Persona:       "root",
 		Kubectl:       "/tools/kubectl",
 		Talm:          "/tools/talm",
 		Talosctl:      "/tools/talosctl",
@@ -893,5 +898,28 @@ func assertNoAuthTemps(t *testing.T, dir string) {
 	}
 	if len(matches) != 0 {
 		t.Fatalf("temporary kubeconfigs remain: %#v", matches)
+	}
+}
+
+// Only the unattended rung may request offline_access: Keycloak grants the
+// realm role to that identity alone, so asking for the scope as a write
+// persona fails the device code exchange instead of yielding a shorter-lived
+// token. This is the enforcement mechanism behind "a write session needs a
+// human", so it is pinned here rather than left to the manifest alone.
+func TestOnlyUnattendedPersonaRequestsOfflineAccess(t *testing.T) {
+	if len(personas) == 0 {
+		t.Fatal("no personas declared")
+	}
+	for name, rung := range personas {
+		args := strings.Join(agentCredentialArgs(config{}, rung, rung.user), " ")
+		if got := strings.Contains(args, "offline_access"); got != rung.unattended {
+			t.Fatalf("persona %s: offline_access requested = %v, want %v", name, got, rung.unattended)
+		}
+		if !strings.Contains(args, "--exec-arg=--grant-type=device-code") {
+			t.Fatalf("persona %s: device-code grant missing", name)
+		}
+	}
+	if !personas[defaultPersona].unattended {
+		t.Fatalf("default persona %q must be the unattended rung", defaultPersona)
 	}
 }

@@ -118,17 +118,41 @@ func run(ctx context.Context, cfg config) error {
 	return nil
 }
 
+// browserResolverRules confines Chrome's name resolution to the canary's own
+// origin. Chrome phones home regardless of the flags that claim to stop it —
+// `--disable-background-networking` and `--disable-sync` are both on by
+// default here, and it still opens a connectivity probe on TCP/80 and a push
+// channel on TCP/5228 to Google on every run. Enumerating features to disable
+// loses to a browser that keeps adding them, so resolution is allowlisted
+// instead: the same shape as the egress policy that denies those connections
+// and is what made them visible. A canary measuring the customer path should
+// dial nothing else.
+func browserResolverRules(pageURL string) (string, error) {
+	parsed, err := url.Parse(pageURL)
+	if err != nil || parsed.Hostname() == "" {
+		return "", fmt.Errorf("canary URL has no host: %q", pageURL)
+	}
+	// localhost is excluded alongside the origin because the DevTools
+	// endpoint chromedp drives lives there; Chrome's own documentation for
+	// this flag never writes a rule without that exclusion.
+	return "MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE " + parsed.Hostname(), nil
+}
+
 func browserPayment(
 	ctx context.Context,
 	cfg config,
 	traceparent string,
 ) (checkoutResponse, error) {
+	resolverRules, err := browserResolverRules(cfg.PublicPageURL)
+	if err != nil {
+		return checkoutResponse{}, err
+	}
 	allocatorOptions := append(
 		chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(cfg.ChromeExecutable),
 		chromedp.NoSandbox,
 		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("disable-background-networking", true),
+		chromedp.Flag("host-resolver-rules", resolverRules),
 	)
 	allocatorCtx, cancelAllocator := chromedp.NewExecAllocator(ctx, allocatorOptions...)
 	defer cancelAllocator()

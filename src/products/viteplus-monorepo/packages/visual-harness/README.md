@@ -71,12 +71,11 @@ compare against**: font antialiasing differs per OS, so baselines must be
 generated inside the pinned Playwright image, never on a laptop.
 macOS-suffixed snapshot files must not be committed.
 
-The `privatecut-visual-gate` CI job runs with `--update-snapshots=missing`: a
-form factor without a committed baseline gets one generated against the exact
-built privatecut image and uploaded in the `privatecut-visual` artifact — download
-it (`gh run download -n privatecut-visual`), review, and commit. Once committed,
-any mismatch fails the gate with the diff in the same artifact. To refresh
-deliberately after an intentional visual change, on a linux box:
+Run the canary with `--update-snapshots=missing` and a form factor without a
+committed baseline gets one generated against the exact built privatecut image,
+left in the output directory to review and commit. Once committed, any
+mismatch fails the run with the diff alongside it. To capture or refresh
+baselines after an intentional visual change, on a linux box:
 
 ```sh
 bazelisk run //src/products/viteplus-monorepo/packages/visual-harness:load

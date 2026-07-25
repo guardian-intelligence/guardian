@@ -12,6 +12,7 @@ import (
 
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -452,7 +453,8 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 		return nil
 	}
 
-	if err := w.ensureDemandForAPIJob(ctx, apiEv, run, trustClassForRun(obs), prBaseRef, deliveryID); err != nil {
+	revived, err := w.ensureDemandForAPIJob(ctx, apiEv, run, trustClassForRun(obs), prBaseRef, deliveryID)
+	if err != nil {
 		return fmt.Errorf("ensure demand: %w", err)
 	}
 	if err := w.st.NotifyJobPlans(ctx); err != nil {
@@ -460,6 +462,9 @@ func (w *worker) submitQueuedJob(ctx context.Context, ev jobEvent, deliveryID st
 	}
 	a := attrs
 	a.Result = "succeeded"
+	if revived {
+		a.Reason = "revived:capacity_failed"
+	}
 	emitEvent(ctx, evDemandRecorded, a)
 	markDirty()
 	return nil
@@ -469,9 +474,16 @@ func jobCanStillRequireRendezvous(status string) bool {
 	return status == "queued" || status == "in_progress"
 }
 
-func (w *worker) ensureDemandForAPIJob(ctx context.Context, ev jobEvent, run apiWorkflowRun, trust, prBaseRef, deliveryID string) error {
+// ensureDemandForAPIJob is only called with jobs whose queued/in_progress
+// status was just re-read from the API — the evidence that makes reviving a
+// capacity_failed demand safe. It reports whether such a revival happened.
+func (w *worker) ensureDemandForAPIJob(ctx context.Context, ev jobEvent, run apiWorkflowRun, trust, prBaseRef, deliveryID string) (bool, error) {
 	class := runnerClassForLabels(ev.Job.Labels, w.cfg.runnerClassPrefix)
-	_, err := w.st.EnsureProviderDemand(ctx, demandRow{
+	revived, err := w.st.ReviveCapacityFailedDemand(ctx, ev.Job.ID)
+	if err != nil {
+		return false, err
+	}
+	_, err = w.st.EnsureProviderDemand(ctx, demandRow{
 		ProviderJobID:          ev.Job.ID,
 		ProviderInstallationID: ev.InstallationID,
 		ProviderRepositoryID:   ev.RepositoryID,
@@ -483,7 +495,7 @@ func (w *worker) ensureDemandForAPIJob(ctx context.Context, ev jobEvent, run api
 		WorkspaceScopeID:       w.resolveWorkspaceScope(ctx, ev.RepositoryFullName, class, trust, run, ev.Job.Name, prBaseRef),
 		LastDeliveryID:         deliveryID,
 	})
-	return err
+	return revived, err
 }
 
 // refreshRunAndJobs is the in_progress/completed path: the payload's terminal
@@ -562,13 +574,17 @@ func (w *worker) refreshRunAndJobs(ctx context.Context, ev jobEvent, deliveryID 
 	}
 	prNumber, prBaseRef, prResolved := w.resolveAndStampPullRequest(ctx, ev.InstallationID, ev.RepositoryFullName, ev.Job.RunID, run, &obs)
 	for _, apiEv := range active {
-		if err := w.ensureDemandForAPIJob(ctx, apiEv, run, trustClassForRun(obs), prBaseRef, deliveryID); err != nil {
+		revived, err := w.ensureDemandForAPIJob(ctx, apiEv, run, trustClassForRun(obs), prBaseRef, deliveryID)
+		if err != nil {
 			return fmt.Errorf("ensure demand for API job %d: %w", apiEv.Job.ID, err)
 		}
 		da := attrs
 		da.JobID = apiEv.Job.ID
 		da.RunnerClass = runnerClassForLabels(apiEv.Job.Labels, w.cfg.runnerClassPrefix)
 		da.Result = "succeeded"
+		if revived {
+			da.Reason = "revived:capacity_failed"
+		}
 		emitEvent(ctx, evDemandRecorded, da)
 	}
 	if len(active) > 0 {
@@ -629,9 +645,9 @@ func (w *worker) resolveAndStampPullRequest(ctx context.Context, installationID 
 }
 
 // resolveWorkspaceScope upserts the job-shape scope this demand reads (and,
-// on branch trust, writes). Best-effort: the workspace cache is
-// acceleration, so a resolution failure records no scope and the job simply
-// runs cold.
+// on branch trust, writes), stamping the class's guest_arch/workspace_epoch
+// pair into the key. Best-effort: the workspace cache is acceleration, so a
+// resolution failure records no scope and the job simply runs cold.
 func (w *worker) resolveWorkspaceScope(ctx context.Context, repoFullName, class, trust string, run apiWorkflowRun, jobName, prBaseRef string) string {
 	org, repo, ok := strings.Cut(repoFullName, "/")
 	if !ok {
@@ -641,15 +657,24 @@ func (w *worker) resolveWorkspaceScope(ctx context.Context, repoFullName, class,
 	if scopeRef == "" {
 		return ""
 	}
+	guestArch, workspaceEpoch, err := w.st.RunnerClassScopeKey(ctx, class)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("worker: read runner class scope key", "repo", repoFullName, "class", class, "err", err)
+		}
+		return ""
+	}
 	name, matrixKey := splitMatrixJobName(jobName)
 	scopeID, err := w.st.EnsureWorkspaceScope(ctx, workspaceScopeKey{
-		Org:          org,
-		Repo:         repo,
-		ScopeRef:     scopeRef,
-		WorkflowPath: run.Path,
-		JobName:      name,
-		MatrixKey:    matrixKey,
-		RunnerClass:  class,
+		Org:            org,
+		Repo:           repo,
+		ScopeRef:       scopeRef,
+		WorkflowPath:   run.Path,
+		JobName:        name,
+		MatrixKey:      matrixKey,
+		RunnerClass:    class,
+		GuestArch:      guestArch,
+		WorkspaceEpoch: workspaceEpoch,
 	})
 	if err != nil {
 		slog.Warn("worker: ensure workspace scope", "repo", repoFullName, "err", err)

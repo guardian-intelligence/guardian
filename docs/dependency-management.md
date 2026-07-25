@@ -47,8 +47,7 @@ actually exercise the artifact.
    the source-policy/version-skew tests, the actions-allowlist and
    renovate-config checks, and fresh-download verification of every
    lockfile entry on both platforms (`//src/tools:multitool_lock_test`) —
-   plus the secret scan and, on tool-pin diffs, `//src/tools:pins`
-   fetch/unpack verification.
+   plus, on tool-pin diffs, `//src/tools:pins` fetch/unpack verification.
 2. Review (human/agent): read the upstream changelog Renovate embeds; for
    anything cluster-coupled or substrate, that means the release notes, not
    the diff summary.
@@ -60,8 +59,8 @@ TODO: replace fetch/unpack verification with a real binary vetting
 pipeline — upstream signature/attestation verification per tool (most of
 `src/tools` ships sigstore signatures or signed checksums) and hermetic
 behavioral exercise where the tool's real job runs offline (restic repo
-roundtrip, cosign offline bundle verify, k6 local run). Gitleaks already gets
-real exercise through the secret scan on every PR.
+roundtrip, cosign offline bundle verify, k6 local run). Gitleaks gets real
+exercise through the pre-commit hook on every commit.
 
 ## The Actions allowlist (lockstep or startup_failure)
 

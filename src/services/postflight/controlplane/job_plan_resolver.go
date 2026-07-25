@@ -98,7 +98,7 @@ func (s *syncServer) handleResolveJobPlan(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
-	if err := s.st.BindObservedAssignment(r.Context(), request.HostID, request.MemberID, request.Assignment); err != nil {
+	if err := s.st.BindObservedAssignment(r.Context(), request.HostID, s.liveCutoff(), request.MemberID, request.Assignment); err != nil {
 		s.syncError(w, request.HostID, "bind resolved assignment", err)
 		return
 	}
@@ -266,8 +266,21 @@ func (w *worker) resolveObservedPlan(ctx context.Context, member resolvablePoolM
 		HeadSHA:                run.HeadSHA,
 	}
 	_, prBaseRef, _ := w.resolveAndStampPullRequest(ctx, member.InstallationID, observed.Identity.Repository, runID, run, &obs)
-	if err := w.ensureDemandForAPIJob(ctx, ev, run, trustClassForRun(obs), prBaseRef, deliveryID); err != nil {
+	revived, err := w.ensureDemandForAPIJob(ctx, ev, run, trustClassForRun(obs), prBaseRef, deliveryID)
+	if err != nil {
 		return 0, timing, fmt.Errorf("ensure observed provider demand: %w", err)
+	}
+	if revived {
+		emitEvent(ctx, evDemandRecorded, eventAttrs{
+			DeliveryID:  deliveryID,
+			Repo:        observed.Identity.Repository,
+			RunID:       runID,
+			RunAttempt:  int64(observed.Identity.RunAttempt),
+			JobID:       job.ID,
+			RunnerClass: class,
+			Result:      "succeeded",
+			Reason:      "revived:capacity_failed",
+		})
 	}
 	if _, err := w.st.EnsureJobIntents(ctx); err != nil {
 		return 0, timing, fmt.Errorf("ensure observed job intent: %w", err)

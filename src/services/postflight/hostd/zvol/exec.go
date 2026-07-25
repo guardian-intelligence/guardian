@@ -50,12 +50,15 @@ func (e *Exec) Prepare(ctx context.Context) error {
 	for _, dataset := range []string{
 		e.Root + "/ws",
 		e.Root + "/gen",
+		e.Root + "/xfer",
 		e.Root + "/process-state",
 		e.Root + "/process-state/ws",
 		e.Root + "/process-state/gen",
+		e.Root + "/process-state/xfer",
 		e.Root + "/tool-state",
 		e.Root + "/tool-state/ws",
 		e.Root + "/tool-state/gen",
+		e.Root + "/tool-state/xfer",
 	} {
 		exists, err := e.exists(ctx, dataset)
 		if err != nil {
@@ -242,15 +245,17 @@ func (e *Exec) EnsureWorkspace(ctx context.Context, assignment AssignmentID, gen
 	if ok, err := e.exists(ctx, dataset); err != nil {
 		return WorkspaceVolume{}, err
 	} else if ok {
-		origin, err := e.origin(ctx, dataset)
+		origin, err := e.originSnapshot(ctx, dataset)
 		if err != nil {
 			return WorkspaceVolume{}, err
 		}
-		guid, err := e.sourceSnapshotGUID(ctx, origin)
-		if err != nil {
-			return WorkspaceVolume{}, err
+		guid := ""
+		if origin != "" {
+			if guid, err = e.snapshotGUID(ctx, origin); err != nil {
+				return WorkspaceVolume{}, err
+			}
 		}
-		return e.readyWorkspace(ctx, dataset, origin, guid)
+		return e.readyWorkspace(ctx, dataset, e.generationFromOrigin(origin), guid)
 	}
 	if generation == "" {
 		if sizeBytes <= 0 {
@@ -264,45 +269,50 @@ func (e *Exec) EnsureWorkspace(ctx context.Context, assignment AssignmentID, gen
 	if err := ValidateName("generation", string(generation)); err != nil {
 		return WorkspaceVolume{}, err
 	}
-	snapshot := e.generationDataset(generation) + "@sealed"
-	if _, err := e.run(ctx, "clone", snapshot, dataset); err != nil {
-		// The control plane's scope pointer can outlive its generation
-		// (reaped, lost with a pool, retired by an operator). A missing
-		// clone source must degrade to a cold build, not wedge every
-		// future assignment in the scope; the next seal advances the pointer.
-		if strings.Contains(err.Error(), "does not exist") && sizeBytes > 0 {
-			if _, cerr := e.run(ctx, "create", "-s", "-V", strconv.FormatInt(sizeBytes, 10), dataset); cerr != nil {
-				return WorkspaceVolume{}, cerr
+	for _, snapshot := range []string{
+		e.generationDataset(generation) + "@sealed",
+		e.transferDataset(generation) + "@sealed",
+	} {
+		if _, err := e.run(ctx, "clone", snapshot, dataset); err != nil {
+			if strings.Contains(err.Error(), "does not exist") {
+				continue
 			}
-			return e.readyWorkspace(ctx, dataset, "", "")
+			return WorkspaceVolume{}, err
 		}
+		guid, err := e.snapshotGUID(ctx, snapshot)
+		if err != nil {
+			return WorkspaceVolume{}, err
+		}
+		return e.readyWorkspace(ctx, dataset, generation, guid)
+	}
+	// The control plane's scope pointer can outlive its generation (reaped,
+	// lost with a pool, retired by an operator) and a routed transfer can
+	// fail. A missing clone source must degrade to a cold build, not wedge
+	// every future assignment in the scope; the next seal advances the
+	// pointer.
+	if sizeBytes <= 0 {
+		return WorkspaceVolume{}, fmt.Errorf("zvol: clone source %s: %w", generation, ErrNotFound)
+	}
+	if _, err := e.run(ctx, "create", "-s", "-V", strconv.FormatInt(sizeBytes, 10), dataset); err != nil {
 		return WorkspaceVolume{}, err
 	}
-	guid, err := e.sourceSnapshotGUID(ctx, generation)
-	if err != nil {
-		return WorkspaceVolume{}, err
-	}
-	return e.readyWorkspace(ctx, dataset, generation, guid)
+	return e.readyWorkspace(ctx, dataset, "", "")
 }
 
-func (e *Exec) sourceSnapshotGUID(ctx context.Context, generation GenerationID) (string, error) {
-	if generation == "" {
-		return "", nil
-	}
-	out, err := e.run(ctx, "get", "-H", "-p", "-o", "value", "guid",
-		e.generationDataset(generation)+"@sealed")
+func (e *Exec) snapshotGUID(ctx context.Context, snapshot string) (string, error) {
+	out, err := e.run(ctx, "get", "-H", "-p", "-o", "value", "guid", snapshot)
 	if err != nil {
 		return "", err
 	}
 	guid := strings.TrimSpace(out)
 	if guid == "" || guid == "-" {
-		return "", fmt.Errorf("zvol: generation %s has no snapshot guid", generation)
+		return "", fmt.Errorf("zvol: snapshot %s has no guid", snapshot)
 	}
 	return guid, nil
 }
 
-// origin resolves which generation a workspace was cloned from, if any.
-func (e *Exec) origin(ctx context.Context, dataset string) (GenerationID, error) {
+// originSnapshot resolves a dataset's full origin snapshot name, or "".
+func (e *Exec) originSnapshot(ctx context.Context, dataset string) (string, error) {
 	out, err := e.run(ctx, "get", "-H", "-o", "value", "origin", dataset)
 	if err != nil {
 		return "", err
@@ -311,12 +321,23 @@ func (e *Exec) origin(ctx context.Context, dataset string) (GenerationID, error)
 	if origin == "-" {
 		return "", nil
 	}
-	// <root>/gen/<generation>@<snap> → <generation>
-	name := strings.TrimPrefix(origin, e.Root+"/gen/")
+	return origin, nil
+}
+
+// generationFromOrigin maps an origin snapshot back to the generation it
+// carries: clones come from either the generation namespace or the transfer
+// cache.
+func (e *Exec) generationFromOrigin(origin string) GenerationID {
+	name := origin
 	if at := strings.IndexByte(name, '@'); at >= 0 {
 		name = name[:at]
 	}
-	return GenerationID(name), nil
+	for _, prefix := range []string{e.Root + "/gen/", e.Root + "/xfer/"} {
+		if rest, ok := strings.CutPrefix(name, prefix); ok {
+			return GenerationID(rest)
+		}
+	}
+	return ""
 }
 
 func (e *Exec) sealPreparedVolume(ctx context.Context, assignment AssignmentID, generation GenerationID) (GenerationSnapshot, error) {
@@ -535,16 +556,13 @@ func (e *Exec) listWorkspaces(ctx context.Context) ([]WorkspaceVolume, error) {
 			continue
 		}
 		var source GenerationID
+		guid := ""
 		if fields[1] != "-" {
-			name := strings.TrimPrefix(fields[1], e.Root+"/gen/")
-			if at := strings.IndexByte(name, '@'); at >= 0 {
-				name = name[:at]
+			source = e.generationFromOrigin(fields[1])
+			var err error
+			if guid, err = e.snapshotGUID(ctx, fields[1]); err != nil {
+				return nil, err
 			}
-			source = GenerationID(name)
-		}
-		guid, err := e.sourceSnapshotGUID(ctx, source)
-		if err != nil {
-			return nil, err
 		}
 		workspaces = append(workspaces, WorkspaceVolume{
 			Name:               fields[0],

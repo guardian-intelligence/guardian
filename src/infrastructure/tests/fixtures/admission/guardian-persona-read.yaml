@@ -1,0 +1,90 @@
+# The read persona is the rung agent sessions hold unattended, so its boundary
+# is the one a leaked offline token buys. Everything except opening a
+# port-forward must be denied, and the identity must be matched by group as
+# well as by username — a token that arrives without a groups claim must not
+# fail open into an unmatched, unrestricted session.
+policy: guardian-persona-read
+cases:
+  - name: pod port-forward
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: portforward
+    objectName: some-pod
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: allow
+  - name: read persona matched by group not username
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: portforward
+    objectName: some-pod
+    user: {username: "keycloak:cozy#other", groups: ["guardian-persona-read", "system:authenticated"]}
+    expect: allow
+  - name: delete pod
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: some-pod
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: delete job
+    operation: DELETE
+    resource: {group: batch, version: v1, resource: jobs}
+    objectName: some-job
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: scale deployment
+    operation: UPDATE
+    resource: {group: apps, version: v1, resource: deployments}
+    subResource: scale
+    objectName: some-deployment
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: mint secrets-writer token
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: secrets-writer
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: create secret
+    operation: CREATE
+    resource: {group: "", version: v1, resource: secrets}
+    objectName: stolen
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: pod exec
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: exec
+    objectName: some-pod
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: update pod
+    operation: UPDATE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: some-pod
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: delete deployment
+    operation: DELETE
+    resource: {group: apps, version: v1, resource: deployments}
+    objectName: some-deployment
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: write-basic persona is not matched by the read policy
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: some-pod
+    user: {username: "keycloak:cozy#platform-write-basic", groups: ["guardian-persona-write-basic", "system:authenticated"]}
+    expect: no-match
+  - name: human admin is not matched
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: some-pod
+    user: {username: "keycloak:cozy#platform-admin", groups: ["cozystack-cluster-admin", "system:authenticated"]}
+    expect: no-match
+  - name: controller service account is not matched
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: some-pod
+    user: {username: "system:serviceaccount:tenant-root:flux", groups: ["system:serviceaccounts", "system:authenticated"]}
+    expect: no-match

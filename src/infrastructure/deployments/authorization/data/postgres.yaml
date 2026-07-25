@@ -74,3 +74,15 @@ spec:
     kind: Postgres
     name: spicedb
   backupClassName: cozy-default
+---
+apiVersion: backups.cozystack.io/v1alpha1
+kind: BackupJob
+metadata:
+  name: spicedb-postgres-nightly-retry-20260724
+  namespace: tenant-guardian-prod
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: Postgres
+    name: spicedb
+  backupClassName: cozy-default

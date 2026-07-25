@@ -285,7 +285,7 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"WriteRelationships",
 		"DeleteRelationships",
 		"randomObjectID",
-		"permission: manage_members",
+		"permission: manage\n",
 		"expectNoPermission: true",
 		"consistency: AtLeastAsFresh",
 	} {
@@ -393,6 +393,53 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 	} {
 		if match := manualMutation.FindString(raw); match != "" {
 			t.Fatalf("%s contains manual cluster mutation command %q", path, strings.TrimSpace(match))
+		}
+	}
+}
+
+func TestThumperScriptsMatchDeployedSchema(t *testing.T) {
+	schemaPath := runfilePath("src/infrastructure/deployments/authorization/prod/schema/guardian.zed")
+	schema := readText(t, schemaPath)
+	definitionPattern := regexp.MustCompile(`(?s)definition\s+(\w+)\s*\{(.*?)\}`)
+	permissionPattern := regexp.MustCompile(`permission\s+(\w+)\s*=`)
+	relationPattern := regexp.MustCompile(`relation\s+(\w+):`)
+	permissions := map[string]map[string]bool{}
+	relations := map[string]map[string]bool{}
+	for _, definition := range definitionPattern.FindAllStringSubmatch(schema, -1) {
+		name, body := definition[1], definition[2]
+		permissions[name] = map[string]bool{}
+		relations[name] = map[string]bool{}
+		for _, m := range permissionPattern.FindAllStringSubmatch(body, -1) {
+			permissions[name][m[1]] = true
+		}
+		for _, m := range relationPattern.FindAllStringSubmatch(body, -1) {
+			relations[name][m[1]] = true
+		}
+	}
+	if len(permissions) == 0 {
+		t.Fatalf("%s yielded no definitions", schemaPath)
+	}
+
+	loadPath := runfilePath("src/infrastructure/deployments/authorization/prod/thumper/qualification.yaml")
+	load := readText(t, loadPath)
+	resource := ""
+	for i, line := range strings.Split(load, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if value, ok := strings.CutPrefix(trimmed, "resource: "); ok {
+			resource = strings.SplitN(value, ":", 2)[0]
+			if _, ok := permissions[resource]; !ok {
+				t.Fatalf("%s:%d references definition %q absent from guardian.zed", loadPath, i+1, resource)
+			}
+		}
+		if value, ok := strings.CutPrefix(trimmed, "permission: "); ok {
+			if !permissions[resource][value] {
+				t.Fatalf("%s:%d checks permission %q that definition %q does not grant in guardian.zed", loadPath, i+1, value, resource)
+			}
+		}
+		if value, ok := strings.CutPrefix(trimmed, "relation: "); ok {
+			if !relations[resource][value] {
+				t.Fatalf("%s:%d writes relation %q that definition %q does not declare in guardian.zed", loadPath, i+1, value, resource)
+			}
 		}
 	}
 }

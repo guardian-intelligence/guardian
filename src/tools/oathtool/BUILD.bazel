@@ -5,6 +5,10 @@ package(default_visibility = ["//visibility:private"])
 
 configure_make(
     name = "oathtool",
+    env = {
+        "AR": "ar",
+        "RANLIB": "ranlib",
+    },
     configure_options = [
         "--disable-dependency-tracking",
         "--disable-pam",
