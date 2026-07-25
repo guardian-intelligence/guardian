@@ -1,13 +1,14 @@
 name: postflight-cli-release
 
-# Release cutter for the postflight CLI: fires on the channel-pin merge commit
-# (the Kargo promotion PR advancing release/channels.yaml), verifies the full
-# signature chain of the pinned artifact, and publishes a GitHub Release with
-# the binaries and the cosign bundles minted at build time — nothing is
-# re-signed here. The release is cut with a short-lived guardian-promotions
-# App token (the same identity that opens promotion PRs), minted only after
-# the dedup check: unlike GITHUB_TOKEN, App-authored releases fire `release:`
-# workflows, which stable's npm publish will ride.
+# Release cutter for the postflight CLI: fires on a channel-pin merge commit
+# (the Kargo promotion PR advancing release/channels.yaml for nightly, a human
+# PR for rc/stable), verifies the full signature chain of every pinned artifact
+# that has no release yet, and publishes a GitHub Release with the binaries,
+# the cosign bundles minted at build time, and a source tarball cut at the
+# build commit — nothing is re-signed here. Releases are cut with a short-lived
+# guardian-promotions App token (the same identity that opens promotion PRs),
+# minted only after the dedup check: unlike GITHUB_TOKEN, App-authored releases
+# fire `release:` workflows, which stable's npm publish will ride.
 
 on:
   push:
@@ -30,55 +31,103 @@ concurrency:
 
 env:
   IMAGE_REPO: ghcr.io/guardian-intelligence/postflight-cli
+  CHANNELS: nightly rc stable
+  CHANNELS_FILE: src/products/postflight-cli/release/channels.yaml
   TARGETS: x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin
+  NATIVE_TARGET: x86_64-unknown-linux-musl
   BUILD_IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main
   ISSUER: https://token.actions.githubusercontent.com
   CRANE_VERSION: v0.21.7
   CRANE_SHA256: 1a57bc98207fa1c0d04bf760699099e26f8383499bfd55b99c1b919a928a7230
 
 jobs:
-  nightly:
+  release:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - name: Read the nightly pin
-        id: pin
-        run: |
-          image="$(grep -A1 '^  nightly:' src/products/postflight-cli/release/channels.yaml \
-            | grep -o 'ghcr.io/guardian-intelligence/postflight-cli@sha256:[a-f0-9]\{64\}' || true)"
-          if [[ -z "$image" ]]; then
-            echo "nightly pin is empty — nothing to release" >> "$GITHUB_STEP_SUMMARY"
-          fi
-          echo "image=$image" >> "$GITHUB_OUTPUT"
-
-      - name: Skip if this artifact is already released
-        if: steps.pin.outputs.image != ''
-        id: dedup
+      - name: Plan the channel cuts
+        id: plan
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          digest="${{ steps.pin.outputs.image }}"
-          digest="${digest##*@}"
-          if gh api "repos/${{ github.repository }}/releases" --paginate \
-              --jq '.[] | select(.tag_name | startswith("postflight-cli/nightly-")) | .body' \
-              | grep -q "$digest"; then
-            echo "released=true" >> "$GITHUB_OUTPUT"
-            echo "a nightly release for $digest already exists — skipping" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "released=false" >> "$GITHUB_OUTPUT"
-          fi
+          channel_field() {
+            awk -v channel="  $1:" -v key="$2:" '
+              $0 == channel { inside = 1; next }
+              inside && /^  [^ ]/ { exit }
+              inside && $1 == key { print $2; exit }
+            ' "$CHANNELS_FILE"
+          }
+
+          # Every dedup and lineage question is "has this digest been released
+          # on channel X", and the tag prefixes partition the release space.
+          release_bodies() {
+            local cache="releases-$1.txt" filter
+            case "$1" in
+              nightly) filter='select(.tag_name | startswith("postflight-cli/nightly-"))' ;;
+              rc) filter='select(.tag_name | startswith("postflight-cli/v") and contains("-rc."))' ;;
+              stable) filter='select(.tag_name | startswith("postflight-cli/v") and (contains("-rc.") | not))' ;;
+            esac
+            if [[ ! -f "$cache" ]]; then
+              gh api "repos/${{ github.repository }}/releases" --paginate \
+                --jq ".[] | $filter | .body" > "$cache"
+            fi
+            printf '%s' "$cache"
+          }
+
+          cuts=()
+          : > plan.txt
+          for channel in $CHANNELS; do
+            image="$(channel_field "$channel" image \
+              | grep -o "$IMAGE_REPO@sha256:[a-f0-9]\{64\}" || true)"
+            if [[ -z "$image" ]]; then
+              echo "$channel: no pin — nothing to release" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            version="$(channel_field "$channel" version | tr -d "\"'")"
+            digest="${image##*@}"
+
+            if grep -q "$digest" "$(release_bodies "$channel")"; then
+              echo "$channel: $digest is already released — skipping" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            case "$channel" in
+              rc)
+                parent=nightly
+                if [[ "$version" != *-rc.* ]]; then
+                  echo "$channel: version '$version' is not a release candidate" >> "$GITHUB_STEP_SUMMARY"
+                  exit 1
+                fi
+                ;;
+              stable)
+                parent=rc
+                if [[ -z "$version" || "$version" == *-rc.* ]]; then
+                  echo "$channel: version '$version' is not a stable version" >> "$GITHUB_STEP_SUMMARY"
+                  exit 1
+                fi
+                ;;
+              *) parent= ;;
+            esac
+            if [[ -n "$parent" ]] && ! grep -q "$digest" "$(release_bodies "$parent")"; then
+              echo "$channel: $digest was never released on $parent — lineage broken, refusing to cut" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+
+            cuts+=("$channel")
+            printf '%s %s %s\n' "$channel" "$image" "$version" >> plan.txt
+          done
+          echo "cuts=${cuts[*]}" >> "$GITHUB_OUTPUT"
 
       - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
-        if: steps.pin.outputs.image != '' && steps.dedup.outputs.released == 'false'
+        if: steps.plan.outputs.cuts != ''
 
-      - name: Verify the artifact before publishing
-        if: steps.pin.outputs.image != '' && steps.dedup.outputs.released == 'false'
-        id: verify
+      - name: Verify the artifacts before publishing
+        if: steps.plan.outputs.cuts != ''
         run: |
           curl -fsSLo crane.tar.gz "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
           echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum -c -
@@ -86,45 +135,58 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.local/bin:$PATH"
 
-          image="${{ steps.pin.outputs.image }}"
-          cosign verify --certificate-identity "$BUILD_IDENTITY" \
-            --certificate-oidc-issuer "$ISSUER" "$image" > /dev/null
+          mkdir -p meta
+          while read -r channel image version <&3; do
+            cosign verify --certificate-identity "$BUILD_IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" "$image" > /dev/null
 
-          manifest="$(crane manifest "$image")"
-          revision="$(jq -r '.annotations["org.opencontainers.image.revision"]' <<<"$manifest")"
-          binaries_digest="$(jq -r '.annotations["org.guardian.binaries-digest"]' <<<"$manifest")"
-          echo "revision=$revision" >> "$GITHUB_OUTPUT"
-          echo "binaries_digest=$binaries_digest" >> "$GITHUB_OUTPUT"
+            manifest="$(crane manifest "$image")"
+            revision="$(jq -r '.annotations["org.opencontainers.image.revision"]' <<<"$manifest")"
+            binaries_digest="$(jq -r '.annotations["org.guardian.binaries-digest"]' <<<"$manifest")"
 
-          mkdir stage && crane export "$image" - | tar -x -C stage
-          mkdir assets
-          for target in $TARGETS; do
-            cp "stage/$target/postflight" "assets/postflight-$target"
-            cp "stage/$target/postflight.sigstore.json" "assets/postflight-$target.sigstore.json"
-            cosign verify-blob \
-              --bundle "assets/postflight-$target.sigstore.json" \
-              --certificate-identity "$BUILD_IDENTITY" \
-              --certificate-oidc-issuer "$ISSUER" \
-              "assets/postflight-$target"
-          done
-          (cd assets && sha256sum postflight-* > checksums.txt)
+            mkdir -p "stage/$channel" "assets/$channel"
+            crane export "$image" - | tar -x -C "stage/$channel"
+            for target in $TARGETS; do
+              cp "stage/$channel/$target/postflight" "assets/$channel/postflight-$target"
+              cp "stage/$channel/$target/postflight.sigstore.json" "assets/$channel/postflight-$target.sigstore.json"
+              cosign verify-blob \
+                --bundle "assets/$channel/postflight-$target.sigstore.json" \
+                --certificate-identity "$BUILD_IDENTITY" \
+                --certificate-oidc-issuer "$ISSUER" \
+                "assets/$channel/postflight-$target"
+            done
+
+            built="$("assets/$channel/postflight-$NATIVE_TARGET" version)"
+            built="${built#postflight version }"
+            if [[ -n "$version" && "$built" != "$version" ]]; then
+              echo "$channel: pin claims $version but the artifact is $built" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+
+            # The checkout is shallow at the pin commit; the sources that
+            # produced these binaries live at the build commit.
+            git fetch --depth 1 origin "$revision"
+            git archive --format=tar.gz --prefix="postflight-$built-src/" \
+              -o "assets/$channel/postflight-$built-src.tar.gz" \
+              "$revision:src/products/postflight-cli"
+
+            (cd "assets/$channel" && sha256sum postflight-* > checksums.txt)
+            printf 'revision=%s\nbinaries_digest=%s\nversion=%s\n' \
+              "$revision" "$binaries_digest" "$built" > "meta/$channel.env"
+          done 3< plan.txt
 
       - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
-        if: steps.pin.outputs.image != '' && steps.dedup.outputs.released == 'false'
+        if: steps.plan.outputs.cuts != ''
         id: app
         with:
           app-id: ${{ secrets.PROMOTIONS_APP_ID }}
           private-key: ${{ secrets.PROMOTIONS_APP_PRIVATE_KEY }}
 
-      - name: Cut the nightly release
-        if: steps.pin.outputs.image != '' && steps.dedup.outputs.released == 'false'
+      - name: Cut the releases
+        if: steps.plan.outputs.cuts != ''
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
-          image="${{ steps.pin.outputs.image }}"
-          revision="${{ steps.verify.outputs.revision }}"
-          day="$(date -u +%Y%m%d -d "@$(git log -1 --format=%ct)")"
-          tag="postflight-cli/nightly-$day"
           # On 404 gh api prints the error JSON to stdout and --jq never
           # applies — only the exit code distinguishes a missing tag, so an
           # unguarded $(...) capture reads garbage into the variable.
@@ -135,35 +197,70 @@ jobs:
               printf '%s' "$out"
             fi
           }
-          existing="$(tag_sha "$tag")"
-          if [[ -n "$existing" && "$existing" != "$revision" ]]; then
-            tag="$tag-$(date -u +%H%M -d "@$(git log -1 --format=%ct)")"
+
+          # The plan rides its own descriptor: the loop body shells out, and a
+          # child that reads stdin would eat the remaining channels.
+          while read -r channel image _ <&3; do
+            . "meta/$channel.env"
+            case "$channel" in
+              nightly)
+                day="$(date -u +%Y%m%d -d "@$(git log -1 --format=%ct)")"
+                tag="postflight-cli/nightly-$day"
+                title="postflight CLI nightly $day"
+                flags=(--prerelease)
+                summary="Automated nightly release of the postflight CLI."
+                ;;
+              rc)
+                tag="postflight-cli/v$version"
+                title="postflight CLI v$version"
+                flags=(--prerelease)
+                summary="Release candidate $version of the postflight CLI."
+                ;;
+              stable)
+                tag="postflight-cli/v$version"
+                title="postflight CLI v$version"
+                flags=(--latest)
+                summary="Release $version of the postflight CLI."
+                ;;
+            esac
+
             existing="$(tag_sha "$tag")"
-          fi
-          # Create the tag ref first: the releases API 403s integration tokens
-          # when target_commitish is a bare SHA (cli/cli#9514), while plain
-          # ref creation with contents:write is fine.
-          if [[ -z "$existing" ]]; then
-            gh api -X POST "repos/${{ github.repository }}/git/refs" \
-              -f ref="refs/tags/$tag" -f sha="$revision" > /dev/null
-          fi
-          notes="Automated nightly release of the postflight CLI.
+            if [[ -n "$existing" && "$existing" != "$revision" ]]; then
+              if [[ "$channel" != nightly ]]; then
+                echo "$channel: tag $tag already points at $existing, not $revision" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+              tag="$tag-$(date -u +%H%M -d "@$(git log -1 --format=%ct)")"
+              existing="$(tag_sha "$tag")"
+            fi
+            # Create the tag ref first: the releases API 403s integration tokens
+            # when target_commitish is a bare SHA (cli/cli#9514), while plain
+            # ref creation with contents:write is fine.
+            if [[ -z "$existing" ]]; then
+              gh api -X POST "repos/${{ github.repository }}/git/refs" \
+                -f ref="refs/tags/$tag" -f sha="$revision" > /dev/null
+            fi
 
-          - Artifact: \`$image\`
-          - Source commit: $revision
-          - Binaries digest: \`${{ steps.verify.outputs.binaries_digest }}\`
-
-          Verify any binary before running it:
-
-          \`\`\`sh
-          cosign verify-blob --bundle postflight-<target>.sigstore.json \\
-            --certificate-identity $BUILD_IDENTITY \\
-            --certificate-oidc-issuer $ISSUER \\
-            postflight-<target>
-          \`\`\`"
-          gh release create "$tag" \
-            --title "postflight CLI nightly $day" \
-            --prerelease \
-            --notes "$notes" \
-            assets/*
-          echo "released $tag from $image" >> "$GITHUB_STEP_SUMMARY"
+            notes="$(printf '%s\n' \
+              "$summary" \
+              "" \
+              "- Artifact: \`$image\`" \
+              "- Source commit: $revision" \
+              "- Binaries digest: \`$binaries_digest\`" \
+              "- Sources: \`postflight-$version-src.tar.gz\` (\`make && sudo make install\`)" \
+              "" \
+              "Verify any binary before running it:" \
+              "" \
+              '```sh' \
+              "cosign verify-blob --bundle postflight-<target>.sigstore.json \\" \
+              "  --certificate-identity $BUILD_IDENTITY \\" \
+              "  --certificate-oidc-issuer $ISSUER \\" \
+              "  postflight-<target>" \
+              '```')"
+            gh release create "$tag" \
+              --title "$title" \
+              "${flags[@]}" \
+              --notes "$notes" \
+              "assets/$channel"/*
+            echo "released $tag from $image" >> "$GITHUB_STEP_SUMMARY"
+          done 3< plan.txt
