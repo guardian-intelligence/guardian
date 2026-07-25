@@ -54,6 +54,9 @@ spec:
   # section of runbooks/postgres-backup-restore.md's sibling procedure).
   users:
     ingest: {}
+    # The postflight CLI release canaries write their own cli.* events, so
+    # this one is not readonly like the checkout canary's.
+    cli_canary: {}
     payments_canary:
       readonly: true
   # Chart bug workaround #2 (v1.5.0): backup.useSystemBucket is broken for
