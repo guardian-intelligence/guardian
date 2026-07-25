@@ -12,6 +12,7 @@ import (
 
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -644,9 +645,9 @@ func (w *worker) resolveAndStampPullRequest(ctx context.Context, installationID 
 }
 
 // resolveWorkspaceScope upserts the job-shape scope this demand reads (and,
-// on branch trust, writes). Best-effort: the workspace cache is
-// acceleration, so a resolution failure records no scope and the job simply
-// runs cold.
+// on branch trust, writes), stamping the class's guest_arch/workspace_epoch
+// pair into the key. Best-effort: the workspace cache is acceleration, so a
+// resolution failure records no scope and the job simply runs cold.
 func (w *worker) resolveWorkspaceScope(ctx context.Context, repoFullName, class, trust string, run apiWorkflowRun, jobName, prBaseRef string) string {
 	org, repo, ok := strings.Cut(repoFullName, "/")
 	if !ok {
@@ -656,15 +657,24 @@ func (w *worker) resolveWorkspaceScope(ctx context.Context, repoFullName, class,
 	if scopeRef == "" {
 		return ""
 	}
+	guestArch, workspaceEpoch, err := w.st.RunnerClassScopeKey(ctx, class)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("worker: read runner class scope key", "repo", repoFullName, "class", class, "err", err)
+		}
+		return ""
+	}
 	name, matrixKey := splitMatrixJobName(jobName)
 	scopeID, err := w.st.EnsureWorkspaceScope(ctx, workspaceScopeKey{
-		Org:          org,
-		Repo:         repo,
-		ScopeRef:     scopeRef,
-		WorkflowPath: run.Path,
-		JobName:      name,
-		MatrixKey:    matrixKey,
-		RunnerClass:  class,
+		Org:            org,
+		Repo:           repo,
+		ScopeRef:       scopeRef,
+		WorkflowPath:   run.Path,
+		JobName:        name,
+		MatrixKey:      matrixKey,
+		RunnerClass:    class,
+		GuestArch:      guestArch,
+		WorkspaceEpoch: workspaceEpoch,
 	})
 	if err != nil {
 		slog.Warn("worker: ensure workspace scope", "repo", repoFullName, "err", err)

@@ -47,6 +47,7 @@ func (s *scheduler) tick(ctx context.Context) {
 	s.expireSealingAssignments(ctx)
 	s.promoteSealedGenerations(ctx)
 	s.discardStaleCandidates(ctx)
+	s.retireOrphanedScopePointers(ctx)
 	s.sweepReapableGenerations(ctx)
 }
 
@@ -132,6 +133,15 @@ func (s *scheduler) discardStaleCandidates(ctx context.Context) {
 		slog.Error("scheduler: discard stale generations", "err", err)
 	} else if count > 0 {
 		slog.Warn("scheduler: discarded stale generations", "count", count)
+	}
+}
+
+func (s *scheduler) retireOrphanedScopePointers(ctx context.Context) {
+	count, err := s.st.RetireOrphanedScopePointers(ctx)
+	if err != nil {
+		slog.Error("scheduler: retire orphaned scope pointers", "err", err)
+	} else if count > 0 {
+		slog.Info("scheduler: retired generations of re-keyed scopes", "count", count)
 	}
 }
 

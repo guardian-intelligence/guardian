@@ -217,6 +217,141 @@ INSERT INTO runner_job_assignments (
 	}
 }
 
+func TestWorkspaceEpochMigrationPreservesScopeIdentity(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := pool.Exec(ctx, `CREATE TABLE schema_migrations (
+		version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"001_initial.sql", "002_hostd_scheduler.sql", "003_workspace_generations.sql",
+		"004_provider_installations.sql", "005_confidential_generations.sql",
+		"006_durable_tool_generations.sql", "007_durable_runner_model.sql",
+		"008_provider_acquisition_boundary.sql", "009_prepositioned_job_plans.sql",
+	} {
+		if err := applyMigration(ctx, pool, name); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	seeded := queryString(t, pool, `
+INSERT INTO workspace_scopes (org, repo, scope_ref, workflow_path, job_name, matrix_key, runner_class)
+VALUES ('acme', 'widget', 'main', '.github/workflows/ci.yml', 'build', '', $1)
+RETURNING scope_id::text`, e2eClass)
+
+	if err := applyMigration(ctx, pool, "010_workspace_scope_epochs.sql"); err != nil {
+		t.Fatal(err)
+	}
+	w := &worker{st: &pgStore{pool: pool}}
+	resolved := w.resolveWorkspaceScope(ctx, e2eRepo, e2eClass, trustClassBranch,
+		apiWorkflowRun{Path: ".github/workflows/ci.yml", HeadBranch: "main"}, "build", "")
+	if resolved != seeded {
+		t.Fatalf("post-migration resolution minted scope %q, want pre-migration scope %q", resolved, seeded)
+	}
+	if got := queryString(t, pool, `SELECT count(*)::text FROM workspace_scopes`); got != "1" {
+		t.Fatalf("workspace_scopes rows = %s, want 1", got)
+	}
+}
+
+func TestWorkspaceEpochBumpResolvesNewColdScope(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := applyMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	w := &worker{st: &pgStore{pool: pool}}
+	run := apiWorkflowRun{Path: ".github/workflows/ci.yml", HeadBranch: "main"}
+	warm := w.resolveWorkspaceScope(ctx, e2eRepo, e2eClass, trustClassBranch, run, "build", "")
+	if warm == "" {
+		t.Fatal("initial resolution recorded no scope")
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO workspace_generations (generation, host_id, runner_class, state, scope_id)
+VALUES ('gen-epoch-1', 'host-e2e', $1, 'committed', $2::uuid)`, e2eClass, warm); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+UPDATE workspace_scopes SET current_generation_id = 'gen-epoch-1', home_host_id = 'host-e2e'
+WHERE scope_id = $1::uuid`, warm); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE runner_classes SET workspace_epoch = 'epoch-2' WHERE class = $1`, e2eClass); err != nil {
+		t.Fatal(err)
+	}
+	cold := w.resolveWorkspaceScope(ctx, e2eRepo, e2eClass, trustClassBranch, run, "build", "")
+	if cold == "" || cold == warm {
+		t.Fatalf("post-bump resolution = %q, want a scope distinct from %q", cold, warm)
+	}
+	if got := queryString(t, pool, `SELECT COALESCE(current_generation_id, '<nil>') FROM workspace_scopes WHERE scope_id = $1::uuid`, cold); got != "<nil>" {
+		t.Fatalf("post-bump scope current_generation_id = %q, want none", got)
+	}
+	if got := queryString(t, pool, `SELECT workspace_epoch FROM workspace_scopes WHERE scope_id = $1::uuid`, cold); got != "epoch-2" {
+		t.Fatalf("post-bump scope epoch = %q", got)
+	}
+}
+
+func TestWorkspaceEpochBumpReapsAbandonedGenerations(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := applyMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := &pgStore{pool: pool}
+	w := &worker{st: store}
+	abandoned := w.resolveWorkspaceScope(ctx, e2eRepo, e2eClass, trustClassBranch,
+		apiWorkflowRun{Path: ".github/workflows/ci.yml", HeadBranch: "main"}, "build", "")
+	if _, err := pool.Exec(ctx, `
+INSERT INTO workspace_generations (generation, host_id, runner_class, state, scope_id)
+VALUES ('gen-abandoned', 'host-e2e', $1, 'committed', $2::uuid)`, e2eClass, abandoned); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+UPDATE workspace_scopes SET current_generation_id = 'gen-abandoned', home_host_id = 'host-e2e'
+WHERE scope_id = $1::uuid`, abandoned); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE runner_classes SET workspace_epoch = 'epoch-2' WHERE class = $1`, e2eClass); err != nil {
+		t.Fatal(err)
+	}
+
+	retired, err := store.RetireOrphanedScopePointers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired != 1 {
+		t.Fatalf("retired generations = %d, want 1", retired)
+	}
+	if got := queryString(t, pool, `SELECT COALESCE(current_generation_id, '<nil>') FROM workspace_scopes WHERE scope_id = $1::uuid`, abandoned); got != "<nil>" {
+		t.Fatalf("abandoned scope pointer = %q, want detached", got)
+	}
+	if got := queryString(t, pool, `SELECT state FROM workspace_generations WHERE generation = 'gen-abandoned'`); got != "retained" {
+		t.Fatalf("abandoned generation state = %q, want retained", got)
+	}
+	if _, err := store.SweepReapableGenerations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := queryString(t, pool, `SELECT state FROM workspace_generations WHERE generation = 'gen-abandoned'`); got != "reapable" {
+		t.Fatalf("abandoned generation state = %q, want reapable", got)
+	}
+	if again, err := store.RetireOrphanedScopePointers(ctx); err != nil || again != 0 {
+		t.Fatalf("second retirement sweep = %d, %v, want a no-op", again, err)
+	}
+}
+
 func startE2EControlPlane(t *testing.T) *e2eControlPlane {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -574,7 +709,7 @@ func TestWarmPoolLocalAssignmentAndRecoverableRestoreEndToEnd(t *testing.T) {
 	const sourceProcessDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	scopeID, err := (&pgStore{pool: control.pool}).EnsureWorkspaceScope(context.Background(), workspaceScopeKey{
 		Org: "acme", Repo: "widget", ScopeRef: "main", WorkflowPath: ".github/workflows/ci.yml",
-		JobName: "build", RunnerClass: e2eClass,
+		JobName: "build", RunnerClass: e2eClass, GuestArch: "x86_64", WorkspaceEpoch: "epoch-1",
 	})
 	if err != nil {
 		t.Fatal(err)
