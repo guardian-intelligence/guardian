@@ -51,6 +51,21 @@ sh_test(
     ],
 )
 
+sh_test(
+    name = "packaging_lockstep_test",
+    srcs = ["packaging_lockstep_test.sh"],
+    args = [
+        "$(location Cargo.toml)",
+        "$(location BUILD.bazel)",
+        "$(location Makefile)",
+    ],
+    data = [
+        "BUILD.bazel",
+        "Cargo.toml",
+        "Makefile",
+    ],
+)
+
 alias(
     name = "format",
     actual = "@rules_rust//tools/rustfmt",

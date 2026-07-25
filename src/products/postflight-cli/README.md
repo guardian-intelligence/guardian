@@ -30,8 +30,9 @@ make
 sudo make install            # or: make install PREFIX="$HOME/.local"
 ```
 
-`make check` runs the crate's tests, `make uninstall` removes the installed
-binary, `make clean` drops the cargo output directory.
+`make check` runs the crate's tests, `sudo make uninstall` removes the
+installed binary (drop the `sudo` and pass the same `PREFIX` if you installed
+under `$HOME`), `make clean` drops the cargo output directory.
 
 Release assets are per target (`postflight-x86_64-unknown-linux-musl`,
 `aarch64-unknown-linux-musl`, and both darwin triples) and ship a sigstore
