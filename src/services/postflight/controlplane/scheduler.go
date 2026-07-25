@@ -61,7 +61,8 @@ func (s *scheduler) recoverOfflineHosts(ctx context.Context) {
 }
 
 func (s *scheduler) preparePoolMembers(ctx context.Context) {
-	members, err := s.st.ListPoolMembersNeedingJIT(ctx, s.cfg.workerBatchSize)
+	members, err := s.st.ListPoolMembersNeedingJIT(ctx, s.cfg.workerBatchSize,
+		s.cfg.listenerFloor, time.Now().Add(-s.cfg.hostOfflineTimeout))
 	if err != nil {
 		slog.Error("scheduler: list pool members needing jit", "err", err)
 		return

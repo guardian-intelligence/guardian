@@ -352,7 +352,7 @@ WHERE scope_id = $1::uuid`, abandoned); err != nil {
 	}
 }
 
-func startE2EControlPlane(t *testing.T) *e2eControlPlane {
+func startE2EControlPlane(t *testing.T, reconfigure ...func(*config)) *e2eControlPlane {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	pool, err := pgxpool.New(ctx, pgtest.Start(t))
@@ -375,8 +375,12 @@ func startE2EControlPlane(t *testing.T) *e2eControlPlane {
 		apiBaseURL: githubServer.URL, runnerClassPrefix: "postflight-",
 		workerInterval: time.Hour, workerBatchSize: 16, maxDeliveryTries: 8,
 		hostdSyncSecret: e2eSyncSecret, schedulerEnabled: true,
-		schedulerInterval: 10 * time.Millisecond, runnerPoolSize: 2, sealTimeout: 10 * time.Second,
+		schedulerInterval: 10 * time.Millisecond, runnerPoolSize: 2, listenerFloor: 2,
+		sealTimeout: 10 * time.Second,
 		verdictTimeout: time.Hour, hostOfflineTimeout: time.Minute,
+	}
+	for _, mutate := range reconfigure {
+		mutate(&cfg)
 	}
 	client, err := newGitHubClient(cfg)
 	if err != nil {
@@ -446,11 +450,15 @@ INSERT INTO github_provider_demands (
 }
 
 func startE2EHost(t *testing.T, origin string) (*agent.Agent, *vm.Fake, *zvol.Fake, context.CancelFunc) {
+	return startE2EHostForClass(t, origin, "host-e2e", e2eClass, 2)
+}
+
+func startE2EHostForClass(t *testing.T, origin, hostID, class string, slots int) (*agent.Agent, *vm.Fake, *zvol.Fake, context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	volumes := zvol.NewFake()
 	vms := vm.NewFake()
-	vms.Images[e2eClass] = "golden"
+	vms.Images[vm.Class(class)] = "golden"
 	vms.OnAttach = func(device string) {
 		index := strings.LastIndex(device, "/ws/")
 		if index < 0 {
@@ -477,8 +485,8 @@ func startE2EHost(t *testing.T, origin string) (*agent.Agent, *vm.Fake, *zvol.Fa
 		volumes.SetToolAttached(id, false)
 	}
 	instance, err := agent.New(agent.Config{
-		HostID: "host-e2e", ControlPlaneOrigin: origin,
-		Slots: map[vm.Class]int{e2eClass: 2}, Images: map[vm.Class]string{e2eClass: "golden"},
+		HostID: hostID, ControlPlaneOrigin: origin,
+		Slots: map[vm.Class]int{vm.Class(class): slots}, Images: map[vm.Class]string{vm.Class(class): "golden"},
 		SyncInterval: 20 * time.Millisecond, CheckoutGuestOrigin: "http://198.51.100.1:8480",
 	}, volumes, vms, e2eSyncSecret, make([]byte, 32), agent.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -1543,4 +1551,202 @@ func TestObservedAssignmentBindsCrossRepoJob(t *testing.T) {
 	if got := queryString(t, control.pool, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "demand_recorded" {
 		t.Fatalf("repo-A demand state = %q", got)
 	}
+}
+
+const biasClass = "postflight-bias-2404"
+
+func seedBiasFleet(t *testing.T, pool *pgxpool.Pool, desired int) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+INSERT INTO runner_classes (class, cpu_cores, memory_bytes, disk_bytes)
+VALUES ($1, 4, 17179869184, 85899345920);
+INSERT INTO runner_pools (org_id, installation_id, runner_class, desired_count)
+VALUES ('acme', $2, $1, $3)`, pgx.QueryExecModeSimpleProtocol, biasClass, e2eInstallationID, desired); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// seedBiasHosts registers both hosts before their agents start so every
+// sync — including each host's first — divides the fleet target two ways.
+func seedBiasHosts(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+INSERT INTO hosts (host_id, boot_id, last_sync_at) VALUES
+    ('host-bias-a', 'preboot', now()), ('host-bias-b', 'preboot', now());
+INSERT INTO host_slots (host_id, class, total) VALUES
+    ('host-bias-a', $1, 6), ('host-bias-b', $1, 6)`,
+		pgx.QueryExecModeSimpleProtocol, biasClass); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func seedBiasDemand(t *testing.T, pool *pgxpool.Pool, jobID, checkRunID int64, sourceGeneration string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `
+INSERT INTO github_workflow_jobs (
+    provider_job_id, provider_run_id, provider_run_attempt,
+    provider_repository_id, provider_installation_id, repository_full_name,
+    name, status, labels_json, runner_class, head_branch, check_run_id
+) VALUES ($1, $2, 1, $3, $4, $5, 'build', 'queued', $6::jsonb, $7, 'main', $8)`,
+		jobID, jobID+100, e2eRepositoryID, e2eInstallationID, e2eRepo,
+		`["`+biasClass+`"]`, biasClass, checkRunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO github_provider_demands (
+    provider_job_id, provider_installation_id, provider_repository_id,
+    repository_full_name, provider_run_id, provider_run_attempt,
+    trust_class, runner_class, source_generation, state
+) VALUES ($1, $2, $3, $4, $5, 1, $6, $7, $8, 'demand_recorded')`,
+		jobID, e2eInstallationID, e2eRepositoryID, e2eRepo, jobID+100,
+		trustClassPR, biasClass, sourceGeneration); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitForStableExposure waits for a host×class to settle at exactly
+// exposed/standby listener counts and stay there across scheduler ticks.
+func waitForStableExposure(t *testing.T, pool *pgxpool.Pool, hostID, class, want string) {
+	t.Helper()
+	read := func() string {
+		return queryString(t, pool, `
+SELECT count(*) FILTER (WHERE state IN ('preparing', 'listening') OR (state = 'warm' AND jit_config <> ''))::text
+       || '/' || count(*) FILTER (WHERE state = 'warm' AND jit_config = '')::text
+FROM runner_pool_members WHERE host_id = $1 AND runner_class = $2`, hostID, class)
+	}
+	waitFor(t, fmt.Sprintf("%s exposure %s", hostID, want), func() bool { return read() == want })
+	time.Sleep(250 * time.Millisecond)
+	if got := read(); got != want {
+		t.Fatalf("%s exposure settled at %q, want %q", hostID, got, want)
+	}
+}
+
+func TestListenerFloorLimitsExposureAcrossHosts(t *testing.T) {
+	control := startE2EControlPlane(t, func(cfg *config) {
+		cfg.listenerFloor = 1
+		cfg.runnerPoolSize = 6
+	})
+	seedBiasFleet(t, control.pool, 6)
+	seedBiasHosts(t, control.pool)
+	startE2EHostForClass(t, control.server.URL, "host-bias-a", biasClass, 6)
+	startE2EHostForClass(t, control.server.URL, "host-bias-b", biasClass, 6)
+	waitForStableExposure(t, control.pool, "host-bias-a", biasClass, "1/3")
+	waitForStableExposure(t, control.pool, "host-bias-b", biasClass, "1/3")
+}
+
+func TestHomedDemandRaisesHostExposure(t *testing.T) {
+	control := startE2EControlPlane(t, func(cfg *config) {
+		cfg.listenerFloor = 1
+		cfg.runnerPoolSize = 6
+	})
+	ctx := context.Background()
+	const generation = "generation-bias-a"
+	seedBiasFleet(t, control.pool, 6)
+	store := &pgStore{pool: control.pool}
+	scopeID, err := store.EnsureWorkspaceScope(ctx, workspaceScopeKey{
+		Org: "acme", Repo: "widget", ScopeRef: "main", WorkflowPath: ".github/workflows/ci.yml",
+		JobName: "build", RunnerClass: biasClass, GuestArch: "x86_64", WorkspaceEpoch: "epoch-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(ctx, `
+INSERT INTO workspace_generations (generation, host_id, runner_class, state, scope_id, sealed_at)
+VALUES ($1, 'host-bias-a', $2, 'committed', $3::uuid, now())`, generation, biasClass, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(ctx, `
+UPDATE workspace_scopes SET current_generation_id = $1, home_host_id = 'host-bias-a'
+WHERE scope_id = $2::uuid`, generation, scopeID); err != nil {
+		t.Fatal(err)
+	}
+	seedBiasDemand(t, control.pool, 9101, 8101, generation)
+	if _, err := control.pool.Exec(ctx, `
+UPDATE github_provider_demands SET workspace_scope_id = $2::uuid WHERE provider_job_id = $1`, int64(9101), scopeID); err != nil {
+		t.Fatal(err)
+	}
+	seedBiasHosts(t, control.pool)
+	startE2EHostForClass(t, control.server.URL, "host-bias-a", biasClass, 6)
+	startE2EHostForClass(t, control.server.URL, "host-bias-b", biasClass, 6)
+	waitForStableExposure(t, control.pool, "host-bias-a", biasClass, "2/3")
+	waitForStableExposure(t, control.pool, "host-bias-b", biasClass, "1/3")
+}
+
+func TestGenerationlessDemandLeavesFloorExposure(t *testing.T) {
+	control := startE2EControlPlane(t, func(cfg *config) {
+		cfg.listenerFloor = 1
+		cfg.runnerPoolSize = 6
+	})
+	seedBiasFleet(t, control.pool, 6)
+	seedBiasDemand(t, control.pool, 9102, 8102, "")
+	seedBiasHosts(t, control.pool)
+	startE2EHostForClass(t, control.server.URL, "host-bias-a", biasClass, 6)
+	startE2EHostForClass(t, control.server.URL, "host-bias-b", biasClass, 6)
+	waitForStableExposure(t, control.pool, "host-bias-a", biasClass, "1/3")
+	waitForStableExposure(t, control.pool, "host-bias-b", biasClass, "1/3")
+}
+
+func TestHomedDemandExposureClampsAtHostShare(t *testing.T) {
+	control := startE2EControlPlane(t, func(cfg *config) {
+		cfg.listenerFloor = 1
+		cfg.runnerPoolSize = 6
+	})
+	const generation = "generation-clamp-a"
+	seedBiasFleet(t, control.pool, 6)
+	if _, err := control.pool.Exec(context.Background(), `
+INSERT INTO workspace_generations (generation, host_id, runner_class, state, sealed_at)
+VALUES ($1, 'host-bias-a', $2, 'committed', now())`, generation, biasClass); err != nil {
+		t.Fatal(err)
+	}
+	for i := int64(0); i < 5; i++ {
+		seedBiasDemand(t, control.pool, 9200+i, 8200+i, generation)
+	}
+	seedBiasHosts(t, control.pool)
+	startE2EHostForClass(t, control.server.URL, "host-bias-a", biasClass, 6)
+	startE2EHostForClass(t, control.server.URL, "host-bias-b", biasClass, 6)
+	waitForStableExposure(t, control.pool, "host-bias-a", biasClass, "3/3")
+	waitForStableExposure(t, control.pool, "host-bias-b", biasClass, "1/3")
+}
+
+func TestZeroFloorActiveDemandExposesOneListener(t *testing.T) {
+	control := startE2EControlPlane(t, func(cfg *config) { cfg.listenerFloor = 0 })
+	startE2EHost(t, control.server.URL)
+	waitForStableExposure(t, control.pool, "host-e2e", e2eClass, "1/1")
+}
+
+func TestSingleHostDefaultsServeQueuedDemand(t *testing.T) {
+	control := startE2EControlPlane(t, func(cfg *config) { cfg.runnerPoolSize = 6 })
+	_, vms, _, _ := startE2EHostForClass(t, control.server.URL, "host-e2e", e2eClass, 6)
+	waitForStableExposure(t, control.pool, "host-e2e", e2eClass, "2/4")
+	statuses, err := vms.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected vm.Status
+	for _, status := range statuses {
+		if status.Phase == vm.PhaseListening {
+			selected = status
+			break
+		}
+	}
+	if selected.ID == "" {
+		t.Fatal("no listening VM")
+	}
+	runnerName := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, selected.Incarnation)
+	if !vms.MarkAssigned(selected.ID, vm.Assignment{
+		RequestID: "request-floor", JobID: "protocol-job-floor", CheckRunID: e2eCheckRunID,
+		RunnerName: runnerName, JobDisplayName: "build",
+		Identity: vm.JobIdentity{
+			RunID: "777", RunAttempt: 1, RunnerName: runnerName,
+			Repository: e2eRepo, WorkflowJob: "build",
+		},
+	}) {
+		t.Fatal("floor listener did not accept assignment")
+	}
+	waitFor(t, "queued demand bound to a floor listener", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_job_assignments WHERE provider_job_id = $1`, e2eJobID) == "1"
+	})
+	// The consumed listener's budget slot re-opens from the standby pool.
+	waitForStableExposure(t, control.pool, "host-e2e", e2eClass, "2/3")
 }
