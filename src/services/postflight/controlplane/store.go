@@ -536,6 +536,24 @@ func (s *pgStore) MarkProviderDemandFailed(ctx context.Context, providerJobID in
 	return tx.Commit(ctx)
 }
 
+// sqlReviveCapacityFailedDemand: capacity_failed is the only pre-acquisition
+// failure — GitHub still holds the queued job message, so provider-verified
+// truth that the job is live restarts its ladder. Any intent past 'queued'
+// means the acquirejob commit point was crossed; those stay failed closed.
+const sqlReviveCapacityFailedDemand = `
+UPDATE github_provider_demands d
+SET state = 'demand_recorded', updated_at = now()
+WHERE d.provider_job_id = $1 AND d.state = 'capacity_failed'
+  AND NOT EXISTS (
+      SELECT 1 FROM github_job_intents i
+      WHERE i.provider_job_id = d.provider_job_id AND i.state <> 'queued'
+  )`
+
+func (s *pgStore) ReviveCapacityFailedDemand(ctx context.Context, providerJobID int64) (bool, error) {
+	tag, err := s.pool.Exec(ctx, sqlReviveCapacityFailedDemand, providerJobID)
+	return tag.RowsAffected() > 0, err
+}
+
 type jobAssignment struct {
 	ProviderJobID int64
 	RunnerName    string
