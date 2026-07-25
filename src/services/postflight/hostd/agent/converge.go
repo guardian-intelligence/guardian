@@ -615,7 +615,7 @@ func (a *Agent) destroyAssignmentVM(ctx context.Context, record *assignment) boo
 	return true
 }
 
-const runnerWorkRoot = "/home/runner/_work"
+const runnerWorkRoot = syncproto.RunnerWorkRoot
 const defaultProcessVolumeSizeBytes int64 = 24 << 30
 const defaultToolVolumeSizeBytes int64 = 32 << 30
 

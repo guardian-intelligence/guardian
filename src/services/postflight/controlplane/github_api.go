@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/syncproto"
 )
 
 const (
@@ -355,7 +357,8 @@ func (c *githubClient) generateJITConfig(ctx context.Context, installationID int
 		EncodedJITConfig string `json:"encoded_jit_config"`
 	}
 	err := c.doJSON(ctx, installationID, http.MethodPost, fmt.Sprintf("/orgs/%s/actions/runners/generate-jitconfig", org),
-		map[string]any{"name": name, "runner_group_id": runnerGroupID, "labels": labels}, &out)
+		map[string]any{"name": name, "runner_group_id": runnerGroupID, "labels": labels,
+			"work_folder": syncproto.RunnerWorkRoot}, &out)
 	if err != nil {
 		return "", err
 	}
