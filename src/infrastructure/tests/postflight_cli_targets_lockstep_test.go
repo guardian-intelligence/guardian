@@ -10,13 +10,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// One release target set feeds five independent surfaces: the lane that builds
-// and signs the binaries, the npm lane's target-to-platform map, the bin shim
-// that dispatches on process.platform, the meta package's optionalDependencies,
-// and the formula's per-arch download URLs. Adding a target to the build lane
-// alone is silent — nothing is red and nothing pages, and the gap reaches users
-// as "no prebuilt binary for your platform" from a release that has one. This
-// test is the only thing that makes the five move together.
+// One release target set has to reach every surface that hands a user a binary:
+// the lane that builds and signs them, the cutter that attaches them to the
+// release, the npm lane's target-to-platform map, the bin shim that dispatches
+// on process.platform, the meta package's optionalDependencies, each platform
+// package's own name and os/cpu constraints, and the formula's per-arch download
+// URLs and checksum pins. Adding a target to the build lane alone is silent —
+// nothing is red and nothing pages, and the gap reaches users as "no prebuilt
+// binary for your platform" from a release that has one. This test is the only
+// thing that makes them move together.
 func TestPostflightCliReleaseTargetsMoveTogether(t *testing.T) {
 	const imageWorkflow = ".github/workflows/postflight-cli-image.yml"
 
