@@ -1,0 +1,115 @@
+name: postflight-cli-publish-brew
+
+# Renders the binary formula for a stable postflight CLI release and mirrors
+# it into the tap repository brew's naming convention demands. The formula's
+# source of truth stays here (dist/homebrew/postflight.rb.tmpl); the tap only
+# ever receives the rendered file, written by the guardian-promotions App —
+# the same identity that opens promotion PRs and cuts the Release.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: postflight-cli-publish-brew
+  cancel-in-progress: false
+
+env:
+  TARGETS: x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin
+  BUILD_IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main
+  ISSUER: https://token.actions.githubusercontent.com
+  TAP_REPO: ${{ github.repository_owner }}/homebrew-tap
+  FORMULA_PATH: Formula/postflight.rb
+
+jobs:
+  publish:
+    if: startsWith(github.event.release.tag_name, 'postflight-cli/v') && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+
+      - name: Download and verify the release binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release download "$TAG" --repo "${{ github.repository }}" --dir assets
+          (cd assets && sha256sum -c checksums.txt)
+          for target in $TARGETS; do
+            cosign verify-blob \
+              --bundle "assets/postflight-$target.sigstore.json" \
+              --certificate-identity "$BUILD_IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              "assets/postflight-$target"
+          done
+
+      - name: Render the formula
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#postflight-cli/v}"
+          cp src/products/postflight-cli/dist/homebrew/postflight.rb.tmpl postflight.rb
+          sed -i "s/@VERSION@/$version/g" postflight.rb
+          for target in $TARGETS; do
+            sum="$(awk -v f="postflight-$target" '$2 == f { print $1 }' assets/checksums.txt)"
+            if [[ -z "$sum" ]]; then
+              echo "checksums.txt carries no entry for postflight-$target" >&2
+              exit 1
+            fi
+            placeholder="SHA256_$(echo "$target" | tr 'a-z-' 'A-Z_')"
+            sed -i "s/@${placeholder}@/$sum/g" postflight.rb
+          done
+          if grep -n '@[A-Z0-9_]*@' postflight.rb; then
+            echo "the rendered formula still carries placeholders" >&2
+            exit 1
+          fi
+          {
+            echo '```ruby'
+            cat postflight.rb
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        id: app
+        with:
+          app-id: ${{ secrets.PROMOTIONS_APP_ID }}
+          private-key: ${{ secrets.PROMOTIONS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+
+      - name: Write the formula to the tap
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          # On 404 gh api prints the error JSON to stdout and --jq never
+          # applies — only the exit code distinguishes a formula that does not
+          # exist yet, so an unguarded $(...) capture reads garbage into the
+          # variable and the update below fails on a bogus blob sha.
+          existing=""
+          if out="$(gh api "repos/$TAP_REPO/contents/$FORMULA_PATH" --jq .sha 2>/dev/null)"; then
+            existing="$out"
+          fi
+          args=()
+          if [[ -n "$existing" ]]; then
+            args+=(-f "sha=$existing")
+          fi
+          gh api -X PUT "repos/$TAP_REPO/contents/$FORMULA_PATH" \
+            -f "message=postflight ${TAG#postflight-cli/v}" \
+            -f "content=$(base64 -w0 postflight.rb)" \
+            "${args[@]}" > /dev/null
+          echo "wrote $FORMULA_PATH in $TAP_REPO for $TAG" >> "$GITHUB_STEP_SUMMARY"
