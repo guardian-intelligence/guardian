@@ -55,72 +55,116 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          channel_field() {
-            awk -v channel="  $1:" -v key="$2:" '
-              $0 == channel { inside = 1; next }
-              inside && /^  [^ ]/ { exit }
-              inside && $1 == key { print $2; exit }
-            ' "$CHANNELS_FILE"
-          }
+          # rc and stable pins arrive by hand-authored PR, so the pins are read
+          # with a real parser: a trailing comment or a typo'd channel key must
+          # fail the cut, not silently resolve to "no pin".
+          python3 - > pins.txt <<'PY'
+          import os
+          import sys
 
-          # Every dedup and lineage question is "has this digest been released
-          # on channel X", and the tag prefixes partition the release space.
-          release_bodies() {
-            local cache="releases-$1.txt" filter
+          import yaml
+
+
+          def fail(message):
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+                  summary.write(message + "\n")
+              sys.exit(message)
+
+
+          known = os.environ["CHANNELS"].split()
+          document = yaml.safe_load(open(os.environ["CHANNELS_FILE"])) or {}
+          channels = document.get("channels") or {}
+          unknown = sorted(set(channels) - set(known))
+          if unknown:
+              fail("channels.yaml declares unknown channel(s): " + " ".join(unknown))
+          for name in known:
+              pin = channels.get(name) or {}
+              if not isinstance(pin, dict):
+                  fail(f"channels.{name} is not a mapping")
+              print(name, pin.get("image", ""), pin.get("version", ""))
+          PY
+
+          # Every dedup and rc lineage question is "has this digest been
+          # released on channel X", and the tag prefixes partition the release
+          # space. The cache path comes back in a variable rather than on
+          # stdout because bash suppresses `set -e` inside the command
+          # substitution of an assignment, which would turn a failed listing
+          # into an empty file and a duplicate cut.
+          release_field() {
+            RELEASE_FIELD="releases-$1-$2.txt"
+            local filter
             case "$1" in
               nightly) filter='select(.tag_name | startswith("postflight-cli/nightly-"))' ;;
               rc) filter='select(.tag_name | startswith("postflight-cli/v") and contains("-rc."))' ;;
               stable) filter='select(.tag_name | startswith("postflight-cli/v") and (contains("-rc.") | not))' ;;
             esac
-            if [[ ! -f "$cache" ]]; then
+            if [[ ! -f "$RELEASE_FIELD" ]]; then
               gh api "repos/${{ github.repository }}/releases" --paginate \
-                --jq ".[] | $filter | .body" > "$cache"
+                --jq ".[] | $filter | .$2" > "$RELEASE_FIELD.part"
+              mv "$RELEASE_FIELD.part" "$RELEASE_FIELD"
             fi
-            printf '%s' "$cache"
           }
 
           cuts=()
           : > plan.txt
-          for channel in $CHANNELS; do
-            image="$(channel_field "$channel" image \
-              | grep -o "$IMAGE_REPO@sha256:[a-f0-9]\{64\}" || true)"
+          while read -r channel image version <&3; do
+            image="$(grep -o "$IMAGE_REPO@sha256:[a-f0-9]\{64\}" <<<"$image" || true)"
             if [[ -z "$image" ]]; then
               echo "$channel: no pin — nothing to release" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
-            version="$(channel_field "$channel" version | tr -d "\"'")"
             digest="${image##*@}"
 
-            if grep -q "$digest" "$(release_bodies "$channel")"; then
+            release_field "$channel" body
+            if grep -q "$digest" "$RELEASE_FIELD"; then
               echo "$channel: $digest is already released — skipping" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
 
             case "$channel" in
               rc)
-                parent=nightly
                 if [[ "$version" != *-rc.* ]]; then
                   echo "$channel: version '$version' is not a release candidate" >> "$GITHUB_STEP_SUMMARY"
                   exit 1
                 fi
+                # rc promotes nightly's exact bytes, so its lineage is the digest.
+                release_field nightly body
+                if ! grep -q "$digest" "$RELEASE_FIELD"; then
+                  echo "$channel: $digest was never released on nightly — lineage broken, refusing to cut" >> "$GITHUB_STEP_SUMMARY"
+                  exit 1
+                fi
                 ;;
               stable)
-                parent=rc
                 if [[ -z "$version" || "$version" == *-rc.* ]]; then
                   echo "$channel: version '$version' is not a stable version" >> "$GITHUB_STEP_SUMMARY"
                   exit 1
                 fi
+                # Dropping the -rc suffix changes CARGO_PKG_VERSION, hence the
+                # bytes, hence the digest: stable can never share a digest with
+                # the candidate it promotes. Its lineage is the version line —
+                # a candidate for this exact version must already be released,
+                # and the build commit must descend from it (asserted once the
+                # revision is known).
+                release_field rc tag_name
+                rc_tag=
+                while read -r tag; do
+                  if [[ "$tag" == "postflight-cli/v$version-rc."* ]]; then
+                    rc_tag="$tag"
+                    break
+                  fi
+                done < "$RELEASE_FIELD"
+                if [[ -z "$rc_tag" ]]; then
+                  echo "$channel: no release candidate was ever cut for $version — lineage broken, refusing to cut" >> "$GITHUB_STEP_SUMMARY"
+                  exit 1
+                fi
+                gh api "repos/${{ github.repository }}/git/ref/tags/$rc_tag" \
+                  --jq .object.sha > "lineage-$channel.rev"
                 ;;
-              *) parent= ;;
             esac
-            if [[ -n "$parent" ]] && ! grep -q "$digest" "$(release_bodies "$parent")"; then
-              echo "$channel: $digest was never released on $parent — lineage broken, refusing to cut" >> "$GITHUB_STEP_SUMMARY"
-              exit 1
-            fi
 
             cuts+=("$channel")
             printf '%s %s %s\n' "$channel" "$image" "$version" >> plan.txt
-          done
+          done 3< pins.txt
           echo "cuts=${cuts[*]}" >> "$GITHUB_OUTPUT"
 
       - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
@@ -128,6 +172,8 @@ jobs:
 
       - name: Verify the artifacts before publishing
         if: steps.plan.outputs.cuts != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           curl -fsSLo crane.tar.gz "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
           echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum -c -
@@ -144,7 +190,19 @@ jobs:
             revision="$(jq -r '.annotations["org.opencontainers.image.revision"]' <<<"$manifest")"
             binaries_digest="$(jq -r '.annotations["org.guardian.binaries-digest"]' <<<"$manifest")"
 
-            mkdir -p "stage/$channel" "assets/$channel"
+            if [[ -f "lineage-$channel.rev" ]]; then
+              base="$(cat "lineage-$channel.rev")"
+              status="$(gh api "repos/${{ github.repository }}/compare/$base...$revision" --jq .status)"
+              case "$status" in
+                ahead | identical) ;;
+                *)
+                  echo "$channel: build commit $revision does not descend from its release candidate at $base ($status)" >> "$GITHUB_STEP_SUMMARY"
+                  exit 1
+                  ;;
+              esac
+            fi
+
+            mkdir -p "stage/$channel" "work/$channel" "assets/$channel"
             crane export "$image" - | tar -x -C "stage/$channel"
             for target in $TARGETS; do
               cp "stage/$channel/$target/postflight" "assets/$channel/postflight-$target"
@@ -166,13 +224,28 @@ jobs:
             # The checkout is shallow at the pin commit; the sources that
             # produced these binaries live at the build commit.
             git fetch --depth 1 origin "$revision"
-            git archive --format=tar.gz --prefix="postflight-$built-src/" \
-              -o "assets/$channel/postflight-$built-src.tar.gz" \
-              "$revision:src/products/postflight-cli"
+            prefix="postflight-$built-src"
+            tarball="assets/$channel/$prefix.tar.gz"
+            git archive --format=tar --prefix="$prefix/" \
+              -o "work/$channel/src.tar" "$revision:src/products/postflight-cli"
+            git archive --format=tar --prefix="$prefix/" \
+              -o "work/$channel/license.tar" "$revision" LICENSE.md
+            tar -Af "work/$channel/src.tar" "work/$channel/license.tar"
+            gzip -n -c "work/$channel/src.tar" > "$tarball"
+
+            contents="$(tar tzf "$tarball")"
+            if ! grep -qxF "$prefix/LICENSE.md" <<<"$contents"; then
+              echo "$channel: source tarball carries no license" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            sources_make=0
+            if grep -qxF "$prefix/Makefile" <<<"$contents"; then
+              sources_make=1
+            fi
 
             (cd "assets/$channel" && sha256sum postflight-* > checksums.txt)
-            printf 'revision=%s\nbinaries_digest=%s\nversion=%s\n' \
-              "$revision" "$binaries_digest" "$built" > "meta/$channel.env"
+            printf 'revision=%s\nbinaries_digest=%s\nversion=%s\nsources_make=%s\n' \
+              "$revision" "$binaries_digest" "$built" "$sources_make" > "meta/$channel.env"
           done 3< plan.txt
 
       - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
@@ -241,13 +314,17 @@ jobs:
                 -f ref="refs/tags/$tag" -f sha="$revision" > /dev/null
             fi
 
+            sources="- Sources: \`postflight-$version-src.tar.gz\`"
+            if [[ "$sources_make" == 1 ]]; then
+              sources="$sources (\`make && sudo make install\`)"
+            fi
             notes="$(printf '%s\n' \
               "$summary" \
               "" \
               "- Artifact: \`$image\`" \
               "- Source commit: $revision" \
               "- Binaries digest: \`$binaries_digest\`" \
-              "- Sources: \`postflight-$version-src.tar.gz\` (\`make && sudo make install\`)" \
+              "$sources" \
               "" \
               "Verify any binary before running it:" \
               "" \
