@@ -358,6 +358,16 @@ each gate:
    Secret stops the run and names the upstream source of truth (the
    `guardian-mgmt-cloudflare-tokens` tofu outputs for the Cloudflare-lane
    values); an empty value is never written (`test -s` semantics).
+
+   The tool relays only the `ingest` property of
+   `guardian-analytics/clickhouse`, and a kv write replaces the whole secret,
+   so the other chart-generated ClickHouse users are re-put by hand in the
+   same write: `payments_canary` (Secret `payments-checkout-canary` key
+   `clickhouse_password`) and `cli_canary` (Secret `cli-release-canary` key
+   `clickhouse_password`), both ns `guardian-analytics`. Skipping them leaves
+   the payments checkout canary and the postflight CLI release canaries
+   unable to write their events. Per-user sources and the DR-rebuild case are
+   in `runbooks/analytics-clickhouse.md`.
 6. **Convergence.** Force-syncs every ClusterSecretStore/SecretStore and
    every ExternalSecret cluster-wide, then polls until all report Ready,
    listing the stragglers on timeout. The store nudge is load-bearing: a
@@ -401,9 +411,12 @@ aspect infra openbao-drill --kubeconfig=src/infrastructure/talm/kubeconfig
 #    secrets-writer write, value on stdin, `test -s` before every put; the
 #    in-cluster-generated ones are sourced from their still-materialized
 #    Orphan/Retain Secrets):
-#    - analytics ClickHouse ingest password (Secret analytics-ch-ingest key
-#      ingest, ns guardian-analytics) → guardian-analytics/clickhouse
-#      property ingest
+#    - analytics ClickHouse user passwords, ALL in one write (a kv write
+#      replaces the secret) → guardian-analytics/clickhouse properties
+#      ingest (Secret analytics-ch-ingest key ingest), payments_canary
+#      (Secret payments-checkout-canary key clickhouse_password) and
+#      cli_canary (Secret cli-release-canary key clickhouse_password), all
+#      ns guardian-analytics
 #    - postflight-controlplane Postgres uri (Secret
 #      postgres-postflight-controlplane-app key uri, ns tenant-root) →
 #      postflight-runner/postgres

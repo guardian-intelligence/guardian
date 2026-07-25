@@ -11,22 +11,36 @@ the namespace boundary under the Cilium allowlists in
 server: 16.67 B/event vs the 16.71 baseline
 (docs/adrs/0002-analytics-event-storage-and-wire-contract.md).
 
-## Ingest credential (chart-generated, OpenBao-relayed)
+## User credentials (chart-generated, OpenBao-relayed)
 
-The chart generates the `ingest` user's password into
-`Secret/clickhouse-analytics-credentials` (tenant-root). Consumers read
-`Secret/analytics-ch-ingest` (guardian-analytics), materialized by ESO from
-`kv/guardian/guardian-mgmt/guardian-analytics/clickhouse`. The relay is a
-one-time operator step (and must be RE-RUN after any DR rebuild — the chart
-regenerates a different password when its Secret is absent):
+Every user declared on the app CR gets a chart-generated password in
+`Secret/clickhouse-analytics-credentials` (tenant-root), and every one of
+them reaches its consumer through the same kv secret,
+`kv/guardian/guardian-mgmt/guardian-analytics/clickhouse` — one property per
+user. The relay is a one-time operator step per user, and must be RE-RUN for
+ALL of them after any DR rebuild of the app: the chart regenerates every
+password when its Secret is absent, and a stale one fails closed at the
+first query.
+
+| kv property | consumer Secret (guardian-analytics) | key | consumer |
+| --- | --- | --- | --- |
+| `ingest` | `analytics-ch-ingest` | `ingest` | ingest service, OTel collector, DDL Job |
+| `payments_canary` | `payments-checkout-canary` | `clickhouse_password` | payments checkout canary (readonly) |
+| `cli_canary` | `cli-release-canary` | `clickhouse_password` | postflight CLI release canaries |
 
 ```sh
-# guardian-writer-guardian-analytics flow, value never on argv:
-# read tenant-root/clickhouse-analytics-credentials key `ingest`, write it
+# guardian-writer-guardian-analytics flow, value never on argv, per property:
+# read tenant-root/clickhouse-analytics-credentials key <property>, write it
 # to kv/guardian/guardian-mgmt/guardian-analytics/clickhouse property
-# `ingest` via the static-seal runbook's "Adding An Integration" procedure,
-# then force-sync ExternalSecret analytics-ch-ingest.
+# <property> via the static-seal runbook's "Adding An Integration" procedure
+# (a kv write REPLACES the secret — put every property in one write), then
+# force-sync the consumer ExternalSecrets.
 ```
+
+A `cli_canary` that has drifted is visible rather than silent:
+`GuardianCliDeeptestEventWriteFailing` fires off
+`guardian_cli_deeptest_event_write` when the deep-test runner's INSERT is
+rejected.
 
 ## Backups (cozy-default Plan, Altinity strategy)
 

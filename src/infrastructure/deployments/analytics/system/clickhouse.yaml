@@ -55,7 +55,14 @@ spec:
   users:
     ingest: {}
     # The postflight CLI release canaries write their own cli.* events, so
-    # this one is not readonly like the checkout canary's.
+    # this one cannot be readonly like the checkout canary's — and `readonly`
+    # is the chart's only restriction knob. Narrowing it to INSERT on
+    # guardian_analytics.events afterwards is not possible: chart users are
+    # rendered into the server's users.xml, whose access storage refuses every
+    # GRANT/REVOKE (ACCESS_STORAGE_READONLY, verified on 24.9.2.42), so the
+    # account carries the same estate-wide DDL rights `ingest` does. Accepted
+    # deliberately: the runner that holds it never executes an artifact whose
+    # signature chain failed, and never hands the credential to one that does.
     cli_canary: {}
     payments_canary:
       readonly: true

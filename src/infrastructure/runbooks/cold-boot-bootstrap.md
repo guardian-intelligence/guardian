@@ -588,8 +588,9 @@ recovery is finished only when the stateful stores are back from R2:
    `tenant-root/postflight-controlplane` and `tenant-guardian-prod/keycloak`)
    and `analytics-clickhouse.md` (clickhouse-backup, plus the chart bugs
    that bite during restore).
-2. Post-restore re-relays: the analytics ingest password must be relayed
-   again after any guardian-analytics re-seed (`analytics-clickhouse.md`),
+2. Post-restore re-relays: every analytics ClickHouse user password must be
+   relayed again after any guardian-analytics re-seed
+   (`analytics-clickhouse.md` carries the per-user table),
    and Keycloak realm state rides in its Postgres — verify logins after the
    PITR, not just pod health.
 3. Declare recovery complete only when `aspect infra converged` passes AND
