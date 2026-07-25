@@ -8,6 +8,7 @@ compatibility prose, no history.
 Companions:
 
 - [Fleet](postflight-fleet.md) — hardware classes, warmth domains, the two clouds
+- [Lightning](postflight-lightning.md) — the warmth substrate: prewarmed VMs, sticky disks, userspace restore, node-local NVMe
 - [Security model](postflight-security-model.md) — per-product threat models and claims
 - [Scheduling](postflight-scheduling.md) — control plane, ledgers, admission, assignment
 - [Storage](postflight-storage.md) — sticky disks, generations, sealing, locality
@@ -15,7 +16,7 @@ Companions:
 - [Runner lifecycle](postflight-runner-lifecycle.md) — the operational model per job
 - [ADR 0013](adrs/0013-bind-jobs-after-local-runner-assignment.md) — assignment is observed, never predicted
 
-## Two products, three axes
+## Two SKU categories, three axes
 
 Postflight competes on exactly three axes, and each axis is owned by a
 deliberate piece of the architecture:
@@ -26,10 +27,16 @@ deliberate piece of the architecture:
 | Security | Hardware-enforced job isolation a compromised host cannot pierce | SEV-SNP guests, in-guest keys, attestation-gated release |
 | Features | A full machine, not a stripped microVM | Full QEMU: complete device surface, `/dev/kvm`, dockerd parity, SSH, hot-attach |
 
-These axes are delivered by **two products on two separate clouds**:
+These axes are delivered by **two SKU categories on two separate clouds**,
+both powered by the same warmth substrate —
+[Lightning](postflight-lightning.md). SKUs are deliberately boring runner
+labels, `postflight-<x>vcpu-<os>-<flavor>`; the flavor selects the category.
+The non-TEE flavor's public name is provisional (`turbo` until ruled
+otherwise):
 
-| | Lightning | Confidential |
+| | Turbo | Confidential |
 | --- | --- | --- |
+| Runner label | `postflight-<x>vcpu-ubuntu24-turbo` | `postflight-<x>vcpu-ubuntu24-confidential` |
 | Silicon | Bare-metal AMD Ryzen (high clock) | AMD EPYC with SEV-SNP |
 | Cloud | Ryzen bare-metal provider | Latitude (current) |
 | TEE | None — the silicon has no SEV | SEV-SNP, always on |
@@ -38,9 +45,9 @@ These axes are delivered by **two products on two separate clouds**:
 | `/dev/kvm` | Yes | No (impossible in SNP guests) |
 | Host trust | Trusted, hardened | Untrusted conduit |
 
-The split is hardware-honest: Ryzen parts have no SEV, so Lightning claims
+The split is hardware-honest: Ryzen parts have no SEV, so Turbo claims
 speed and isolation, never confidentiality; SNP forbids `/dev/kvm`, so
-KVM-needing jobs route to Lightning. Nobody else offers a TEE and KVM on one
+KVM-needing jobs route to Turbo. Nobody else offers a TEE and KVM on one
 platform — we offer both, one label apart.
 
 Full QEMU is not incidental. It is the only VMM that carries all three axes at
@@ -76,7 +83,7 @@ GitHub webhooks/API ──► Control plane ──plans/prefetch──► hostd 
 | GitHub | The workflow DAG, retries, and runner selection. The only workflow engine in the system. |
 | Control plane | One deployable binary. Ledgers, admission, job plans, assignment truth, generation catalog, attested sessions, key custody, metering, reconcilers, the production canary. |
 | Postgres | Four independent ledgers: capacity, demand/assignment, storage, usage. Inbox/outbox rows, short transactions, idempotency keys, `FOR UPDATE SKIP LOCKED` workers. |
-| OpenBao | Product-scoped Transit mount (`transit-postflight`): Lightning DEK wrap/unwrap, Confidential tenant key custody, generation-manifest signing, per-tenant crypto-erase. |
+| OpenBao | Product-scoped Transit mount (`transit-postflight`): Turbo DEK wrap/unwrap, Confidential tenant key custody, generation-manifest signing, per-tenant crypto-erase. |
 | hostd | Per-host daemon. Slot actors, storage manager, QEMU supervision, checkpoint sealing, a crash-safe operation journal, one prioritized control stream. |
 | guestd | The only privileged agent in the guest. Attestation, LUKS and mounts, runner supervision, the Worker gate, the CRIU capsule, quiesce. |
 | QEMU + OpenZFS | Mechanism, never policy. Pinned QEMU per fleet; node-local NVMe zpools; no network storage on any hot path. |
@@ -113,7 +120,7 @@ Each principle is stated so that a violation is observable.
    compatibility classes and never crosses them.
 8. **Keys have one custodian per fleet.** Confidential: the CPU derives
    volume keys in-guest and they never cross the guest boundary in either
-   direction. Lightning: `transit-postflight` custodies lineage DEKs and a
+   direction. Turbo: `transit-postflight` custodies lineage DEKs and a
    tenant's Transit key is its crypto-erase switch.
 9. **On Confidential, the host is a conduit.** Secret-bearing traffic
    between the control plane and the guest is sealed to attestation; hostd

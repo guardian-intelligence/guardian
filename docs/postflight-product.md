@@ -188,6 +188,8 @@ WarpBuild's playbook: straight to SOC 2 Type II — 3-month window, ~$8–10k, ~
 
 ## 12. Technical foundation ⚙
 
+The warmth substrate underneath everything in this section is **Lightning** — technology doctrine, customer promise, and philosophy live in [postflight-lightning.md](postflight-lightning.md).
+
 **Warm pool on QEMU — measured on guardian-w1 NVMe 2026-07-05:** ~520ms full warm restore vs 8.8s cold; 8-parallel restores in 774ms wall (~10 VMs/s); disk hot-attach 227ms with revoke verified. Assignment = resume + clock resync (kvmclock + guest-agent time set) + identity + JIT config fetched in-guest (attempt-scoped token). One-shot VMs, always. Workers: plain Ubuntu 24.04, no Kubernetes — every resource is customer compute; host daemon as a systemd unit dialing out to the control plane (egress-only, workload identity). Shared-nothing nodes; org→node affinity keeps caches warm; placement is a control-plane decision.
 
 **Cache model — the moat (Postflight-source-verified semantics on the new QEMU mechanism):**
@@ -231,7 +233,7 @@ The market is converging on this exact ladder (Depot CI → agent sandboxes; Ope
 1. **Hardware + rate card (gates the "faster than everyone else" headline).** f4.metal.small (EPYC 4484PX — desktop-class single-thread, competitive with premium vendors) until $4k MRR; rs4.metal.xlarge (9554P, 64c/1.5TB) adds density but its 3.1GHz base likely *regresses* single-thread — possibly right for sandbox density, wrong for CI slots. Benchmark rs4.metal.xlarge and f4.metal.large (9275F-class, 4.1GHz) one hour each: single-thread + a real CI suite (`bare-metal-ci-bench` is prior art). Publish the winner in RunsOn-comparable format.
 2. **Design-partner terms:** months free (how many?), written feedback/reference ask, card-on-file (recommend: always).
 3. **SOC 2 start:** now vs first paying customer (recommend: first paying customer; trust page now).
-4. **Runner label namespace** (`runs-on: postflight-16vcpu`?) — lives in customer workflow files forever; decide before first install.
+4. **Runner label flavor branding** — the label scheme is `postflight-<x>vcpu-<os>-<flavor>` (first category: `postflight-<x>vcpu-ubuntu24-confidential`); the non-TEE flavor's public name (`turbo`, provisional) lives in customer workflow files forever — ratify before first install.
 5. **macOS referral partner** — one named vendor for the objection script.
 6. **Cirrus Linux run-off + Blacksmith-refugee outreach** — direct outreach, or SF-in-person only for the first 10?
 7. **Metered rate + spend-cap defaults** — after the benchmark; caps default low and raise on request.
@@ -256,7 +258,7 @@ Sandbox isolation doctrine (multi-tenant QEMU), the below is advisory for when w
 
 - Customer-facing security claims, the threat model, and the release gates
   are defined in [postflight-security-model.md](postflight-security-model.md).
-- Trust model: every sandbox guest is hostile and may hold a kernel exploit. The isolation boundary is KVM plus a jailed VMM, never namespaces alone — containers share a kernel and a kernel escape is a fleet escape. Untrusted-code planes (customer CI, agent sandboxes) run only on workload nodes, never on control-plane or product hosts. Tenants are always isolated from each other; whether the worker host itself is trusted is per product — trusted and hardened on Lightning, an untrusted conduit on Confidential (see the security model).
+- Trust model: every sandbox guest is hostile and may hold a kernel exploit. The isolation boundary is KVM plus a jailed VMM, never namespaces alone — containers share a kernel and a kernel escape is a fleet escape. Untrusted-code planes (customer CI, agent sandboxes) run only on workload nodes, never on control-plane or product hosts. Tenants are always isolated from each other; whether the worker host itself is trusted is per SKU category — trusted and hardened on Turbo, an untrusted conduit on Confidential (see the security model).
 - The bar: meet AWS Firecracker's software-isolation posture, plus SEV-SNP guests with measurement-bound at-rest encryption once the rs4 workload plane is verified (SEV is off in BIOS on the f4 boxes). Runtime memory confidentiality is distinct from build/release attestation (which needs no TEE).
 - VMM substrate: QEMU/KVM with `-cpu host` and the existing pinned `pc-q35-8.2` machine ABI. `microvm` and Cloud Hypervisor are rejected for the first SNP release so one launch-measurement and conformance tuple can stabilize; their reconsideration gate is recorded in the security model. The jail and network model remain VMM-agnostic.
 - Device-surface minimization: virtio-only (virtio-blk, virtio-net, virtio-serial/vsock). `-nodefaults`, `-no-user-config`, `-nographic`. No USB, floppy, CD, audio, or emulated legacy NIC/block. Patch QEMU device-emulation CVEs on the critical path — the standing tax of a C VMM.

@@ -45,7 +45,7 @@ Three layers, strongest last:
 | Planning | Select the scope and a compatible generation for a job intent — never a VM; push small plans to every eligible host |
 | Assignment | Persist the exact, immutable binding after the guest reports it; unique-match join or recycle |
 | Generation catalog | Signed manifests, lineage, generation numbers, current-pointer CAS, rollback floors, retention |
-| Attested sessions | Verify SNP evidence, establish sealed channels, release JIT and tenant keys (Confidential); authenticated control channel and DEK release (Lightning) |
+| Attested sessions | Verify SNP evidence, establish sealed channels, release JIT and tenant keys (Confidential); authenticated control channel and DEK release (Turbo) |
 | Transit custody | The `transit-postflight` client: tenant keys, manifest signing, crypto-erase |
 | Metering | Append-only intervals: customer-billable and infrastructure-reserved |
 | Reconcilers | Missed webhooks, stale hosts, deadlines, promotion, retention sweeps, image freshness |
@@ -53,15 +53,17 @@ Three layers, strongest last:
 
 ## Admission and routing
 
-The runner label is the product SKU is the runner class. Admission resolves
-it to a fleet and hardware class, checks tenant concurrency and trust class,
-and applies spend policy. The millisecond meter is always on; deal shapes
+The runner label is the product SKU is the runner class. Labels follow
+`postflight-<x>vcpu-<os>-<flavor>` (e.g.
+`postflight-16vcpu-ubuntu24-confidential`); the flavor selects the fleet.
+Admission resolves the label to a fleet and hardware class, checks tenant
+concurrency and trust class, and applies spend policy. The millisecond meter is always on; deal shapes
 (caps, commitments) are policy on top of the same meter. Webhook ingress
 never rejects on backpressure — the queue is the buffer, time-to-pickup is
 the SLO, and refusal happens only at the staleness deadline.
 
 Jobs requiring `/dev/kvm` or other non-TEE-only capabilities are admissible
-only to Lightning classes; the capability set lives on the class row.
+only to Turbo classes; the capability set lives on the class row.
 
 ## Plans and assignment
 

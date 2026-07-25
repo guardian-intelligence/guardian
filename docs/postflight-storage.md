@@ -49,7 +49,7 @@ snapshots plus an optional CRIU process capsule, coupled by one manifest:
   capsule digest and CRIU format, parent lineage and monotonic generation
   number, the platform and compatibility tuple, the SNP measurement and
   minimum TCB (Confidential), and the key reference (derivation salt on
-  Confidential; wrapped DEK on Lightning).
+  Confidential; wrapped DEK on Turbo).
 - Manifests are signed with the `postflight-manifest` Transit key; the
   private key never leaves OpenBao. Verification is offline against the
   published public key.
@@ -80,7 +80,7 @@ nothing and the previous pointer stays authoritative:
 Warmth is host-affine and that is a decision, not a limitation:
 
 - On Confidential, volume keys are chip-bound: a generation's ciphertext is
-  only openable on the chip that wrote it. On Lightning, generations are
+  only openable on the chip that wrote it. On Turbo, generations are
   simply resident where they were sealed.
 - The host where a scope last sealed is its home. When GitHub hands a job to
   a guest elsewhere, the job runs cold there, and its seal establishes the
@@ -97,7 +97,7 @@ Warmth is host-affine and that is a decision, not a limitation:
 One custodian per fleet; details in the
 [security model](postflight-security-model.md):
 
-| | Confidential | Lightning |
+| | Confidential | Turbo |
 | --- | --- | --- |
 | Volume key | Derived in-guest: chip half (PSP, measurement-bound) + tenant half (`transit-postflight`) | Per-lineage DEK from a `transit-postflight` data key |
 | Host sees | Ciphertext and sealed frames only | Ciphertext at rest; key transits to guest RAM at rendezvous |
