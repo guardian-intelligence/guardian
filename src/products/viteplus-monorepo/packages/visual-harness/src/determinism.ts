@@ -75,6 +75,8 @@ export interface SeekOptions {
 // Without this settle, a canvas that mounts mid-advance integrates a
 // run-varying time window and captures drift apart.
 const DEFAULT_SETTLE_MS = 500;
+const WAIT_SELECTOR_SLICE_MS = 3_000;
+const WAIT_SELECTOR_BUDGET_MS = 30_000;
 
 /**
  * Call after page.goto: settles fonts, layout, and hydration, jumps the
@@ -95,7 +97,24 @@ export async function seekTo(
 ): Promise<number> {
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   if (options.waitSelector) {
-    await page.waitForSelector(options.waitSelector, { state: "visible" });
+    // The clock is paused: a page whose reveal chain was still queued behind
+    // a timer when pauseAt landed (a slow first load) cannot make progress
+    // however long we wait in real time. Alternate short real-time waits
+    // with mocked-time nudges so queued timers get to fire; the WAAPI freeze
+    // below still pins every animation to exactly seekMs.
+    const deadline = Date.now() + WAIT_SELECTOR_BUDGET_MS;
+    for (;;) {
+      try {
+        await page.waitForSelector(options.waitSelector, {
+          state: "visible",
+          timeout: WAIT_SELECTOR_SLICE_MS,
+        });
+        break;
+      } catch (error) {
+        if (Date.now() >= deadline) throw error;
+        await page.clock.fastForward(1_000);
+      }
+    }
   }
   // Driver-side sleep: page.waitForTimeout would go through the page's
   // (currently paused) mocked timers.
