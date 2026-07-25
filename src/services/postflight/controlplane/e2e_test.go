@@ -1078,3 +1078,148 @@ INSERT INTO github_provider_demands (
 		}
 	}
 }
+
+func TestPoolTargetsSplitAcrossLiveHosts(t *testing.T) {
+	control := startE2EControlPlane(t)
+	ctx := context.Background()
+	const class = "postflight-split-2404"
+	if _, err := control.pool.Exec(ctx, `
+INSERT INTO runner_classes (class, cpu_cores, memory_bytes, disk_bytes)
+VALUES ($1, 4, 17179869184, 85899345920)`, class); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.pool.Exec(ctx, `
+INSERT INTO runner_pools (org_id, installation_id, runner_class, desired_count)
+VALUES ('acme', $1, $2, 6)`, e2eInstallationID, class); err != nil {
+		t.Fatal(err)
+	}
+	syncHost := func(hostID string) syncproto.SyncResponse {
+		return postHostSync(t, control.server.URL, syncproto.SyncRequest{
+			HostID: hostID, BootID: "boot-" + hostID,
+			Slots: []syncproto.SlotReport{{Class: class, Total: 6}},
+		})
+	}
+	syncHost("host-split-a")
+	syncHost("host-split-b")
+	first := syncHost("host-split-a")
+	second := syncHost("host-split-b")
+	if first.PoolTargets[class] != 3 || second.PoolTargets[class] != 3 {
+		t.Fatalf("pool targets = %d/%d, want 3/3",
+			first.PoolTargets[class], second.PoolTargets[class])
+	}
+	if _, err := control.pool.Exec(ctx, `UPDATE hosts SET last_sync_at = now() - interval '1 hour' WHERE host_id = 'host-split-b'`); err != nil {
+		t.Fatal(err)
+	}
+	first = syncHost("host-split-a")
+	if got := first.PoolTargets[class]; got != 6 {
+		t.Fatalf("survivor pool target = %d, want 6", got)
+	}
+}
+
+func TestListHostPoolTargetsDivisionAndClamp(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := applyMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := &pgStore{pool: pool}
+	const class = "postflight-division-2404"
+	if _, err := pool.Exec(ctx, `
+INSERT INTO runner_classes (class, cpu_cores, memory_bytes, disk_bytes)
+VALUES ($1, 4, 17179869184, 85899345920);
+INSERT INTO runner_pools (org_id, installation_id, runner_class, desired_count)
+VALUES ('acme', 123, $1, 7);
+INSERT INTO hosts (host_id, boot_id, last_sync_at) VALUES
+    ('host-div-a', 'boot', now()), ('host-div-b', 'boot', now()),
+    ('host-div-c', 'boot', now() - interval '1 hour');
+INSERT INTO host_slots (host_id, class, total) VALUES
+    ('host-div-a', $1, 10), ('host-div-b', $1, 10), ('host-div-c', $1, 10)`,
+		pgx.QueryExecModeSimpleProtocol, class); err != nil {
+		t.Fatal(err)
+	}
+	cutoff := time.Now().Add(-time.Minute)
+	target := func(hostID string) int {
+		t.Helper()
+		targets, err := store.ListHostPoolTargets(ctx, hostID, cutoff)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return targets[class]
+	}
+	// Remainder goes to the lowest host_id; the stale host holds no share.
+	if a, b, c := target("host-div-a"), target("host-div-b"), target("host-div-c"); a != 4 || b != 3 || c != 0 {
+		t.Fatalf("targets = %d/%d/%d, want 4/3/0", a, b, c)
+	}
+	// A share is clamped by the host's own slot total without redistribution.
+	if _, err := pool.Exec(ctx, `UPDATE host_slots SET total = 2 WHERE host_id = 'host-div-a' AND class = $1`, class); err != nil {
+		t.Fatal(err)
+	}
+	if a, b := target("host-div-a"), target("host-div-b"); a != 2 || b != 3 {
+		t.Fatalf("clamped targets = %d/%d, want 2/3", a, b)
+	}
+	// A host with no slot capacity for the class absorbs no share.
+	if _, err := pool.Exec(ctx, `UPDATE host_slots SET total = 0 WHERE host_id = 'host-div-b' AND class = $1`, class); err != nil {
+		t.Fatal(err)
+	}
+	if a, b := target("host-div-a"), target("host-div-b"); a != 2 || b != 0 {
+		t.Fatalf("zero-slot targets = %d/%d, want 2/0", a, b)
+	}
+	// A class without enabled pools targets zero everywhere.
+	if _, err := pool.Exec(ctx, `UPDATE runner_pools SET enabled = false WHERE runner_class = $1`, class); err != nil {
+		t.Fatal(err)
+	}
+	if a := target("host-div-a"); a != 0 {
+		t.Fatalf("disabled-pool target = %d, want 0", a)
+	}
+}
+
+func TestJobPlanBroadcastIsBounded(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := applyMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := &pgStore{pool: pool}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO hosts (host_id, boot_id, last_sync_at) VALUES ('host-bound', 'boot', now());
+INSERT INTO host_slots (host_id, class, total) VALUES ('host-bound', $1, 2);
+INSERT INTO github_workflow_jobs (
+    provider_job_id, provider_run_id, provider_run_attempt,
+    provider_repository_id, provider_installation_id, repository_full_name,
+    name, status, labels_json, runner_class, head_branch, check_run_id
+)
+SELECT 500000 + i, 600000 + i, 1, 4242, 123, 'acme/widget',
+       'build', 'queued', ('["' || $1 || '"]')::jsonb, $1, 'main', 700000 + i
+FROM generate_series(1, 150) AS i;
+INSERT INTO github_provider_demands (
+    provider_job_id, provider_installation_id, provider_repository_id,
+    repository_full_name, provider_run_id, provider_run_attempt,
+    trust_class, runner_class, state
+)
+SELECT 500000 + i, 123, 4242, 'acme/widget', 600000 + i, 1,
+       $2, $1, 'demand_recorded'
+FROM generate_series(1, 150) AS i`,
+		pgx.QueryExecModeSimpleProtocol, e2eClass, trustClassPR); err != nil {
+		t.Fatal(err)
+	}
+	plans, err := store.ListJobPlans(ctx, "host-bound")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) != jobPlanBroadcastLimit {
+		t.Fatalf("broadcast plans = %d, want %d", len(plans), jobPlanBroadcastLimit)
+	}
+	for i, plan := range plans {
+		if want := int64(500001 + i); plan.ProviderJobID != want {
+			t.Fatalf("plan %d has provider job %d, want %d", i, plan.ProviderJobID, want)
+		}
+	}
+}

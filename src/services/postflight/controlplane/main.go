@@ -141,7 +141,8 @@ func buildMux(ctx context.Context, cfg config, st *pgStore, ws *webhookServer, r
 	mux.HandleFunc("/api/v1/github/webhooks", ws.handleWebhook)
 	if cfg.hostdSyncSecret != "" {
 		ss := &syncServer{
-			st: st, resolver: resolver, secret: []byte(cfg.hostdSyncSecret), sealTimeout: cfg.sealTimeout, tracer: tracer,
+			st: st, resolver: resolver, secret: []byte(cfg.hostdSyncSecret), sealTimeout: cfg.sealTimeout,
+			hostOfflineTimeout: cfg.hostOfflineTimeout, tracer: tracer,
 			jobPlans: newJobPlanBus(ctx, st.pool),
 		}
 		mux.HandleFunc(syncproto.SyncPath, ss.handleSync)
