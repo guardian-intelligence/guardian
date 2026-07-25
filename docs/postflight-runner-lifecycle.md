@@ -1,8 +1,8 @@
 # Postflight runner lifecycle
 
-This document is the current operational model for the Linux x64 Ubuntu 24.04
-confidential runner. It assumes SEV-SNP, one job per VM, a pre-booted QEMU pool,
-and encrypted node-local zvol generations.
+The operational model for the Linux x64 Ubuntu 24.04 confidential runner:
+SEV-SNP, one job per VM, a pre-booted QEMU pool, encrypted node-local zvol
+generations.
 
 ## Four durable identities
 
@@ -13,9 +13,8 @@ and encrypted node-local zvol generations.
 | Assignment | `(protocol job ID, member incarnation)` | The selected guest reports the job locally | The job ends, is withdrawn, or fails closed |
 | Generation | Authenticated manifest digest and monotonic generation number | A trusted successful donor is sealed | Retention reaps it or policy invalidates it |
 
-A numeric GitHub REST job ID is useful for UI and conclusion reconciliation,
-but it is not the runner protocol job ID and is not used to decide which VM
-received a job.
+The numeric GitHub REST job ID serves UI and conclusion reconciliation; it
+is not the runner protocol job ID and never decides which VM received a job.
 
 ## Pool and assignment state
 
@@ -36,15 +35,15 @@ assignment
        +----------+----------+-----------+--------------+-----------> terminal
 ```
 
-An assignment row is append-oriented: its member, request ID, protocol job ID,
-runner name, repository, run, attempt, and workflow job cannot be rewritten.
-Only its state, selected generation, restore result, terminal result, and timing
-evidence advance.
+An assignment row's identity — member, request ID, protocol job ID, runner
+name, repository, run, attempt, and workflow job — is written once and never
+rewritten. Its state, selected generation, restore result, terminal result,
+and timing evidence advance in place.
 
-The runner listener is connected while the member is `listening`. GitHub's
+The runner listener is connected while the member is `listening`; GitHub's
 assignment reaches the guest directly. The listener invokes guestd before
-Runner.Worker dispatch; guestd blocks the listener until hostd completes the
-rendezvous. This makes assignment deterministic after the fact without
+Runner.Worker dispatch, and guestd blocks the listener until hostd completes
+the rendezvous — assignment is deterministic after the fact without
 serializing listener registration.
 
 ## Restore transaction
@@ -69,11 +68,11 @@ verify manifest and scope
   -> release Worker
 ```
 
-The restore isolation is disposable. CRIU runs with its process tree confined
-to the capsule PID namespace and cgroup. A recoverable error is allowed to
-continue cold only after the process tree is empty, every temporary mount is
-detached, and the killed cgroup has been replaced with a distinct cgroup
-object. Failure to prove or replace that boundary is an unsafe outcome.
+The restore isolation is disposable: CRIU's process tree is confined to the
+capsule PID namespace and cgroup. A recoverable error may continue cold only
+after the process tree is empty, every temporary mount is detached, and the
+killed cgroup is replaced with a distinct cgroup object. Failing to prove or
+replace that boundary is an unsafe outcome.
 
 ### Failure policy
 
@@ -88,17 +87,17 @@ object. Failure to prove or replace that boundary is an unsafe outcome.
 | QEMU, guestd, or listener dies after provider acquisition | Recycle/refill | Invalidate suspect process component | Current attempt cannot be transparently requeued |
 | Cold capsule creation fails | Recycle VM | Already invalidated | Current attempt cannot be transparently requeued |
 
-The workspace and tool snapshots survive a process-only invalidation if their
-authenticated manifest components remain valid. The next attempt gets their
+Workspace and tool snapshots survive a process-only invalidation while their
+authenticated manifest components remain valid; the next attempt gets their
 artifacts with a cold process capsule.
 
-GitHub's broker `acquirejob` call is a commit point. Before it, disconnecting a
-listener leaves the job eligible for GitHub's normal pickup retry. After it,
-the provider does not expose a release operation that can assign the same job
-message to another listener. The durable assignment ledger must not describe
-post-acquisition VM loss as requeued; transparent recovery would require a
-separately designed, attested handoff of the acquired job message and its
-listener state to a replacement VM.
+GitHub's broker `acquirejob` call is a commit point. Before it, a
+disconnected listener leaves the job eligible for GitHub's normal pickup
+retry. After it, the provider exposes no release operation that can hand the
+same job message to another listener, so the durable assignment record must
+not describe post-acquisition VM loss as requeued. Transparent recovery
+would require a separately designed, attested handoff of the acquired job
+message and its listener state to a replacement VM.
 
 ## Generation creation and publication
 
@@ -124,9 +123,10 @@ generations is forbidden.
 
 ## Timing contract
 
-Each source records `CLOCK_BOOTTIME`, boot ID, sequence, and realtime. Durations
-within a process use only its monotonic values. Cross-source spans use bracketed
-realtime samples and report their uncertainty. Required hot-path events are:
+Each source records `CLOCK_BOOTTIME`, boot ID, sequence, and realtime.
+Durations within a process use only its monotonic values; cross-source spans
+use bracketed realtime samples and report their uncertainty. Required
+hot-path events:
 
 ```text
 github_job_available

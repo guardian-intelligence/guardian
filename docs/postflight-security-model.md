@@ -159,8 +159,8 @@ Generation manifests are signed (see Transit) and carry a monotonic
 generation number; the control-plane catalog owns the current pointer and the
 rollback floor. The rendezvous message delivers the manifest and floor over
 the sealed session, so a byzantine host cannot present a stale-but-authentic
-generation: the guest refuses anything below the floor. Integrity without
-freshness is not enough, and the floor's authority is deliberately off-host.
+generation: the guest refuses anything below the floor. The floor's
+authority is off-host.
 
 ### CRIU rules
 
@@ -205,10 +205,10 @@ Rules: keys are non-exportable and deny-by-default; each control-plane module
 gets the minimum verb set (metering can verify, only the session module can
 decrypt); every operation is audit-shipped; key deletion is the tenant
 crypto-erase mechanism and requires the same ceremony as any custody-tier
-destruction. DR follows the OpenBao restore-not-reseed doctrine — and the
-tested-restore drill is a **release gate** here, because Transit now protects
-durable customer ciphertext: no Turbo at-rest claim ships before a
-cold-start restore has decrypted pre-restore ciphertext.
+destruction. DR follows the OpenBao restore-not-reseed doctrine, and the
+tested-restore drill is a **release gate** because Transit protects durable
+customer ciphertext: no Turbo at-rest claim ships before a cold-start
+restore has decrypted pre-restore ciphertext.
 
 Rotation creates a new lineage (one cold build); it never rewrites volumes.
 

@@ -1,113 +1,103 @@
 # Lightning
 
-Status: technology doctrine, 2026-07-24. Lightning is the warmth substrate
-that powers every Postflight SKU: the orchestrated set of technologies that
-make a CI job start warm, run on hot caches, and leave its work behind for
-the next job. Lightning is a technology and a promise, never a SKU — runner
-labels are deliberately boring (`postflight-<x>vcpu-<os>-<flavor>`), and
-both categories behind them, Turbo and Confidential, run the same Lightning
-substrate. The mechanisms summarized here are owned in detail by the
-companion docs; this document owns the why.
+Status: technology doctrine, 2026-07-24.
 
-## The promise
+Lightning is the warmth substrate under every Postflight SKU: it makes a CI
+job start warm, run on hot caches, and leave its work behind for the next
+job. It is a technology, not a SKU — runner labels are plain
+(`postflight-<x>vcpu-<os>-<flavor>`), and both categories behind them,
+Turbo and Confidential, run the same substrate. Companion docs own the
+mechanisms in detail; this document owns the rationale.
 
-Lightning exists to deliver three customer-observable properties, and every
-mechanism below is in service of one of them:
+## Customer goals
 
-1. **Minimize queueing.** From the customer's perspective, a job starts
-   when GitHub assigns it. Pools are prewarmed, sessions attested, plans
-   prepositioned — provisioning work never appears on the customer path.
-   Up to reserved concurrency, P99 start time is P50.
-2. **Maximize concurrency.** Slots are real cores, never oversubscribed;
-   capacity is fixed, refilled ahead of demand, and destroy-and-refill
-   keeps every slot immediately resalable. Concurrency is a number we
-   guarantee, not a pool we hope stretches.
-3. **Make CI as fast as possible.** The highest-clock silicon we can buy,
-   with source, caches, and long-lived build processes already present when
-   the job lands. The wins compound: warm start × hot cache × fast CPU.
+Every mechanism below serves one of three customer-observable properties:
+
+1. **Minimize queueing.** A job starts when GitHub assigns it: pools
+   prewarmed, sessions attested, plans prepositioned. Up to reserved
+   concurrency, P99 start time is P50.
+2. **Maximize concurrency.** Slots are real cores, never oversubscribed.
+   Capacity is fixed, refilled ahead of demand; destroy-and-refill keeps
+   every slot immediately resalable. Concurrency is a guaranteed number.
+3. **Fastest possible CI.** The highest-clock silicon we can buy, with
+   source, caches, and long-lived build processes already present when the
+   job lands. Warm start × hot cache × fast CPU compound.
 
 ## The four pillars
 
-### 1. Prewarmed VMs, a lifecycle measured in milliseconds
+### 1. Prewarmed VMs
 
 A generic guest is booted, attested, and listening before any customer
-demand exists ([scheduling](postflight-scheduling.md), pool supply). By the
-time GitHub hands a job to a listener, the only remaining work is the hot
-path: observe the assignment, attach the sticky disks, restore the capsule,
-open the Worker gate. Every VM is single-use — one job, then destroyed and
-its slot refilled — so warmth never trades against isolation.
+demand exists ([scheduling](postflight-scheduling.md), pool supply). When
+GitHub assigns a job, only the hot path remains: observe the assignment,
+attach the sticky disks, restore the capsule, open the Worker gate. Every
+VM is single-use — one job, then destroyed and its slot refilled — so
+warmth never trades against isolation.
 
 ### 2. Build artifacts persisted in zvols, mounted just in time
 
-CI work is an asset, not exhaust. Workspace, tool caches, and build state
-persist as sparse zvol generations on the worker's NVMe zpool
-([storage](postflight-storage.md)). Materializing a workspace from a sealed
-generation is a constant-time CoW clone, and volumes reach the running VM
-by virtio-scsi hot-attach in tens of milliseconds — source and caches are
-local block devices before the job's first step, never a download protocol.
+Workspace, tool caches, and build state persist as sparse zvol generations
+on the worker's NVMe zpool ([storage](postflight-storage.md)).
+Materializing a workspace from a sealed generation is a constant-time CoW
+clone; volumes reach the running VM by virtio-scsi hot-attach in tens of
+milliseconds. Source and caches are local block devices before the job's
+first step, never a download protocol.
 
 ### 3. Snapshots restored in userspace, just in time
 
 On green push-to-main, the guest's long-lived build processes — compilers,
 daemons, watchers, warm JITs — are checkpointed by CRIU
 (checkpoint/restore in userspace) into an encrypted process volume,
-atomically coupled to the zvol generation set and sealed as a signed golden
-generation. The next job restores that capsule into a fresh prewarmed VM
-just in time: the machine picks up where the last green build left off.
-Restore-or-cold is the only branch — a miss costs speed, never
-correctness ([runner lifecycle](postflight-runner-lifecycle.md)).
+atomically coupled to the zvol generation set, and sealed as a signed
+golden generation. The next job restores that capsule into a fresh
+prewarmed VM. Restore-or-cold is the only branch — a miss costs speed,
+never correctness ([runner lifecycle](postflight-runner-lifecycle.md)).
 
 ### 4. Node-local zvols on premium NVMe
 
-Every byte of warm state lives on the worker's own striped NVMe zpool.
-There is no network storage on any hot path — no Ceph, no object-store
-round trip, no cache download. Locality is the performance floor the other
-three pillars stand on, and its cost is stated honestly: warm state is a
-regenerable cache, host loss is one cold build, and nothing is replicated
-or migrated ([storage](postflight-storage.md), locality).
+All warm state lives on the worker's own striped NVMe zpool. No network
+storage on any hot path: no Ceph, no object-store round trip, no cache
+download. The cost: warm state is a regenerable cache, host loss is one
+cold build, and nothing is replicated or migrated
+([storage](postflight-storage.md), locality).
 
 ## The mindset
 
-Lightning is a bet that CI has been operated with the wrong mental model,
-and each correction is a pillar's reason to exist:
+Each pillar corrects an operating assumption:
 
-- **Stop wasting the work your CI already did.** Every run compiles,
-  fetches, and warms — and stock runners throw it all away at job end.
-  Persisting artifacts intelligently (scoped, sealed, promoted on green)
-  turns every prior run into the starting line for the next one.
-- **Use the compute you already have, better.** The answer to slow CI is
-  not more shared vCPUs; it is real cores at high clocks with their caches
-  already hot. A warm start on hardware you already reserved beats an
+- **Stop discarding CI's work.** Every run compiles, fetches, and warms;
+  stock runners throw it away at job end. Persisting artifacts — scoped,
+  sealed, promoted on green — makes each run the starting line for the
+  next.
+- **Use existing compute better.** Not more shared vCPUs: real cores at
+  high clocks with hot caches. A warm start on reserved hardware beats an
   autoscaled cold fleet on both latency and cost.
-- **Treat CI like a developer machine.** CI was never going to catch every
-  problem, so waiting 20+ minutes to catch a subset of them is a broken
-  trade. A developer machine builds incrementally from yesterday's state;
-  Lightning gives CI the same property — and gives agents a golden
-  workspace: a cold VM your agent just spun up starts from the sealed
-  green-on-main state instead of warming caches for 20 minutes, any time,
-  anywhere.
+- **Treat CI like a developer machine.** CI catches only a subset of
+  problems; waiting 20+ minutes for it is a bad trade. A developer machine
+  builds incrementally from yesterday's state; Lightning gives CI the same
+  property — and gives agents a golden workspace: a cold VM starts from the
+  sealed green-on-main state instead of warming caches for 20 minutes.
 
 ## Who Lightning is for
 
 Agentic engineers, specifically:
 
-- Engineers who want to move fast and unhobble their agents — agents
-  multiply job volume ahead of headcount, and the feedback loop is the
-  bottleneck Lightning attacks.
+- Engineers who want to unhobble their agents — agents multiply job volume
+  ahead of headcount, and the feedback loop is the bottleneck.
 - Engineers who understand CI shouldn't persist secrets and will make the
   few changes to keep that true. Lightning enforces its half by
   construction: runner processes are killed and proven absent before any
   capsule freezes, credentials never touch disk, and everything persisted
   is ciphertext ([security model](postflight-security-model.md)).
-- Engineers who want to run code in a TEE — the Confidential category runs
-  the identical Lightning substrate inside SEV-SNP, where a compromised
-  host reads nothing.
+- Engineers who want to run code in a TEE — Confidential runs the
+  identical substrate inside SEV-SNP, where a compromised host reads
+  nothing.
 
 ## Measured baselines
 
-Tracer-measured on guardian-w1 NVMe, 2026-07-05; per-class production
-numbers come from the rate-card bench and carry benchmark provenance before
-any claim ships ([fleet](postflight-fleet.md), onboarding):
+Tracer-measured on guardian-w1 NVMe, 2026-07-05. Per-class production
+numbers come from the rate-card bench and carry benchmark provenance
+before any claim ships ([fleet](postflight-fleet.md), onboarding).
 
 | Operation | Measured |
 | --- | --- |
@@ -123,7 +113,7 @@ any claim ships ([fleet](postflight-fleet.md), onboarding):
 - Not durable storage. Warm state is a regenerable cache; anything that
   would complicate that — replication, migration, backup, cross-host key
   release — is a cold build instead.
-- Not a second warmth mechanism. One mechanism, CRIU capsules on sticky
+- Not a second warmth mechanism. One mechanism: CRIU capsules on sticky
   zvol generations, identical on both fleets
   ([architecture](postflight-architecture.md), principle 5).
 - Not a scheduler. GitHub owns the DAG and runner selection; Lightning
