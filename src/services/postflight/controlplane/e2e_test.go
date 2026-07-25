@@ -1223,3 +1223,189 @@ FROM generate_series(1, 150) AS i`,
 		}
 	}
 }
+
+func TestObservedAssignmentRevivesCapacityFailedDemand(t *testing.T) {
+	control := startE2EControlPlane(t)
+	ctx := context.Background()
+	store := &pgStore{pool: control.pool}
+	if err := store.MarkProviderDemandFailed(ctx, e2eJobID, []problem{problemCapacityTimeout(e2eClass)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "capacity_failed" {
+		t.Fatalf("demand state = %q", got)
+	}
+	if _, err := control.pool.Exec(ctx, `DELETE FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID); err != nil {
+		t.Fatal(err)
+	}
+
+	_, vms, _, _ := startE2EHost(t, control.server.URL)
+	waitFor(t, "registered listeners", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pool_members WHERE state = 'listening'`) == "2"
+	})
+	if got := queryString(t, control.pool, `SELECT count(*)::text FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID); got != "0" {
+		t.Fatalf("terminal demand regrew %s job intents before any observation", got)
+	}
+	statuses, err := vms.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected vm.Status
+	for _, status := range statuses {
+		if status.Phase == vm.PhaseListening {
+			selected = status
+			break
+		}
+	}
+	if selected.ID == "" {
+		t.Fatal("no listening VM")
+	}
+	runnerName := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, selected.Incarnation)
+	if runnerName == "" {
+		t.Fatal("pool member has no runner name")
+	}
+	run := apiWorkflowRun{
+		ID: e2eRunID, Event: "push", Path: ".github/workflows/ci.yml",
+		HeadBranch: "main", HeadSHA: strings.Repeat("c", 40), RunAttempt: 1,
+	}
+	run.HeadRepository.FullName = e2eRepo
+	run.Repository.ID = e2eRepositoryID
+	run.Repository.FullName = e2eRepo
+	control.github.setRun(run, []apiWorkflowJob{{
+		ID: e2eJobID, RunID: e2eRunID, RunAttempt: 1, Name: "build", Status: "in_progress",
+		Labels: []string{e2eClass}, RunnerID: 101, RunnerName: runnerName,
+		CheckRunURL: fmt.Sprintf("https://api.github.com/repos/%s/check-runs/%d", e2eRepo, e2eCheckRunID),
+		HeadSHA:     run.HeadSHA, HeadBranch: run.HeadBranch, WorkflowName: "CI",
+	}})
+
+	identity := vm.JobIdentity{
+		RunID: strconv.FormatInt(e2eRunID, 10), RunAttempt: 1, RunnerName: runnerName,
+		Repository: e2eRepo, WorkflowJob: "build",
+	}
+	if !vms.MarkAssigned(selected.ID, vm.Assignment{
+		RequestID: "request-revive", JobID: "protocol-job-revive", CheckRunID: e2eCheckRunID,
+		RunnerName: runnerName, JobDisplayName: "build", Identity: identity,
+	}) {
+		t.Fatal("local listener did not accept assignment")
+	}
+	var rendezvous vm.Rendezvous
+	waitFor(t, "revived rendezvous", func() bool {
+		var found bool
+		rendezvous, found = vms.RendezvousFor(selected.ID)
+		return found
+	})
+	if got := queryString(t, control.pool, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "demand_recorded" {
+		t.Fatalf("revived demand state = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID); got != "observed" {
+		t.Fatalf("revived intent state = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT member_id FROM runner_job_assignments WHERE provider_job_id = $1`, e2eJobID); got != selected.Incarnation {
+		t.Fatalf("revived assignment member = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT problem_count::text || ':' || primary_problem_code FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "1:pool.capacity_timeout" {
+		t.Fatalf("revival erased the demand problem ledger: %q", got)
+	}
+	if !vms.MarkBound(selected.ID) {
+		t.Fatal("revived assignment did not bind")
+	}
+	waitFor(t, "revived authorization", func() bool {
+		authorization, found := vms.AuthorizationFor(selected.ID)
+		return found && authorization.MemberID == selected.Incarnation &&
+			authorization.AssignmentID == rendezvous.AssignmentID
+	})
+	clock := vm.ClockSample{UnixNS: time.Now().UnixNano(), Synchronized: true, Clocksource: "kvm-clock"}
+	if !vms.MarkWorkerReady(selected.ID, clock) || !vms.MarkHookBlocked(selected.ID, identity) || !vms.MarkReady(selected.ID, clock) {
+		t.Fatal("customer worker was not released")
+	}
+	waitFor(t, "running revived assignment", func() bool {
+		return queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE provider_job_id = $1`, e2eJobID) == "running"
+	})
+	if got := queryString(t, control.pool, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "assigned" {
+		t.Fatalf("running demand state = %q", got)
+	}
+}
+
+func TestObservedAssignmentBindsCrossRepoJob(t *testing.T) {
+	control := startE2EControlPlane(t)
+	const (
+		hostID            = "host-cross-repo"
+		bootID            = "boot-cross-repo"
+		memberID          = "member-cross-repo"
+		vmID              = "vm-cross-repo"
+		crossRepo         = "acme/gadget"
+		crossRepositoryID = int64(4343)
+		crossRunID        = int64(781)
+		crossJobID        = int64(9005)
+		crossCheckRunID   = int64(8005)
+	)
+	hostReport := syncproto.SyncRequest{
+		HostID: hostID, BootID: bootID,
+		Slots: []syncproto.SlotReport{{Class: e2eClass, Total: 1, Listening: 1}},
+		Members: []syncproto.PoolMemberReport{{
+			MemberID: memberID, VMID: vmID, Class: e2eClass, Image: "golden", State: syncproto.MemberListening,
+		}},
+	}
+	postHostSync(t, control.server.URL, hostReport)
+	waitFor(t, "capacity pool intent", func() bool {
+		return queryString(t, control.pool, `SELECT count(*)::text FROM runner_pools WHERE runner_class = $1 AND desired_count > 0`, e2eClass) == "1"
+	})
+	postHostSync(t, control.server.URL, hostReport)
+	runnerName := queryString(t, control.pool, `SELECT runner_name FROM runner_pool_members WHERE member_id = $1`, memberID)
+	if runnerName == "" {
+		t.Fatal("cross-repo member was not allocated to the warm pool")
+	}
+	waitFor(t, "repo-A intent", func() bool {
+		return queryString(t, control.pool, `SELECT state FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID) == "queued"
+	})
+
+	run := apiWorkflowRun{
+		ID: crossRunID, Event: "push", Path: ".github/workflows/ci.yml",
+		HeadBranch: "main", HeadSHA: strings.Repeat("d", 40), RunAttempt: 1,
+	}
+	run.HeadRepository.FullName = crossRepo
+	run.Repository.ID = crossRepositoryID
+	run.Repository.FullName = crossRepo
+	control.github.setRun(run, []apiWorkflowJob{{
+		ID: crossJobID, RunID: crossRunID, RunAttempt: 1, Name: "build", Status: "in_progress",
+		Labels: []string{e2eClass}, RunnerID: 102, RunnerName: runnerName,
+		CheckRunURL: fmt.Sprintf("https://api.github.com/repos/%s/check-runs/%d", crossRepo, crossCheckRunID),
+		HeadSHA:     run.HeadSHA, HeadBranch: run.HeadBranch, WorkflowName: "CI",
+	}})
+
+	resolved := postJobPlanResolve(t, control.server.URL, syncproto.JobPlanResolveRequest{
+		HostID: hostID, BootID: bootID, MemberID: memberID, VMID: vmID,
+		Assignment: syncproto.ObservedAssignment{
+			RequestID: "request-cross-repo", JobID: "protocol-job-cross-repo", CheckRunID: crossCheckRunID,
+			RunnerName: runnerName, JobDisplayName: "build",
+			Identity: syncproto.JobIdentity{
+				RunID: strconv.FormatInt(crossRunID, 10), RunAttempt: 1, RunnerName: runnerName,
+				Repository: crossRepo, WorkflowJob: "build-key",
+			},
+		},
+	})
+	if resolved.Plan.ExecutionID != strconv.FormatInt(crossJobID, 10) || resolved.Plan.CheckRunID != crossCheckRunID ||
+		resolved.Plan.RepositoryFullName != crossRepo || resolved.Plan.RepositoryID != crossRepositoryID {
+		t.Fatalf("resolved plan = %+v", resolved.Plan)
+	}
+	if got := queryString(t, control.pool, `SELECT repository_full_name || ':' || state FROM github_provider_demands WHERE provider_job_id = $1`, crossJobID); got != crossRepo+":demand_recorded" {
+		t.Fatalf("cross-repo demand = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM github_job_intents WHERE provider_job_id = $1`, crossJobID); got != "observed" {
+		t.Fatalf("cross-repo intent state = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT repository || ':' || member_id FROM runner_job_assignments WHERE provider_job_id = $1`, crossJobID); got != crossRepo+":"+memberID {
+		t.Fatalf("cross-repo assignment = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT s.repo FROM workspace_scopes s JOIN github_provider_demands d ON d.workspace_scope_id = s.scope_id WHERE d.provider_job_id = $1`, crossJobID); got != "gadget" {
+		t.Fatalf("cross-repo workspace scope repo = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT count(*)::text FROM runner_job_assignments WHERE provider_job_id = $1`, e2eJobID); got != "0" {
+		t.Fatalf("repo-A job gained %s assignments from repo-B's observation", got)
+	}
+	if got := queryString(t, control.pool, `SELECT state || ':' || request_id FROM github_job_intents WHERE provider_job_id = $1`, e2eJobID); got != "queued:" {
+		t.Fatalf("repo-A intent = %q", got)
+	}
+	if got := queryString(t, control.pool, `SELECT state FROM github_provider_demands WHERE provider_job_id = $1`, e2eJobID); got != "demand_recorded" {
+		t.Fatalf("repo-A demand state = %q", got)
+	}
+}
