@@ -23,7 +23,7 @@ spec:
     iterations: 3
     alerts:
       - name: ops
-        severity: warn
+        severity: warning
         providerRef:
           name: alert-relay
           namespace: flagger
