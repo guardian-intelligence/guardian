@@ -4,6 +4,10 @@ load("@npm//:defs.bzl", "npm_link_all_packages")
 
 npm_link_all_packages()
 
+# Held byte-identical to the crate's dist/install.sh by
+# //src/products/postflight-cli:installer_lockstep_test.
+exports_files(["public/postflight/install.sh"])
+
 filegroup(
     name = "package_manifest",
     srcs = ["package.json"],
