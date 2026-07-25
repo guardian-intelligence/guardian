@@ -1,0 +1,569 @@
+# Install-matrix canary for the postflight CLI: every six hours, walk the
+# channel lanes the release manifest pins and exercise the install paths a
+# user actually takes — the public GitHub release assets and the curl
+# installer served from the site — over the public internet, with the same
+# cosign verification the docs tell users to run. Nothing here gates a
+# promotion; the deep-test runner does that before a release exists. This
+# watches what is already published, so a broken checksums.txt, an expired
+# signature, a release whose body no longer matches the pinned digest, or an
+# installer that stops resolving a channel pages instead of waiting for a
+# user to hit it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cli-install-canary
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: cli-install-canary
+    app.kubernetes.io/part-of: guardian
+  annotations:
+    # The scripts' shell variables must reach the pod verbatim, not be
+    # blanked by Flux's envsubst pass.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  # cosign's image is ko-built and shell-less, and this cluster does not
+  # enable the ImageVolume source, so the binary is extracted from the pinned
+  # image over the same public path the canary tests everything else on:
+  # manifest by pinned digest, every layer blob verified against its manifest
+  # digest before extraction. The image is never run as a container.
+  extract-cosign.sh: |
+    #!/bin/sh
+    set -eu
+    REPO="${COSIGN_IMAGE#ghcr.io/}"
+    REPO="${REPO%%[@:]*}"
+    DIGEST="${COSIGN_IMAGE##*@}"
+    cd /tmp
+    TOKEN="$(curl -fsS "https://ghcr.io/token?scope=repository:$REPO:pull&service=ghcr.io" | jq -r .token)"
+    test -n "$TOKEN" && test "$TOKEN" != null
+    fetch_manifest() {
+      curl -fsS -H "Authorization: Bearer $TOKEN" \
+        "https://ghcr.io/v2/$REPO/manifests/$1" \
+        -H 'Accept: application/vnd.oci.image.index.v1+json' \
+        -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.v2+json'
+    }
+    # The registry is not trusted: every fetched byte is verified against
+    # the digest that named it, manifests included — the chain from the
+    # pinned digest to the extracted binary has no unverified link.
+    fetch_manifest "$DIGEST" > root.json
+    echo "${DIGEST#sha256:}  root.json" | sha256sum -c - >/dev/null
+    case "$(jq -r .mediaType root.json)" in
+      application/vnd.oci.image.index.v1+json|application/vnd.docker.distribution.manifest.list.v2+json)
+        arch_digest="$(jq -r '.manifests[] | select(.platform.os=="linux" and .platform.architecture=="amd64") | .digest' root.json | head -1)"
+        fetch_manifest "$arch_digest" > manifest.json
+        echo "${arch_digest#sha256:}  manifest.json" | sha256sum -c - >/dev/null
+        ;;
+      *)
+        cp root.json manifest.json
+        ;;
+    esac
+    for layer in $(jq -r '.layers[].digest' manifest.json); do
+      curl -fsSL -H "Authorization: Bearer $TOKEN" \
+        "https://ghcr.io/v2/$REPO/blobs/$layer" -o layer.tgz
+      echo "${layer#sha256:}  layer.tgz" | sha256sum -c - >/dev/null
+      # Stream the member out instead of extracting the tree: ko layers ship
+      # their directories read-only (0555), which a non-root extract cannot
+      # write into.
+      member="$(tar tzf layer.tgz 2>/dev/null | grep -E '^/?ko-app/cosign$' || true)"
+      if [ -n "$member" ]; then
+        tar xzOf layer.tgz "$member" > /cosign-bin/cosign
+        chmod 0755 /cosign-bin/cosign
+      fi
+      rm -f layer.tgz
+    done
+    /cosign-bin/cosign version
+  canary.sh: |
+    #!/bin/bash
+    set -uo pipefail
+    VMINSERT=http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus
+    CLICKHOUSE=http://chendpoint-clickhouse-analytics.tenant-root.svc.cozy.local:8123
+    RELEASES_API=https://api.github.com/repos/guardian-intelligence/guardian/releases
+    COSIGN=/cosign-bin/cosign
+    PLATFORM=linux-x86_64-cluster
+    WORK=/tmp/work
+    export HOME=/tmp
+
+    now_ms() {
+      local micros="${EPOCHREALTIME/[.,]/}"
+      echo $((micros / 1000))
+    }
+
+    push() {
+      curl -fsS --retry 3 --max-time 15 --data-binary "$1" "$VMINSERT" \
+        || { echo "failed to record canary result in vminsert"; exit 1; }
+    }
+
+    events_failed=0
+    tag=""
+    digest=""
+    detail=""
+    release=""
+    release_version=""
+
+    record() {
+      local channel="$1" method="$2" ok="$3" ms="$4" note="$5"
+      push "guardian_cli_install_canary_success{channel=\"$channel\",method=\"$method\",platform=\"$PLATFORM\"} $ok"
+      local props status
+      props="$(jq -cn --arg channel "$channel" --arg method "$method" \
+        --arg platform "$PLATFORM" --arg tag "$tag" --arg digest "$digest" \
+        --arg detail "$note" --argjson ok "$ok" \
+        '{channel: $channel, method: $method, platform: $platform,
+          ok: ($ok == 1), tag: $tag, digest: $digest, detail: $detail}')"
+      status=500
+      [ "$ok" = "1" ] && status=200
+      curl -fsS --max-time 20 -u "$CH_USER:$CH_PASSWORD" "$CLICKHOUSE" --data-binary \
+        "INSERT INTO guardian_analytics.events
+           (server_ts, site, event_name, trust_tier, schema_version, path,
+            status, duration_ms, props)
+         VALUES (now64(3), 'postflight-cli', 'cli.install_canary.method',
+                 'server_observed', 1, '/postflight', $status, $ms,
+                 '${props//\'/\'\'}')" >/dev/null \
+        || { echo "clickhouse insert failed for $channel/$method"; events_failed=1; }
+    }
+
+    # The release binary this pod can execute, checksum-verified and run
+    # once per channel: both methods compare against the version it reports.
+    resolve_release_version() {
+      local channel="$1"
+      local dir="$WORK/$channel/assets" url out
+      [ -n "$release_version" ] && return 0
+      mkdir -p "$dir" || { detail="cannot create $dir"; return 1; }
+      if [ ! -f "$dir/checksums.txt" ]; then
+        url="$(jq -r '.assets[] | select(.name == "checksums.txt") | .browser_download_url' <<<"$release")"
+        [ -n "$url" ] || { detail="release $tag has no checksums.txt"; return 1; }
+        curl -fsSL --max-time 60 -o "$dir/checksums.txt" "$url" \
+          || { detail="checksums.txt download failed for $tag"; return 1; }
+      fi
+      if [ ! -f "$dir/postflight-$NATIVE_TARGET" ]; then
+        url="$(jq -r --arg name "postflight-$NATIVE_TARGET" \
+          '.assets[] | select(.name == $name) | .browser_download_url' <<<"$release")"
+        [ -n "$url" ] || { detail="release $tag has no postflight-$NATIVE_TARGET"; return 1; }
+        curl -fsSL --max-time 120 -o "$dir/postflight-$NATIVE_TARGET" "$url" \
+          || { detail="postflight-$NATIVE_TARGET download failed for $tag"; return 1; }
+      fi
+      ( cd "$dir" && grep -E " postflight-${NATIVE_TARGET}\$" checksums.txt | sha256sum -c - ) >/dev/null 2>&1 \
+        || { detail="checksum mismatch for postflight-$NATIVE_TARGET in $tag"; return 1; }
+      chmod +x "$dir/postflight-$NATIVE_TARGET"
+      out="$("$dir/postflight-$NATIVE_TARGET" version 2>&1)" \
+        || { detail="postflight-$NATIVE_TARGET did not run: $out"; return 1; }
+      case "$out" in
+        "postflight version "*) release_version="$out" ;;
+        *) detail="unexpected version output from postflight-$NATIVE_TARGET: $out"; return 1 ;;
+      esac
+      return 0
+    }
+
+    method_release_assets() {
+      local channel="$1"
+      local dir="$WORK/$channel/assets" urls url target magic
+      mkdir -p "$dir" || { detail="cannot create $dir"; return 1; }
+      urls="$(jq -r '.assets[].browser_download_url' <<<"$release")"
+      [ -n "$urls" ] || { detail="release $tag carries no assets"; return 1; }
+      for url in $urls; do
+        curl -fsSL --max-time 120 -o "$dir/${url##*/}" "$url" \
+          || { detail="asset download failed: $url"; return 1; }
+      done
+      [ -f "$dir/checksums.txt" ] || { detail="release $tag has no checksums.txt"; return 1; }
+      ( cd "$dir" && sha256sum -c checksums.txt ) >/dev/null 2>&1 \
+        || { detail="sha256sum -c failed for $tag"; return 1; }
+      # Verbatim the command the release notes hand users, trust roots
+      # included: this canary answers "does verification work for a reader of
+      # the release page", so it resolves Sigstore's root the way that reader
+      # does rather than through the pinned root the in-cluster signing lanes
+      # verify against.
+      for target in $TARGETS; do
+        [ -f "$dir/postflight-$target" ] || { detail="release $tag has no postflight-$target"; return 1; }
+        "$COSIGN" verify-blob --bundle "$dir/postflight-$target.sigstore.json" \
+          --certificate-identity "$BUILD_IDENTITY" \
+          --certificate-oidc-issuer "$ISSUER" \
+          "$dir/postflight-$target" >/dev/null 2>&1 \
+          || { detail="cosign verify-blob failed for postflight-$target in $tag"; return 1; }
+      done
+      # The targets this pod cannot execute are asserted structurally: a
+      # cross-compile that silently produced the wrong object format still
+      # passes its checksum and its signature.
+      for target in $TARGETS; do
+        [ "$target" = "$NATIVE_TARGET" ] && continue
+        magic="$(od -An -N4 -tx1 "$dir/postflight-$target" | tr -d ' \n')"
+        case "$target" in
+          *-linux-*)
+            [ "$magic" = "7f454c46" ] \
+              || { detail="postflight-$target is not an ELF image"; return 1; }
+            ;;
+          *-apple-darwin)
+            [ "$magic" = "cffaedfe" ] \
+              || { detail="postflight-$target is not a 64-bit Mach-O image"; return 1; }
+            ;;
+        esac
+      done
+      resolve_release_version "$channel" || return 1
+      return 0
+    }
+
+    method_installer_script() {
+      local channel="$1"
+      local home="$WORK/$channel/home" out installed
+      resolve_release_version "$channel" || return 1
+      rm -rf "$home"
+      mkdir -p "$home" || { detail="cannot create $home"; return 1; }
+      out="$(curl -fsSL --max-time 60 "$INSTALLER_URL" \
+        | env HOME="$home" sh -s -- --channel "$channel" 2>&1)" \
+        || { detail="fetching or running $INSTALLER_URL failed: $out"; return 1; }
+      installed="$home/.local/bin/postflight"
+      [ -x "$installed" ] \
+        || { detail="installer left no executable at ~/.local/bin/postflight"; return 1; }
+      out="$("$installed" version 2>&1)" \
+        || { detail="installed binary did not run: $out"; return 1; }
+      [ "$out" = "$release_version" ] \
+        || { detail="installer produced '$out' but release $tag carries '$release_version'"; return 1; }
+      return 0
+    }
+
+    # The channel lanes come from the release manifest, so an rc or stable
+    # lane is covered the day its pin lands — no second place to teach.
+    lanes="$(awk '
+      /^releases:/ { releases = 1; next }
+      releases && /^  postflight-cli:/ { cli = 1; next }
+      releases && cli && /^  [^ ]/ { cli = 0 }
+      cli && /^    [A-Za-z0-9_-]+:[[:space:]]*$/ { channel = $1; sub(/:$/, "", channel); next }
+      cli && channel != "" && /^      image:[[:space:]]/ { print channel, $2 }
+    ' /release-manifest/release-manifest.yaml)"
+    if [ -z "$lanes" ]; then
+      echo "no postflight-cli lanes in the release manifest: the mount or the lane grammar is broken"
+      exit 1
+    fi
+
+    releases="$(curl -fsSL --max-time 60 -H 'Accept: application/vnd.github+json' \
+      "$RELEASES_API?per_page=100")" || { echo "GitHub release listing failed"; exit 1; }
+
+    cells=0
+    failures=0
+    while read -r channel ref; do
+      [ -n "$channel" ] || continue
+      digest="${ref##*@}"
+      tag=""
+      release=""
+      release_version=""
+      case "$channel" in
+        nightly) include='^postflight-cli/nightly-'; exclude='' ;;
+        rc) include='^postflight-cli/v[0-9].*-rc\.'; exclude='' ;;
+        stable) include='^postflight-cli/v[0-9]'; exclude='-rc\.' ;;
+        *) include=''; exclude='' ;;
+      esac
+
+      reason=""
+      if [ -z "$include" ]; then
+        reason="no release tag grammar registered for channel $channel"
+      else
+        release="$(jq -c --arg inc "$include" --arg exc "$exclude" '
+          [ .[]
+            | select(.tag_name | test($inc))
+            | select($exc == "" or ((.tag_name | test($exc)) | not)) ]
+          | sort_by(.created_at) | last // empty' <<<"$releases")"
+        if [ -z "$release" ]; then
+          reason="no published release matches channel $channel"
+        else
+          tag="$(jq -r .tag_name <<<"$release")"
+          push "guardian_cli_install_canary_release_age_seconds{channel=\"$channel\",platform=\"$PLATFORM\"} $(( $(date -u +%s) - $(jq -r '.published_at | fromdateiso8601' <<<"$release") ))"
+          # Lineage: the newest release on a channel must be the artifact the
+          # manifest pins. A mismatch means the release train published
+          # something other than what is pinned, which is a failure of every
+          # method on that channel — never a reason to stay quiet.
+          if ! jq -r .body <<<"$release" | grep -qF "$digest"; then
+            reason="release $tag does not carry the pinned digest $digest"
+          fi
+        fi
+      fi
+
+      for method in $METHODS; do
+        cells=$((cells + 1))
+        started="$(now_ms)"
+        detail="$reason"
+        ok=0
+        if [ -z "$reason" ]; then
+          case "$method" in
+            release-assets) method_release_assets "$channel" && ok=1 ;;
+            installer-script) method_installer_script "$channel" && ok=1 ;;
+            *) detail="unregistered install method $method" ;;
+          esac
+        fi
+        record "$channel" "$method" "$ok" "$(( $(now_ms) - started ))" "$detail"
+        if [ "$ok" != "1" ]; then
+          failures=$((failures + 1))
+          echo "FAILED $channel/$method: $detail"
+        else
+          echo "ok $channel/$method ($tag)"
+        fi
+      done
+    done <<<"$lanes"
+
+    push "guardian_cli_install_canary_heartbeat 1"
+    echo "install matrix: $cells cells, $failures failing"
+    # A failing cell is reported, not thrown: the VMRule pages on two
+    # consecutive failures of the same cell, and a Job exit code here would
+    # page on the first transient public-internet hiccup instead. The run
+    # only fails when the sweep itself was hollow or its records did not
+    # land.
+    test "$cells" -gt 0 || { echo "the matrix evaluated nothing"; exit 1; }
+    test "$events_failed" -eq 0
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cli-install-canary
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: cli-install-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  schedule: "40 */6 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cli-install-canary
+            app.kubernetes.io/part-of: guardian
+            # The label the ClickHouse policy admits across the namespace
+            # boundary.
+            guardian.dev/role: analytics-client
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          initContainers:
+            - name: extract-cosign
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/sh", "/scripts/extract-cosign.sh"]
+              env:
+                # An env value is invisible to the imageset extractor, so
+                # this pin rides the hand-declared images.declared.lock entry
+                # the countersigner's pin is anchored to;
+                # TestInstallCanaryCosignPinMatchesCountersigner holds the
+                # two together, so the cosign that verifies a release is the
+                # cosign that countersigned it.
+                - name: COSIGN_IMAGE
+                  value: "ghcr.io/sigstore/cosign/cosign:v3.1.1@sha256:6bbe0d281d955c79f85b325f0f7e651c1bcab5a4fa4ad4903d74955178a3b2eb"
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65534
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                  ephemeral-storage: 512Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+                  ephemeral-storage: 1Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: cosign-bin
+                  mountPath: /cosign-bin
+                - name: tmp
+                  mountPath: /tmp
+          containers:
+            - name: canary
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/bash", "/scripts/canary.sh"]
+              env:
+                - name: METHODS
+                  value: "release-assets installer-script"
+                - name: INSTALLER_URL
+                  value: https://guardianintelligence.org/postflight/install.sh
+                - name: TARGETS
+                  value: "x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin"
+                - name: NATIVE_TARGET
+                  value: x86_64-unknown-linux-musl
+                - name: BUILD_IDENTITY
+                  value: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main
+                - name: ISSUER
+                  value: https://token.actions.githubusercontent.com
+                - name: CH_USER
+                  value: cli_canary
+                - name: CH_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: cli-release-canary
+                      key: clickhouse_password
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65534
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                  ephemeral-storage: 512Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+                  ephemeral-storage: 2Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: cosign-bin
+                  mountPath: /cosign-bin
+                - name: tmp
+                  mountPath: /tmp
+                - name: release-manifest
+                  mountPath: /release-manifest
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: cli-install-canary
+            - name: cosign-bin
+              emptyDir: {}
+            - name: tmp
+              emptyDir:
+                sizeLimit: 2Gi
+            - name: release-manifest
+              configMap:
+                name: release-manifest
+---
+# Canary pod flows: DNS, the public internet (ghcr for the cosign image, the
+# GitHub API and release assets, the site serving the installer), the
+# ClickHouse HTTP port for the per-method events, and the VictoriaMetrics
+# import path. world rather than an FQDN allowlist: toFQDNs needs the L7 DNS
+# proxy, which the chained datapath rules out.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cli-install-canary
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: cli-install-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: cli-install-canary
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            clickhouse.altinity.com/chi: clickhouse-analytics
+      toPorts:
+        - ports:
+            - port: "8123"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+# Ingress half: tenant-root's generated isolation does not admit other
+# namespaces (same reason as the promoter and remediator pairs).
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-cli-install-canary
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: guardian-analytics
+            k8s:app.kubernetes.io/name: cli-install-canary
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: cli-install-canary
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: cli-install-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: cli-install-canary.rules
+      interval: 60s
+      rules:
+        # Two consecutive failures of the same channel×method: the 13h window
+        # spans at least two of the six-hourly runs, and the sample-count
+        # guard keeps a single failing run — a GitHub blip, a release cut
+        # mid-sweep — from paging on its own.
+        - alert: GuardianCliInstallCanaryFailing
+          expr: >-
+            max_over_time(guardian_cli_install_canary_success[13h]) == 0
+            and count_over_time(guardian_cli_install_canary_success[13h]) >= 2
+          labels:
+            severity: critical
+            guardian_component: cli-release-train
+          annotations:
+            summary: "the postflight CLI {{ $labels.channel }} channel fails to install via {{ $labels.method }}"
+            description: >-
+              Two consecutive install-matrix runs could not install the
+              postflight CLI from the {{ $labels.channel }} channel using
+              {{ $labels.method }} — users following the documented path are
+              hitting the same wall. Causes seen in this order: the release
+              body no longer carries the pinned digest (a release train that
+              published something other than what is pinned), a checksum or
+              cosign verify-blob failure on a published asset, or the
+              installer script no longer resolving the channel. Check the
+              newest cli-install-canary Job logs in guardian-analytics.
+        - alert: GuardianCliInstallCanarySilent
+          # The count_over_time guard keeps this from firing during bring-up,
+          # before the first scheduled run has ever pushed a sample.
+          expr: >-
+            absent_over_time(guardian_cli_install_canary_heartbeat[13h])
+            and on() count_over_time(guardian_cli_install_canary_heartbeat[8d]) > 0
+          labels:
+            severity: warning
+            guardian_component: cli-release-train
+          annotations:
+            summary: "the postflight CLI install matrix has not reported in 13h"
+            description: >-
+              No install-matrix heartbeat for over two run intervals: the
+              published install paths are unverified. The CronJob is failing
+              before its metrics push (cosign extraction, the release
+              manifest mount, the GitHub listing) or not running at all.
+              Check the newest cli-install-canary Job logs in
+              guardian-analytics.

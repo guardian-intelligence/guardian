@@ -189,6 +189,25 @@ func TestDeeptestRunnerCosignPinMatchesTheRegistryLane(t *testing.T) {
 	}
 }
 
+// The install canary verifies published release assets with a cosign
+// extracted from the same pinned image the countersigner signs with: the
+// cosign that checks a signature may never drift from the cosign that mints
+// it, so a bump PR for one goes red until the other follows.
+func TestInstallCanaryCosignPinMatchesCountersigner(t *testing.T) {
+	canaryYAML := "src/infrastructure/deployments/guardian/promotion/cli-install-canary.yaml"
+	countersignerYAML := "src/infrastructure/deployments/guardian/system/zot-countersigner.yaml"
+
+	cosignPin := regexp.MustCompile(`ghcr\.io/sigstore/cosign/cosign:v\d+\.\d+\.\d+@sha256:[a-f0-9]{64}`)
+	canaryCosign := cosignPin.FindString(readText(t, runfilePath(canaryYAML)))
+	countersignerCosign := cosignPin.FindString(readText(t, runfilePath(countersignerYAML)))
+	if canaryCosign == "" {
+		t.Fatalf("%s: no COSIGN_IMAGE tag@digest pin found", canaryYAML)
+	}
+	if canaryCosign != countersignerCosign {
+		t.Fatalf("install canary COSIGN_IMAGE %s and countersigner COSIGN_IMAGE %s differ: move them together", canaryCosign, countersignerCosign)
+	}
+}
+
 func TestTalmChartTalosVersionAgreesWithInstallerImage(t *testing.T) {
 	chart := extractMinor(t, talmChartRunfile,
 		`talosVersion: "v(\d+)\.(\d+)"`)

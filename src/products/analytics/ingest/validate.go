@@ -23,8 +23,9 @@ const (
 )
 
 // Registered event vocabulary: exact names and owned prefixes. Everything
-// the site emits today (lib/telemetry call sites) plus the beacon's own
-// lifecycle events. Unknown names reject the event.
+// the site emits today (lib/telemetry call sites), the beacon's own
+// lifecycle events, and the postflight CLI's release canaries. Unknown
+// names reject the event.
 var (
 	registeredNames = map[string]struct{}{
 		"page_view":     {},
@@ -42,6 +43,7 @@ var (
 		"page_shell.",
 		"beacon.",
 		"privatecut.",
+		"cli.",
 	}
 	knownVitals = map[string]struct{}{
 		"LCP": {}, "CLS": {}, "INP": {}, "TTFB": {}, "FCP": {},
