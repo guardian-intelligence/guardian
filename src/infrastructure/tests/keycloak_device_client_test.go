@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// `aspect infra auth --platform-agent` performs a device-code login against
+// The OIDC personas of `aspect infra auth` perform a device-code login against
 // the guardian-owned kubernetes-device Keycloak client. Nothing at runtime
 // ties the axl task to the CR that declares that client: renaming the
 // clientId, dropping the manifest from the kustomization, or disabling the

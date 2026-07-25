@@ -17,14 +17,14 @@ User must pay $10/mo to enable CloudFlare LB with 3 endpoints (1 for each ingres
   IPs from the operator workstation.
 - The kube API is reachable via the default `~/.kube/config`, whose only
   standing identity is the `read` persona (the `platform-agent` OIDC context,
-  set up with `aspect infra auth --platform-agent`): cluster-wide read plus
-  port-forward, and the only rung that refreshes unattended. Repair verbs come
-  from `--persona=write-basic` and emergencies from `--persona=write-all`;
-  neither holds `offline_access`, so each costs an operator device approval and
-  expires with its Keycloak session. There is no standing admin kubeconfig
-  anywhere on disk; breakglass x509 is minted on demand with
-  `aspect infra auth --platform-admin --reason "<why>"` and dies with its
-  short cert lifetime. The ladder lives in
+  set up with `aspect infra auth`): cluster-wide read plus port-forward, and the
+  only rung that refreshes unattended. Repair verbs come from
+  `--persona=write-basic` and emergencies from `--persona=write-all`; neither
+  holds `offline_access`, so each costs an operator device approval and expires
+  with its Keycloak session. There is no standing admin kubeconfig anywhere on
+  disk; breakglass x509 is minted on demand with
+  `aspect infra auth --persona=root --reason "<why>"` and dies with its short
+  cert lifetime. The ladder lives in
   `src/infrastructure/base/cozystack/platform-admins.yaml`.
 - Machine config applies are per-node, base plus overlay:
   `talm apply -f nodes/<node>.yaml -f nodes/<node>-overlay.yaml`.
@@ -72,7 +72,7 @@ Every node arms its AMD SP5100 TCO chipset watchdog (`/dev/watchdog0`, 1m timeou
 * Stripe is payment rail only -- we don't use Stripe Subscriptions / Usage-Based Billing. We meter on our own (planned)
 * Zero customers as of present day besides us: no compatibility shims or legacy wrappers.
 * OCI images are shipped to ghcr.io. See https://github.com/orgs/guardian-intelligence/packages
-* Customer identity runs in the product Keycloak in `tenant-guardian-prod`, distinct from Cozystack's bundled *platform* Keycloak (operator identity for dashboard/kubectl OIDC), which gates cluster-admin access: kubectl authenticates via `aspect infra auth --platform-agent` (OIDC against the `cozy` realm); the custody x509 kubeconfig is breakglass-only, minted by `aspect infra auth --platform-admin --reason "<why>"` (audit-logged), and the Keycloak admin console is never publicly routed — see `src/infrastructure/base/cozystack/platform.yaml` and `keycloak-admin-guard.yaml` there. The customer issuer is `https://guardianintelligence.org/realms/guardianintelligence.org`; upstream social identities are connections to its stable Guardian accounts. SpiceDB is reached only through the typed Authorization API for organization, project, repository, installation, and role decisions, and is not on the login path. The complete invariants and canary contract are in `docs/sign-in-with-guardian.md`.
+* Customer identity runs in the product Keycloak in `tenant-guardian-prod`, distinct from Cozystack's bundled *platform* Keycloak (operator identity for dashboard/kubectl OIDC), which gates cluster-admin access: kubectl authenticates via `aspect infra auth` (OIDC against the `cozy` realm, default `read` persona); the custody x509 kubeconfig is breakglass-only, minted by `aspect infra auth --persona=root --reason "<why>"` (audit-logged), and the Keycloak admin console is never publicly routed — see `src/infrastructure/base/cozystack/platform.yaml` and `keycloak-admin-guard.yaml` there. The customer issuer is `https://guardianintelligence.org/realms/guardianintelligence.org`; upstream social identities are connections to its stable Guardian accounts. SpiceDB is reached only through the typed Authorization API for organization, project, repository, installation, and role decisions, and is not on the login path. The complete invariants and canary contract are in `docs/sign-in-with-guardian.md`.
 - API IDL in Buf/Connect + (AIP-193). Declare each operation's policy surface (e.g. required permission, idempotency key, request-size, rate-limit class, audit level) outside of the core event contract as method-options metadata on the RPC contract. We need to be able to fine tune operational characterstics that don't break the schema. See `src/proto/guardian`. `connect.Interceptor`s enforce it fails-closed.
 * VictoriaLogs for logs. VictoriaMetrics for Metrics. TigerBeetle for financial truth/OLTP.
 * Bazel owns the build graph and produces bytes using OCI for layout. `cosign`/SLSA proves that it's authentic Guardian Intelligence LLC software.

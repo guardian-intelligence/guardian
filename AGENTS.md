@@ -28,7 +28,7 @@ The loop is: worktree → change → PR/CI → merge → babysit convergence →
 Optional:
 
 * Learn what development tooling exists with `aspect --help`
-* Install tools and confirm access if this is first time setup: `eval "$(scripts/bootstrap.sh path)" && aspect tools install && eval "$(aspect tools path)" && aspect infra auth --platform-agent` (auth required for babysitting your change after merge). Tool shims installed by `aspect tools install` are available in `./.guardian/tools/bin`.
+* Install tools and confirm access if this is first time setup: `eval "$(scripts/bootstrap.sh path)" && aspect tools install && eval "$(aspect tools path)" && aspect infra auth` (auth required for babysitting your change after merge). Tool shims installed by `aspect tools install` are available in `./.guardian/tools/bin`.
 
 
 ```sh
@@ -59,8 +59,8 @@ Common post-merge issues:
 
 House rules:
 - Do not use administration CLIs as a second control plane, use them for reads. Rely on Flux to converge the cluster after merge.
-- Sessions carry authority by persona. `aspect infra auth --platform-agent` gives you `read` — cluster-wide read plus port-forward, and it stays logged in unattended. Repair verbs (delete a wedged pod, scale a workload, mint a secrets-writer token) need `--persona=write-basic`, and emergencies need `--persona=write-all`; neither holds `offline_access`, so each one costs the operator a device approval and expires with its Keycloak session. Ask for the rung you need rather than assuming you have it. The ladder and how to extend it: `src/infrastructure/base/cozystack/platform-admins.yaml`.
-- If relevant to your task, clean up any hanging resources post-merge. Breakglass (`aspect infra auth --platform-admin --reason "<why>"`) is the x509 root credential minted from the custody bundle; it is audit logged, pages a human, and is only for when Keycloak itself is unavailable.
+- Sessions carry authority by persona: `aspect infra auth --persona=<rung>`. The default `read` gives cluster-wide read plus port-forward and stays logged in unattended. Repair verbs (delete a wedged pod, scale a workload, mint a secrets-writer token) need `write-basic`, and emergencies need `write-all`; neither holds `offline_access`, so each costs the operator a device approval and expires with its Keycloak session. Ask for the rung you need rather than assuming you have it. The ladder and how to extend it: `src/infrastructure/base/cozystack/platform-admins.yaml`.
+- If relevant to your task, clean up any hanging resources post-merge. `--persona=root --reason "<why>"` is the x509 breakglass minted from the custody bundle; it is audit logged, pages a human, and is only for when Keycloak itself is unavailable.
 </development_loop>
 
 <observability>

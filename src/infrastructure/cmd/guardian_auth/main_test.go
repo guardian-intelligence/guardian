@@ -168,12 +168,12 @@ func TestValidateConfigRequiresPairedOverrides(t *testing.T) {
 	}
 }
 
-func TestValidateConfigRejectsTalosOverridesInAgentMode(t *testing.T) {
+func TestValidateConfigRejectsTalosOverridesOnOIDCPersonas(t *testing.T) {
 	cfg := baseAgentConfig(t.TempDir())
 	cfg.Endpoints = "203.0.113.1"
 	cfg.Nodes = "203.0.113.1"
-	if err := validateConfig(cfg); err == nil || !strings.Contains(err.Error(), "only to admin mode") {
-		t.Fatalf("validateConfig() error = %v, want admin-only override error", err)
+	if err := validateConfig(cfg); err == nil || !strings.Contains(err.Error(), "only to --persona=root") {
+		t.Fatalf("validateConfig() error = %v, want root-only override error", err)
 	}
 }
 
@@ -570,7 +570,7 @@ func TestRunAdminMintFailureLeavesDestinationUnchanged(t *testing.T) {
 		return nil
 	}}
 	app := testApplication(cfg, runner)
-	err := app.runAdmin(context.Background(), defaultCandidates())
+	err := app.runBreakglass(context.Background(), defaultCandidates())
 	if err == nil || !strings.Contains(err.Error(), "mint admin") {
 		t.Fatalf("runAdmin() error = %v", err)
 	}
@@ -591,7 +591,7 @@ func TestRunAdminKubeconfigMintFailureRemovesPartialCredentials(t *testing.T) {
 		return nil
 	}}
 	app := testApplication(cfg, runner)
-	if err := app.runAdmin(context.Background(), defaultCandidates()); err == nil || !strings.Contains(err.Error(), "mint admin") {
+	if err := app.runBreakglass(context.Background(), defaultCandidates()); err == nil || !strings.Contains(err.Error(), "mint admin") {
 		t.Fatalf("runAdmin() error = %v, want mint failure", err)
 	}
 	assertFileEquals(t, cfg.Kubeconfig, original)
@@ -616,7 +616,7 @@ func TestRunAdminVerificationFailureLeavesDestinationUnchanged(t *testing.T) {
 		return nil
 	}
 	app := testApplication(cfg, runner)
-	err := app.runAdmin(context.Background(), defaultCandidates())
+	err := app.runBreakglass(context.Background(), defaultCandidates())
 	if err == nil || !strings.Contains(err.Error(), "verify minted admin") {
 		t.Fatalf("runAdmin() error = %v", err)
 	}
@@ -648,7 +648,7 @@ func TestRunAdminFailoverMintsExactPairVerifiesThenPreservesMerge(t *testing.T) 
 		return nil
 	}
 	app := testApplication(cfg, runner)
-	if err := app.runAdmin(context.Background(), defaultCandidates()); err != nil {
+	if err := app.runBreakglass(context.Background(), defaultCandidates()); err != nil {
 		t.Fatalf("runAdmin() error = %v", err)
 	}
 	assertFileEquals(t, cfg.Kubeconfig, merged)
@@ -702,7 +702,7 @@ func TestRunAdminPreparesTalosconfigAndUsesMintedClusterName(t *testing.T) {
 		return nil
 	}
 	app := testApplication(cfg, runner)
-	if err := app.runAdmin(context.Background(), defaultCandidates()[:1]); err != nil {
+	if err := app.runBreakglass(context.Background(), defaultCandidates()[:1]); err != nil {
 		t.Fatalf("runAdmin() error = %v", err)
 	}
 	talosconfig := -1
@@ -741,7 +741,7 @@ func TestRunAdminFinalRenameFailureLeavesDestinationUnchanged(t *testing.T) {
 	}
 	app := testApplication(cfg, runner)
 	app.fs = &nthRenameFailFS{failAt: 2}
-	if err := app.runAdmin(context.Background(), defaultCandidates()[:1]); err == nil || !strings.Contains(err.Error(), "atomically install") {
+	if err := app.runBreakglass(context.Background(), defaultCandidates()[:1]); err == nil || !strings.Contains(err.Error(), "atomically install") {
 		t.Fatalf("runAdmin() error = %v, want final install failure", err)
 	}
 	assertFileEquals(t, cfg.Kubeconfig, original)
@@ -751,13 +751,13 @@ func TestRunAdminFinalRenameFailureLeavesDestinationUnchanged(t *testing.T) {
 
 func baseAgentConfig(dir string) config {
 	return config{
-		Mode:          "agent",
+		Persona:       "read",
 		Kubectl:       "/tools/kubectl",
 		Kubelogin:     "/tools/kubectl-oidc_login",
 		CA:            "/repo/ca.crt",
 		Kubeconfig:    filepath.Join(dir, "config"),
 		OIDCIssuer:    "https://keycloak.example/realms/platform",
-		OIDCClientID:  "guardian-platform-agent",
+		OIDCClientID:  "kubernetes-device",
 		OIDCCacheDir:  filepath.Join(dir, "oidc-cache"),
 		KubeAPIServer: defaultKubeAPIServer,
 		ProbeTimeout:  time.Second,
@@ -768,7 +768,7 @@ func baseAdminConfig(dir string) config {
 	talmRoot := filepath.Join(dir, "talm")
 	_ = os.MkdirAll(talmRoot, 0o700)
 	return config{
-		Mode:          "admin",
+		Persona:       "root",
 		Kubectl:       "/tools/kubectl",
 		Talm:          "/tools/talm",
 		Talosctl:      "/tools/talosctl",

@@ -29,22 +29,31 @@ const (
 	defaultTalosEndpoint = "k8s.guardianintelligence.org"
 )
 
-// personas maps a rung of the persona ladder to the Keycloak identity that
-// carries it (src/infrastructure/base/cozystack/platform-admins.yaml). Only the
-// unattended rung is granted the offline_access realm role, so requesting the
-// scope anywhere else fails the code exchange outright ("Offline tokens not
-// allowed for the user or client") rather than silently yielding a session
-// token. Asking for a write persona is asking the operator to approve a device
-// login that will expire with its Keycloak session.
+// personas is the whole authentication surface: a rung of the ladder in
+// src/infrastructure/base/cozystack/platform-admins.yaml selects both the
+// identity and the credential mechanism, so there is no second axis to keep
+// consistent with it.
+//
+// The three OIDC rungs differ only by Keycloak identity. Only the unattended
+// one is granted the offline_access realm role, so requesting that scope
+// anywhere else fails the code exchange outright ("Offline tokens not allowed
+// for the user or client") rather than silently yielding a session token —
+// which is what makes a write rung cost an operator approval.
+//
+// `root` differs in mechanism rather than degree: x509 minted from the custody
+// bundle, so it is the only rung that still works when Keycloak is down, and
+// the only one that demands a reason and pages a human.
 type persona struct {
 	user       string
 	unattended bool
+	breakglass bool
 }
 
 var personas = map[string]persona{
 	"read":        {user: "platform-agent", unattended: true},
 	"write-basic": {user: "platform-write-basic"},
 	"write-all":   {user: "platform-write-all"},
+	"root":        {breakglass: true},
 }
 
 // personaFor resolves a persona name, treating the empty string as the default
@@ -66,7 +75,6 @@ func personaNames() []string {
 }
 
 type config struct {
-	Mode          string
 	Persona       string
 	Kubectl       string
 	Talm          string
@@ -229,8 +237,7 @@ func main() {
 
 func parseFlags() config {
 	var cfg config
-	flag.StringVar(&cfg.Mode, "mode", "", "authentication mode: agent or admin")
-	flag.StringVar(&cfg.Persona, "persona", defaultPersona, "persona to assume in agent mode: "+strings.Join(personaNames(), ", "))
+	flag.StringVar(&cfg.Persona, "persona", defaultPersona, "persona to assume: "+strings.Join(personaNames(), ", "))
 	flag.StringVar(&cfg.Kubectl, "kubectl", "", "path to kubectl")
 	flag.StringVar(&cfg.Talm, "talm", "", "path to Talm (admin mode)")
 	flag.StringVar(&cfg.Talosctl, "talosctl", "", "path to talosctl (admin mode)")
@@ -263,10 +270,10 @@ func (a *application) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if a.cfg.Mode == "agent" {
-		return a.runAgent(ctx, candidates)
+	if personaFor(a.cfg.Persona).breakglass {
+		return a.runBreakglass(ctx, candidates)
 	}
-	return a.runAdmin(ctx, candidates)
+	return a.runAgent(ctx, candidates)
 }
 
 func resolveKubeconfigPath(path string, fs fileSystem) (string, error) {
@@ -288,14 +295,12 @@ func resolveKubeconfigPath(path string, fs fileSystem) (string, error) {
 }
 
 func validateConfig(cfg config) error {
-	if cfg.Mode != "agent" && cfg.Mode != "admin" {
-		return errors.New("--mode must be agent or admin")
-	}
-	if cfg.Mode == "agent" && cfg.Persona != "" {
+	if cfg.Persona != "" {
 		if _, ok := personas[cfg.Persona]; !ok {
 			return fmt.Errorf("--persona must be one of %s", strings.Join(personaNames(), ", "))
 		}
 	}
+	breakglass := personaFor(cfg.Persona).breakglass
 	for _, required := range []struct {
 		name  string
 		value string
@@ -316,13 +321,13 @@ func validateConfig(cfg config) error {
 	if hasEndpoints != hasNodes {
 		return errors.New("--endpoints and --nodes must be supplied together")
 	}
-	if cfg.Mode == "agent" && hasEndpoints {
-		return errors.New("--endpoints and --nodes apply only to admin mode; use --kube-api-server for an agent override")
+	if !breakglass && hasEndpoints {
+		return errors.New("--endpoints and --nodes apply only to --persona=root; use --kube-api-server for an override")
 	}
 	if err := validateKubernetesAPI(cfg.KubeAPIServer); err != nil {
 		return fmt.Errorf("--kube-api-server: %w", err)
 	}
-	if cfg.Mode == "agent" {
+	if !breakglass {
 		for _, required := range []struct {
 			name  string
 			value string
@@ -366,7 +371,7 @@ func resolveCandidates(cfg config) ([]accessCandidate, error) {
 		return candidates, nil
 	}
 	candidate := accessCandidate{Name: clusterName, KubernetesAPI: cfg.KubeAPIServer}
-	if cfg.Mode == "admin" {
+	if personaFor(cfg.Persona).breakglass {
 		candidate.TalosEndpoint = defaultTalosEndpoint
 		candidate.TalosTarget = defaultTalosEndpoint
 	}
@@ -546,7 +551,7 @@ func (a *application) selectAgentCandidate(ctx context.Context, candidates []acc
 	return accessCandidate{}, fmt.Errorf("no reachable Kubernetes API candidate; attempts: %s", strings.Join(failures, "; "))
 }
 
-func (a *application) runAdmin(ctx context.Context, candidates []accessCandidate) error {
+func (a *application) runBreakglass(ctx context.Context, candidates []accessCandidate) error {
 	if err := a.runner.Run(ctx, a.cfg.Talm, []string{
 		"talosconfig",
 		"--root", a.cfg.TalmRoot,
