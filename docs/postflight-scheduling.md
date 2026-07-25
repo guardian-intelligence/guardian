@@ -1,24 +1,23 @@
 # Postflight scheduling and control plane
 
-Status: end-state architecture, 2026-07-24. The control plane is one
-deployable binary over Postgres and OpenBao. It owns truth, admission, plans,
-and evidence — and deliberately does not own workflow orchestration or
-runner selection, because GitHub already does.
+Status: end-state architecture, 2026-07-24.
+
+The control plane is one deployable binary over Postgres and OpenBao. It
+owns truth, admission, plans, and evidence; GitHub owns workflow
+orchestration and runner selection.
 
 ## Substrate rules
 
 - Postgres is the only durable state. Inbox/outbox rows, short transactions,
   idempotency keys, `FOR UPDATE SKIP LOCKED` workers. No workflow engine:
-  GitHub owns the job DAG and retries; an internal engine would duplicate an
-  authority we cannot override.
-- Four independently owned schemas, each advanced only by the controller
-  that owns it: **capacity** (hosts, slots, pool-member incarnations),
-  **demand and assignment** (job intents, plans, immutable bindings),
-  **storage** (scopes, generations, manifests, pointers), **usage**
-  (billable and reserved intervals). There is no state machine that joins
-  them — and no event-sourcing discipline across them. State lives in
-  ordinary mutable rows; append-only records exist only where they pay for
-  themselves: usage intervals and assignment identity.
+  GitHub owns the job DAG and retries.
+- Four independently owned schemas, each advanced only by its controller:
+  **capacity** (hosts, slots, pool-member incarnations), **demand and
+  assignment** (job intents, plans, immutable bindings), **storage**
+  (scopes, generations, manifests, pointers), **usage** (billable and
+  reserved intervals). No state machine joins them and no event-sourcing
+  discipline spans them: ordinary mutable rows, with append-only records
+  only for usage intervals and assignment identity.
 - Classes, hardware, and policy are rows, not enums. Adding a SKU, a
   hardware class, or a trust rule is data.
 
@@ -27,16 +26,15 @@ runner selection, because GitHub already does.
 Three layers, strongest last:
 
 1. **Webhooks are hints.** Delivery and order are unreliable — a `queued`
-   event can arrive minutes after the job was assigned, or never. Ingress
-   verifies the HMAC before parsing, records each delivery durably, and
-   treats every event as a trigger, not a fact.
+   event can arrive minutes after assignment, or never. Ingress verifies
+   the HMAC before parsing, records each delivery durably, and treats
+   events as triggers, not facts.
 2. **The REST API is truth.** Any event, gap, or deadline can trigger an
    authoritative refresh that constructs missing intent or corrects state.
 3. **The guest's observed assignment is final.** The binding reported from
    inside the selected guest at the `acquirejob` commit point outranks
-   anything GitHub's eventing implies (ADR 0013). On Confidential that
-   observation arrives over the attested session, so it is also
-   host-tamper-proof.
+   anything GitHub's eventing implies (ADR 0013). On Confidential it
+   arrives over the attested session, so it is also host-tamper-proof.
 
 ## Modules
 
@@ -59,11 +57,11 @@ Three layers, strongest last:
 The runner label is the product SKU is the runner class. Labels follow
 `postflight-<x>vcpu-<os>-<flavor>` (e.g.
 `postflight-16vcpu-ubuntu24-confidential`); the flavor selects the fleet.
-Admission resolves the label to a fleet and hardware class, checks tenant
-concurrency and trust class, and applies spend policy. The millisecond meter is always on; deal shapes
-(caps, commitments) are policy on top of the same meter. Webhook ingress
-never rejects on backpressure — the queue is the buffer, time-to-pickup is
-the SLO, and refusal happens only at the staleness deadline.
+Admission resolves the label to fleet and hardware class, checks tenant
+concurrency and trust class, and applies spend policy. The millisecond
+meter is always on; deal shapes (caps, commitments) are policy on top of
+it. Webhook ingress never rejects on backpressure: the queue is the buffer,
+time-to-pickup is the SLO, refusal happens only at the staleness deadline.
 
 Jobs requiring `/dev/kvm` or other non-TEE-only capabilities are admissible
 only to Turbo classes; the capability set lives on the class row.
@@ -73,9 +71,9 @@ only to Turbo classes; the capability set lives on the class row.
 Planning happens before GitHub chooses anything:
 
 1. A job intent exists (webhook or repair).
-2. Planning selects the **scope** (see [storage](postflight-storage.md)) and
-   the current compatible generation, and pushes the plan to every host of
-   the class with a listening slot.
+2. Planning selects the **scope** (see [storage](postflight-storage.md))
+   and the current compatible generation, and pushes the plan to every
+   host of the class with a listening slot.
 3. GitHub's broker hands the job to one connected listener; that guest
    reports the binding before Runner.Worker is created; the control plane
    joins it to the queued intent requiring a **unique** match — ambiguity
@@ -83,20 +81,20 @@ Planning happens before GitHub chooses anything:
 4. The assignment row's identity is written once and never rewritten; its
    state, timing, and results advance in place.
 
-There is no placement steering: the control plane cannot route a job to the
-host holding its warm generation, and does not try. Locality is emergent —
-a scope's generations live where its jobs ran — and an off-home win runs
-cold and re-establishes residency by sealing there. After `acquirejob` there
-is no provider give-back: losing the guest fails that attempt closed, and
-the assignment record never claims a transparent requeue.
+There is no placement steering: the control plane cannot route a job to
+the host holding its warm generation. Locality is emergent — a scope's
+generations live where its jobs ran — and an off-home win runs cold and
+re-establishes residency by sealing there. After `acquirejob` there is no
+provider give-back: losing the guest fails that attempt closed, and the
+assignment record never claims a transparent requeue.
 
 ## Pool supply
 
 Slots are refilled ahead of demand: launch the generic guest, verify
-attestation, establish the sealed session, mint the JIT configuration, start
-the listener — all before any customer job exists, so provisioning is never
-on the customer path. JIT configurations are single-use, exist only in guest
-RAM, and are minted per member, per registration.
+attestation, establish the sealed session, mint the JIT configuration,
+start the listener — all before any customer job exists. JIT
+configurations are single-use, exist only in guest RAM, and are minted per
+member, per registration.
 
 ## Reconcilers
 
@@ -111,23 +109,24 @@ Idempotent, independently scheduled, each owning one repair:
 - Retention: reap is a control-plane verb executed by hostd, driven by
   last-use, size, and pins.
 - Image and runner freshness: GitHub's runner deprecation clock and our
-  golden-image cadence both feed the same reconciler; a stale image drains
-  its members.
+  golden-image cadence feed the same reconciler; a stale image drains its
+  members.
 
 ## Canary and showback
 
-The canary is an ordinary customer in every mechanical respect: a real
-GitHub App installation, tenant, repository, and runner labels, dispatched on
-a schedule by the canary controller. Its workflows are customer workloads,
-never cluster administration. Every run traverses admission, planning,
-assignment, attestation, keys, storage, and metering, and accrues real
-showback usage that never settles.
+The canary is an ordinary customer: a real GitHub App installation,
+tenant, repository, and runner labels, dispatched on a schedule by the
+canary controller. Its workflows are customer workloads, never cluster
+administration. Every run traverses admission, planning, assignment,
+attestation, keys, storage, and metering, and accrues real showback usage
+that never settles.
 
-Standing scenarios: cold job; exact warm restore; injected recoverable CRIU
-incompatibility; integrity failure that must recycle; cancellation before
-and after acquisition; hostd restart with adoption; rollback-floor refusal;
-checkpoint timeout; runner and image version expiry. Each scenario asserts
-its span set (below), so a regression pages before a customer feels it.
+Standing scenarios: cold job; exact warm restore; injected recoverable
+CRIU incompatibility; integrity failure that must recycle; cancellation
+before and after acquisition; hostd restart with adoption; rollback-floor
+refusal; checkpoint timeout; runner and image version expiry. Each
+scenario asserts its span set (below), so a regression pages before a
+customer feels it.
 
 ## Metering and moments
 
@@ -139,8 +138,8 @@ Three moments partition every job's timeline:
 | `slot_reusable` | Donor destroyed, slot released for refill | Reserved-infrastructure time |
 | `generation_published` | Candidate promoted after attempt success | Reserved-infrastructure time |
 
-Sealing and publication always run on Guardian's clock, never the
-customer's. Intervals are append-only; corrections are compensating rows.
+Sealing and publication run on Guardian's clock, never the customer's.
+Intervals are append-only; corrections are compensating rows.
 
 Required hot-path spans (source-local monotonic clocks, realtime brackets
 for cross-machine joins; never subtract monotonics across boot IDs):

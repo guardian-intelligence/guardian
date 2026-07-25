@@ -1,9 +1,6 @@
 # Postflight production architecture
 
-Status: end-state architecture, 2026-07-24. This document and its companions
-describe the system Postflight converges to in production. They are living
-documents: when a decision changes, the document changes with it — no
-compatibility prose, no history.
+Status: end-state architecture, 2026-07-24.
 
 Companions:
 
@@ -18,19 +15,17 @@ Companions:
 
 ## Two SKU categories, three axes
 
-Postflight competes on exactly three axes, and each axis is owned by a
-deliberate piece of the architecture:
+Postflight competes on three axes:
 
 | Axis | How we win | Load-bearing architecture |
 | --- | --- | --- |
-| Speed | Warm starts measured in milliseconds, not minutes | CRIU process capsules + sticky ZFS disks (constant-time CoW clones) on high-clock bare metal |
+| Speed | Warm starts in milliseconds, not minutes | CRIU process capsules + sticky ZFS disks (constant-time CoW clones) on high-clock bare metal |
 | Security | Hardware-enforced job isolation a compromised host cannot pierce | SEV-SNP guests, in-guest keys, attestation-gated release |
 | Features | A full machine, not a stripped microVM | Full QEMU: complete device surface, `/dev/kvm`, dockerd parity, SSH, hot-attach |
 
-These axes are delivered by **two SKU categories on two separate clouds**,
-both powered by the same warmth substrate —
-[Lightning](postflight-lightning.md). SKUs are deliberately boring runner
-labels, `postflight-<x>vcpu-<os>-<flavor>`; the flavor selects the category.
+Two SKU categories on two separate clouds, both on the
+[Lightning](postflight-lightning.md) warmth substrate. SKUs are runner
+labels `postflight-<x>vcpu-<os>-<flavor>`; the flavor selects the category.
 The non-TEE flavor's public name is provisional (`turbo` until ruled
 otherwise):
 
@@ -45,22 +40,21 @@ otherwise):
 | `/dev/kvm` | Yes | No (impossible in SNP guests) |
 | Host trust | Trusted, hardened | Untrusted conduit |
 
-The split is hardware-honest: Ryzen parts have no SEV, so Turbo claims
-speed and isolation, never confidentiality; SNP forbids `/dev/kvm`, so
-KVM-needing jobs route to Turbo. Nobody else offers a TEE and KVM on one
-platform — we offer both, one label apart.
+The split is hardware-honest: Ryzen has no SEV, so Turbo claims speed and
+isolation, never confidentiality; SNP forbids `/dev/kvm`, so KVM-needing
+jobs route to Turbo. Nobody else offers a TEE and KVM on one platform.
 
-Full QEMU is not incidental. It is the only VMM that carries all three axes at
-once: SEV-SNP launch (security), virtio-scsi hot-attach of sticky disks in
-tens of milliseconds (speed), and the complete device model (features).
-"Custom QEMU" means a Guardian-built, pinned, attested **upstream** artifact
-plus a rigorously owned launch profile per hardware class — never a fork.
-Scheduling, storage, and lifecycle logic live in Guardian daemons.
+Full QEMU is the only VMM that carries all three axes: SEV-SNP launch,
+tens-of-milliseconds virtio-scsi hot-attach of sticky disks, and the
+complete device model. "Custom QEMU" means a Guardian-built, pinned,
+attested **upstream** artifact plus an owned launch profile per hardware
+class — never a fork. Scheduling, storage, and lifecycle logic live in
+Guardian daemons.
 
 ## The assembly
 
 Three Guardian processes, four pieces of infrastructure, one external
-scheduler. Nothing else.
+scheduler.
 
 ```text
 GitHub webhooks/API ──► Control plane ──plans/prefetch──► hostd (one per host)
@@ -80,79 +74,72 @@ GitHub webhooks/API ──► Control plane ──plans/prefetch──► hostd 
 
 | Component | Owns |
 | --- | --- |
-| GitHub | The workflow DAG, retries, and runner selection. The only workflow engine in the system. |
-| Control plane | One deployable binary. Admission, job plans, assignment truth, generation catalog, attested sessions, key custody, metering, reconcilers, the production canary. |
-| Postgres | Four independently owned schemas: capacity, demand/assignment, storage, usage. Ordinary relational rows — current state updates in place; history is kept only where it pays (usage intervals, assignment identity). Short transactions, idempotency keys, `FOR UPDATE SKIP LOCKED` workers. |
+| GitHub | Workflow DAG, retries, runner selection. The only workflow engine in the system. |
+| Control plane | One deployable binary: admission, job plans, assignment truth, generation catalog, attested sessions, key custody, metering, reconcilers, the production canary. |
+| Postgres | Four independently owned schemas: capacity, demand/assignment, storage, usage. Ordinary relational rows updated in place; history only where it pays (usage intervals, assignment identity). Short transactions, idempotency keys, `FOR UPDATE SKIP LOCKED` workers. |
 | OpenBao | Product-scoped Transit mount (`transit-postflight`): Turbo DEK wrap/unwrap, Confidential tenant key custody, generation-manifest signing, per-tenant crypto-erase. |
-| hostd | Per-host daemon. Slot actors, storage manager, QEMU supervision, checkpoint sealing, a crash-safe operation journal, a two-lane control stream. |
-| guestd | The only privileged agent in the guest. Attestation, LUKS and mounts, runner supervision, the Worker gate, the CRIU capsule, quiesce. |
+| hostd | Per-host daemon: slot actors, storage manager, QEMU supervision, checkpoint sealing, crash-safe operation journal, two-lane control stream. |
+| guestd | The only privileged agent in the guest: attestation, LUKS and mounts, runner supervision, the Worker gate, the CRIU capsule, quiesce. |
 | QEMU + OpenZFS | Mechanism, never policy. Pinned QEMU per fleet; node-local NVMe zpools; no network storage on any hot path. |
 
 ## Principles
 
-Each principle is stated so that a violation is observable.
-
 1. **GitHub is the scheduler.** No internal workflow engine duplicates its
-   DAG. Webhooks are hints (order and delivery are unreliable), the REST API
-   is truth, and the guest's locally observed assignment is the final
-   correctness fallback.
-2. **Assignment is observed, never predicted** (ADR 0013). All listeners stay
-   connected; GitHub picks one; the selected guest reports the binding before
-   Runner.Worker exists; plans are prepositioned so the winner needs no
-   round trip.
-3. **One job, one VM, destroy-and-refill.** Pool members are single-use. No
-   VM accepts a second job; completion, cancellation, loss, and unsafe
-   restore all recycle the guest.
+   DAG. Webhooks are hints (delivery and order are unreliable), the REST API
+   is truth, the guest's locally observed assignment is the final fallback.
+2. **Assignment is observed, never predicted** (ADR 0013). All listeners
+   stay connected; GitHub picks one; the selected guest reports the binding
+   before Runner.Worker exists; prepositioned plans mean the winner needs
+   no round trip.
+3. **One job, one VM, destroy-and-refill.** Pool members are single-use;
+   completion, cancellation, loss, and unsafe restore all recycle the guest.
 4. **Warm state is a regenerable cache, never data.** Any miss, host loss,
    image roll, or key rotation costs exactly one cold build. Nothing in the
    warmth path is backed up, migrated, or recovered.
 5. **One warmth mechanism.** CRIU process capsules on sticky zvol
-   generations, identical on both fleets. Whole-VM snapshots do not exist
-   anywhere: SNP forbids them, and a second mechanism would fork the seal
-   pipeline, the manifest, and the compatibility story.
+   generations, identical on both fleets. Whole-VM snapshots do not exist:
+   SNP forbids them, and a second mechanism would fork the seal pipeline,
+   the manifest, and the compatibility story.
 6. **The hot path belongs to one slot.** Between assignment observation and
-   Worker authorization, only the owning slot actor runs. No pool scan,
-   inventory report, GC, or control-plane convergence may appear on that
-   path.
-7. **Hardware is data.** New silicon (a hardware class, a new EPYC
-   generation, a new provider) is onboarded by adding rows, benching, and
-   setting attestation policy — never by writing code. Warmth is bounded by
+   Worker authorization, only the owning slot actor runs — no pool scan,
+   inventory report, GC, or control-plane convergence.
+7. **Hardware is data.** New silicon (a hardware class, an EPYC generation,
+   a provider) is onboarded by adding rows, benching, and setting
+   attestation policy, not by writing code. Warmth is bounded by
    compatibility classes and never crosses them.
 8. **Keys have one custodian per fleet.** Confidential: the CPU derives
-   volume keys in-guest and they never cross the guest boundary in either
-   direction. Turbo: `transit-postflight` custodies lineage DEKs and a
+   volume keys in-guest; they never cross the guest boundary in either
+   direction. Turbo: `transit-postflight` custodies lineage DEKs, and a
    tenant's Transit key is its crypto-erase switch.
 9. **On Confidential, the host is a conduit.** Secret-bearing traffic
-   between the control plane and the guest is sealed to attestation; hostd
-   relays ciphertext it cannot open. A compromised host reads nothing it was
-   not already entitled to operate.
+   between control plane and guest is sealed to attestation; hostd relays
+   ciphertext it cannot open. A compromised host reads nothing it was not
+   already entitled to operate.
 10. **Small schemas, not a god-object.** Capacity, demand/assignment,
     storage, and usage are independently owned Postgres schemas with small
-    per-resource state machines; each controller advances only the resource
-    it owns. This is ordinary relational state, not event sourcing: rows
-    update in place, and append-only records appear only where they earn
-    their keep — usage intervals and assignment identity.
+    per-resource state machines; each controller advances only its own
+    resource. Ordinary relational state, not event sourcing: rows update in
+    place; append-only records exist only for usage intervals and
+    assignment identity.
 11. **Every claim ships with a gate.** Speed claims carry benchmark
     provenance; security claims carry release gates with positive controls.
     A claim without a falsifier does not go on the website.
 12. **One IDL.** Every internal channel is generated from one protobuf
     package: control plane ↔ hostd is two gRPC streams per host
-    (assignment/plan traffic on one lane, inventory/telemetry on the other,
-    so urgent messages never queue behind bulk), and hostd ↔ guestd speaks
-    the same generated protocol over vsock. A hand-framed message anywhere
-    is a bug.
+    (assignment/plan on one lane, inventory/telemetry on the other, so
+    urgent messages never queue behind bulk); hostd ↔ guestd speaks the
+    same generated protocol over vsock. A hand-framed message anywhere is a
+    bug.
 
 ## What does not exist
 
-Deliberate absences, so they are not "discovered missing":
-
 - No workflow engine, no per-job Kubernetes objects, no host leases.
 - No whole-VM snapshots; no second warmth mechanism.
-- No cross-host generation replication and no key-release plane for moving
+- No cross-host generation replication, no key-release plane for moving
   warm state between chips: warmth is host-affine and a miss runs cold. The
   catalog and manifest keep the shape (wrapped-key reference, lineage,
-  pointer CAS) so portable warmth would be a key-plane change, not a schema
-  migration — it is adopted only on measured pull.
+  pointer CAS), so portable warmth would be a key-plane change, not a
+  schema migration — adopted only on measured pull.
 - No QEMU fork.
 - No durable object-storage tier for customer state (ADR 0005, ADR 0009):
-  sticky disks are node-local NVMe, and their loss is a cold build.
+  sticky disks are node-local NVMe; their loss is a cold build.

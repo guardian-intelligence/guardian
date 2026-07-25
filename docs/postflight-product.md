@@ -1,6 +1,6 @@
 # Postflight — Product Document v0.7
 
-2026-07-07. Source document for the sales training deck. Market and buyer claims are research-verified (July 2026); technical claims are verified against Postflight source or measured on our metal. Sections and lines marked ⚙ are internal — they inform the deck but never appear in customer material. (v0.7: renamed from Verself to Postflight by Guardian; content otherwise unchanged from v0.6.)
+2026-07-07. Source document for the sales training deck. Market and buyer claims are research-verified (July 2026); technical claims are verified against Postflight source or measured on our metal. Sections and lines marked ⚙ are internal — they inform the deck but never appear in customer material.
 
 ---
 
@@ -23,31 +23,31 @@ Differentiation, two claims only:
 >
 > Fast CI stopped being an infrastructure line item. It's a retention line item — and it's what your engineers tell their friends about.
 
-Evidence behind the story, for the proof slides:
+Evidence for the proof slides:
 
-- CI volume is growing ~60% *per quarter, per developer* (Blacksmith's measured figure) as agents multiply PR volume ahead of headcount. The feedback loop is compounding in the wrong direction on stock runners.
-- Real champions say it in their own words: "developers became incredibly vocal that the pipeline wasn't great" (Jane, 250 devs); "ran the pipeline 10 times to get one pass" (Clerk); "The amount we pay an engineer per minute is far higher than any CI minute" (Upbound, Director of Eng).
+- CI volume is growing ~60% *per quarter, per developer* (Blacksmith's measured figure) as agents multiply PR volume ahead of headcount.
+- Champions in their own words: "developers became incredibly vocal that the pipeline wasn't great" (Jane, 250 devs); "ran the pipeline 10 times to get one pass" (Clerk); "The amount we pay an engineer per minute is far higher than any CI minute" (Upbound, Director of Eng).
 - Pitch order: morale story → founder credibility → live demo ("your agent installs it before this meeting ends") → the benchmark → the meter and the commitment. Emotion, trust, proof, demo, deal. Infrastructure never leads.
 
 ## 3. The founder (why buy from me)
 
-Early customers aren't buying a runner; they're buying the person operating it. The bio is the warranty, and it maps onto this product with unusual precision:
+Early customers buy the person operating the runner. The bio maps onto the product:
 
-- **Shovon Hasan — capacity products are the day job.** At AWS, leads development of the consoles and developer tooling for EC2's capacity products — **Capacity Reservations, Spot, and Capacity Blocks for ML** — and builds the developer tooling used across ~25 engineers' surfaces including Bedrock inference (Mantle), Console to Code, Launch Wizard, and Fleet Manager. Deck translation: reserved capacity, spot markets, and metered ML capacity are what he builds at planetary scale; Postflight is the same product category, operated at boutique scale with one name on the pager.
-- **Agent-native practitioner, not tourist.** Daily agent-driven development since Cline in May 2025 — roughly twelve hours a day since. The product's user is an agent because the founder has spent over a year living that way; the skill and CLI are designed from use, not from spec. ⚙ Verbal-only color, never in writing: the reason moonlighting works is that he's automated his own day job (and much of his team's) with agents — the product's thesis, demonstrated on its founder. Great bar story, contractual/optics hazard in a deck.
-- **The FDE commitment, in writing:** Shovon personally forward-deploys into your org. Any bug, outage, latency regression, or janky feature is prioritized immediately — not triaged into a backlog. The headline for the common case: a fix ships within 24 hours. Founder-paged support isn't a support tier — it's an engineer on your team you don't have to hire.
+- **Shovon Hasan — capacity products are the day job.** At AWS, leads development of the consoles and developer tooling for EC2's capacity products — **Capacity Reservations, Spot, and Capacity Blocks for ML** — and builds the developer tooling used across ~25 engineers' surfaces including Bedrock inference (Mantle), Console to Code, Launch Wizard, and Fleet Manager. Deck translation: reserved capacity, spot markets, and metered ML capacity at planetary scale; Postflight is the same category at boutique scale with one name on the pager.
+- **Agent-native practitioner.** Daily agent-driven development since Cline in May 2025 — roughly twelve hours a day since. The skill and CLI are designed from use, not from spec. ⚙ Verbal-only color, never in writing: moonlighting works because he's automated his own day job (and much of his team's) with agents — the product's thesis, demonstrated on its founder. Bar story, contractual/optics hazard in a deck.
+- **The FDE commitment, in writing:** Shovon personally forward-deploys into your org. Any bug, outage, latency regression, or janky feature is prioritized immediately — not triaged into a backlog. Headline for the common case: a fix ships within 24 hours.
 
-⚙ The written form of the commitment is a standard severity-tiered support agreement, so the promise survives physics (the design-partner one-pager, ~half a page):
-  - **Sev-1 (CI down / security):** acknowledged within 1 hour; mitigation effort is continuous until restored; hourly status updates.
+⚙ The written form is a standard severity-tiered support agreement (the design-partner one-pager, ~half a page), so the promise survives physics:
+  - **Sev-1 (CI down / security):** acknowledged within 1 hour; continuous mitigation effort until restored; hourly status updates.
   - **Sev-2 (degraded performance, blocking bug):** acknowledged within 4 hours; workaround or mitigation within 24 hours.
-  - **Sev-3 (minor bug, janky feature):** prioritized ASAP; a committed timeline communicated within 24 hours.
-  Response and mitigation are on the clock; root-cause resolution is committed as continuous effort plus a communicated timeline — the industry-standard shape, generous at the tier levels because there are ten customers and one very motivated engineer.
+  - **Sev-3 (minor bug, janky feature):** prioritized ASAP; committed timeline communicated within 24 hours.
+  Response and mitigation are on the clock; root-cause resolution is continuous effort plus a communicated timeline.
 
-⚙ AWS status — resolved: Shovon is at AWS until outside investment (or revenue) makes Postflight the full-time job, and the material says so honestly rather than hiding it. Handle it *proactively* in every deal (see §9's talk track) — raised by us before they ask, paired with why the platform doesn't depend on founder-hours: the substrate is built for unattended operation and pages a human only when self-healing fails.
+⚙ AWS status — resolved: Shovon is at AWS until outside investment (or revenue) makes Postflight the full-time job, and the material says so. Handle it *proactively* in every deal (§9's talk track) — raised by us before they ask, paired with why the platform doesn't depend on founder-hours: the substrate runs unattended and pages a human only when self-healing fails.
 
 ## 4. Who buys (evidence-based ICP)
 
-Research across ~30 competitor case studies gives two real profiles and one conquest note. The dividing line is published by the incumbents themselves: **~75 engineers / ~$50M raised** is where self-serve breaks and commitments begin (Blacksmith: "around 75 engineers in, costs spike, flakiness grows, and scaling pains kick in").
+Research across ~30 competitor case studies gives two profiles and one conquest note. The dividing line is published by the incumbents themselves: **~75 engineers / ~$50M raised** is where self-serve breaks and commitments begin (Blacksmith: "around 75 engineers in, costs spike, flakiness grows, and scaling pains kick in").
 
 ### ICP-A — the compile-bound AI-era product team (land)
 
@@ -62,27 +62,27 @@ Research across ~30 competitor case studies gives two real profiles and one conq
 - **Firmographics:** 75–500 engineers, Series C → public. Often consolidating multiple CI systems; frequently a monorepo. Where Jane (250 devs, 35 teams), PostHog, PlanetScale, and the Namespace unicorn cluster (Ramp, Vanta, Verkada) live.
 - **Champion:** Staff DevOps/Platform Engineer or Director of Platform Engineering — measured on pipeline success rate, CI spend, and developer-survey sentiment. Stated fear, verbatim from the field: championing a small vendor and eating an outage ("both of these providers are essentially single person operations" is now a written objection). Vendor continuity is a buying criterion after two 2026 shutdowns — §9's bus-factor talk track is the counter.
 - **Economic buyer:** VP Eng/CTO signs; security gates. The enterprise tiers every incumbent gates (SSO, audit logs, SLA, invoice billing) are the artifacts of this procurement pass.
-- **Triggers, ranked:** (1) **self-hosted ARC/runner-fleet burnout** — the single best-evidenced negotiated-deal trigger ("sleepless nights keeping it running" — Finch); (2) **a trust rupture with an incumbent** — PlanetScale left Buildkite over a downtime demand; switching happens on trust, not price; (3) **agent-volume shock** hitting concurrency ceilings and budget predictability (Astral hit GitHub's org concurrency caps with a ~900-job matrix; Nominal's trigger was AI-tool PR growth).
+- **Triggers, ranked:** (1) **self-hosted ARC/runner-fleet burnout** — the best-evidenced negotiated-deal trigger ("sleepless nights keeping it running" — Finch); (2) **a trust rupture with an incumbent** — PlanetScale left Buildkite over a downtime demand; switching happens on trust, not price; (3) **agent-volume shock** hitting concurrency ceilings and budget predictability (Astral hit GitHub's org concurrency caps with a ~900-job matrix; Nominal's trigger was AI-tool PR growth).
 - **Disqualifiers:** teams whose real requirement is secrets-in-house orchestration at monorepo scale — they're leaving the GitHub Actions control plane entirely (Buildkite/RWX buyers; PagerDuty ran a 50-vendor eval to get there). That's our BYOC rung later (§13), not our hosted product today.
 
 ### Conquest notes (time-boxed)
 
-- **Cirrus Runners run-off:** contracts expire through 2026 with no first-party migration path. The macOS-primary mobile fleet is *not ours* (we don't do macOS — refer them out, honestly). The **Linux-slot** portion bought fixed monthly capacity for budget predictability — exactly our commitment shape.
+- **Cirrus Runners run-off:** contracts expire through 2026 with no first-party migration path. The macOS-primary mobile fleet is *not ours* (we don't do macOS — refer them out). The **Linux-slot** portion bought fixed monthly capacity for budget predictability — exactly our commitment shape.
 - **Blacksmith billing-surprise refugees** (June 2026 HN scandal): approachable with the spend-cap + commitment story.
 
-⚙ **Design-partner selection rule:** the first 10 come from ICP-A *behavior* (founder-reachable, one-hop approval, 5-minute install) but are selected for ICP-B *trajectory* — 30+ engineers, agent adoption visible, approaching the wall. The research's sharpest insight: **the self-serve champion and the committed buyer are the same person at two moments in company life.** The IC who felt the queue at 40 engineers runs the procurement pass at 150. Design partners are champion-farming; the $40k/mo customer is ICP-B, reached through references, and reference calls are how that segment actually buys (the biggest enterprise case studies in this market are deliberately anonymous).
+⚙ **Design-partner selection rule:** the first 10 come from ICP-A *behavior* (founder-reachable, one-hop approval, 5-minute install) but are selected for ICP-B *trajectory* — 30+ engineers, agent adoption visible, approaching the wall. The research's sharpest insight: **the self-serve champion and the committed buyer are the same person at two moments in company life.** The IC who felt the queue at 40 engineers runs the procurement pass at 150. Design partners are champion-farming; the $40k/mo customer is ICP-B, reached through references, and reference calls are how that segment buys (the biggest enterprise case studies in this market are anonymous).
 
-Where these people are: HN incident/pricing threads (the proven channel — every founder in this market sells in comments), RunsOn's public benchmarks used as neutral eval material, the GitHub pricing-revolt discussion threads, OSS maintainer blogs, and in person in SF.
+Where these people are: HN incident/pricing threads (the proven channel — every founder in this market sells in comments), RunsOn's public benchmarks used as neutral eval material, the GitHub pricing-revolt threads, OSS maintainer blogs, and in person in SF.
 
 ## 5. Pricing & packaging
 
-**The meter is always on: per-millisecond, for everyone.** The usage records meter guest workload time (not VM boot overhead) in milliseconds. Nobody else can say this — Blacksmith bills per-minute (a 10-second agent-triggered job bills as a full minute; users complain about exactly this), Depot per-second. Millisecond metering is the *fairness* story for the agent era: thousands of short agent-triggered jobs, billed for what they use.
+**The meter is always on: per-millisecond, for everyone.** Usage records meter guest workload time (not VM boot overhead) in milliseconds. Nobody else can say this — Blacksmith bills per-minute (a 10-second agent-triggered job bills as a full minute; users complain about exactly this), Depot per-second. Millisecond metering is the fairness story for the agent era: thousands of short agent-triggered jobs, billed for what they use.
 
-**What varies is the deal shape on top of the meter:**
+What varies is the deal shape on top of the meter:
 
-- **Metered (ICP-A, design partners):** usage-billed against the meter with **hard default spend caps** and real-time usage from the CLI. Raising a cap or adding reserved capacity requires explicit human approval — agent prepares, human ratifies. Billing surprises are a product defect, not a revenue line.
-- **Committed (ICP-B, negotiated bespoke):** committed spend in exchange for negotiated rates, **guaranteed reserved warm concurrency**, priority capacity, SLA, dedicated Slack, invoice billing. Settled against the same millisecond meter — a commitment is a floor and a guarantee, not a different billing system. Every enterprise deal is negotiated individually; there is no public enterprise rate card.
-- **Hardware isolation scales with the commitment.** At sufficient committed spend, we provision nodes that are exclusively yours — physically dedicated bare metal, operated by us. On our economics this is a strength, not an exception: capacity is only ever added when a concrete commitment pulls it, so a large deal literally comes with its own machines. The isolation ladder a buyer climbs: isolated VMs on shared metal (everyone) → reserved warm concurrency (committed) → dedicated nodes (larger commitment) → BYOC on their own metal (§13, later). Each rung is the same product with a stronger boundary.
+- **Metered (ICP-A, design partners):** usage-billed with **hard default spend caps** and real-time usage from the CLI. Raising a cap or adding reserved capacity requires explicit human approval — agent prepares, human ratifies. Billing surprises are a product defect, not a revenue line.
+- **Committed (ICP-B, negotiated bespoke):** committed spend in exchange for negotiated rates, **guaranteed reserved warm concurrency**, priority capacity, SLA, dedicated Slack, invoice billing. Settled against the same millisecond meter — a commitment is a floor and a guarantee, not a different billing system. Every enterprise deal is negotiated individually; no public enterprise rate card.
+- **Hardware isolation scales with the commitment.** At sufficient committed spend, we provision nodes that are exclusively yours — physically dedicated bare metal, operated by us. On our economics this is a strength: capacity is only added when a concrete commitment pulls it, so a large deal comes with its own machines. The isolation ladder: isolated VMs on shared metal (everyone) → reserved warm concurrency (committed) → dedicated nodes (larger commitment) → BYOC on their own metal (§13, later). Each rung is the same product with a stronger boundary.
 - **Included in every deal, not add-ons:** dedicated static egress IPs (a $100/IP/mo add-on at Blacksmith; for us also the shared-IP rate-limit fix, §12), the durable cache system, docker mirror, and the founder FDE commitment (§3).
 - **Design partners (first 10):** months free, founder paged on a Slack message, in exchange for written feedback and reference rights. **Payment instrument on file even when free** — free CI compute is the top cryptomining-abuse target; non-negotiable. 3-month pilot term; annual discussed after conversion.
 
@@ -92,9 +92,9 @@ Where these people are: HN incident/pricing threads (the proven channel — ever
 
 Surfaces, in the order customers meet them:
 
-1. **The GitHub App** — where the daily loop lives: PR comments and checks. Minimal permissions are the security headline: **Actions (read) + org Self-hosted runners (read/write) + Metadata (read)**. We cannot request access to secrets or code — GitHub doesn't offer it.
+1. **The GitHub App** — the daily loop: PR comments and checks. Minimal permissions are the security headline: **Actions (read) + org Self-hosted runners (read/write) + Metadata (read)**. We cannot request access to secrets or code — GitHub doesn't offer it.
 2. **The skill — a major part of the product, not documentation.** Humans never learn the CLI; they type `/postflight` (or ask their agent) and Claude or Codex does the rest: onboard, integrate a repo, diagnose a failure, pull usage, manage the org. Design principles:
-   - **User-invokable only by default, zero ambient context cost.** The skill occupies no tokens until called. An agent-native product must not tax the agent's context window to exist — this is a design requirement, not an accident.
+   - **User-invokable only by default, zero ambient context cost.** The skill occupies no tokens until called; an agent-native product must not tax the agent's context window to exist.
    - The skill encodes the golden paths and teaches the agent to self-serve diagnosis; it is versioned, shipped, and supported like the CLI itself (the §3 FDE commitment covers skill bugs explicitly).
    - Distribution: official marketplaces (Claude Code plugins, Codex plugins, Cursor rules — thin adapters generated from one source) plus `curl https://guardianintelligence.org/postflight/agents | sh`. The marketing page serves AGENTS.md to agent traffic.
 3. **The CLI — the substrate the skill drives.** Engineers can use it directly; agents always can: `--json` everywhere (JSON by default when stdout isn't a TTY), non-interactive by default, distinct exit codes, structured errors with remediation text, idempotent commands, a `postflight api` escape hatch.
@@ -103,11 +103,11 @@ Surfaces, in the order customers meet them:
 
 - `postflight jobs describe --json` returns agent-actionable failure context: failing step, exit code, log tail, diff-vs-last-green-on-main, cache-state deltas.
 - The GitHub App's failure comment carries the same context in agent-readable form — the agent in the customer's PR loop diagnoses without being asked.
-- The skill teaches the agent to pull context and propose the fix. Incumbents built dashboards for humans staring at logs; that's the behavior our story says is dying.
+- The skill teaches the agent to pull context and propose the fix. Incumbents built dashboards for humans staring at logs.
 
-**A verifiable install path — trust designed for the agent era.** The CLI and skill are cosign-signed with SLSA provenance and inspectable attestations. When an org tells its agent to install a new vendor's tooling, the agent verifies provenance *before executing anything*, and the security reviewer can audit that it happened. No CI incumbent offers an attestable install path today. ⚙ The machinery exists (keyless CI identities, offline-verifiable bundles); the skill's install step runs the verification by default — whether agents "appreciate" it is unfalsifiable, but security teams reviewing agent-driven installs measurably do, and it converts the scariest part of our pitch (new vendor + agent + binary) into a differentiator.
+**A verifiable install path.** The CLI and skill are cosign-signed with SLSA provenance and inspectable attestations. When an org tells its agent to install a new vendor's tooling, the agent verifies provenance *before executing anything*, and the security reviewer can audit that it happened. No CI incumbent offers an attestable install path today. ⚙ The machinery exists (keyless CI identities, offline-verifiable bundles); the skill's install step runs verification by default — whether agents "appreciate" it is unfalsifiable, but security teams reviewing agent-driven installs measurably do, and it converts the scariest part of our pitch (new vendor + agent + binary) into a differentiator.
 
-**Closing the console-shaped gaps headlessly** (each is a known failure mode of console-less products):
+**Closing the console-shaped gaps headlessly** (each a known failure mode of console-less products):
 
 - Finance: Stripe-hosted Customer Portal is the billing console (invoices, receipts, payment methods; email+OTP login for the CFO). Committed deals get invoices.
 - Security: audit-log export/streaming as a first-class CLI feature (SIEM export is what larger customers prefer anyway) + public trust page, which publishes the data-retention policy: everything we hold is encrypted, expires in 30 days, and is rebuildable from the customer's repo (§12).
@@ -145,14 +145,14 @@ The line: *"Take 5 minutes. Install our GitHub App, tell your agent to finish th
 **"GitHub Actions is fine."**
 "If CI isn't a felt pain, we're not a fit. But check three numbers: you're paying $0.006/min for roughly half the CPU we run; your cache caps at 10GB with 72-second round-trips; and 'stuck in Queued' has its own community megathreads. Ask your engineers — they know."
 
-**"We already use Depot."** *(will come up — they're the strongest incumbent)*
+**"We already use Depot."** *(will come up — the strongest incumbent)*
 "Depot's real strength is Docker builds — keep them for that if you love it. Where we win: metering (ms vs seconds), dedicated reserved capacity (their dedicated infra is a sales-gated enterprise checkbox), a cache that's a block device mounted before boot rather than a faster download, and an agent-debuggable surface. And you're a name to me, not a tier."
 
 **"You're one person."**
 "One person whose day job is EC2's capacity products — Capacity Reservations, Spot, Capacity Blocks for ML. Reserved compute with a meter is what I build at planetary scale; this is the boutique version with my name on the pager. Your CI runs on capacity I don't oversubscribe, the substrate is open source with drilled disaster recovery — cold-boot from nothing is a rehearsed procedure — and leaving us is a one-line `runs-on` flip back to `ubuntu-latest`; I'll hand you that runbook today. Plus the support commitment in writing: anything broken gets prioritized immediately, most fixes ship within 24 hours." ⚙ Hand the runbook over proactively; after two vendor shutdowns this year, continuity is a stated buying criterion and the runbook converts fear into trust.
 
 **"Isn't this a side project? You work at AWS."** *(raise it ourselves before they do)*
-"Yes — I'm at AWS until this business earns my full attention, and I'd rather you hear that from me. What it means in practice: the platform is built to run unattended — it detects its own degradation, heals what it can, and pages me only when it can't; my support commitment is in writing with severity tiers; and your exit is a one-line runbook I hand you on day one. And candidly: design partners like you are exactly how this becomes my full-time job." ⚙ Proactive honesty here is a trust weapon — a hidden day job discovered later kills the deal; a disclosed one with a written SLA and an exit runbook reads as integrity. Calibrate warmth; never the belligerent version.
+"Yes — I'm at AWS until this business earns my full attention, and I'd rather you hear that from me. In practice: the platform runs unattended — it detects its own degradation, heals what it can, and pages me only when it can't; my support commitment is in writing with severity tiers; and your exit is a one-line runbook I hand you on day one. And candidly: design partners like you are exactly how this becomes my full-time job." ⚙ Proactive honesty here is a trust weapon — a hidden day job discovered later kills the deal; a disclosed one with a written SLA and an exit runbook reads as integrity. Calibrate warmth; never the belligerent version.
 
 **"You want our agents installing a new vendor's binary?"**
 "That's the one install in your org your agent can *cryptographically verify first*. CLI and skill are cosign-signed with SLSA provenance; the skill's install step verifies attestations before executing, and your security team can audit that it happened. Compare that to the marketplace actions your CI already runs unverified."
@@ -188,21 +188,21 @@ WarpBuild's playbook: straight to SOC 2 Type II — 3-month window, ~$8–10k, ~
 
 ## 12. Technical foundation ⚙
 
-The warmth substrate underneath everything in this section is **Lightning** — technology doctrine, customer promise, and philosophy live in [postflight-lightning.md](postflight-lightning.md).
+The warmth substrate underneath this section is **Lightning** — doctrine and customer goals live in [postflight-lightning.md](postflight-lightning.md).
 
 **Warm pool on QEMU — measured on guardian-w1 NVMe 2026-07-05:** ~520ms full warm restore vs 8.8s cold; 8-parallel restores in 774ms wall (~10 VMs/s); disk hot-attach 227ms with revoke verified. Assignment = resume + clock resync (kvmclock + guest-agent time set) + identity + JIT config fetched in-guest (attempt-scoped token). One-shot VMs, always. Workers: plain Ubuntu 24.04, no Kubernetes — every resource is customer compute; host daemon as a systemd unit dialing out to the control plane (egress-only, workload identity). Shared-nothing nodes; org→node affinity keeps caches warm; placement is a control-plane decision.
 
-**Cache model — the moat (Postflight-source-verified semantics on the new QEMU mechanism):**
+**Cache model — the moat (Postflight-source-verified semantics on the QEMU mechanism):**
 
-- Source and caches are **local NVMe block devices, never a download protocol** — the customer-facing claim and the structural answer to every competitor's cache benchmark. **The core mechanism is hot-plugging zvols into running QEMU VMs** — tracer-proven 2026-07-05: 227ms attach, revoke verified, virtio-scsi controller must be in the VM template. Hot-plug is what turns a generic warm pooled VM into *your* VM at assignment time (the org isn't known at pool-boot), and is the expected path for non-enterprise customers; staging drives before boot remains available for golden-restore and dedicated-capacity paths. ⚙ The old "mount before boot, never hot-plug" invariant was the Firecracker-era design — do not carry it forward as a constraint.
+- Source and caches are **local NVMe block devices, never a download protocol** — the customer-facing claim and the structural answer to every competitor's cache benchmark. **The core mechanism is hot-plugging zvols into running QEMU VMs** — tracer-proven 2026-07-05: 227ms attach, revoke verified, virtio-scsi controller must be in the VM template. Hot-plug turns a generic warm pooled VM into *your* VM at assignment time (the org isn't known at pool-boot) and is the expected path for non-enterprise customers; staging drives before boot remains available for golden-restore and dedicated-capacity paths. ⚙ "Mount before boot, never hot-plug" is not a constraint — do not carry it as one.
 - `postflight/checkout`: guest fetches a single-commit git pack from the host's bare mirror, advances the durable workspace to the exact SHA, preserves untracked build state. Laptop-style incremental builds across CI runs.
 - `.postflight/cache.yml`: named cache mounts as ZFS zvol generations, CAS pointer promotion, scoped by branch + job-shape + trust class, 7-day TTL + watermark eviction.
 - Green on push-to-main → golden checkpoint: a CRIU process capsule atomically coupled to the zvol generation set (including `_work`), CAS-promoted. PR runs consume goldens; only protected-branch pushes create them.
 
-**Data lifecycle & isolation policy (canonical — agents keep getting this wrong; this is the reference):**
+**Data lifecycle & isolation policy (canonical reference — agents keep getting this wrong):**
 
-- **Golden images and durable caches: encrypted always, 30-day retention, NOT backed up by default.** They are *intentionally ephemeral* — rebuildable performance state derived from the customer's repo, never data of record. Losing one costs a cold build, never data. Backup of golden state is opt-in, not default.
-- **Customer workloads are isolated from each other in the hosted offering**: one-shot VM per job, per-org encrypted datasets, no guest-to-guest reachability, no cross-tenant state sharing. This — not "dedicated hardware" — is the universal claim. **Dedicated hardware is absolutely on the table, sized to the commitment** (a large enough deal gets its own nodes — capacity is added when a commitment pulls it); it is negotiated, never an implied default.
+- **Golden images and durable caches: encrypted always, 30-day retention, NOT backed up by default.** They are ephemeral by design — rebuildable performance state derived from the customer's repo, never data of record. Losing one costs a cold build, never data. Backup of golden state is opt-in.
+- **Customer workloads are isolated from each other in the hosted offering:** one-shot VM per job, per-org encrypted datasets, no guest-to-guest reachability, no cross-tenant state sharing. This — not "dedicated hardware" — is the universal claim. **Dedicated hardware is on the table, sized to the commitment** (a large enough deal gets its own nodes — capacity is added when a commitment pulls it); it is negotiated, never an implied default.
 - Sales upside of the policy, use it: "everything we hold of yours is encrypted, expires in 30 days, and is rebuildable from your repo — we are structurally a bad place to steal data from."
 
 **Day-one table stakes** (each breaks the product in customer-blames-us ways):
@@ -226,7 +226,7 @@ read&write + Self-hosted runners (org): read&write + Metadata: read +
 2. **Next — direct sandbox API for agents:** same pool, no GitHub handshake; where <100ms spawn lives and Daytona is the competitor. Per-ms metering and snapshot/fork primitives already fit. No CI decision may foreclose this (lease API stays product-agnostic).
 3. **After POC — BYOC:** license the control plane + scheduling onto customer compute; the installable artifact is the dogfooded worker bootstrap, dial-out egress-only. Competitive set becomes Buildkite hybrid / RunsOn / Actuated. §9's qualified-out Buildkite prospects are this rung's pipeline.
 
-The market is converging on this exact ladder (Depot CI → agent sandboxes; OpenAI × Cirrus). CI revenue funds the pool; the pool is the sandbox product; the installer is the BYOC product.
+The market is converging on this ladder (Depot CI → agent sandboxes; OpenAI × Cirrus). CI revenue funds the pool; the pool is the sandbox product; the installer is the BYOC product.
 
 ## 14. Open decisions
 
@@ -254,13 +254,13 @@ Resolved: 3-month pilot term · name stays Postflight for now (label namespace +
 
 ## 16. Sandbox Isolation Policy
 
-Sandbox isolation doctrine (multi-tenant QEMU), the below is advisory for when we stand up our QEMU warm pool:
+Sandbox isolation doctrine (multi-tenant QEMU), advisory for when we stand up our QEMU warm pool:
 
 - Customer-facing security claims, the threat model, and the release gates
   are defined in [postflight-security-model.md](postflight-security-model.md).
 - Trust model: every sandbox guest is hostile and may hold a kernel exploit. The isolation boundary is KVM plus a jailed VMM, never namespaces alone — containers share a kernel and a kernel escape is a fleet escape. Untrusted-code planes (customer CI, agent sandboxes) run only on workload nodes, never on control-plane or product hosts. Tenants are always isolated from each other; whether the worker host itself is trusted is per SKU category — trusted and hardened on Turbo, an untrusted conduit on Confidential (see the security model).
 - The bar: meet AWS Firecracker's software-isolation posture, plus SEV-SNP guests with measurement-bound at-rest encryption once the rs4 workload plane is verified (SEV is off in BIOS on the f4 boxes). Runtime memory confidentiality is distinct from build/release attestation (which needs no TEE).
-- VMM substrate: QEMU/KVM with `-cpu host` and the existing pinned `pc-q35-8.2` machine ABI. `microvm` and Cloud Hypervisor are rejected for the first SNP release so one launch-measurement and conformance tuple can stabilize; their reconsideration gate is recorded in the security model. The jail and network model remain VMM-agnostic.
+- VMM substrate: QEMU/KVM with `-cpu host` and the pinned `pc-q35-8.2` machine ABI. `microvm` and Cloud Hypervisor are rejected for the first SNP release so one launch-measurement and conformance tuple can stabilize; their reconsideration gate is recorded in the security model. The jail and network model remain VMM-agnostic.
 - Device-surface minimization: virtio-only (virtio-blk, virtio-net, virtio-serial/vsock). `-nodefaults`, `-no-user-config`, `-nographic`. No USB, floppy, CD, audio, or emulated legacy NIC/block. Patch QEMU device-emulation CVEs on the critical path — the standing tax of a C VMM.
 - VMM process jail: each QEMU runs (1) as a dedicated unprivileged uid/gid, never root — the worker creates the TAP, then the process drops privilege; (2) under `-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny` plus a supervisor seccomp-bpf whitelist with no_new_privs; (3) in its own user/mount/net/pid namespaces, pivot_root'd into a minimal rootfs holding only its drives and sockets; (4) under a per-VM AppArmor/SELinux (sVirt-style) label so an escaped QEMU cannot reach another tenant's disk; (5) in a cgroup v2 slice with memory.max/high, cpu.max, pids.max, io.max — PSI on the slice is the host saturation signal.
 - Network isolation: one TAP + dedicated netns per VM, default-deny egress with explicit NAT, anti-spoof nftables on MAC+IP, per-VM bandwidth cap, no inter-VM L2 reachability, metadata reachable only at our controlled link-local endpoint. Ape OpenComputer's per-VM /30 but terminate it in a netns, not a shared bridge.
