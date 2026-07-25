@@ -1,13 +1,13 @@
 # Install-matrix canary for the postflight CLI: every six hours, walk the
 # channel lanes the release manifest pins and exercise the install paths a
-# user actually takes — the public GitHub release assets and the curl
-# installer served from the site — over the public internet, with the same
-# cosign verification the docs tell users to run. Nothing here gates a
-# promotion; the deep-test runner does that before a release exists. This
-# watches what is already published, so a broken checksums.txt, an expired
-# signature, a release whose body no longer matches the pinned digest, or an
-# installer that stops resolving a channel pages instead of waiting for a
-# user to hit it.
+# user actually takes — the public GitHub release assets, the curl installer
+# served from the site, whichever of them METHODS selects — over the public
+# internet, with the same cosign verification the docs tell users to run.
+# Nothing here gates a promotion; the deep-test runner does that before a
+# release exists. This watches what is already published, so a broken
+# checksums.txt, an expired signature, a release whose body no longer matches
+# the pinned digest, or an installer that stops resolving a channel pages
+# instead of waiting for a user to hit it.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -101,24 +101,35 @@ data:
     release=""
     release_version=""
 
+    # The variable half of the row is handed to ClickHouse as JSON for it to
+    # parse rather than escaped into a SQL literal: detail carries raw command
+    # output, and a backslash inside a string literal is an escape ClickHouse
+    # consumes — a stored props that no longer parses, on exactly the failing
+    # rows an operator reads during an incident.
+    INSERT_EVENT="INSERT INTO guardian_analytics.events
+        (server_ts, site, event_name, trust_tier, schema_version, path,
+         status, duration_ms, props)
+      SELECT now64(3), 'postflight-cli', 'cli.install_canary.method',
+             'server_observed', 1, '/postflight', status, duration_ms, props
+      FROM input('status UInt16, duration_ms UInt32, props String')
+      FORMAT JSONEachRow"
+
     record() {
       local channel="$1" method="$2" ok="$3" ms="$4" note="$5"
       push "guardian_cli_install_canary_success{channel=\"$channel\",method=\"$method\",platform=\"$PLATFORM\"} $ok"
-      local props status
-      props="$(jq -cn --arg channel "$channel" --arg method "$method" \
+      local row status=500
+      [ "$ok" = "1" ] && status=200
+      row="$(jq -cn --arg channel "$channel" --arg method "$method" \
         --arg platform "$PLATFORM" --arg tag "$tag" --arg digest "$digest" \
         --arg detail "$note" --argjson ok "$ok" \
-        '{channel: $channel, method: $method, platform: $platform,
-          ok: ($ok == 1), tag: $tag, digest: $digest, detail: $detail}')"
-      status=500
-      [ "$ok" = "1" ] && status=200
-      curl -fsS --max-time 20 -u "$CH_USER:$CH_PASSWORD" "$CLICKHOUSE" --data-binary \
-        "INSERT INTO guardian_analytics.events
-           (server_ts, site, event_name, trust_tier, schema_version, path,
-            status, duration_ms, props)
-         VALUES (now64(3), 'postflight-cli', 'cli.install_canary.method',
-                 'server_observed', 1, '/postflight', $status, $ms,
-                 '${props//\'/\'\'}')" >/dev/null \
+        --argjson status "$status" --argjson ms "$ms" \
+        '{status: $status, duration_ms: $ms,
+          props: ({channel: $channel, method: $method, platform: $platform,
+                   ok: ($ok == 1), tag: $tag, digest: $digest,
+                   detail: $detail} | tojson)}')"
+      printf '%s\n%s\n' "$INSERT_EVENT" "$row" \
+        | curl -fsS --max-time 20 -u "$CH_USER:$CH_PASSWORD" "$CLICKHOUSE" \
+            --data-binary @- >/dev/null \
         || { echo "clickhouse insert failed for $channel/$method"; events_failed=1; }
     }
 
@@ -234,8 +245,23 @@ data:
       exit 1
     fi
 
-    releases="$(curl -fsSL --max-time 60 -H 'Accept: application/vnd.github+json' \
-      "$RELEASES_API?per_page=100")" || { echo "GitHub release listing failed"; exit 1; }
+    # The listing pages newest-first over every release in the repo, CLI and
+    # data drop alike, so an rc or stable cut sinks below page one long before
+    # it stops being the channel's newest. Each page is projected down to the
+    # fields the matrix reads before it is accumulated.
+    releases='[]'
+    page=1
+    while [ "$page" -le 20 ]; do
+      body="$(curl -fsSL --max-time 60 -H 'Accept: application/vnd.github+json' \
+        "$RELEASES_API?per_page=100&page=$page")" \
+        || { echo "GitHub release listing failed at page $page"; exit 1; }
+      trimmed="$(jq -c '[ .[] | {tag_name, created_at, published_at, body,
+        assets: [ .assets[] | {name, browser_download_url} ]} ]' <<<"$body")" \
+        || { echo "GitHub release listing page $page is not the expected shape"; exit 1; }
+      releases="$(printf '%s\n%s\n' "$releases" "$trimmed" | jq -cs add)"
+      [ "$(jq length <<<"$trimmed")" -lt 100 ] && break
+      page=$((page + 1))
+    done
 
     cells=0
     failures=0
@@ -380,8 +406,12 @@ spec:
               image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
               command: ["/bin/bash", "/scripts/canary.sh"]
               env:
+                # installer-script joins the matrix once
+                # https://guardianintelligence.org/postflight/install.sh
+                # answers 200 from the apex; until then a cell for it would
+                # page critical on a URL that is merely not deployed yet.
                 - name: METHODS
-                  value: "release-assets installer-script"
+                  value: "release-assets"
                 - name: INSTALLER_URL
                   value: https://guardianintelligence.org/postflight/install.sh
                 - name: TARGETS
