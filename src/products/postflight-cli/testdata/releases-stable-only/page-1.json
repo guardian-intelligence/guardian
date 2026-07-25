@@ -1,0 +1,12 @@
+[
+  {
+    "html_url": "https://github.com/guardian-intelligence/guardian/releases/tag/postflight-cli%2Fv1.0.0",
+    "id": 900000021,
+    "tag_name": "postflight-cli/v1.0.0",
+    "name": "postflight CLI v1.0.0",
+    "draft": false,
+    "prerelease": false,
+    "assets": [{"name": "postflight-x86_64-unknown-linux-musl", "size": 4194304}],
+    "body": "stable"
+  }
+]

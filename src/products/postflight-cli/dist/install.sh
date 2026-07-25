@@ -15,7 +15,9 @@
 set -eu
 
 REPO="guardian-intelligence/guardian"
-RELEASES_URL="https://api.github.com/repos/$REPO/releases?per_page=100"
+RELEASES_URL="https://api.github.com/repos/$REPO/releases"
+RELEASES_PER_PAGE=100
+RELEASES_MAX_PAGES=10
 DOWNLOAD_URL="https://github.com/$REPO/releases/download"
 TAG_PREFIX="postflight-cli"
 BUILD_IDENTITY="https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main"
@@ -25,6 +27,7 @@ CHANNELS="stable rc nightly"
 channel="${POSTFLIGHT_CHANNEL:-stable}"
 install_dir="${POSTFLIGHT_INSTALL_DIR:-}"
 require_verification=no
+print_tag=no
 
 log() {
   printf 'postflight: %s\n' "$1" >&2
@@ -43,6 +46,8 @@ options:
   --channel <ch>          release channel to install from (default: stable)
   --require-verification  fail unless cosign is available to check the
                           signature; without it a missing cosign only warns
+  --print-tag             print the release tag the channel resolves to and
+                          exit without installing anything
   -h, --help              print this message
 
 environment:
@@ -64,6 +69,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --require-verification)
       require_verification=yes
+      shift
+      ;;
+    --print-tag)
+      print_tag=yes
       shift
       ;;
     -h | --help)
@@ -127,28 +136,73 @@ esac
 
 # BSD mktemp (macOS) rejects a bare -d, so the template is not optional.
 work="$(mktemp -d "${TMPDIR:-/tmp}/postflight-install.XXXXXX")"
-trap 'rm -rf "$work"' EXIT INT TERM
+staged=""
+cleanup() {
+  rm -rf "$work"
+  if [ -n "$staged" ]; then
+    rm -f "$staged"
+  fi
+}
+trap cleanup EXIT INT TERM
 
 fetch() {
   curl -fsSL --proto '=https' --tlsv1.2 --retry 3 -o "$2" "$1"
 }
 
+# POSTFLIGHT_RELEASES_DIR replaces the API with a directory of page-<n>.json
+# fixtures so the channel-resolution rules can be tested without a network.
+releases_page() {
+  if [ -n "${POSTFLIGHT_RELEASES_DIR:-}" ]; then
+    if [ -f "$POSTFLIGHT_RELEASES_DIR/page-$1.json" ]; then
+      cat "$POSTFLIGHT_RELEASES_DIR/page-$1.json" > "$2"
+    else
+      printf '[]\n' > "$2"
+    fi
+    return 0
+  fi
+  fetch "$RELEASES_URL?per_page=$RELEASES_PER_PAGE&page=$1" "$2"
+}
+
 # /releases/latest is unusable here: every release so far is a prerelease, and
 # the repository also carries unrelated data drops, so the channel's newest
 # release is whichever listed release matches its tag shape first (the API
-# returns releases newest-first).
-if ! fetch "$RELEASES_URL" "$work/releases.json"; then
-  fail "could not list releases from $RELEASES_URL (GitHub rate-limits unauthenticated callers to 60 requests per hour per IP)"
-fi
+# returns releases newest-first). Pages are pulled one at a time and kept for
+# the rest of the run, so the common case costs a single request against the
+# 60/hour unauthenticated budget and the fallback channel enumeration costs
+# none.
+last_page=0
 
-tr ',' '\n' < "$work/releases.json" \
-  | sed -n \
-    -e 's/^[[{[:space:]]*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/tag \1/p' \
-    -e 's/^[[{[:space:]]*"prerelease"[[:space:]]*:[[:space:]]*true.*/pre true/p' \
-    -e 's/^[[{[:space:]]*"prerelease"[[:space:]]*:[[:space:]]*false.*/pre false/p' \
-    > "$work/fields"
-
-[ -s "$work/fields" ] || fail "could not read any release from $RELEASES_URL"
+load_page() {
+  page_no="$1"
+  [ "$page_no" -le "$RELEASES_MAX_PAGES" ] || return 1
+  if [ "$last_page" -ne 0 ] && [ "$page_no" -gt "$last_page" ]; then
+    return 1
+  fi
+  page_fields="$work/fields.$page_no"
+  if [ -f "$page_fields" ]; then
+    return 0
+  fi
+  page_json="$work/releases.$page_no.json"
+  releases_page "$page_no" "$page_json" \
+    || fail "could not list releases from $RELEASES_URL (GitHub rate-limits unauthenticated callers to 60 requests per hour per IP)"
+  tr ',' '\n' < "$page_json" \
+    | sed -n \
+      -e 's/^[[{[:space:]]*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/tag \1/p' \
+      -e 's/^[[{[:space:]]*"prerelease"[[:space:]]*:[[:space:]]*true.*/pre true/p' \
+      -e 's/^[[{[:space:]]*"prerelease"[[:space:]]*:[[:space:]]*false.*/pre false/p' \
+      > "$page_fields"
+  page_tags="$(grep -c '^tag ' "$page_fields" || true)"
+  if [ "$page_tags" -eq 0 ]; then
+    rm -f "$page_fields"
+    [ "$page_no" -gt 1 ] || fail "could not read any release from $RELEASES_URL"
+    last_page=$((page_no - 1))
+    return 1
+  fi
+  if [ "$page_tags" -lt "$RELEASES_PER_PAGE" ]; then
+    last_page="$page_no"
+  fi
+  return 0
+}
 
 matches_channel() {
   case "$1" in
@@ -171,29 +225,45 @@ matches_channel() {
   return 1
 }
 
-resolve_tag() {
-  resolve_channel="$1"
-  resolve_tag_name=""
+scan_page() {
+  scan_channel="$1"
+  scan_tag=""
   field=""
   while IFS= read -r field || [ -n "$field" ]; do
     case "$field" in
       "tag "*)
-        resolve_tag_name="${field#tag }"
+        scan_tag="${field#tag }"
         ;;
       "pre "*)
-        if [ -n "$resolve_tag_name" ] \
-          && matches_channel "$resolve_channel" "$resolve_tag_name" "${field#pre }"; then
-          printf '%s\n' "$resolve_tag_name"
+        if [ -n "$scan_tag" ] \
+          && matches_channel "$scan_channel" "$scan_tag" "${field#pre }"; then
+          printf '%s\n' "$scan_tag"
           return 0
         fi
-        resolve_tag_name=""
+        scan_tag=""
         ;;
     esac
-  done < "$work/fields"
+  done < "$2"
   return 1
 }
 
-if ! tag="$(resolve_tag "$channel")"; then
+# Callers redirect stdout rather than using a command substitution: the page
+# bookkeeping this fills in must survive into the next call, and a subshell
+# would drop it.
+resolve_tag() {
+  resolve_page=1
+  while load_page "$resolve_page"; do
+    if scan_page "$1" "$work/fields.$resolve_page"; then
+      return 0
+    fi
+    resolve_page=$((resolve_page + 1))
+  done
+  return 1
+}
+
+if resolve_tag "$channel" > "$work/tag"; then
+  tag="$(cat "$work/tag")"
+else
   available=""
   for candidate in $CHANNELS; do
     if resolve_tag "$candidate" > /dev/null; then
@@ -201,10 +271,17 @@ if ! tag="$(resolve_tag "$channel")"; then
     fi
   done
   [ -n "$available" ] || fail "no postflight CLI release exists on any channel yet"
+  suggested="${available# }"
+  suggested="${suggested%% *}"
   fail "no release on the '$channel' channel yet. Available channels:$available
 Install from one explicitly, for example:
 
-  curl -fsSL https://guardianintelligence.org/postflight/install.sh | sh -s -- --channel nightly"
+  curl -fsSL https://guardianintelligence.org/postflight/install.sh | sh -s -- --channel $suggested"
+fi
+
+if [ "$print_tag" = yes ]; then
+  printf '%s\n' "$tag"
+  exit 0
 fi
 
 log "installing $tag ($target)"
@@ -240,9 +317,17 @@ fi
 
 mkdir -p "$install_dir" || fail "could not create $install_dir"
 chmod 0755 "$work/$asset"
-mv "$work/$asset" "$install_dir/postflight" || fail "could not write $install_dir/postflight"
 
-version="$("$install_dir/postflight" version)" || fail "$install_dir/postflight was installed but does not run"
+# The binary is smoke-tested under a staged name inside the destination
+# directory: it only takes its final name once it has proven it runs, so a
+# broken download cannot shadow a working install, and TMPDIR being mounted
+# noexec (common on hardened hosts) cannot fail the test either.
+staged="$install_dir/.postflight.install.$$"
+mv "$work/$asset" "$staged" || fail "could not write to $install_dir"
+version="$("$staged" version)" || fail "the $target binary from $tag does not run on this machine"
+mv "$staged" "$install_dir/postflight" || fail "could not write $install_dir/postflight"
+staged=""
+
 log "installed $version to $install_dir/postflight"
 
 case ":${PATH:-}:" in
