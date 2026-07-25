@@ -871,8 +871,8 @@
           "REPO_MAPPING:rules_rust+,bazel_skylib bazel_skylib+",
           "REPO_MAPPING:rules_rust+,bazel_tools bazel_tools",
           "REPO_MAPPING:rules_rust+,rules_cc rules_cc+",
-          "FILE:@@//src/products/postflight-cli/Cargo.lock 2bc2fd0a390f166af5b77bd26b4e80c8b043afb63481c55f07b2ba444d1c124e",
-          "FILE:@@//src/products/postflight-cli/Cargo.toml 5b23d698b21883b5a151ef8f1638390743912d1621709beea225718eb17e33d0"
+          "FILE:@@//src/products/postflight-cli/Cargo.lock a104f5f3ca530999f27eec1d3fc1698185832e480260f85533244729247e769d",
+          "FILE:@@//src/products/postflight-cli/Cargo.toml a35bf84fbc1a65eda1d97e02297eb4f515ec7f103859e251eceb33df1cbc5613"
         ],
         "generatedRepoSpecs": {
           "postflight_cli_crates": {
