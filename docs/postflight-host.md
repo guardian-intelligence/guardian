@@ -21,7 +21,7 @@ scan, or wait on convergence outside the owning slot.
 
 | Controller | Owns |
 | --- | --- |
-| ControlStream | One persistent, host-initiated, mutually authenticated stream to the control plane. Two priority classes: assignment and plan traffic preempts inventory and telemetry. On Confidential it additionally relays sealed frames it cannot open. |
+| ControlStream | Two persistent, host-initiated, mutually authenticated gRPC streams to the control plane: assignment and plan traffic on one lane, inventory and telemetry on the other, so urgent messages never queue behind bulk. On Confidential it additionally relays sealed frames it cannot open. |
 | SlotGovernor | The host's fixed slots: CPU sets, memory, NUMA, cgroup limits, SMT policy. Slots are configured at provisioning and never overcommitted. |
 | SlotActor (one per slot) | A serialized event loop owning one slot's entire lifecycle: refill, rendezvous, authorization, seal, destroy. A hung operation in one slot stalls only that slot. |
 | AssignmentRouter | Consumes the guest-observed assignment and resolves the prepositioned plan locally — no network round trip stands between assignment and storage work. |
@@ -61,9 +61,10 @@ touches a running job.
 ## The guest contract
 
 guestd is the only privileged agent inside the guest, supervised by nothing
-(a dead guestd is a dead VM). The single guest↔host channel is a closed
-vsock protocol with bounded message sizes — the guest is untrusted input to
-the host, and on Confidential the host is untrusted transport to the guest.
+(a dead guestd is a dead VM). The single guest↔host channel is the system's
+shared protobuf protocol carried over vsock, with bounded message sizes —
+the guest is untrusted input to the host, and on Confidential the host is
+untrusted transport to the guest.
 
 Boot ladder, before any customer demand exists:
 

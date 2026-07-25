@@ -76,7 +76,7 @@ Where these people are: HN incident/pricing threads (the proven channel — ever
 
 ## 5. Pricing & packaging
 
-**The meter is always on: per-millisecond, for everyone.** The ledger meters guest workload time (not VM boot overhead) in milliseconds. Nobody else can say this — Blacksmith bills per-minute (a 10-second agent-triggered job bills as a full minute; users complain about exactly this), Depot per-second. Millisecond metering is the *fairness* story for the agent era: thousands of short agent-triggered jobs, billed for what they use.
+**The meter is always on: per-millisecond, for everyone.** The usage records meter guest workload time (not VM boot overhead) in milliseconds. Nobody else can say this — Blacksmith bills per-minute (a 10-second agent-triggered job bills as a full minute; users complain about exactly this), Depot per-second. Millisecond metering is the *fairness* story for the agent era: thousands of short agent-triggered jobs, billed for what they use.
 
 **What varies is the deal shape on top of the meter:**
 

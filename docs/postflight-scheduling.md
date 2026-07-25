@@ -11,11 +11,14 @@ runner selection, because GitHub already does.
   idempotency keys, `FOR UPDATE SKIP LOCKED` workers. No workflow engine:
   GitHub owns the job DAG and retries; an internal engine would duplicate an
   authority we cannot override.
-- Four independent ledgers, each advanced only by the controller that owns
-  it: **capacity** (hosts, slots, pool-member incarnations), **demand and
-  assignment** (job intents, plans, immutable bindings), **storage** (scopes,
-  generations, manifests, pointers), **usage** (billable and reserved
-  intervals). There is no state machine that joins them.
+- Four independently owned schemas, each advanced only by the controller
+  that owns it: **capacity** (hosts, slots, pool-member incarnations),
+  **demand and assignment** (job intents, plans, immutable bindings),
+  **storage** (scopes, generations, manifests, pointers), **usage**
+  (billable and reserved intervals). There is no state machine that joins
+  them — and no event-sourcing discipline across them. State lives in
+  ordinary mutable rows; append-only records exist only where they pay for
+  themselves: usage intervals and assignment identity.
 - Classes, hardware, and policy are rows, not enums. Adding a SKU, a
   hardware class, or a trust rule is data.
 
@@ -25,7 +28,7 @@ Three layers, strongest last:
 
 1. **Webhooks are hints.** Delivery and order are unreliable — a `queued`
    event can arrive minutes after the job was assigned, or never. Ingress
-   verifies the HMAC before parsing, records a durable delivery ledger, and
+   verifies the HMAC before parsing, records each delivery durably, and
    treats every event as a trigger, not a fact.
 2. **The REST API is truth.** Any event, gap, or deadline can trigger an
    authoritative refresh that constructs missing intent or corrects state.
@@ -39,7 +42,7 @@ Three layers, strongest last:
 
 | Module | Responsibility |
 | --- | --- |
-| GitHub ingress | Webhook inbox, signature verification, delivery ledger, API truth repair, cancellation and completion tracking |
+| GitHub ingress | Webhook inbox, signature verification, delivery records, API truth repair, cancellation and completion tracking |
 | Admission | Label → runner class → fleet + hardware class routing; tenant concurrency; trust class; spend policy against the always-on meter |
 | Capacity | Hosts, slots, pool-member incarnations, cordon/drain/offline; per-site inventories |
 | Planning | Select the scope and a compatible generation for a job intent — never a VM; push small plans to every eligible host |
@@ -77,15 +80,15 @@ Planning happens before GitHub chooses anything:
    reports the binding before Runner.Worker is created; the control plane
    joins it to the queued intent requiring a **unique** match — ambiguity
    recycles the member rather than guessing.
-4. The assignment row is append-oriented: identity never rewrites, only
-   state, timing, and results advance.
+4. The assignment row's identity is written once and never rewritten; its
+   state, timing, and results advance in place.
 
 There is no placement steering: the control plane cannot route a job to the
 host holding its warm generation, and does not try. Locality is emergent —
 a scope's generations live where its jobs ran — and an off-home win runs
 cold and re-establishes residency by sealing there. After `acquirejob` there
 is no provider give-back: losing the guest fails that attempt closed, and
-the ledger never claims a transparent requeue.
+the assignment record never claims a transparent requeue.
 
 ## Pool supply
 
@@ -159,7 +162,7 @@ ClickHouse analytics.
 
 ## State machines
 
-Owned per ledger; states are validated text, deadlines are columns.
+Owned per schema; states are validated text, deadlines are columns.
 
 ```text
 slot        empty → booting → attesting → preparing → listening

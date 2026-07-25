@@ -119,8 +119,8 @@ A site is one provider region for one fleet. Storage traffic (none in the
 end-state hot path; provisioning and image distribution otherwise) stays
 inside a site. There is no cross-site data plane and no cross-site warmth.
 Capacity planning is per site: provision for peak, bill for use, no
-autoscaler — adding hosts is a human decision informed by the capacity
-ledger.
+autoscaler — adding hosts is a human decision informed by capacity
+history.
 
 Related: [architecture](postflight-architecture.md) ·
 [storage](postflight-storage.md) · [security model](postflight-security-model.md)

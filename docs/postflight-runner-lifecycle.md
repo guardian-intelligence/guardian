@@ -36,10 +36,10 @@ assignment
        +----------+----------+-----------+--------------+-----------> terminal
 ```
 
-An assignment row is append-oriented: its member, request ID, protocol job ID,
-runner name, repository, run, attempt, and workflow job cannot be rewritten.
-Only its state, selected generation, restore result, terminal result, and timing
-evidence advance.
+An assignment row's identity — member, request ID, protocol job ID, runner
+name, repository, run, attempt, and workflow job — is written once and never
+rewritten. Its state, selected generation, restore result, terminal result,
+and timing evidence advance in place.
 
 The runner listener is connected while the member is `listening`. GitHub's
 assignment reaches the guest directly. The listener invokes guestd before
@@ -95,7 +95,7 @@ artifacts with a cold process capsule.
 GitHub's broker `acquirejob` call is a commit point. Before it, disconnecting a
 listener leaves the job eligible for GitHub's normal pickup retry. After it,
 the provider does not expose a release operation that can assign the same job
-message to another listener. The durable assignment ledger must not describe
+message to another listener. The durable assignment record must not describe
 post-acquisition VM loss as requeued; transparent recovery would require a
 separately designed, attested handoff of the acquired job message and its
 listener state to a replacement VM.

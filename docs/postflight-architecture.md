@@ -10,7 +10,7 @@ Companions:
 - [Fleet](postflight-fleet.md) — hardware classes, warmth domains, the two clouds
 - [Lightning](postflight-lightning.md) — the warmth substrate: prewarmed VMs, sticky disks, userspace restore, node-local NVMe
 - [Security model](postflight-security-model.md) — per-product threat models and claims
-- [Scheduling](postflight-scheduling.md) — control plane, ledgers, admission, assignment
+- [Scheduling](postflight-scheduling.md) — control plane, state, admission, assignment
 - [Storage](postflight-storage.md) — sticky disks, generations, sealing, locality
 - [Host](postflight-host.md) — hostd, the QEMU profile, the guest contract
 - [Runner lifecycle](postflight-runner-lifecycle.md) — the operational model per job
@@ -65,7 +65,7 @@ scheduler. Nothing else.
 ```text
 GitHub webhooks/API ──► Control plane ──plans/prefetch──► hostd (one per host)
        │                     │                              │
-       │                     ├─ Postgres: four ledgers      ├─ OpenZFS: sticky disks
+       │                     ├─ Postgres: four schemas      ├─ OpenZFS: sticky disks
        │                     ├─ OpenBao: transit-postflight ├─ QEMU: pinned artifact
        │                     ├─ attested sessions           └─ one SlotActor per slot
        │                     ├─ admission / planning                 │
@@ -81,10 +81,10 @@ GitHub webhooks/API ──► Control plane ──plans/prefetch──► hostd 
 | Component | Owns |
 | --- | --- |
 | GitHub | The workflow DAG, retries, and runner selection. The only workflow engine in the system. |
-| Control plane | One deployable binary. Ledgers, admission, job plans, assignment truth, generation catalog, attested sessions, key custody, metering, reconcilers, the production canary. |
-| Postgres | Four independent ledgers: capacity, demand/assignment, storage, usage. Inbox/outbox rows, short transactions, idempotency keys, `FOR UPDATE SKIP LOCKED` workers. |
+| Control plane | One deployable binary. Admission, job plans, assignment truth, generation catalog, attested sessions, key custody, metering, reconcilers, the production canary. |
+| Postgres | Four independently owned schemas: capacity, demand/assignment, storage, usage. Ordinary relational rows — current state updates in place; history is kept only where it pays (usage intervals, assignment identity). Short transactions, idempotency keys, `FOR UPDATE SKIP LOCKED` workers. |
 | OpenBao | Product-scoped Transit mount (`transit-postflight`): Turbo DEK wrap/unwrap, Confidential tenant key custody, generation-manifest signing, per-tenant crypto-erase. |
-| hostd | Per-host daemon. Slot actors, storage manager, QEMU supervision, checkpoint sealing, a crash-safe operation journal, one prioritized control stream. |
+| hostd | Per-host daemon. Slot actors, storage manager, QEMU supervision, checkpoint sealing, a crash-safe operation journal, a two-lane control stream. |
 | guestd | The only privileged agent in the guest. Attestation, LUKS and mounts, runner supervision, the Worker gate, the CRIU capsule, quiesce. |
 | QEMU + OpenZFS | Mechanism, never policy. Pinned QEMU per fleet; node-local NVMe zpools; no network storage on any hot path. |
 
@@ -126,12 +126,21 @@ Each principle is stated so that a violation is observable.
    between the control plane and the guest is sealed to attestation; hostd
    relays ciphertext it cannot open. A compromised host reads nothing it was
    not already entitled to operate.
-10. **Ledgers, not a god-object.** Capacity, demand/assignment, storage, and
-    usage are independent ledgers with small per-resource state machines.
-    Each controller advances only the resource it owns.
+10. **Small schemas, not a god-object.** Capacity, demand/assignment,
+    storage, and usage are independently owned Postgres schemas with small
+    per-resource state machines; each controller advances only the resource
+    it owns. This is ordinary relational state, not event sourcing: rows
+    update in place, and append-only records appear only where they earn
+    their keep — usage intervals and assignment identity.
 11. **Every claim ships with a gate.** Speed claims carry benchmark
     provenance; security claims carry release gates with positive controls.
     A claim without a falsifier does not go on the website.
+12. **One IDL.** Every internal channel is generated from one protobuf
+    package: control plane ↔ hostd is two gRPC streams per host
+    (assignment/plan traffic on one lane, inventory/telemetry on the other,
+    so urgent messages never queue behind bulk), and hostd ↔ guestd speaks
+    the same generated protocol over vsock. A hand-framed message anywhere
+    is a bug.
 
 ## What does not exist
 
