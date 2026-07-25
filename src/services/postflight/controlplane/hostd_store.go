@@ -650,6 +650,10 @@ type jobPlanRow struct {
 	ProcessDigest, ProcessVersion                     string
 }
 
+// jobPlanBroadcastLimit bounds every host's long-polled plan snapshot; jobs
+// past the window enter it as earlier plans resolve or their demands settle.
+const jobPlanBroadcastLimit = 100
+
 func (s *pgStore) ListJobPlans(ctx context.Context, hostID string) ([]jobPlanRow, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT d.plan_id::text, d.provider_job_id, d.provider_installation_id,
@@ -666,7 +670,8 @@ JOIN host_slots slots ON slots.host_id = $1 AND slots.class = d.runner_class AND
 LEFT JOIN workspace_generations g ON g.generation = d.source_generation
 WHERE d.state IN ('demand_recorded', 'capacity_requested')
   AND j.status IN ('queued', 'in_progress') AND j.check_run_id > 0
-ORDER BY d.provider_job_id`, hostID)
+ORDER BY d.provider_job_id
+LIMIT $2`, hostID, jobPlanBroadcastLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -744,13 +749,33 @@ func (s *pgStore) ListReapGenerations(ctx context.Context, hostID string) ([]str
 	return generations, rows.Err()
 }
 
-func (s *pgStore) ListHostPoolTargets(ctx context.Context, hostID string) (map[string]int, error) {
+// ListHostPoolTargets divides each class's fleet target across the live
+// hosts offering that class: every host gets the floor share, the first
+// fleet-target-mod-N hosts by host_id get one extra, and each share is
+// clamped by the host's own slot total. Hosts past liveCutoff hold no share.
+func (s *pgStore) ListHostPoolTargets(ctx context.Context, hostID string, liveCutoff time.Time) (map[string]int, error) {
 	rows, err := s.pool.Query(ctx, `
-SELECT slots.class, LEAST(slots.total, COALESCE(sum(p.desired_count), 0))::integer
-FROM host_slots slots
-LEFT JOIN runner_pools p ON p.runner_class = slots.class AND p.enabled
-WHERE slots.host_id = $1
-GROUP BY slots.class, slots.total`, hostID)
+WITH class_targets AS (
+    SELECT slots.class, slots.total,
+           COALESCE((SELECT sum(p.desired_count) FROM runner_pools p
+                     WHERE p.runner_class = slots.class AND p.enabled), 0)::bigint AS fleet_target
+    FROM host_slots slots
+    WHERE slots.host_id = $1
+), live_hosts AS (
+    SELECT hs.class, hs.host_id,
+           row_number() OVER (PARTITION BY hs.class ORDER BY hs.host_id) AS host_rank,
+           count(*) OVER (PARTITION BY hs.class) AS host_count
+    FROM host_slots hs
+    JOIN hosts h ON h.host_id = hs.host_id
+    WHERE hs.total > 0 AND h.last_sync_at >= $2
+)
+SELECT t.class,
+       LEAST(t.total, COALESCE(
+           t.fleet_target / l.host_count +
+           CASE WHEN l.host_rank <= t.fleet_target % l.host_count THEN 1 ELSE 0 END,
+           0))::integer
+FROM class_targets t
+LEFT JOIN live_hosts l ON l.class = t.class AND l.host_id = $1`, hostID, liveCutoff)
 	if err != nil {
 		return nil, err
 	}

@@ -21,12 +21,13 @@ import (
 const maxSyncRequestBytes = 4 << 20
 
 type syncServer struct {
-	st          *pgStore
-	resolver    *worker
-	secret      []byte
-	sealTimeout time.Duration
-	tracer      trace.Tracer
-	jobPlans    *jobPlanBus
+	st                 *pgStore
+	resolver           *worker
+	secret             []byte
+	sealTimeout        time.Duration
+	hostOfflineTimeout time.Duration
+	tracer             trace.Tracer
+	jobPlans           *jobPlanBus
 }
 
 func (s *syncServer) authorized(r *http.Request) bool {
@@ -203,7 +204,7 @@ func (s *syncServer) desiredState(ctx context.Context, request syncproto.SyncReq
 	if response.Reap, err = s.st.ListReapGenerations(ctx, request.HostID); err != nil {
 		return response, err
 	}
-	if response.PoolTargets, err = s.st.ListHostPoolTargets(ctx, request.HostID); err != nil {
+	if response.PoolTargets, err = s.st.ListHostPoolTargets(ctx, request.HostID, time.Now().Add(-s.hostOfflineTimeout)); err != nil {
 		return response, err
 	}
 	return response, nil
