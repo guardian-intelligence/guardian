@@ -6,11 +6,12 @@ warmth, and silicon onboarding as a routine rather than an event.
 
 ## Two fleets, two clouds
 
-Each product runs on its own fleet in its own provider account:
+Each SKU category runs on its own fleet in its own provider account; fleets
+carry the SKU flavor names:
 
 | Fleet | Silicon | Provider posture |
 | --- | --- | --- |
-| Lightning | Bare-metal AMD Ryzen, highest available clocks | Host is trusted and hardened; provider diligence matters |
+| Turbo | Bare-metal AMD Ryzen, highest available clocks | Host is trusted and hardened; provider diligence matters |
 | Confidential | AMD EPYC with SEV-SNP | Host and provider are untrusted (see [security model](postflight-security-model.md)); provider choice is commercial |
 
 Fleets share nothing at the data plane. Generations, capsules, and keys never
@@ -31,7 +32,7 @@ A **hardware class** is a database row, not a code path:
 ```text
 hardware_class:
   id                    e.g. ryzen-9950x, epyc-9275f, epyc-venice-<model>
-  fleet                 lightning | confidential
+  fleet                 turbo | confidential
   cpu_family            microarchitecture generation
   qemu_cpu_model        the pinned guest-visible CPU baseline for this class
   cores / smt_policy    sellable real cores; SMT stance per class
@@ -84,7 +85,8 @@ evidence, never code:
    numbers; a class without benchmark provenance has no SKU.
 5. **Canary soak.** The production canary tenant runs its full scenario set
    against the class before any customer label maps to it.
-6. **Sell.** Map runner-class labels to the hardware class in admission.
+6. **Sell.** Map runner-class labels
+   (`postflight-<x>vcpu-<os>-<flavor>`) to the hardware class in admission.
 
 The first customer job in each scope on a new class is a cold build — a new
 compatibility class starts empty by definition. That is the entire cost of a
@@ -103,7 +105,7 @@ Capacity is fixed slots per host, set at provisioning:
   never shared across tenants. Concurrent-build interference, not VM count,
   sizes the slot count.
 - **RAM is never overcommitted.** SNP memory is pinned at its high-water
-  mark; Lightning follows the same rule for predictability. Host RAM math
+  mark; Turbo follows the same rule for predictability. Host RAM math
   subtracts the ZFS ARC cap (`zfs_arc_max` is set at provisioning, or
   accounting lies) and per-VM QEMU overhead.
 - **Disk is the overcommitted dimension.** Sparse zvols overcommit NVMe;

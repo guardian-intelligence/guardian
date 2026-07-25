@@ -54,7 +54,7 @@ touches a running job.
   shaping and no guest-to-guest path.
 - Guest devices arrive by stable serial (workspace, tool, process) via
   virtio-scsi hot-attach; attach and detach observe before acting so repeats
-  converge. `/dev/kvm` is exposed only by Lightning class profiles.
+  converge. `/dev/kvm` is exposed only by Turbo class profiles.
 - No QEMU guest agent, no serial shell, no host-commandable exec or file
   interface exists in any profile.
 
@@ -70,7 +70,7 @@ Boot ladder, before any customer demand exists:
 1. Boot from the measured image (read-only root, dm-verity).
 2. Confidential: request the SNP report over an ephemeral key and establish
    the sealed session with the control plane through the host conduit.
-   Receive the JIT configuration and tenant key half over it. Lightning:
+   Receive the JIT configuration and tenant key half over it. Turbo:
    receive the JIT configuration and lineage DEK over the authenticated
    control channel.
 3. Start and supervise Runner.Listener with the JIT configuration held only

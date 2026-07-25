@@ -1,14 +1,14 @@
 # Postflight workload security model
 
 Status: living security policy, 2026-07-24. Defines the customer-facing
-security claims for both Postflight products, the threat model behind each,
-and the evidence required before a claim ships.
+security claims for both Postflight SKU categories, the threat model behind
+each, and the evidence required before a claim ships.
 
 ## Positioning
 
-Postflight sells two products with two honest security postures:
+Postflight sells two SKU categories with two honest security postures:
 
-- **Lightning** — the fastest CI money can buy, with hardware VM isolation
+- **Turbo** — the fastest CI money can buy, with hardware VM isolation
   and at-rest encryption. Its host is trusted infrastructure, and we say so.
 - **Confidential** — the same speed architecture inside SEV-SNP, where a
   compromised worker host reads nothing. Customers trust Guardian and AMD —
@@ -17,7 +17,7 @@ Postflight sells two products with two honest security postures:
 Wording discipline: claims say "verifiable" and "by construction", never
 "provably". Any capability originating on our side of the GitHub App is
 unfalsifiable to the customer (an App owner can always mint keys), so
-operator-exclusion is not claimed by either product; it is the Black tier's
+operator-exclusion is not claimed by either category; it is the Black tier's
 territory (see adopt-on-pull).
 
 ## Claims
@@ -40,7 +40,7 @@ territory (see adopt-on-pull).
    golden-image launch measurements are published per release, so every claim
    above is checkable by the customer without Guardian's cooperation.
 
-### Lightning
+### Turbo
 
 1. Every job executes in its own hardware virtual machine (KVM), created for
    that job and destroyed after it. One physical core never serves two
@@ -48,16 +48,16 @@ territory (see adopt-on-pull).
 2. Everything persisted from a job is ciphertext under per-lineage keys
    custodied in Guardian's OpenBao Transit. A stolen disk, leaked snapshot,
    or compromised storage plane yields ciphertext.
-3. **Explicit boundary:** Lightning's hosts are trusted Guardian
+3. **Explicit boundary:** Turbo's hosts are trusted Guardian
    infrastructure. A live compromise of a worker host could expose the jobs
    on it. Customers who need that boundary closed buy Confidential — the
-   distinction is the product line, not fine print.
+   distinction is the SKU category, not fine print.
 
 ## Threat model
 
 ### Adversaries in scope
 
-| Adversary | Lightning | Confidential |
+| Adversary | Turbo | Confidential |
 | --- | --- | --- |
 | Malicious tenant job (hostile guest kernel, escape attempts, residue) | ✔ | ✔ |
 | Data-at-rest attacker (disks, zvols, snapshots, decommissioned media, storage plane) | ✔ | ✔ |
@@ -67,13 +67,14 @@ territory (see adopt-on-pull).
 
 ### Trusted
 
-- Both products: the Guardian control plane, OpenBao, the golden-image build
-  pipeline, and GitHub (for everything GitHub already sees by construction).
+- Both categories: the Guardian control plane, OpenBao, the golden-image
+  build pipeline, and GitHub (for everything GitHub already sees by
+  construction).
 - Confidential: the AMD PSP, SEV-SNP firmware, and endorsement root under an
   active security-bulletin policy; the published, measured guest image.
   **Not** the worker host stack — kernel, KVM, QEMU, and hostd are operators
   of ciphertext and sealed frames.
-- Lightning: additionally the worker host stack, hardened per the sandbox
+- Turbo: additionally the worker host stack, hardened per the sandbox
   isolation doctrine ([product doc §16](postflight-product.md)).
 
 ### Explicit non-claims
@@ -173,7 +174,7 @@ Process-memory capsules are the hottest plaintext the platform handles:
 - Restore happens in a fresh attested VM before any customer-controlled code
   runs.
 
-## Architecture — Lightning
+## Architecture — Turbo
 
 Same guest image family, same mount ladder, same CRIU rules — different key
 custody:
@@ -184,9 +185,9 @@ custody:
   channel and exists only in guest RAM.
 - Claims follow custody: this protects data at rest against disk theft,
   snapshot leaks, and storage-plane compromise. It does not protect against
-  a live host compromise, and the model says so (claim L3).
+  a live host compromise, and the model says so (claim T3).
 - Deleting a tenant's Transit key is crypto-erase for everything it wraps.
-- Lightning classes may expose `/dev/kvm`; the host jail doctrine
+- Turbo classes may expose `/dev/kvm`; the host jail doctrine
   ([product doc §16](postflight-product.md)) applies in full.
 
 ## OpenBao Transit, product-scoped
@@ -197,7 +198,7 @@ declares the mount; durable keys are data):
 
 | Key | Purpose | Operations |
 | --- | --- | --- |
-| `tenant-<id>` | Confidential `K_tenant` custody; Lightning lineage DEK wrapping | datakey generate, decrypt |
+| `tenant-<id>` | Confidential `K_tenant` custody; Turbo lineage DEK wrapping | datakey generate, decrypt |
 | `postflight-manifest` | Generation-manifest signing | sign, verify |
 
 Rules: keys are non-exportable and deny-by-default; each control-plane module
@@ -206,7 +207,7 @@ decrypt); every operation is audit-shipped; key deletion is the tenant
 crypto-erase mechanism and requires the same ceremony as any custody-tier
 destruction. DR follows the OpenBao restore-not-reseed doctrine — and the
 tested-restore drill is a **release gate** here, because Transit now protects
-durable customer ciphertext: no Lightning at-rest claim ships before a
+durable customer ciphertext: no Turbo at-rest claim ships before a
 cold-start restore has decrypted pre-restore ciphertext.
 
 Rotation creates a new lineage (one cold build); it never rewrites volumes.
@@ -243,8 +244,8 @@ Each gate needs a positive control proving the detector trips.
 | G10 | both | Isolation battery | The §16 jail conformance suite passes: non-root QEMU, seccomp, per-VM network isolation, cgroup caps, no cross-tenant sibling scheduling. |
 | G11 | both | Image hygiene | Golden images are customer-free and, on Confidential, bake the production encryption mode; insecure modes fail image admission. |
 | G12 | C | Bulletin currency | Admitted TCB versions meet minimums from active AMD bulletins; a newly prohibited TCB removes the tuple from scheduling. |
-| G13 | L | Transit custody | Lightning DEKs exist on no host disk or log; wrapped DEKs are useless without Transit; deleting a tenant key renders its lineages undecryptable (verified). |
-| G14 | L | Transit restore drill | A cold-start OpenBao restore decrypts pre-restore Lightning ciphertext before any at-rest claim ships. |
+| G13 | T | Transit custody | Turbo DEKs exist on no host disk or log; wrapped DEKs are useless without Transit; deleting a tenant key renders its lineages undecryptable (verified). |
+| G14 | T | Transit restore drill | A cold-start OpenBao restore decrypts pre-restore Turbo ciphertext before any at-rest claim ships. |
 
 ## Adopt on pull
 
