@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -35,6 +37,9 @@ type config struct {
 
 	checkoutListenAddr  string
 	checkoutGuestOrigin string
+
+	transferListenAddr string
+	transferOrigin     string
 }
 
 func envOr(key, fallback string) string {
@@ -103,6 +108,8 @@ func loadConfig() (config, error) {
 		tapLifecyclePath:             envOr("HOSTD_TAP_LIFECYCLE_PATH", "/usr/local/libexec/postflight-tap"),
 		checkoutListenAddr:           envOr("HOSTD_CHECKOUT_LISTEN_ADDR", "127.0.0.1:8480"),
 		checkoutGuestOrigin:          required("HOSTD_CHECKOUT_GUEST_ORIGIN"),
+		transferListenAddr:           os.Getenv("HOSTD_TRANSFER_LISTEN_ADDR"),
+		transferOrigin:               os.Getenv("HOSTD_TRANSFER_ORIGIN"),
 	}
 	switch cfg.guestNetwork {
 	case "none", "user":
@@ -116,8 +123,40 @@ func loadConfig() (config, error) {
 	if !filepath.IsAbs(cfg.tapLifecyclePath) {
 		errs = append(errs, errors.New("HOSTD_TAP_LIFECYCLE_PATH must be absolute"))
 	}
+	if err := validateTransferConfig(cfg.transferListenAddr, cfg.transferOrigin); err != nil {
+		errs = append(errs, err)
+	}
 	if len(errs) > 0 {
 		return cfg, errors.Join(errs...)
 	}
 	return cfg, nil
+}
+
+// validateTransferConfig admits the generation-transfer lane only as a
+// coherent pair bound to one specific address. The listener serves sealed
+// tenant workspaces to anyone holding the fleet credential, so a wildcard
+// bind — which would expose it beyond the transfer VLAN — is refused
+// outright rather than warned about.
+func validateTransferConfig(listenAddr, origin string) error {
+	if listenAddr == "" && origin == "" {
+		return nil
+	}
+	if listenAddr == "" || origin == "" {
+		return errors.New("HOSTD_TRANSFER_LISTEN_ADDR and HOSTD_TRANSFER_ORIGIN must be set together")
+	}
+	host, _, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		return fmt.Errorf("HOSTD_TRANSFER_LISTEN_ADDR: %q is not host:port", listenAddr)
+	}
+	if host == "" {
+		return errors.New("HOSTD_TRANSFER_LISTEN_ADDR must name the transfer VLAN address, not a wildcard bind")
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		return errors.New("HOSTD_TRANSFER_LISTEN_ADDR must name the transfer VLAN address, not a wildcard bind")
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("HOSTD_TRANSFER_ORIGIN: %q is not an http(s) origin", origin)
+	}
+	return nil
 }

@@ -36,6 +36,15 @@
 //	                              is how the guest checkout action reaches it.
 //	HOSTD_CHECKOUT_GUEST_ORIGIN   the same endpoint as guests reach it, e.g. http://10.0.2.2:8480
 //	                              (user datapath) or the bridge address http://10.77.0.1:8480
+//	HOSTD_TRANSFER_LISTEN_ADDR    generation-transfer bind on the private transfer VLAN, e.g.
+//	                              10.75.0.1:8482. Must name that specific address — wildcard
+//	                              binds are refused so sealed tenant workspaces are never
+//	                              served beyond the VLAN. Unset (with HOSTD_TRANSFER_ORIGIN)
+//	                              disables the transfer lane for this host.
+//	HOSTD_TRANSFER_ORIGIN         the same listener as peer hosts reach it, e.g.
+//	                              http://10.75.0.1:8482, advertised to the control plane so
+//	                              jobs landing elsewhere can pull this host's generations.
+//	                              Set both transfer variables together or neither.
 //
 // Install (one-time, per plain-Ubuntu runner host):
 //
@@ -63,6 +72,7 @@ import (
 
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/agent"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/checkoutbundle"
+	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/transfer"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vm"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/hostd/zvol"
 )
@@ -124,6 +134,7 @@ func run(logger *slog.Logger) error {
 		CheckoutGuestOrigin:          cfg.checkoutGuestOrigin,
 		TraceDir:                     filepath.Join(cfg.stateDir, "rendezvous"),
 		StorageMinimumAvailableBytes: cfg.storageMinimumAvailableBytes,
+		TransferOrigin:               cfg.transferOrigin,
 		Platform:                     platformFingerprint(cfg),
 	}, storage, vms, cfg.syncSecret, hostSecret, agent.Options{Logger: logger})
 	if err != nil {
@@ -160,12 +171,38 @@ func run(logger *slog.Logger) error {
 		}
 	}()
 
+	var transferHTTP *http.Server
+	if cfg.transferListenAddr != "" {
+		transferServer, err := transfer.New(transfer.Config{
+			Store:  storage,
+			Secret: []byte(cfg.syncSecret),
+			Logger: logger,
+		})
+		if err != nil {
+			return err
+		}
+		// No WriteTimeout: a generation stream legitimately runs long.
+		transferHTTP = &http.Server{
+			Addr:              cfg.transferListenAddr,
+			Handler:           transferServer.Handler(),
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			IdleTimeout:       2 * time.Minute,
+		}
+		go func() {
+			if err := transferHTTP.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+				failed <- fmt.Errorf("transfer endpoint: %w", err)
+			}
+		}()
+	}
+
 	agentDone := make(chan error, 1)
 	go func() { agentDone <- instance.Run(agentCtx) }()
 
 	logger.Info("hostd running",
 		"host", cfg.hostID, "class", cfg.class, "slots", cfg.slots,
-		"pool", cfg.pool, "image", image, "checkout_addr", cfg.checkoutListenAddr)
+		"pool", cfg.pool, "image", image, "checkout_addr", cfg.checkoutListenAddr,
+		"transfer_addr", cfg.transferListenAddr, "transfer_origin", cfg.transferOrigin)
 
 	var exitErr error
 	select {
@@ -181,6 +218,9 @@ func run(logger *slog.Logger) error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	_ = server.Shutdown(shutdownCtx)
+	if transferHTTP != nil {
+		_ = transferHTTP.Shutdown(shutdownCtx)
+	}
 	return exitErr
 }
 

@@ -151,6 +151,7 @@ func desiredFromPlan(plan syncproto.JobPlan, status vm.Status) syncproto.Desired
 			WorkflowJob: assignment.Identity.WorkflowJob,
 		},
 		Workspace: plan.Workspace, Tool: plan.Tool, Process: plan.Process,
+		Transfer:  plan.Transfer,
 	}
 }
 

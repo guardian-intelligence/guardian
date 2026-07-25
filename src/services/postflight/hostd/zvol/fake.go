@@ -2,8 +2,11 @@ package zvol
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
+	"sort"
 	"sync"
 )
 
@@ -16,6 +19,12 @@ type Fake struct {
 
 	workspaces  map[AssignmentID]WorkspaceVolume
 	generations map[GenerationID]GenerationSnapshot
+	// transfers is the transfer-cache namespace: received generations that
+	// Inventory never reports as residency.
+	transfers map[GenerationID]GenerationSnapshot
+	// parents records each sealed generation's clone origin, for incremental
+	// send resolution.
+	parents map[GenerationID]GenerationID
 	// attached marks workspaces held open by a VM; DestroyWorkspace on an
 	// attached volume returns ErrBusy, mirroring ZFS behavior.
 	attached map[AssignmentID]bool
@@ -59,6 +68,8 @@ func newFakeVolumeTree(prefix string) *Fake {
 	return &Fake{
 		workspaces:  map[AssignmentID]WorkspaceVolume{},
 		generations: map[GenerationID]GenerationSnapshot{},
+		transfers:   map[GenerationID]GenerationSnapshot{},
+		parents:     map[GenerationID]GenerationID{},
 		attached:    map[AssignmentID]bool{},
 		clones:      map[GenerationID]int{},
 		prefix:      prefix,
@@ -264,10 +275,18 @@ func (f *Fake) EnsureWorkspace(_ context.Context, assignment AssignmentID, gener
 		return existing, nil
 	}
 	if generation != "" {
-		if _, ok := f.generations[generation]; !ok {
+		_, resident := f.generations[generation]
+		_, cached := f.transfers[generation]
+		switch {
+		case resident || cached:
+			f.clones[generation]++
+		case sizeBytes > 0:
+			// A missing clone source degrades to a cold build, mirroring the
+			// real driver.
+			generation = ""
+		default:
 			return WorkspaceVolume{}, fmt.Errorf("clone source %s: %w", generation, ErrNotFound)
 		}
-		f.clones[generation]++
 	}
 	volume := WorkspaceVolume{
 		Name:   f.prefix + "/ws/" + string(assignment),
@@ -335,6 +354,9 @@ func (f *Fake) SealSet(_ context.Context, assignment AssignmentID, generation Ge
 	f.generations[generation] = workspaceGeneration
 	f.tool.generations[generation] = toolGeneration
 	f.process.generations[generation] = processGeneration
+	f.parents[generation] = f.workspaces[assignment].Source
+	f.tool.parents[generation] = f.tool.workspaces[assignment].Source
+	f.process.parents[generation] = f.process.workspaces[assignment].Source
 	f.journal("seal-set %s generation=%s", assignment, generation)
 	return GenerationSet{Workspace: workspaceGeneration, Tool: toolGeneration, Process: processGeneration}, nil
 }
@@ -378,6 +400,237 @@ func (f *Fake) DestroyGeneration(_ context.Context, generation GenerationID) err
 	delete(f.generations, generation)
 	f.journal("destroy-generation %s", generation)
 	return nil
+}
+
+func (f *Fake) tree(tree TransferTree) *Fake {
+	switch tree {
+	case TreeTool:
+		return f.tool
+	case TreeProcess:
+		return f.process
+	default:
+		return f
+	}
+}
+
+// fakeTransferStream is the Fake's wire format: a JSON header line followed
+// by filler payload, symmetric between Send and ReceiveGeneration so agent
+// and server tests can move generations between two fakes end to end.
+type fakeTransferStream struct {
+	Generation  string `json:"generation"`
+	Tree        string `json:"tree"`
+	Incremental bool   `json:"incremental"`
+	Base        string `json:"base,omitempty"`
+	Bytes       int64  `json:"bytes"`
+}
+
+// ResolveSend implements TransferStore.
+func (f *Fake) ResolveSend(_ context.Context, generation GenerationID, tree TransferTree, from GenerationID) (SendPlan, error) {
+	if err := ValidateName("generation", string(generation)); err != nil {
+		return SendPlan{}, err
+	}
+	if !ValidTransferTree(tree) {
+		return SendPlan{}, fmt.Errorf("zvol: unknown transfer tree %q", tree)
+	}
+	if from != "" {
+		if err := ValidateName("generation", string(from)); err != nil {
+			return SendPlan{}, err
+		}
+	}
+	f.mu.Lock()
+	err := f.fail("resolve-send", string(generation))
+	f.mu.Unlock()
+	if err != nil {
+		return SendPlan{}, err
+	}
+	node := f.tree(tree)
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	snapshot, ok := node.generations[generation]
+	if !ok {
+		return SendPlan{}, fmt.Errorf("generation %s (%s): %w", generation, tree, ErrNotFound)
+	}
+	plan := SendPlan{Generation: generation, Tree: tree, Snapshot: snapshot.Snapshot}
+	if from != "" && from != generation && node.parents[generation] == from {
+		plan.BaseSnapshot = node.prefix + "/gen/" + string(from) + "@sealed"
+		plan.Incremental = true
+	}
+	return plan, nil
+}
+
+// Send implements TransferStore.
+func (f *Fake) Send(_ context.Context, plan SendPlan, w io.Writer) (int64, error) {
+	f.mu.Lock()
+	err := f.fail("send", string(plan.Generation))
+	f.mu.Unlock()
+	if err != nil {
+		return 0, err
+	}
+	node := f.tree(plan.Tree)
+	node.mu.Lock()
+	snapshot, ok := node.generations[plan.Generation]
+	node.mu.Unlock()
+	if !ok {
+		return 0, fmt.Errorf("generation %s (%s): %w", plan.Generation, plan.Tree, ErrNotFound)
+	}
+	header := fakeTransferStream{
+		Generation: string(plan.Generation), Tree: string(plan.Tree),
+		Incremental: plan.Incremental, Base: string(f.tree(plan.Tree).parentOf(plan.Generation)),
+		Bytes: snapshot.Bytes,
+	}
+	counter := &countingWriter{w: w}
+	if err := json.NewEncoder(counter).Encode(header); err != nil {
+		return counter.n, err
+	}
+	return counter.n, nil
+}
+
+func (f *Fake) parentOf(generation GenerationID) GenerationID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.parents[generation]
+}
+
+// ReceiveGeneration implements TransferStore.
+func (f *Fake) ReceiveGeneration(_ context.Context, generation GenerationID, tree TransferTree, r io.Reader) error {
+	if err := ValidateName("generation", string(generation)); err != nil {
+		return err
+	}
+	if !ValidTransferTree(tree) {
+		return fmt.Errorf("zvol: unknown transfer tree %q", tree)
+	}
+	f.mu.Lock()
+	err := f.fail("receive-generation", string(generation))
+	f.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	node := f.tree(tree)
+	node.mu.Lock()
+	_, cached := node.transfers[generation]
+	node.mu.Unlock()
+	if cached {
+		return nil
+	}
+	var header fakeTransferStream
+	if err := json.NewDecoder(r).Decode(&header); err != nil {
+		return fmt.Errorf("zvol: transfer stream does not parse: %w", err)
+	}
+	if header.Generation != string(generation) || header.Tree != string(tree) {
+		return fmt.Errorf("zvol: transfer stream carries %s/%s, want %s/%s",
+			header.Generation, header.Tree, generation, tree)
+	}
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	if header.Incremental {
+		base := GenerationID(header.Base)
+		_, resident := node.generations[base]
+		_, transferred := node.transfers[base]
+		if !resident && !transferred {
+			return fmt.Errorf("zvol: incremental base %s: %w", base, ErrNotFound)
+		}
+	}
+	node.transfers[generation] = GenerationSnapshot{
+		Generation: generation,
+		Snapshot:   node.prefix + "/xfer/" + string(generation) + "@sealed",
+		Bytes:      header.Bytes,
+	}
+	node.parents[generation] = GenerationID(header.Base)
+	node.journal("receive-transfer %s tree=%s incremental=%t", generation, tree, header.Incremental)
+	return nil
+}
+
+// GenerationState implements TransferStore.
+func (f *Fake) GenerationState(_ context.Context, generation GenerationID) (bool, bool, error) {
+	if err := ValidateName("generation", string(generation)); err != nil {
+		return false, false, err
+	}
+	f.mu.Lock()
+	if err := f.fail("generation-state", string(generation)); err != nil {
+		f.mu.Unlock()
+		return false, false, err
+	}
+	_, resident := f.generations[generation]
+	_, cached := f.transfers[generation]
+	f.mu.Unlock()
+	for _, node := range []*Fake{f.tool, f.process} {
+		node.mu.Lock()
+		_, treeCached := node.transfers[generation]
+		node.mu.Unlock()
+		cached = cached && treeCached
+	}
+	return resident, cached, nil
+}
+
+// ListTransfers implements TransferStore.
+func (f *Fake) ListTransfers(context.Context) ([]GenerationID, error) {
+	seen := map[GenerationID]bool{}
+	for _, node := range []*Fake{f, f.tool, f.process} {
+		node.mu.Lock()
+		for generation := range node.transfers {
+			seen[generation] = true
+		}
+		node.mu.Unlock()
+	}
+	generations := make([]GenerationID, 0, len(seen))
+	for generation := range seen {
+		generations = append(generations, generation)
+	}
+	sort.Slice(generations, func(i, j int) bool { return generations[i] < generations[j] })
+	return generations, nil
+}
+
+// DestroyTransfer implements TransferStore.
+func (f *Fake) DestroyTransfer(_ context.Context, generation GenerationID) error {
+	if err := ValidateName("generation", string(generation)); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	err := f.fail("destroy-transfer", string(generation))
+	f.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, node := range []*Fake{f, f.tool, f.process} {
+		node.mu.Lock()
+		if _, ok := node.transfers[generation]; ok {
+			if node.clones[generation] > 0 {
+				node.mu.Unlock()
+				return ErrBusy
+			}
+			delete(node.transfers, generation)
+			found = true
+			node.journal("destroy-transfer %s", generation)
+		}
+		node.mu.Unlock()
+	}
+	if !found {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SeedTransfer makes a generation's complete set cached in the transfer
+// namespace, as if a prior fetch landed it.
+func (f *Fake) SeedTransfer(generation GenerationID, bytes int64) {
+	for _, node := range []*Fake{f, f.tool, f.process} {
+		node.mu.Lock()
+		node.transfers[generation] = GenerationSnapshot{
+			Generation: generation,
+			Snapshot:   node.prefix + "/xfer/" + string(generation) + "@sealed",
+			Bytes:      bytes,
+		}
+		node.mu.Unlock()
+	}
+}
+
+// HasTransfer reports whether the workspace tree of a generation is cached.
+func (f *Fake) HasTransfer(generation GenerationID) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.transfers[generation]
+	return ok
 }
 
 // Inventory implements Driver.

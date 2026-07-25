@@ -11,6 +11,7 @@ go_library(
     deps = [
         "//src/services/postflight/hostd/agent",
         "//src/services/postflight/hostd/checkoutbundle",
+        "//src/services/postflight/hostd/transfer",
         "//src/services/postflight/hostd/vm",
         "//src/services/postflight/hostd/zvol",
     ],

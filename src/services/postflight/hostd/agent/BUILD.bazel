@@ -15,6 +15,7 @@ go_library(
         "rendezvous_trace.go",
         "snapshot.go",
         "sync.go",
+        "transfer.go",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/hostd/agent",
     visibility = ["//visibility:public"],
@@ -22,6 +23,7 @@ go_library(
         "//src/services/postflight/hostd/checkoutbundle",
         "//src/services/postflight/hostd/guestproto",
         "//src/services/postflight/hostd/syncproto",
+        "//src/services/postflight/hostd/transfer",
         "//src/services/postflight/hostd/vm",
         "//src/services/postflight/hostd/zvol",
 		"//src/services/postflight/timing",
@@ -36,6 +38,7 @@ go_test(
     embed = [":agent"],
     deps = [
         "//src/services/postflight/hostd/syncproto",
+        "//src/services/postflight/hostd/transfer",
         "//src/services/postflight/hostd/vm",
         "//src/services/postflight/hostd/zvol",
     ],

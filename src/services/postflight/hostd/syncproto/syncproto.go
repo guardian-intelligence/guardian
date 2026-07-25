@@ -18,6 +18,32 @@ type SyncRequest struct {
 	Assignments []AssignmentReport `json:"assignments"`
 	Generations []GenerationReport `json:"generations"`
 	Workspaces  []string           `json:"workspaces"`
+	// TransferOrigin is where peer hosts reach this host's generation-transfer
+	// listener (e.g. http://10.75.0.1:8482). Empty means this host does not
+	// serve generations; the control plane then never routes transfers at it.
+	TransferOrigin string `json:"transfer_origin,omitempty"`
+}
+
+// TransferSpec routes a job at a generation that is resident on another host.
+// The assigned host pulls the generation from Origin before materializing;
+// any transfer failure degrades to a cold build, never a failed job.
+type TransferSpec struct {
+	Origin     string `json:"origin"`
+	Generation string `json:"generation"`
+	// Base optionally names a generation the assigned host already holds that
+	// the source may serve an incremental stream against.
+	Base string `json:"base,omitempty"`
+}
+
+// TransferReport is the assigned host's evidence of a transfer attempt:
+// used (materialized warm from the transferred generation), failed-cold
+// (transfer failed or timed out; the job ran cold), or absent (the source no
+// longer held the generation; the job ran cold).
+type TransferReport struct {
+	Outcome     string `json:"outcome"`
+	Bytes       int64  `json:"bytes,omitempty"`
+	Millis      int64  `json:"millis,omitempty"`
+	Incremental bool   `json:"incremental,omitempty"`
 }
 
 type PlatformReport struct {
@@ -136,6 +162,7 @@ type AssignmentReport struct {
 	ExitCode         int                 `json:"exit_code,omitempty"`
 	Reason           string              `json:"reason,omitempty"`
 	Restore          *RestoreReport      `json:"restore,omitempty"`
+	Transfer         *TransferReport     `json:"transfer,omitempty"`
 	Checkpoint       *CheckpointArtifact `json:"checkpoint,omitempty"`
 	SealedGeneration string              `json:"sealed_generation,omitempty"`
 	Timing           []TimingPoint       `json:"timing,omitempty"`
@@ -206,6 +233,7 @@ type JobPlan struct {
 	Workspace          WorkspaceSpec `json:"workspace"`
 	Tool               WorkspaceSpec `json:"tool"`
 	Process            ProcessSpec   `json:"process"`
+	Transfer           *TransferSpec `json:"transfer,omitempty"`
 }
 
 type DesiredMemberState string
@@ -255,6 +283,7 @@ type DesiredAssignment struct {
 	Workspace WorkspaceSpec `json:"workspace"`
 	Tool      WorkspaceSpec `json:"tool"`
 	Process   ProcessSpec   `json:"process"`
+	Transfer  *TransferSpec `json:"transfer,omitempty"`
 
 	SealGeneration string              `json:"seal_generation,omitempty"`
 	SealCheckpoint *CheckpointArtifact `json:"seal_checkpoint,omitempty"`

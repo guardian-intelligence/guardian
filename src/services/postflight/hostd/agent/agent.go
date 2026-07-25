@@ -38,6 +38,9 @@ type Metrics struct {
 	JobPlanResolveFailures   atomic.Int64
 	JobPlanResolveSuccesses  atomic.Int64
 	StorageAdmissionFailures atomic.Int64
+	WarmTransfers            atomic.Int64
+	FailedTransfers          atomic.Int64
+	TransfersCollected       atomic.Int64
 }
 
 type Agent struct {
@@ -46,7 +49,11 @@ type Agent struct {
 	vms        vm.Driver
 	logger     *slog.Logger
 	httpClient *http.Client
-	credential string
+	// transferHTTP pulls generation streams; unlike httpClient it carries no
+	// client-wide timeout because a pull is bounded per fetch by the
+	// assignment's transfer budget.
+	transferHTTP *http.Client
+	credential   string
 	hostSecret []byte
 	now        func() time.Time
 	newID      func() string
@@ -111,6 +118,10 @@ func New(cfg Config, zvols zvol.Driver, vms vm.Driver, credential string, hostSe
 	}
 	if a.httpClient == nil {
 		a.httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
+	a.transferHTTP = options.HTTPClient
+	if a.transferHTTP == nil {
+		a.transferHTTP = &http.Client{}
 	}
 	if a.now == nil {
 		a.now = time.Now
@@ -335,6 +346,7 @@ func (a *Agent) HandleVMUpdate(ctx context.Context, id vm.ID) {
 			}
 			a.clearDeferredUpdate(id)
 			spec := desiredFromPlan(plan, status)
+			a.sanitizeTransfer(&spec)
 			if err := validateAssignment(spec); err != nil {
 				a.metrics.RejectedAssignments.Add(1)
 				a.logger.Error("rejecting locally bound job plan", "plan_id", plan.PlanID, "err", err)

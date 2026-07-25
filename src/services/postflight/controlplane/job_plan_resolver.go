@@ -98,7 +98,7 @@ func (s *syncServer) handleResolveJobPlan(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
-	if err := s.st.BindObservedAssignment(r.Context(), request.HostID, request.MemberID, request.Assignment); err != nil {
+	if err := s.st.BindObservedAssignment(r.Context(), request.HostID, s.liveCutoff(), request.MemberID, request.Assignment); err != nil {
 		s.syncError(w, request.HostID, "bind resolved assignment", err)
 		return
 	}
