@@ -23,13 +23,19 @@ Four targets are built and released every time: `x86_64-unknown-linux-musl`,
 | curl installer | `curl -fsSL https://guardianintelligence.org/postflight/install.sh \| sh -s -- --channel nightly` | stable (default), `--channel rc\|nightly` | live |
 | release asset | download `postflight-<target>` from the release, `cosign verify-blob`, `chmod +x` | all | live |
 | make | `make && sudo make install` in `src/products/postflight-cli` of a clone, or in an unpacked release source tarball | all | live |
-| cargo | `cargo install postflight` | stable | lane wired, inert |
-| cargo-binstall | `cargo binstall postflight` | stable | lane wired, inert |
+| cargo | `cargo install postflight` | stable | live at 0.1.0 |
+| cargo-binstall | `cargo binstall postflight` | stable | falls back to a source build until a `v` tag exists |
 | npm/bun | `npm i -g @guardian-intelligence/postflight` | stable | lane wired, inert |
 | brew | `brew install guardian-intelligence/tap/postflight` | stable | lane wired, inert |
 | mise | tool `ubi:guardian-intelligence/guardian` with `exe=postflight` and `tag_regex=^postflight-cli/v` | stable | untested |
 
-Only the first three work today. "Lane wired, inert" means the publishing
+`cargo install postflight` works today because 0.1.0 was published by hand to
+claim the name; the automated lane has still never run, and crates.io versions
+are immutable, so the first stable must carry a version above 0.1.0.
+`cargo binstall` resolves its asset URL from a `postflight-cli/v<version>` tag
+that does not exist yet, so it degrades to a source build until one does.
+
+"Lane wired, inert" means the publishing
 machinery is on main and correct but has never run: all three ecosystem
 lanes are filtered to non-prerelease `postflight-cli/v*` tags, no stable
 release exists, and each is additionally waiting on a registry-side or
@@ -251,9 +257,8 @@ the checked-out source is the artifact), installs the toolchain pinned in
 version in the tag, mints a short-lived token through trusted publishing,
 and runs `cargo publish --locked -p postflight`.
 
-`Cargo.toml` still carries `publish = false`. That is the remaining inert
-guard, not an oversight — the lane cannot publish until it is flipped, which
-is part of the crates.io ceremony below.
+The lane's first act is to refuse a crate the manifest marks unpublishable,
+because cargo's own refusal names neither the key nor the ceremony behind it.
 
 ### Homebrew
 
@@ -526,13 +531,13 @@ human with those credentials can create. Every one of them fails the lane
 loudly rather than silently publishing nothing, so none of them can be
 discovered late by a user.
 
-- **crates.io.** Two things. The crate name `postflight` has to be owned on
-  a flat namespace and a trusted publisher registered against
-  `postflight-cli-publish-crates.yml` in this repository, and `Cargo.toml`'s
-  `publish = false` has to be flipped — `cargo publish` refuses outright
-  while it stands. Both `cargo install postflight` and
-  `cargo binstall postflight` are downstream of this; binstall's asset URL
-  is already correct, it is the index lookup that is missing.
+- **crates.io.** The name is owned: `postflight` 0.1.0 was published by hand
+  on 2026-07-26, which is what makes `cargo install postflight` work today.
+  What remains is registering a trusted publisher against
+  `postflight-cli-publish-crates.yml` in this repository so the lane can mint
+  its own token, and dropping `publish = false` from the manifest so cargo
+  will let it. Note that 0.1.0 is spent — versions are immutable and yanking
+  does not free one — so the first stable must be numbered above it.
 
 - **npm.** Trusted publishing is registered *per package*, so that is five
   registrations against `postflight-cli-publish-npm.yml`: the meta package
