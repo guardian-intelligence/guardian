@@ -1,3 +1,10 @@
+import {
+  type Rectangle,
+  rectangleAround,
+  toWebGLScissor,
+  unionRectangles,
+} from "./geometry";
+
 export type IlluminationMode = "css" | "webgl2";
 
 export interface IlluminationRenderer {
@@ -116,18 +123,57 @@ void main() {
 }
 `;
 
-const copyFragmentShaderSource = `#version 300 es
+const dynamicFragmentShaderSource = `#version 300 es
 precision highp float;
 
+uniform int uLightCount;
+uniform vec4 uLightColors[4];
+uniform vec4 uLights[4];
+uniform vec2 uCssResolution;
 uniform sampler2D uStaticTexture;
 
 in vec2 vUv;
 out vec4 outColor;
 
 void main() {
-  outColor = texture(uStaticTexture, vUv);
+  vec2 cssPoint = vec2(vUv.x, 1.0 - vUv.y) * uCssResolution;
+  vec3 color = texture(uStaticTexture, vUv).rgb;
+
+  for (int index = 0; index < 4; index++) {
+    if (index >= uLightCount) break;
+    vec4 light = uLights[index];
+    vec3 lightColor = uLightColors[index].rgb;
+    float distanceFromLight = distance(cssPoint, light.xy) / light.z;
+    float influence = pow(max(0.0, 1.0 - distanceFromLight), 2.2) * light.w;
+    color = 1.0 - (1.0 - color) * (1.0 - lightColor * influence);
+  }
+
+  outColor = vec4(color, 1.0);
 }
 `;
+
+type Light = {
+  readonly color: readonly [number, number, number];
+  readonly intensity: number;
+  readonly radius: number;
+  readonly x: number;
+  readonly y: number;
+};
+
+const sourceLightStyles: Record<
+  string,
+  Pick<Light, "color" | "intensity" | "radius">
+> = {
+  dropzone: { color: [0.36, 0.62, 1], intensity: 0.045, radius: 440 },
+  logo: { color: [0.55, 0.72, 1], intensity: 0.17, radius: 170 },
+  status: { color: [0.34, 0.9, 0.82], intensity: 0.075, radius: 120 },
+};
+
+const pointerLightStyle = {
+  color: [0.38, 0.7, 1],
+  intensity: 0.09,
+  radius: 190,
+} as const;
 
 function compileShader(
   context: WebGL2RenderingContext,
@@ -184,17 +230,23 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
   readonly mode = "webgl2";
   readonly #canvas: HTMLCanvasElement;
   readonly #context: WebGL2RenderingContext;
-  readonly #copyProgram: WebGLProgram;
+  readonly #dynamicProgram: WebGLProgram;
   readonly #staticProgram: WebGLProgram;
   readonly #framebuffer: WebGLFramebuffer;
   readonly #staticTexture: WebGLTexture;
   readonly #resizeObserver: ResizeObserver;
   #frameCount = 0;
+  #height = 1;
+  #pixelRatio = 1;
+  #pointer: Light | null = null;
+  #pointerFrame = 0;
+  #sources: Light[] = [];
+  #width = 1;
 
   constructor(canvas: HTMLCanvasElement, context: WebGL2RenderingContext) {
     this.#canvas = canvas;
     this.#context = context;
-    this.#copyProgram = createProgram(context, copyFragmentShaderSource);
+    this.#dynamicProgram = createProgram(context, dynamicFragmentShaderSource);
     this.#staticProgram = createProgram(context, staticFragmentShaderSource);
 
     const framebuffer = context.createFramebuffer();
@@ -209,8 +261,57 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
 
     this.#resizeObserver = new ResizeObserver(() => this.#resize());
     this.#resizeObserver.observe(canvas);
+    window.addEventListener("pointermove", this.#onPointerMove, { passive: true });
+    document.documentElement.addEventListener("pointerleave", this.#onPointerLeave, {
+      passive: true,
+    });
     this.#resize();
   }
+
+  readonly #onPointerMove = (event: PointerEvent) => {
+    const previous = this.#pointer;
+    this.#pointer = {
+      ...pointerLightStyle,
+      x: event.clientX,
+      y: event.clientY,
+    };
+    const previousRectangle = previous
+      ? rectangleAround(previous.x, previous.y, previous.radius, this.#width, this.#height)
+      : null;
+    const nextRectangle = rectangleAround(
+      this.#pointer.x,
+      this.#pointer.y,
+      this.#pointer.radius,
+      this.#width,
+      this.#height,
+    );
+    this.#schedulePointerDraw(unionRectangles(previousRectangle, nextRectangle));
+  };
+
+  readonly #onPointerLeave = () => {
+    const previous = this.#pointer;
+    this.#pointer = null;
+    if (!previous) return;
+    this.#schedulePointerDraw(
+      rectangleAround(previous.x, previous.y, previous.radius, this.#width, this.#height),
+    );
+  };
+
+  #schedulePointerDraw(rectangle: Rectangle | null) {
+    if (!rectangle) return;
+    this.#pendingRectangle = unionRectangles(this.#pendingRectangle, rectangle);
+    if (this.#pointerFrame !== 0) return;
+    this.#canvas.dataset.state = "scheduled";
+    this.#pointerFrame = window.requestAnimationFrame(() => {
+      this.#pointerFrame = 0;
+      const pendingRectangle = this.#pendingRectangle;
+      this.#pendingRectangle = null;
+      if (pendingRectangle) this.#drawToScreen(pendingRectangle);
+      this.#canvas.dataset.state = "idle";
+    });
+  }
+
+  #pendingRectangle: Rectangle | null = null;
 
   #resize() {
     const { height, width } = this.#canvas.getBoundingClientRect();
@@ -219,6 +320,9 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
     const backingHeight = Math.max(1, Math.round(height * pixelRatio));
 
     if (this.#canvas.width === backingWidth && this.#canvas.height === backingHeight) return;
+    this.#height = height;
+    this.#pixelRatio = pixelRatio;
+    this.#width = width;
     this.#canvas.width = backingWidth;
     this.#canvas.height = backingHeight;
 
@@ -253,9 +357,8 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
     }
 
     this.#drawStatic(width, height, backingWidth, backingHeight);
-    this.#drawToScreen(backingWidth, backingHeight);
-    this.#frameCount += 1;
-    this.#canvas.dataset.frameCount = String(this.#frameCount);
+    this.#syncSources();
+    this.#drawToScreen();
     this.#canvas.dataset.state = "idle";
   }
 
@@ -272,22 +375,77 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
     context.drawArrays(context.TRIANGLES, 0, 3);
   }
 
-  #drawToScreen(width: number, height: number) {
+  #syncSources() {
+    this.#sources = [...document.querySelectorAll<HTMLElement>("[data-illumination-source]")]
+      .map((element): Light | null => {
+        const name = element.dataset.illuminationSource ?? "";
+        const style = sourceLightStyles[name];
+        if (!style) return null;
+        const rectangle = element.getBoundingClientRect();
+        return {
+          ...style,
+          x: rectangle.left + rectangle.width * 0.5,
+          y: rectangle.top + rectangle.height * 0.5,
+        };
+      })
+      .filter((light): light is Light => light !== null)
+      .slice(0, 3);
+  }
+
+  #drawToScreen(dirtyRectangle?: Rectangle) {
     const context = this.#context;
+    const lights = [...(this.#pointer ? [this.#pointer] : []), ...this.#sources].slice(0, 4);
+    const lightValues = new Float32Array(16);
+    const colorValues = new Float32Array(16);
+    lights.forEach((light, index) => {
+      lightValues.set([light.x, light.y, light.radius, light.intensity], index * 4);
+      colorValues.set([...light.color, 1], index * 4);
+    });
+
     context.bindFramebuffer(context.FRAMEBUFFER, null);
-    context.viewport(0, 0, width, height);
-    context.useProgram(this.#copyProgram);
+    context.viewport(0, 0, this.#canvas.width, this.#canvas.height);
+    if (dirtyRectangle) {
+      const scissor = toWebGLScissor(dirtyRectangle, this.#height, this.#pixelRatio);
+      context.enable(context.SCISSOR_TEST);
+      context.scissor(scissor.x, scissor.y, scissor.width, scissor.height);
+    } else {
+      context.disable(context.SCISSOR_TEST);
+    }
+    context.useProgram(this.#dynamicProgram);
     context.activeTexture(context.TEXTURE0);
     context.bindTexture(context.TEXTURE_2D, this.#staticTexture);
-    context.uniform1i(requireUniform(context, this.#copyProgram, "uStaticTexture"), 0);
+    context.uniform1i(requireUniform(context, this.#dynamicProgram, "uStaticTexture"), 0);
+    context.uniform2f(
+      requireUniform(context, this.#dynamicProgram, "uCssResolution"),
+      this.#width,
+      this.#height,
+    );
+    context.uniform1i(
+      requireUniform(context, this.#dynamicProgram, "uLightCount"),
+      lights.length,
+    );
+    context.uniform4fv(
+      requireUniform(context, this.#dynamicProgram, "uLights[0]"),
+      lightValues,
+    );
+    context.uniform4fv(
+      requireUniform(context, this.#dynamicProgram, "uLightColors[0]"),
+      colorValues,
+    );
     context.drawArrays(context.TRIANGLES, 0, 3);
+    context.disable(context.SCISSOR_TEST);
+    this.#frameCount += 1;
+    this.#canvas.dataset.frameCount = String(this.#frameCount);
   }
 
   dispose() {
+    window.cancelAnimationFrame(this.#pointerFrame);
+    window.removeEventListener("pointermove", this.#onPointerMove);
+    document.documentElement.removeEventListener("pointerleave", this.#onPointerLeave);
     this.#resizeObserver.disconnect();
     this.#context.deleteFramebuffer(this.#framebuffer);
     this.#context.deleteTexture(this.#staticTexture);
-    this.#context.deleteProgram(this.#copyProgram);
+    this.#context.deleteProgram(this.#dynamicProgram);
     this.#context.deleteProgram(this.#staticProgram);
   }
 }

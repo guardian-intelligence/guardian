@@ -10,7 +10,11 @@ export function Header() {
       >
         Guardian
       </a>
-      <span className="privatecut-header__orb" aria-hidden="true">
+      <span
+        className="privatecut-header__orb"
+        data-illumination-source="logo"
+        aria-hidden="true"
+      >
         <WingsArgent className="privatecut-header__mark privatecut-header__mark--base" />
         <WingsArgent className="privatecut-header__mark privatecut-header__mark--reflection" />
       </span>
@@ -32,7 +36,10 @@ export function Header() {
             </svg>
           </span>
         </a>
-        <span className="privatecut-header__glow-control privatecut-header__status">
+        <span
+          className="privatecut-header__glow-control privatecut-header__status"
+          data-illumination-source="status"
+        >
           <span className="privatecut-header__glow-effect" aria-hidden="true" />
           <span className="privatecut-header__glow-text">
             <span className="privatecut-header__status-dot" aria-hidden="true" />
