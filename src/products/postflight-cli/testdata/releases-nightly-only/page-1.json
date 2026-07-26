@@ -1,0 +1,32 @@
+[
+  {
+    "html_url": "https://github.com/guardian-intelligence/guardian/releases/tag/postflight-cli%2Fnightly-20260724",
+    "id": 900000012,
+    "tag_name": "postflight-cli/nightly-20260724",
+    "name": "postflight CLI nightly-20260724",
+    "draft": false,
+    "prerelease": true,
+    "assets": [{"name": "postflight-x86_64-unknown-linux-musl", "size": 4194304}],
+    "body": "nightly"
+  },
+  {
+    "html_url": "https://github.com/guardian-intelligence/guardian/releases/tag/dataset-2026-07-20",
+    "id": 900000011,
+    "tag_name": "dataset-2026-07-20",
+    "name": "letters corpus 2026-07-20",
+    "draft": false,
+    "prerelease": false,
+    "assets": [{"name": "letters.tar.zst", "size": 8388608}],
+    "body": "unrelated data drop"
+  },
+  {
+    "html_url": "https://github.com/guardian-intelligence/guardian/releases/tag/postflight-cli%2Fnightly-20260723",
+    "id": 900000010,
+    "tag_name": "postflight-cli/nightly-20260723",
+    "name": "postflight CLI nightly-20260723",
+    "draft": false,
+    "prerelease": true,
+    "assets": [{"name": "postflight-x86_64-unknown-linux-musl", "size": 4194304}],
+    "body": "nightly"
+  }
+]
