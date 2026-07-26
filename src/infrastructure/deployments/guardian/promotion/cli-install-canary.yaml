@@ -406,12 +406,8 @@ spec:
               image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
               command: ["/bin/bash", "/scripts/canary.sh"]
               env:
-                # installer-script joins the matrix once
-                # https://guardianintelligence.org/postflight/install.sh
-                # answers 200 from the apex; until then a cell for it would
-                # page critical on a URL that is merely not deployed yet.
                 - name: METHODS
-                  value: "release-assets"
+                  value: "release-assets installer-script"
                 - name: INSTALLER_URL
                   value: https://guardianintelligence.org/postflight/install.sh
                 - name: TARGETS
