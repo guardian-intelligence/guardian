@@ -24,10 +24,14 @@ canary loop drives. Renaming either side fails at PR time.
 ## Credentials
 
 The provider reads `GITHUB_TOKEN`; it is never a tofu variable and never
-lands in state. The token needs `repo` and `admin:org` on **both**
-organizations — `guardian-intelligence` for the ruleset,
-`digital-guardian-software` for the fleet. The platform GitHub App cannot be
-used here: its installation token is scoped to ghcr reads.
+lands in state. It must be the custody-backed classic PAT with `repo` and
+`admin:org` on **both** organizations — `guardian-intelligence` for the
+ruleset, `digital-guardian-software` for the fleet. Export it explicitly:
+without `GITHUB_TOKEN`, the provider falls back to the OAuth-class token from
+`gh`, which GitHub refuses for App-installation repository writes. Fine-grained
+PATs and App tokens cannot perform that write either. The platform GitHub App
+is scoped to ghcr reads, and the release projector PAT is `write:packages`
+only; neither is a substitute.
 
 Applying this root is an operator ceremony, not an agent task: it needs the
 state passphrase and a token no in-cluster identity holds. Assemble the
@@ -92,6 +96,21 @@ that makes the token mintable. If a stable cut fails at its
 applied — apply it, then re-run the cutter with `workflow_dispatch`. The
 formula is machine-written: to change what it says, change
 `dist/homebrew/postflight.rb.tmpl` and cut a release, never the tap.
+
+If an organization owner had to add `homebrew-tap` in the GitHub UI because
+the custody classic PAT was unavailable, adopt that exact live relationship
+before planning:
+
+```sh
+tofu import \
+  github_app_installation_repository.promotions_homebrew_tap \
+  144138265:homebrew-tap
+tofu plan
+```
+
+The plan must be clean. A fallback `gh` OAuth token cannot read or write this
+resource reliably, so a 403 is an authentication error, not evidence that the
+grant is absent.
 
 ## Changing the required check
 

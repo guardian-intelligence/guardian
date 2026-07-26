@@ -1,13 +1,18 @@
 ---
 name: sweep-github-app-permissions
-description: Reconcile every GitHub App owned by or installed on guardian-intelligence through an organization owner's signed-in browser, enforce the committed least-privilege permission and repository boundaries, and accept only matching first-party permission updates.
+description: Reconcile every GitHub App owned by or installed on guardian-intelligence, enforce the committed least-privilege permission and repository boundaries across the signed-in owner UI and GitHub IaC, and accept only matching first-party permission updates.
 ---
 
-# Computer-Use Agent GitHub Permissions Sweep Manual
+# GitHub Permissions Sweep Manual
 
-Use this manual from the operator's already signed-in browser. Make every
-state-changing operation through the GitHub UI. Terminal commands in this
-manual are read-only acceptance checks, not a second control plane.
+Use this manual from the operator's already signed-in browser. App
+registration settings, permission-update acceptance, and repository grants
+that have no committed resource are changed through the GitHub UI. A
+repository grant declared in
+`src/infrastructure/bootstrap/guardian-github` is reconciled through that
+OpenTofu root instead; do not create a second control plane by deleting or
+hand-maintaining it in the UI. Terminal `gh` commands in this manual are
+read-only acceptance checks.
 
 ## Completion contract
 
@@ -53,6 +58,14 @@ or request in the ledger.
   the App, owner, old access, requested access, and affected repositories as a
   blocker. GitHub Apps do not support accepting only part of a third-party
   permission bundle.
+- Do not use the release projector's `write:packages` PAT for App-installation
+  reads or writes. It exists only for GHCR publication.
+- Do not assume the token behind `gh` can reconcile installation repository
+  grants. GitHub's add/remove-installation-repository endpoints accept only a
+  classic PAT with `repo`; OAuth tokens, fine-grained PATs, GitHub App user
+  tokens, and installation tokens cannot perform the write. The
+  `guardian-github` root's custody-backed `GITHUB_TOKEN` is the supported
+  machine path. Keep it out of argv, output, shell history, and state.
 
 ## First-party baseline
 
@@ -114,10 +127,21 @@ Select **Only select repositories** for every first-party installation.
 
 | App | Required repositories in `guardian-intelligence` |
 | - | - |
-| `Guardian Promotions` | `guardian` |
+| `Guardian Promotions` | `guardian`, `homebrew-tap` |
 | `guardian-renovate` | `guardian` |
 | `guardian-platform-app` | `guardian` |
 | `Postflight by Guardian` | Only repositories whose default-branch workflow files contain a live Postflight `runs-on` label, plus an explicitly documented Postflight canary or benchmark repository |
+
+`homebrew-tap` is a publication boundary for the Postflight CLI, not an
+incidental extra repository. A stable release mints a tap-scoped
+`guardian-promotions` token and writes `Formula/postflight.rb` there. The
+repository and its installation grant are declared by
+`github_repository.homebrew_tap` and
+`github_app_installation_repository.promotions_homebrew_tap` in
+`src/infrastructure/bootstrap/guardian-github/main.tf`. Treat the committed
+resource as the authority on every sweep. npm and crates.io publication do not
+imply additional GitHub repository grants; their trusted-publisher boundaries
+are outside this installation.
 
 For Postflight, recompute the set on every run. A repository name containing
 `postflight` is not evidence by itself, and archived repositories are not
@@ -205,10 +229,19 @@ third-party Apps:
 4. For a first-party App, select exactly the repository baseline. For a
    third-party App, apply the evidenced or operator-approved allowlist from the
    repository-baseline rules.
-5. Select **Save**, reload the page, and record the rendered repository list.
-6. If GitHub shows **Review request**, **New permissions requested**, or an
+5. Before saving, compare the target with committed installation-repository
+   resources. Never remove a repository merely because an older hard-coded
+   ledger omitted it. For `guardian-promotions`, `homebrew-tap` must appear and
+   its committed OpenTofu resource must remain in state.
+6. Select **Save**, reload the page, and record the rendered repository list.
+   If a committed grant is missing, record drift and reconcile the
+   `guardian-github` root with its custody-backed classic PAT. If an owner
+   deliberately bootstraps the grant in the UI because that credential is
+   unavailable, import the exact live grant before considering the sweep
+   stable; a follow-up plan must be clean.
+7. If GitHub shows **Review request**, **New permissions requested**, or an
    equivalent banner, continue to Step 4 before leaving this App.
-7. If no request is pending, compare the rendered installed permissions and
+8. If no request is pending, compare the rendered installed permissions and
    events with the ledger target. Record `match` or the exact mismatch.
 
 Do not use the repository's **Settings → GitHub Apps** page for this step: it
@@ -260,6 +293,13 @@ gh api --paginate orgs/guardian-intelligence/installations \
   --jq '.installations[] | {app_id, app_slug, id, repository_selection, permissions, events}'
 ```
 
+This endpoint corroborates the installation and permission bundle, but an
+OAuth-class `gh` session may be unable to enumerate the selected repository
+names. A 403 from `user/installations/<id>/repositories` is an authentication
+boundary, not evidence that the repository is absent. Verify selected names in
+the rendered owner UI and, for declared grants, in the clean OpenTofu plan and
+state.
+
 For each first-party slug, corroborate the public App definition:
 
 ```sh
@@ -274,6 +314,7 @@ Reference behavior:
 
 - [Review and modify installed GitHub Apps](https://docs.github.com/en/apps/using-github-apps/reviewing-and-modifying-installed-github-apps)
 - [Approve updated permissions for a GitHub App](https://docs.github.com/en/apps/using-github-apps/approving-updated-permissions-for-a-github-app)
+- [Add a repository to an App installation](https://docs.github.com/en/rest/apps/installations#add-a-repository-to-an-app-installation)
 - [Renovate GitHub App permissions](https://docs.renovatebot.com/modules/platform/github/#running-as-a-github-app)
 
 ## Output record
