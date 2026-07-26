@@ -47,6 +47,11 @@ channel-enumeration message rather than installing:
 postflight: no release on the 'stable' channel yet. Available channels: nightly
 ```
 
+Removal is `postflight self uninstall` for every method that leaves an
+install receipt, which today means the curl installer; each package manager
+owns removal of the copy it placed, and the CLI declines those rather than
+desyncing it. See [Uninstall](#uninstall).
+
 The `mise` row is a recipe declared in the crate README; nothing in the
 repository or the canary estate exercises it. Its `tag_regex` matches `v`
 tags only, so it will not see nightlies. `cargo binstall` resolves
