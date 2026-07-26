@@ -47,6 +47,11 @@ channel-enumeration message rather than installing:
 postflight: no release on the 'stable' channel yet. Available channels: nightly
 ```
 
+Removal is `postflight self uninstall` for every method that leaves an
+install receipt, which today means the curl installer; each package manager
+owns removal of the copy it placed, and the CLI declines those rather than
+desyncing it. See [Uninstall](#uninstall).
+
 The `mise` row is a recipe declared in the crate README; nothing in the
 repository or the canary estate exercises it. Its `tag_regex` matches `v`
 tags only, so it will not see nightlies. `cargo binstall` resolves
@@ -243,6 +248,98 @@ why the release manifest must move in lockstep with the channel pin (see
 below). The countersigner and projector are `registry-design.md`'s subject;
 what matters here is that neither of them touches the per-binary bundles a
 CLI user verifies.
+
+## The install receipt
+
+Sign-once has a cost that lands on the user: because the same bytes ride edge
+→ nightly → rc → stable, the binary cannot name the release it was published
+as. Its version is the crate version at the build commit, identical across
+every channel and, between version bumps, identical across every nightly. A
+binary that stamped its channel or its tag would fork per channel, and the
+artifact that promoted would no longer be the artifact that was tested.
+
+So provenance is recorded beside the binary rather than inside it.
+`install.sh` writes `install-receipt.json` into the CLI's config directory
+(`$XDG_CONFIG_HOME/postflight`, else `~/.config/postflight`):
+
+```json
+{
+  "schema": 1,
+  "method": "install.sh",
+  "binary_path": "/home/you/.local/bin/postflight",
+  "channel": "nightly",
+  "tag": "postflight-cli/nightly-20260726",
+  "version": "0.2.0-nightly",
+  "target": "x86_64-unknown-linux-musl",
+  "binary_sha256": "a5211ec7…",
+  "installed_at": "2026-07-26T05:24:16Z"
+}
+```
+
+`postflight version` prints the tag, channel and install time underneath the
+version line; `postflight version --short` prints the bare version for
+scripts. **The first line of `postflight version` is fixed** — the deep-test
+runner and the install canary both read it — so provenance is added below it
+and never woven into it.
+
+A receipt is evidence about the one path in `binary_path`, compared with
+symlinks resolved. A second install elsewhere, or a `cargo install` copy
+alongside an installer-managed one, leaves the old receipt in place; it does
+not describe the new binary and is ignored rather than borrowed. A receipt
+whose `schema` is newer than the reader understands is ignored too.
+
+Failing to write a receipt never fails an install: the binary is already in
+place and working, and provenance is not the install. A pinned `--version`
+records no channel, because it follows none.
+
+## Uninstall
+
+`postflight self uninstall` removes the binary, the credentials and the
+receipt, and removes the config directory if nothing else is in it. It reports
+what it removed and what it left.
+
+Three properties are load-bearing:
+
+**It ends the session, not just the file.** Removal calls the same sign-out
+path as `postflight auth logout`, which POSTs the refresh token to the
+issuer's logout endpoint before deleting anything. Deleting `credentials.json`
+alone ends nothing — the session lives at Keycloak until it idles out, so the
+next sign-in would be waved through against a session the user believed they
+had closed. A revocation that cannot be delivered is reported and the local
+copy is removed anyway; leaving a token on disk because the network was down
+is the worse failure.
+
+**It refuses what it does not own.** With no receipt naming the running
+binary, the path is matched against the package managers — Homebrew
+(`/Cellar/`, `/homebrew/`, `/linuxbrew/`), npm (`/node_modules/`), cargo
+(`$CARGO_HOME/bin`) — and the right command is printed instead. Deleting a
+brew-managed file behind brew's back desyncs its manifest and leaves the user
+worse off than before they asked. Anything else unrecognised is declined with
+`make uninstall` and `rm` as the alternatives. In both cases the credentials
+are still removed, because they are ours whoever owns the binary, and the exit
+status is non-zero: the thing that was asked for did not fully happen.
+
+**Confirmation is required, not assumed.** Without `--yes`, a non-terminal
+stdin is refused rather than treated as consent — the same reasoning that
+makes `curl … | sh` worth being careful about.
+
+Order matters: credentials go first. If the binary removal then fails the user
+has a working CLI and merely signs in again; the reverse leaves a token behind
+with nothing left to clear it. Unlinking a running executable is fine on Unix
+— the inode outlives the name — so the process finishes its own removal and
+still prints its report.
+
+`install.sh --uninstall` is the path for a binary too broken to remove itself,
+which is exactly when someone reaches for it. It reads the receipt for the
+install path, delegates to `postflight self uninstall --yes` when the binary
+runs, and only removes files directly when it does not — saying plainly that
+the session was not ended, because a shell script has no good way to do it.
+
+The install canary's `uninstall` method exercises all of this every six hours
+against the live release: install via the public installer, assert the refusal
+without a terminal, remove, then assert the binary, the receipt and the config
+directory are all gone by name. Asserting the home directory is empty would
+pass for a run that installed nothing.
 
 ## Ecosystem mirrors
 
@@ -641,10 +738,18 @@ discovered late by a user.
 
 ## Known gaps
 
-**No macOS execution coverage anywhere.** Both darwin targets are
+**No automated macOS execution coverage.** Both darwin targets are
 cross-compiled on a Linux runner, released, packed into npm platform
-packages, pinned by the Homebrew formula, and verified at every step — but
-never run. The deep-test runner checks Mach-O magic plus the cputype word;
+packages, pinned by the Homebrew formula, and verified at every step. One
+`aarch64-apple-darwin` binary has now been run by hand — installed on an
+Apple Silicon machine through the public installer on 2026-07-26, signature
+verified, `version` correct — which establishes that the lane produces
+working binaries and that two undocumented properties currently hold:
+`zig cc` emits the ad-hoc Mach-O signature arm64 macOS requires to exec at
+all, and `curl | sh` sets no `com.apple.quarantine` attribute, so Gatekeeper
+never adjudicates. Neither is asserted anywhere, and the first would break
+silently on a toolchain change. Nothing runs a darwin binary on a schedule.
+The deep-test runner checks Mach-O magic plus the cputype word;
 the install canary checks magic only; every version assert in the estate
 runs the linux-x64 binary because it is the only one the runner can
 execute. A cross-compile that produced a correct-looking Mach-O that faults
@@ -655,6 +760,13 @@ into the same series; the `platform` label on
 `guardian_cli_install_canary_success` exists for it, and the `cli.` event
 prefix is already registered so a satellite can speak the same vocabulary
 through the public path.
+
+**The `uninstall` canary method is written but not yet listed.** It cannot
+pass against a release published before `postflight self uninstall` existed,
+so `METHODS` gains it once a nightly carries the subcommand — one env edit,
+and the cell goes live on the next six-hourly run. Until then removal is
+covered by the crate's tests and the installer's, not against the live
+release.
 
 **Nothing canaries the ecosystem mirrors.** The install canary's methods are
 the release assets and the curl installer. A published npm version that

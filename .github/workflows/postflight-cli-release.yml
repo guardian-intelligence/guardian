@@ -221,7 +221,11 @@ jobs:
                 "assets/$channel/postflight-$target"
             done
 
-            built="$("assets/$channel/postflight-$NATIVE_TARGET" version)"
+            # First line only: `version` prints provenance underneath itself
+            # when an install receipt sits beside the binary. `--short` would
+            # read better and is not usable here — a stable cut can ride
+            # freight built before that flag existed.
+            built="$("assets/$channel/postflight-$NATIVE_TARGET" version | head -n 1)"
             built="${built#postflight version }"
             if [[ -n "$version" && "$built" != "$version" ]]; then
               echo "$channel: pin claims $version but the artifact is $built" >> "$GITHUB_STEP_SUMMARY"
@@ -396,7 +400,7 @@ jobs:
           # The renderer takes the version on argv and the formula's own `test`
           # block asserts it back out of the binary at install time; assert it
           # here, off the verified artifact, rather than on a user's machine.
-          reported="$("assets/stable/postflight-$NATIVE_TARGET" version)"
+          reported="$("assets/stable/postflight-$NATIVE_TARGET" version | head -n 1)"
           if [[ "$reported" != "postflight version $version" ]]; then
             echo "stable: the formula would promise $version but the artifact reports '$reported'" >> "$GITHUB_STEP_SUMMARY"
             exit 1

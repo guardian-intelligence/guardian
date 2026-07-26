@@ -298,7 +298,10 @@ data:
     # 5s for `version`, 20s for the device flow, and a 60s ceiling over the
     # whole benchmark loop.
     CLI=(env -u CLICKHOUSE_USER -u CLICKHOUSE_PASSWORD "$BIN")
-    version_out="$(timeout 5 "${CLI[@]}" version 2>&1)"
+    # First line only: `version` prints where a copy came from underneath the
+    # version itself when an install receipt sits beside it, and what is being
+    # asserted here is the version the binary claims.
+    version_out="$(timeout 5 "${CLI[@]}" version 2>&1 | head -n 1)"
     cli_version="${version_out##* }"
     if [[ "$version_out" =~ ^postflight\ version\ [0-9]+\.[0-9]+\.[0-9]+ ]]; then
       record version 1
@@ -580,11 +583,14 @@ spec:
       interval: 60s
       rules:
         - alert: GuardianCliDeeptestSilent
-          # The count_over_time guard keeps this from firing during bring-up,
-          # before the first scheduled run has ever pushed a sample.
+          # Guarded on the CronJob having been scheduled, not on the heartbeat
+          # having once existed: guarding on the metric's own history cannot
+          # distinguish "not deployed yet" from "deployed and has never once
+          # completed a run", and suppresses the second forever.
           expr: >-
             absent_over_time(guardian_cli_deeptest_heartbeat[3h])
-            and on() count_over_time(guardian_cli_deeptest_heartbeat[8d]) > 0
+            and on() (time() - max(kube_cronjob_status_last_schedule_time{
+              namespace="guardian-analytics", cronjob="cli-deeptest-runner"}) > 3600)
           labels:
             severity: warning
             guardian_component: cli-release-train

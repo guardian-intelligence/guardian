@@ -9,7 +9,7 @@ rust_binary(
         # Binaries carry only the crate version: commit provenance lives in the
         # OCI annotations and Fulcio certificate so identical sources rebuild
         # byte-identically and the edge lane can dedup by content.
-        "CARGO_PKG_VERSION": "0.1.0",
+        "CARGO_PKG_VERSION": "0.2.0-nightly",
     },
     visibility = ["//visibility:public"],
     deps = [

@@ -40,7 +40,8 @@ pub fn login(options: &LoginOptions) -> Result<(), Error> {
     );
 
     let tokens = flow.wait_for_approval(&authorization, &mut std::thread::sleep)?;
-    store_credentials(&config_dir()?, &StoredCredentials::from(&tokens))?;
+    let credentials = StoredCredentials::new(&tokens, issuer, &options.client_id);
+    store_credentials(&config_dir()?, &credentials)?;
     match username_for(tokens.id_token.as_deref())? {
         Some(username) => println!("Signed in as {username}."),
         None => println!("Signed in."),
@@ -64,13 +65,92 @@ pub fn status() -> Result<bool, Error> {
     }
 }
 
+/// What signing out managed to accomplish.
+pub enum SignOut {
+    NothingStored,
+    /// The session was ended at the issuer as well as locally.
+    Revoked,
+    /// The local copy is gone but the issuer still holds the session.
+    LocalOnly {
+        reason: String,
+    },
+}
+
+/// Removes stored credentials, ending the session at the issuer first.
+///
+/// Deleting the file alone ends nothing: the session lives at the issuer until
+/// it idles out, so a "signed out" machine would have its next sign-in waved
+/// through against a session the user believed they had closed.
+pub fn sign_out() -> Result<SignOut, Error> {
+    let dir = config_dir()?;
+    let Some(credentials) = load_credentials(&dir)? else {
+        return Ok(SignOut::NothingStored);
+    };
+
+    let outcome = match credentials.refresh_token.as_deref() {
+        Some(refresh_token) => {
+            let issuer = credentials
+                .issuer
+                .as_deref()
+                .filter(|v| !v.is_empty())
+                .unwrap_or(crate::DEFAULT_ISSUER);
+            let client_id = credentials
+                .client_id
+                .as_deref()
+                .filter(|v| !v.is_empty())
+                .unwrap_or(crate::DEFAULT_CLIENT_ID);
+            match revoke(issuer, client_id, refresh_token) {
+                Ok(()) => SignOut::Revoked,
+                Err(err) => SignOut::LocalOnly {
+                    reason: err.to_string(),
+                },
+            }
+        }
+        None => SignOut::LocalOnly {
+            reason: String::from("no refresh token was stored"),
+        },
+    };
+
+    // Whatever the issuer said, the local copy goes. A revocation that could
+    // not be delivered is no reason to leave a token sitting on disk.
+    clear_credentials(&dir)?;
+    Ok(outcome)
+}
+
 pub fn logout() -> Result<(), Error> {
-    if clear_credentials(&config_dir()?)? {
-        println!("Signed out.");
-    } else {
-        println!("No stored credentials.");
+    match sign_out()? {
+        SignOut::NothingStored => println!("No stored credentials."),
+        SignOut::Revoked => println!("Signed out."),
+        SignOut::LocalOnly { reason } => {
+            println!("Signed out on this machine.");
+            eprintln!(
+                "postflight: the session could not be ended at the sign-in service ({reason}). \
+                 It expires on its own."
+            );
+        }
     }
     Ok(())
+}
+
+fn revoke(issuer: &str, client_id: &str, refresh_token: &str) -> Result<(), Error> {
+    let url = format!(
+        "{}/protocol/openid-connect/logout",
+        issuer.trim_end_matches('/')
+    );
+    let mut response = http_agent()
+        .post(&url)
+        .send_form([("client_id", client_id), ("refresh_token", refresh_token)])?;
+    let status = response.status().as_u16();
+    if status == 200 || status == 204 {
+        return Ok(());
+    }
+    Err(Error::UnexpectedStatus {
+        status,
+        body: response
+            .body_mut()
+            .read_to_string()
+            .unwrap_or_else(|_| String::from("<unreadable>")),
+    })
 }
 
 fn http_agent() -> ureq::Agent {
@@ -107,8 +187,6 @@ pub fn preferred_username(id_token: &str) -> Result<Option<String>, Error> {
         .map(ToOwned::to_owned))
 }
 
-// Field names are fixed by the OAuth token-response wire format.
-#[allow(clippy::struct_field_names)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StoredCredentials {
     pub access_token: String,
@@ -116,14 +194,22 @@ pub struct StoredCredentials {
     pub refresh_token: Option<String>,
     #[serde(default)]
     pub id_token: Option<String>,
+    /// Recorded so signing out reaches the issuer that minted these tokens
+    /// rather than whichever one today's defaults name.
+    #[serde(default)]
+    pub issuer: Option<String>,
+    #[serde(default)]
+    pub client_id: Option<String>,
 }
 
-impl From<&TokenSet> for StoredCredentials {
-    fn from(tokens: &TokenSet) -> Self {
+impl StoredCredentials {
+    pub fn new(tokens: &TokenSet, issuer: &str, client_id: &str) -> Self {
         Self {
             access_token: tokens.access_token.clone(),
             refresh_token: tokens.refresh_token.clone(),
             id_token: tokens.id_token.clone(),
+            issuer: Some(issuer.to_owned()),
+            client_id: Some(client_id.to_owned()),
         }
     }
 }
@@ -215,6 +301,55 @@ mod tests {
     }
 
     #[test]
+    fn revoke_ends_the_session_at_the_issuer() {
+        let server =
+            crate::testing::TestServer::serve(vec![crate::testing::json_response(204, "")]);
+        revoke(&server.url, "postflight-cli", "rt-1").expect("revocation should succeed");
+        let requests = server.finish();
+        assert!(
+            requests[0].starts_with("POST /protocol/openid-connect/logout "),
+            "revocation must hit the logout endpoint, got: {}",
+            requests[0].lines().next().unwrap_or_default()
+        );
+        assert!(requests[0].contains("client_id=postflight-cli"));
+        assert!(requests[0].contains("refresh_token=rt-1"));
+    }
+
+    #[test]
+    fn a_refused_revocation_is_reported_not_swallowed() {
+        let server = crate::testing::TestServer::serve(vec![crate::testing::json_response(
+            400,
+            r#"{"error":"invalid_grant"}"#,
+        )]);
+        let err = revoke(&server.url, "postflight-cli", "stale").expect_err("400 must not pass");
+        assert!(matches!(err, Error::UnexpectedStatus { status: 400, .. }));
+        server.finish();
+    }
+
+    /// Credentials written before the issuer was recorded still have to load:
+    /// upgrading the CLI must not strand someone in a state where signing out
+    /// fails on a file they cannot see.
+    #[test]
+    fn credentials_without_an_issuer_still_load() {
+        let dir = std::env::temp_dir().join(format!(
+            "postflight-legacy-creds-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            credentials_path(&dir),
+            r#"{"access_token":"at-1","refresh_token":"rt-1","id_token":null}"#,
+        )
+        .unwrap();
+        let loaded = load_credentials(&dir).unwrap().expect("should load");
+        assert_eq!(loaded.access_token, "at-1");
+        assert_eq!(loaded.issuer, None);
+        assert_eq!(loaded.client_id, None);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn credentials_roundtrip_and_clear() {
         let dir = std::env::temp_dir().join(format!(
             "postflight-cli-test-{}-{:?}",
@@ -225,6 +360,8 @@ mod tests {
             access_token: String::from("at-1"),
             refresh_token: Some(String::from("rt-1")),
             id_token: None,
+            issuer: Some(String::from("https://example.test/realms/r")),
+            client_id: Some(String::from("postflight-cli")),
         };
 
         assert!(load_credentials(&dir).unwrap().is_none());
