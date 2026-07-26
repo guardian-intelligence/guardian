@@ -59,13 +59,25 @@ async function installObservers(page) {
       }
     });
     observe("longtask", (entries) => {
-      for (const entry of entries) window.__privatecutProfile.longtasks.push(entry.duration);
+      for (const entry of entries) {
+        window.__privatecutProfile.longtasks.push({
+          duration: entry.duration,
+          startTime: entry.startTime,
+        });
+      }
     });
     observe("long-animation-frame", (entries) => {
       for (const entry of entries) {
         window.__privatecutProfile.longAnimationFrames.push({
           blockingDuration: entry.blockingDuration,
           duration: entry.duration,
+          scripts: [...entry.scripts].map((script) => ({
+            duration: script.duration,
+            forcedStyleAndLayoutDuration: script.forcedStyleAndLayoutDuration,
+            functionName: script.sourceFunctionName,
+            invoker: script.invoker,
+            sourceUrl: script.sourceURL,
+          })),
         });
       }
     });
@@ -241,6 +253,9 @@ const pageMetrics = await page.evaluate(() => {
         profile.longAnimationFrames.length > 0
           ? Math.max(...profile.longAnimationFrames.map((entry) => entry.duration))
           : 0,
+      slowest: [...profile.longAnimationFrames]
+        .sort((left, right) => right.duration - left.duration)
+        .slice(0, 3),
     },
     slowestInteractions: [...profile.events]
       .sort((left, right) => right.duration - left.duration)
@@ -258,10 +273,9 @@ const pageMetrics = await page.evaluate(() => {
       decodedBodySize: resources.reduce((sum, entry) => sum + (entry.decodedBodySize || 0), 0),
       transferSize: resources.reduce((sum, entry) => sum + (entry.transferSize || 0), 0),
     },
-    totalBlockingTime: profile.longtasks.reduce(
-      (sum, duration) => sum + Math.max(0, duration - 50),
-      0,
-    ),
+    totalBlockingTime: profile.longtasks
+      .filter((entry) => entry.startTime >= (paints["first-contentful-paint"] ?? 0))
+      .reduce((sum, entry) => sum + Math.max(0, entry.duration - 50), 0),
   };
 });
 

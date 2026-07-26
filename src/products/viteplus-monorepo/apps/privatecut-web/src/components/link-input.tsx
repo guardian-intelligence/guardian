@@ -56,6 +56,7 @@ export function LinkInput({ onSource, onWarm, disabled }: LinkInputProps) {
       </div>
       <form
         className="link-input__form"
+        data-illumination-glass="field"
         onSubmit={(e) => {
           e.preventDefault();
           submit();

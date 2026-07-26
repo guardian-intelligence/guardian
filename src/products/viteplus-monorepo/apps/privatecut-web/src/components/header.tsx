@@ -12,6 +12,7 @@ export function Header() {
       </a>
       <span
         className="privatecut-header__orb"
+        data-illumination-glass="orb"
         data-illumination-source="logo"
         aria-hidden="true"
       >
@@ -25,6 +26,7 @@ export function Header() {
           rel="noreferrer"
           aria-label="View Guardian on GitHub"
           className="privatecut-header__glow-control privatecut-header__github"
+          data-illumination-glass="control"
         >
           <span className="privatecut-header__glow-effect" aria-hidden="true" />
           <span className="privatecut-header__glow-text">
@@ -38,6 +40,7 @@ export function Header() {
         </a>
         <span
           className="privatecut-header__glow-control privatecut-header__status"
+          data-illumination-glass="control"
           data-illumination-source="status"
         >
           <span className="privatecut-header__glow-effect" aria-hidden="true" />
