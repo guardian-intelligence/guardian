@@ -6,6 +6,8 @@
 # renovate.yml uses (the customManagers rule in renovate.json5 moves both).
 set -euo pipefail
 
-npx="$1"
-export HOME="$TEST_TMPDIR"
-"$npx" --yes -p renovate@43.270.0 renovate-config-validator --strict renovate.json5
+node_dir="$(cd "$(dirname "$1")" && pwd -P)"
+npx="$2"
+export npm_config_cache="$TEST_TMPDIR/npm-cache"
+PATH="$node_dir:$PATH" \
+  "$npx" --yes -p renovate@43.270.0 renovate-config-validator --strict renovate.json5

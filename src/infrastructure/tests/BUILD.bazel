@@ -36,6 +36,7 @@ go_test(
         "postflight_cli_auth_session_test.go",
         "postflight_cli_targets_lockstep_test.go",
         "release_manifest_test.go",
+        "renovate_conformance_test.go",
         "secret_consumer_conformance_test.go",
         "spicedb_conformance_test.go",
         "storage_encryption_foundation_test.go",
