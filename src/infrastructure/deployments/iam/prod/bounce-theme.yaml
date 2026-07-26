@@ -152,7 +152,7 @@ data:
       .buttons button { flex: 1; padding: 12px; border-radius: 10px; font-size: 15px;
         font-weight: 600; cursor: pointer; }
       .approve { border: 0; background: #4930a8; color: #fff; }
-      .deny { border: 1px solid rgb(23 20 29 / 0.18); background: #fff; color: #17141d; }
+      .deny { order: -1; border: 1px solid rgb(23 20 29 / 0.18); background: #fff; color: #17141d; }
       .caution { margin-top: 16px; font-size: 13px; color: #5e5871; line-height: 1.5; }
     </style></head>
     <body><div class="card">
@@ -161,9 +161,15 @@ data:
       It will hold your Guardian identity until you sign it out.</p>
       <form action="${url.oauthAction}" method="post">
         <input type="hidden" name="code" value="${oauth.code}">
+        <#-- Approve must stay first in the DOM (Deny sits left via CSS
+             order): anything that submits this form without naming a
+             button — implicit submission, a stray generic submit click —
+             submits with the first submit button, and that default must
+             never be the destructive verb. Stock Keycloak orders accept
+             first for the same reason. -->
         <div class="buttons">
-          <button id="postflight-grant-deny" class="deny" type="submit" name="cancel" value="1">Deny</button>
           <button id="postflight-grant-approve" class="approve" type="submit" name="accept" value="1">Approve</button>
+          <button id="postflight-grant-deny" class="deny" type="submit" name="cancel" value="1">Deny</button>
         </div>
       </form>
       <p class="caution">Only approve a sign-in you started yourself moments ago. If someone
