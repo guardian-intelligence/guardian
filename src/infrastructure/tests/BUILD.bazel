@@ -98,6 +98,7 @@ go_test(
         "//src/infrastructure/runbooks:docs",
         "//src/infrastructure/talm:chart",
         "//src/products/postflight-cli:sources",
+        "//src/products/viteplus-monorepo/packages/canary-journeys:sources",
         "//src/products/postflight-cli/dist/homebrew:formula",
         "//src/products/postflight-cli/dist/npm:packages",
         "//src/products/postflight-cli/release:channels",

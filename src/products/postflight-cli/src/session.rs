@@ -35,7 +35,10 @@ impl<'a> Session<'a> {
     /// Ask the issuer who this access token belongs to. `None` means the
     /// issuer refused it — expired, revoked, or riding a session that no longer
     /// exists. Every other failure is an error, because "we could not reach the
-    /// issuer" must never read as "you are signed out".
+    /// issuer" must never read as "you are signed out". A 403 in particular is
+    /// `insufficient_scope`: the token was minted without `openid` and the
+    /// session behind it may be perfectly healthy, so it must never be answered
+    /// by deleting the credential.
     pub fn user_info(&self, access_token: &str) -> Result<Option<UserInfo>, Error> {
         let url = format!("{}/protocol/openid-connect/userinfo", self.issuer);
         let mut response = self
@@ -45,7 +48,7 @@ impl<'a> Session<'a> {
             .call()?;
         match response.status().as_u16() {
             200 => Ok(Some(response.body_mut().read_json()?)),
-            401 | 403 => Ok(None),
+            401 => Ok(None),
             status => Err(unexpected_status(status, &mut response)),
         }
     }
@@ -156,6 +159,24 @@ mod tests {
                 .expect("401 is an answer")
                 .is_none()
         );
+        server.finish();
+    }
+
+    // 403 is `insufficient_scope`, which says the token was minted wrong, not
+    // that the session is over — answering it as a sign-out would delete a
+    // credential whose session is alive.
+    #[test]
+    fn user_info_does_not_read_insufficient_scope_as_a_dead_session() {
+        let server = TestServer::serve(vec![json_response(
+            403,
+            r#"{"error": "insufficient_scope", "error_description": "Missing openid scope"}"#,
+        )]);
+        let agent = agent();
+
+        assert!(matches!(
+            Session::new(&agent, &server.url, "postflight-cli").user_info("at-1"),
+            Err(Error::UnexpectedStatus { status: 403, .. })
+        ));
         server.finish();
     }
 

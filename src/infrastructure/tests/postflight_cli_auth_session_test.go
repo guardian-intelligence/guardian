@@ -64,3 +64,30 @@ func TestDeeptestRecordsTheAuthSessionChecks(t *testing.T) {
 		}
 	}
 }
+
+// The device-flow journey canary is the only proof that signing out ends the
+// session at the issuer, and it can only prove it about the token the CLI
+// actually holds. The scope is what decides that: a device request without
+// `openid` mints a plain OAuth access token, and Keycloak's userinfo answers it
+// 403 "Missing openid scope" however healthy the session is — which is exactly
+// how this drifted into a failing prod canary on 2026-07-26. Nothing at runtime
+// ties the two requests together, so this does.
+func TestJourneyCanaryRequestsTheScopeTheCliRequests(t *testing.T) {
+	const (
+		deviceFlow = "src/products/postflight-cli/src/device.rs"
+		journey    = "src/products/viteplus-monorepo/packages/canary-journeys/journeys/device-flow.spec.ts"
+	)
+
+	source := readText(t, runfilePath(deviceFlow))
+	match := regexp.MustCompile(`\("scope",\s*"([^"]+)"\)`).FindStringSubmatch(source)
+	if match == nil {
+		t.Fatalf("%s no longer names the scope it starts the device grant with", deviceFlow)
+	}
+	scope := match[1]
+
+	spec := readText(t, runfilePath(journey))
+	want := `scope: "` + scope + `"`
+	if !strings.Contains(spec, want) {
+		t.Fatalf("the device-flow journey canary does not request %s; it would mint a token the CLI never holds", want)
+	}
+}
