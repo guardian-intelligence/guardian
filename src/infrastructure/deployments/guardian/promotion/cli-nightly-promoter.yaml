@@ -1,9 +1,16 @@
-# cli-nightly-promoter: the postflight CLI's nightly cadence. Kargo's own
-# auto-promotion fires the moment Freight is discovered, which would make
-# "nightly" a lie — so the nightly stage has no promotion policy and this
-# CronJob promotes the latest edge Freight once a day instead. Promotion
-# itself stays entirely Kargo's: this job only creates the Promotion CR and
-# Kargo runs the template (pin-bump PR, automerge, reconciler).
+# cli-nightly-promoter: the postflight CLI's channel cadence, as a departure
+# schedule rather than a wall clock. Qualification is a property of each
+# Freight (it must have soaked — existed for SOAK_SECONDS — and pass the
+# Stage template's own deep-test gate), departures are rate-limited to one
+# per DEPARTURE_SECONDS, and a departure takes the newest qualified Freight.
+# Two invariants carry the design: a new Freight never delays a departure
+# (restart-the-soak schemes livelock under steady merge traffic), and the
+# departure interval is the only churn dial — commits landing between
+# departures batch into one hop. Kargo's own auto-promotion would fire the
+# moment Freight is discovered, so the stage has no promotion policy and
+# this CronJob ticks instead. Promotion itself stays entirely Kargo's: this
+# job only creates the Promotion CR and Kargo runs the template (pin-bump
+# PR, automerge, reconciler).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -59,6 +66,16 @@ data:
     NS=guardian-products
     STAGE=postflight-cli-nightly
     WAREHOUSE=postflight-cli
+    # A Freight qualifies once it has existed this long; the deep-test verdict
+    # usually lands inside the window, and the Stage template's gate re-checks
+    # it authoritatively at promotion time.
+    SOAK_SECONDS=3600
+    # The churn dial: at most one departure per interval.
+    DEPARTURE_SECONDS=21600
+    # A failed attempt (usually a gate still waiting on its verdict) is not
+    # retried faster than this, so failed Promotions cannot pile up tick after
+    # tick against the same Freight.
+    RETRY_SECONDS=3600
 
     beat() {
       curl -fsS --retry 3 --data-binary \
@@ -66,26 +83,61 @@ data:
         "$VMINSERT"
     }
 
-    latest=$(kubectl get freights -n "$NS" -o json | jq -r --arg w "$WAREHOUSE" \
-      '[.items[] | select(.origin.name==$w)]
+    now=$(date -u +%s)
+    latest=$(kubectl get freights -n "$NS" -o json | jq -r \
+      --arg w "$WAREHOUSE" --argjson now "$now" --argjson soak "$SOAK_SECONDS" \
+      '[.items[] | select(.origin.name==$w)
+        | select(($now - (.metadata.creationTimestamp | fromdateiso8601)) >= $soak)]
        | sort_by(.metadata.creationTimestamp) | last | .metadata.name // empty')
     if [ -z "$latest" ]; then
-      echo "no freight discovered from $WAREHOUSE yet"
+      echo "no freight from $WAREHOUSE has finished its ${SOAK_SECONDS}s soak"
       beat; exit 0
     fi
 
-    current=$(kubectl get stage "$STAGE" -n "$NS" \
-      -o jsonpath='{.status.lastPromotion.freight.name}')
-    if [ "$latest" = "$current" ]; then
-      echo "nightly already at freight $latest"
-      beat; exit 0
-    fi
-
-    inflight=$(kubectl get promotions -n "$NS" -o json | jq -r --arg s "$STAGE" \
+    promos=$(kubectl get promotions -n "$NS" -o json)
+    inflight=$(jq -r --arg s "$STAGE" \
       '[.items[] | select(.spec.stage==$s)
-        | select(.status.phase=="Pending" or .status.phase=="Running")] | length')
+        | select(.status.phase=="Pending" or .status.phase=="Running")] | length' <<<"$promos")
     if [ "$inflight" != "0" ]; then
       echo "a promotion for $STAGE is already in flight; not stacking another"
+      beat; exit 0
+    fi
+
+    # "Already shipped" is judged against the last promotion that SUCCEEDED:
+    # comparing against the stage's lastPromotion regardless of phase would
+    # read a gate-failed attempt as done and wedge the channel on it forever.
+    # The stage's own status is the fallback when Kargo has pruned the
+    # Promotion objects. All timestamp arithmetic stays in jq — the pod's
+    # busybox date cannot parse ISO8601.
+    last_ok=$(jq -r --arg s "$STAGE" --argjson now "$now" \
+      '[.items[] | select(.spec.stage==$s) | select(.status.phase=="Succeeded")]
+       | sort_by(.metadata.creationTimestamp) | last
+       | if . == null then ""
+         else "\(.spec.freight) \($now - (.metadata.creationTimestamp | fromdateiso8601))" end' <<<"$promos")
+    if [ -z "$last_ok" ]; then
+      last_ok=$(kubectl get stage "$STAGE" -n "$NS" -o json | jq -r --argjson now "$now" \
+        '.status.lastPromotion
+         | if . == null or .status.phase != "Succeeded" then ""
+           else "\(.freight.name) \($now - (.status.finishedAt | fromdateiso8601))" end')
+    fi
+    read -r last_ok_freight last_ok_age <<<"$last_ok"
+    if [ "$latest" = "${last_ok_freight:-}" ]; then
+      echo "channel already at the newest soaked freight $latest"
+      beat; exit 0
+    fi
+
+    try_age=$(jq -r --arg s "$STAGE" --arg f "$latest" --argjson now "$now" \
+      '[.items[] | select(.spec.stage==$s) | select(.spec.freight==$f)]
+       | sort_by(.metadata.creationTimestamp) | last
+       | if . == null then ""
+         else "\($now - (.metadata.creationTimestamp | fromdateiso8601))" end' <<<"$promos")
+    if [ -n "$try_age" ] && [ "$try_age" -lt "$RETRY_SECONDS" ]; then
+      echo "last attempt at $latest was ${try_age}s ago; cooling down"
+      beat; exit 0
+    fi
+
+    if [ -n "${last_ok_age:-}" ] && [ "$last_ok_age" -lt "$DEPARTURE_SECONDS" ]; then
+      echo "last departure was ${last_ok_age}s ago; next in $(( DEPARTURE_SECONDS - last_ok_age ))s"
       beat; exit 0
     fi
 
@@ -97,7 +149,7 @@ data:
       echo "stage template defines no steps; refusing to promote"
       beat; exit 1
     fi
-    name="${STAGE}-$(date -u +%Y%m%d)-${latest:0:7}"
+    name="${STAGE}-$(date -u +%Y%m%d%H%M)-${latest:0:7}"
     echo "promoting $STAGE to freight $latest as $name"
     jq -n --arg stage "$STAGE" --arg freight "$latest" \
       --arg name "$name" --arg ns "$NS" --argjson tpl "$template" \
@@ -125,9 +177,9 @@ metadata:
     app.kubernetes.io/name: cli-nightly-promoter
     app.kubernetes.io/part-of: guardian
 spec:
-  schedule: "0 8 * * *"
+  schedule: "*/15 * * * *"
   concurrencyPolicy: Forbid
-  startingDeadlineSeconds: 3600
+  startingDeadlineSeconds: 600
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
   jobTemplate:
@@ -255,16 +307,16 @@ spec:
           # completed a run", and suppresses the second forever. The install
           # canary was silenced that way for its entire life — see #1177.
           expr: >-
-            absent_over_time(guardian_cli_nightly_promoter_heartbeat[26h])
+            absent_over_time(guardian_cli_nightly_promoter_heartbeat[2h])
             and on() (time() - max(kube_cronjob_status_last_schedule_time{
-              namespace="guardian-products", cronjob="cli-nightly-promoter"}) > 3600)
+              namespace="guardian-products", cronjob="cli-nightly-promoter"}) > 1800)
           labels:
             severity: warning
             guardian_component: cli-release-train
           annotations:
-            summary: "cli-nightly-promoter has not run in 26h"
+            summary: "cli-nightly-promoter has not run in 2h"
             description: >-
-              The nightly promoter CronJob has pushed no heartbeat for over a
-              day: the CLI nightly channel is no longer advancing. Check the
-              newest cli-nightly-promoter Job logs in guardian-products and
-              Kargo's postflight-cli-nightly stage.
+              The channel promoter ticks every 15 minutes and heartbeats even
+              on its no-op paths; two silent hours mean the CLI channel is no
+              longer advancing. Check the newest cli-nightly-promoter Job logs
+              in guardian-products and Kargo's postflight-cli-nightly stage.
