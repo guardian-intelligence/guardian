@@ -1,5 +1,5 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
-import { BackgroundParticles } from "~/components/background-particles";
+import { IlluminationScene } from "~/components/illumination-scene";
 import { TelemetryProbe } from "~/lib/telemetry/page-view";
 import { deployMetaTags } from "~/lib/telemetry/server-deploy-meta";
 import "~/styles/app.css";
@@ -63,6 +63,7 @@ function RootComponent() {
         <HeadContent />
       </head>
       <body className="font-sans antialiased text-mist min-h-screen">
+        <IlluminationScene />
         <div className="stage-light" aria-hidden="true">
           <div className="stage-spotlights">
             <span className="stage-spotlight stage-spotlight--left" />
@@ -70,7 +71,6 @@ function RootComponent() {
             <span className="stage-spotlight stage-spotlight--right" />
           </div>
         </div>
-        <BackgroundParticles />
         <div className="stage-lines" aria-hidden="true">
           <span className="stage-line stage-line--vertical stage-line--outer-left" />
           <span className="stage-line stage-line--vertical stage-line--inner-left" />

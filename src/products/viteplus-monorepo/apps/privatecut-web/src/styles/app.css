@@ -50,6 +50,29 @@ body {
   isolation: isolate;
 }
 
+.illumination-scene {
+  position: fixed;
+  inset: 0;
+  z-index: -4;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.65;
+  -webkit-mask-image: linear-gradient(#000 0%, #000 74%, transparent 100%);
+  mask-image: linear-gradient(#000 0%, #000 74%, transparent 100%);
+}
+
+.illumination-scene[data-mode="css"] {
+  background:
+    radial-gradient(circle at 17% 22%, rgb(216 236 248 / 18%) 0 1px, transparent 1.4px),
+    radial-gradient(circle at 68% 38%, rgb(216 236 248 / 14%) 0 1px, transparent 1.4px),
+    radial-gradient(circle at 82% 17%, rgb(216 236 248 / 12%) 0 1px, transparent 1.4px);
+  background-size:
+    18rem 16rem,
+    23rem 21rem,
+    29rem 27rem;
+}
+
 .stage-light {
   position: fixed;
   inset: 0;
@@ -117,18 +140,6 @@ body {
   --spotlight-scale: 1;
   --spotlight-pulse: 4.8s;
   --spotlight-sweep: 6.8s;
-}
-
-.stage-particles {
-  position: fixed;
-  inset: 0;
-  z-index: -4;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  opacity: 0.65;
-  -webkit-mask-image: linear-gradient(#000 0%, #000 74%, transparent 100%);
-  mask-image: linear-gradient(#000 0%, #000 74%, transparent 100%);
 }
 
 .stage-lines {
@@ -594,7 +605,8 @@ body {
   line-height: 0.98;
   text-align: center;
   text-shadow: 0 2px 1rem rgb(174 207 242 / 24%);
-  opacity: 0;
+  /* Keep the heading paint-eligible for LCP without changing its delayed reveal. */
+  opacity: 0.001;
   animation: title-base-in 2s 0.1s ease forwards;
 }
 
@@ -878,6 +890,14 @@ body {
   transition:
     border-color 200ms ease,
     background-color 200ms ease;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .privatecut-header__glow-control,
+  .dropzone,
+  .link-input__form {
+    background-color: rgb(8 10 21 / 96%);
+  }
 }
 
 .link-input__form:focus-within {
@@ -1245,6 +1265,14 @@ body {
 
   .privatecut-title::after {
     display: none;
+  }
+
+  .dropzone,
+  .dropzone__icon,
+  .link-input__form,
+  .link-input__submit,
+  .privatecut-header__glow-control {
+    transition: none;
   }
 }
 

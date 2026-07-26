@@ -44,14 +44,30 @@ function Home() {
   const [session, setSession] = useState<Session>({ kind: "idle" });
   const engineRef = useRef<PrivateCutEngine | null>(null);
   const warmRef = useRef<Promise<typeof import("~/engine/client")> | null>(null);
+  const warmTimerRef = useRef<number | null>(null);
 
-  // Engine chunk (worker + mediabunny) starts fetching on first hover of the
-  // dropzone, so it is warm by the time a file lands.
-  const warm = useCallback(() => {
+  const loadEngine = useCallback(() => {
     warmRef.current ??= import("~/engine/client");
+    return warmRef.current;
   }, []);
 
-  useEffect(() => () => engineRef.current?.dispose(), []);
+  // The prefetch begins just after the interaction frame, keeping hover and
+  // focus latency independent from parsing the media engine.
+  const warm = useCallback(() => {
+    if (warmRef.current || warmTimerRef.current !== null) return;
+    warmTimerRef.current = window.setTimeout(() => {
+      warmTimerRef.current = null;
+      void loadEngine();
+    }, 75);
+  }, [loadEngine]);
+
+  useEffect(
+    () => () => {
+      if (warmTimerRef.current !== null) window.clearTimeout(warmTimerRef.current);
+      engineRef.current?.dispose();
+    },
+    [],
+  );
 
   const onSource = useCallback(
     (source: MediaSource) => {
@@ -62,8 +78,11 @@ function Home() {
           type: source.type,
         });
       }
-      warm();
-      void (warmRef.current as Promise<typeof import("~/engine/client")>)
+      if (warmTimerRef.current !== null) {
+        window.clearTimeout(warmTimerRef.current);
+        warmTimerRef.current = null;
+      }
+      void loadEngine()
         .then(async (m) => {
           engineRef.current?.dispose();
           const engine = new m.PrivateCutEngine();
@@ -88,7 +107,7 @@ function Home() {
           setSession({ kind: "rejected", message });
         });
     },
-    [warm],
+    [loadEngine],
   );
 
   const reset = useCallback(() => {
