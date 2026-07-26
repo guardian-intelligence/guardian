@@ -29,7 +29,11 @@ export function IlluminationScene() {
       renderer?.dispose();
       renderer = nextRenderer;
       canvas.dataset.mode = nextRenderer.mode;
-      canvas.dataset.state = "idle";
+      canvas.dataset.state =
+        nextRenderer.mode === "webgl2" &&
+        !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "scheduled"
+          : "idle";
       document.documentElement.dataset.illumination = nextRenderer.mode;
     };
 

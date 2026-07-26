@@ -187,12 +187,12 @@ for (let attempt = 0; attempt < attempts; attempt += 1) {
   pointerRuns.push(await sampleFrames(page, "pointer"));
 }
 
-const settledFrameStart = await page
+const motionFrameStart = await page
   .locator(".illumination-scene")
   .evaluate((element) => Number(element.dataset.frameCount ?? "0"))
   .catch(() => null);
 await page.waitForTimeout(1_000);
-const settledFrameEnd = await page
+const motionFrameEnd = await page
   .locator(".illumination-scene")
   .evaluate((element) => Number(element.dataset.frameCount ?? "0"))
   .catch(() => null);
@@ -302,10 +302,10 @@ const report = {
     idle: summarizeRuns(idleRuns),
     page: pageMetrics,
     pointer: summarizeRuns(pointerRuns),
-    settledFrameDelta:
-      settledFrameStart === null || settledFrameEnd === null
+    motionFrameDelta:
+      motionFrameStart === null || motionFrameEnd === null
         ? null
-        : settledFrameEnd - settledFrameStart,
+        : motionFrameEnd - motionFrameStart,
     startupCdp: {
       taskMs: round(
         ((afterNavigation.TaskDuration ?? 0) - (beforeNavigation.TaskDuration ?? 0)) * 1_000,
@@ -337,7 +337,7 @@ await browser.close();
 
 const failures = [];
 if (shouldGate) {
-  const { page: measuredPage, pointer, settledFrameDelta } = report.axes;
+  const { motionFrameDelta, page: measuredPage, pointer } = report.axes;
   if (pointer.p95Ms > p95BudgetMs) {
     failures.push(`pointer p95 ${pointer.p95Ms}ms > ${round(p95BudgetMs)}ms`);
   }
@@ -354,11 +354,13 @@ if (shouldGate) {
   if (measuredPage.totalBlockingTime > 200) {
     failures.push(`TBT ${round(measuredPage.totalBlockingTime)}ms > 200ms`);
   }
-  if (measuredPage.illumination && measuredPage.illumination.state !== "idle") {
-    failures.push(`illumination did not settle: ${measuredPage.illumination.state}`);
+  if (measuredPage.illumination && measuredPage.illumination.state !== "scheduled") {
+    failures.push(`illumination motion loop is not active: ${measuredPage.illumination.state}`);
   }
-  if (settledFrameDelta !== null && settledFrameDelta !== 0) {
-    failures.push(`illumination rendered ${settledFrameDelta} idle frames`);
+  if (motionFrameDelta !== null && motionFrameDelta < targetHz * 0.8) {
+    failures.push(
+      `illumination advanced ${motionFrameDelta} frames in 1s; expected at least ${Math.floor(targetHz * 0.8)}`,
+    );
   }
 }
 

@@ -1,4 +1,3 @@
-import { type Rectangle, rectangleAround, toWebGLScissor, unionRectangles } from "./geometry";
 import { WakeScheduler } from "./scheduler";
 
 export type IlluminationMode = "css" | "webgl2";
@@ -8,6 +7,40 @@ export interface IlluminationRenderer {
   dispose(): void;
 }
 
+type ParticleLayer = {
+  readonly alpha: readonly [number, number];
+  readonly blur: number;
+  readonly density: number;
+  readonly size: readonly [number, number];
+  readonly speed: readonly [number, number];
+};
+
+const PARTICLE_LAYERS: readonly ParticleLayer[] = [
+  {
+    alpha: [0.1, 0.28],
+    blur: 0.4,
+    density: 0.0002,
+    size: [0.3, 0.55],
+    speed: [0.002, 0.005],
+  },
+  {
+    alpha: [0.15, 0.4],
+    blur: 0.8,
+    density: 0.000065,
+    size: [0.45, 0.8],
+    speed: [0.006, 0.011],
+  },
+  {
+    alpha: [0.2, 0.55],
+    blur: 1.8,
+    density: 0.000018,
+    size: [0.7, 1.15],
+    speed: [0.012, 0.02],
+  },
+] as const;
+
+const FLOATS_PER_PARTICLE = 8;
+
 const contextOptions: WebGLContextAttributes = {
   alpha: true,
   antialias: false,
@@ -15,11 +48,70 @@ const contextOptions: WebGLContextAttributes = {
   failIfMajorPerformanceCaveat: true,
   powerPreference: "high-performance",
   premultipliedAlpha: true,
-  preserveDrawingBuffer: true,
+  preserveDrawingBuffer: false,
   stencil: false,
 };
 
-const vertexShaderSource = `#version 300 es
+const particleVertexShaderSource = `#version 300 es
+precision highp float;
+
+layout(location = 0) in vec4 aPositionSizeSpeed;
+layout(location = 1) in vec4 aAppearance;
+
+uniform float uPixelRatio;
+uniform float uTime;
+
+out float vAlpha;
+out float vBlur;
+out float vCoreRadius;
+
+void main() {
+  float speed = aPositionSizeSpeed.w;
+  vec2 position = vec2(
+    mod(aPositionSizeSpeed.x + 0.02 - speed * uTime * 0.08, 1.04) - 0.02,
+    mod(aPositionSizeSpeed.y + 0.02 - speed * uTime, 1.04) - 0.02
+  );
+  vec2 clip = position * 2.0 - 1.0;
+  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+
+  float radius = aPositionSizeSpeed.z;
+  float blur = aAppearance.w;
+  float renderedRadius = radius + blur * 0.5;
+  gl_PointSize = max(1.0, renderedRadius * 2.0 * uPixelRatio);
+  vCoreRadius = radius / max(renderedRadius, 0.001);
+  vBlur = blur;
+  vAlpha = aAppearance.x * (
+    0.58 + 0.42 * ((sin(uTime * aAppearance.z + aAppearance.y) + 1.0) * 0.5)
+  );
+}
+`;
+
+const particleFragmentShaderSource = `#version 300 es
+precision highp float;
+
+in float vAlpha;
+in float vBlur;
+in float vCoreRadius;
+
+out vec4 outColor;
+
+void main() {
+  vec2 point = gl_PointCoord * 2.0 - 1.0;
+  float distanceFromCenter = length(point);
+  if (distanceFromCenter > 1.0) discard;
+
+  float core = 1.0 - smoothstep(max(0.05, vCoreRadius * 0.55), vCoreRadius, distanceFromCenter);
+  float haloFalloff = mix(8.0, 3.25, clamp(vBlur / 1.8, 0.0, 1.0));
+  float halo = exp(-distanceFromCenter * distanceFromCenter * haloFalloff) * (1.0 - core);
+  float alpha = vAlpha * (core + halo * 0.42);
+  vec3 coreColor = vec3(216.0, 236.0, 248.0) / 255.0;
+  vec3 haloColor = vec3(174.0, 207.0, 242.0) / 255.0;
+  vec3 color = mix(haloColor, coreColor, core);
+  outColor = vec4(color * alpha, alpha);
+}
+`;
+
+const lightVertexShaderSource = `#version 300 es
 precision highp float;
 
 const vec2 POSITIONS[3] = vec2[3](
@@ -37,220 +129,51 @@ void main() {
 }
 `;
 
-const staticFragmentShaderSource = `#version 300 es
+const lightFragmentShaderSource = `#version 300 es
 precision highp float;
 
+uniform vec4 uPointerLight;
 uniform vec2 uCssResolution;
 
 in vec2 vUv;
 out vec4 outColor;
 
-float hash21(vec2 point) {
-  point = fract(point * vec2(123.34, 456.21));
-  point += dot(point, point + 45.32);
-  return fract(point.x * point.y);
-}
-
-float beam(vec2 point, vec2 origin, vec2 direction, float width, float reach) {
-  vec2 offset = point - origin;
-  float forward = dot(offset, direction);
-  float lateral = abs(offset.x * direction.y - offset.y * direction.x);
-  float cone = 1.0 - smoothstep(width * max(forward, 0.03), width * max(forward, 0.03) + 0.025, lateral);
-  float head = smoothstep(0.0, 0.08, forward);
-  float tail = 1.0 - smoothstep(reach * 0.72, reach, forward);
-  return cone * head * tail;
-}
-
-float verticalLine(float x, float position, float opacity) {
-  float distanceToLine = abs(x - position);
-  return (1.0 - smoothstep(0.45, 1.35, distanceToLine)) * opacity;
-}
-
 void main() {
-  vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
-  vec2 cssPoint = uv * uCssResolution;
-  vec3 color = vec3(0.0196, 0.0235, 0.0588);
-
-  vec2 stageOffset = (uv - vec2(0.5, 0.355)) / vec2(0.52, 0.67);
-  float stageGlow = exp(-dot(stageOffset, stageOffset) * 2.5);
-  color += vec3(0.018, 0.045, 0.16) * stageGlow;
-
-  vec2 upperOffset = (uv - vec2(0.5, 0.31)) / vec2(0.5, 0.7);
-  float upperGlow = exp(-dot(upperOffset, upperOffset) * 4.0);
-  color += vec3(0.055, 0.074, 0.102) * upperGlow;
-
-  vec2 origin = vec2(0.5, 0.09);
-  float leftBeam = beam(uv, origin, normalize(vec2(-0.3, 1.0)), 0.19, 0.86);
-  float centerBeam = beam(uv, origin, vec2(0.0, 1.0), 0.18, 0.9);
-  float rightBeam = beam(uv, origin, normalize(vec2(0.3, 1.0)), 0.19, 0.86);
-  color += vec3(0.078, 0.097, 0.135) * (leftBeam + rightBeam) * 0.22;
-  color += vec3(0.09, 0.115, 0.16) * centerBeam * 0.2;
-
-  float lineFade = (1.0 - smoothstep(0.66, 0.9, uv.y)) * smoothstep(0.0, 0.12, uv.y);
-  float center = uCssResolution.x * 0.5;
-  float lines =
-    verticalLine(cssPoint.x, center - 520.0, 0.035) +
-    verticalLine(cssPoint.x, center - 416.0, 0.06) +
-    verticalLine(cssPoint.x, center, 0.028) +
-    verticalLine(cssPoint.x, center + 416.0, 0.06) +
-    verticalLine(cssPoint.x, center + 520.0, 0.035);
-  float headerLine = (1.0 - smoothstep(0.45, 1.35, abs(cssPoint.y - 105.0))) * 0.055;
-  headerLine *= smoothstep(0.0, 0.22, uv.x) * (1.0 - smoothstep(0.78, 1.0, uv.x));
-  color += vec3(0.73, 0.84, 0.97) * (lines * lineFade + headerLine);
-
-  vec2 particleCell = floor(cssPoint / 18.0);
-  vec2 particleLocal = fract(cssPoint / 18.0);
-  float particleSeed = hash21(particleCell);
-  vec2 particlePosition = vec2(hash21(particleCell + 4.7), hash21(particleCell + 9.2));
-  float particleDistance = length((particleLocal - particlePosition) * 18.0);
-  float particle = (1.0 - smoothstep(0.3, 1.35, particleDistance));
-  particle *= smoothstep(0.965, 0.998, particleSeed);
-  particle *= 1.0 - smoothstep(0.68, 0.96, uv.y);
-  color += vec3(0.68, 0.81, 0.95) * particle * (0.12 + particleSeed * 0.28);
-
-  float grain = hash21(floor(gl_FragCoord.xy * 0.5));
-  color += (grain - 0.5) * 0.006;
-
-  vec2 vignetteUv = uv * (1.0 - uv.yx);
-  float vignette = pow(clamp(vignetteUv.x * vignetteUv.y * 18.0, 0.0, 1.0), 0.18);
-  color *= mix(0.58, 1.0, vignette);
-
-  outColor = vec4(max(color, 0.0), 1.0);
+  vec2 point = vec2(vUv.x, 1.0 - vUv.y) * uCssResolution;
+  float normalizedDistance = distance(point, uPointerLight.xy) / uPointerLight.z;
+  float influence = pow(max(0.0, 1.0 - normalizedDistance), 2.6) * uPointerLight.w;
+  vec3 color = vec3(0.38, 0.70, 1.0);
+  outColor = vec4(color * influence, influence);
 }
 `;
-
-const dynamicFragmentShaderSource = `#version 300 es
-precision highp float;
-
-uniform int uLightCount;
-uniform vec4 uLightColors[4];
-uniform vec4 uLights[4];
-uniform int uGlassCount;
-uniform vec4 uGlassRects[6];
-uniform vec4 uGlassParams[6];
-uniform vec2 uCssResolution;
-uniform sampler2D uStaticTexture;
-
-in vec2 vUv;
-out vec4 outColor;
-
-float roundedRectangleDistance(
-  vec2 point,
-  vec2 center,
-  vec2 halfSize,
-  float radius
-) {
-  vec2 offset = abs(point - center) - halfSize + radius;
-  return length(max(offset, 0.0)) + min(max(offset.x, offset.y), 0.0) - radius;
-}
-
-void main() {
-  vec2 cssPoint = vec2(vUv.x, 1.0 - vUv.y) * uCssResolution;
-  vec3 color = texture(uStaticTexture, vUv).rgb;
-
-  for (int index = 0; index < 6; index++) {
-    if (index >= uGlassCount) break;
-    vec4 rectangle = uGlassRects[index];
-    vec4 parameters = uGlassParams[index];
-    vec2 center = rectangle.xy + rectangle.zw * 0.5;
-    vec2 halfSize = rectangle.zw * 0.5;
-    float distanceToSurface = roundedRectangleDistance(
-      cssPoint,
-      center,
-      halfSize,
-      min(parameters.x, min(halfSize.x, halfSize.y))
-    );
-    if (distanceToSurface <= 0.0) {
-      vec2 normalized = (cssPoint - center) / max(halfSize, vec2(1.0));
-      vec2 normal = normalize(normalized + vec2(0.0001));
-      float rim = 1.0 - smoothstep(0.0, 16.0, -distanceToSurface);
-      vec2 refraction = vec2(normal.x, -normal.y) * parameters.y / uCssResolution;
-      vec3 refracted = vec3(
-        texture(uStaticTexture, vUv + refraction * 1.12).r,
-        texture(uStaticTexture, vUv + refraction).g,
-        texture(uStaticTexture, vUv + refraction * 0.86).b
-      );
-      color = mix(color, refracted, parameters.z * (0.34 + rim * 0.3));
-      color += vec3(0.36, 0.55, 0.82) * parameters.w * rim;
-    }
-  }
-
-  for (int index = 0; index < 4; index++) {
-    if (index >= uLightCount) break;
-    vec4 light = uLights[index];
-    vec3 lightColor = uLightColors[index].rgb;
-    float distanceFromLight = distance(cssPoint, light.xy) / light.z;
-    float influence = pow(max(0.0, 1.0 - distanceFromLight), 2.2) * light.w;
-    color = 1.0 - (1.0 - color) * (1.0 - lightColor * influence);
-  }
-
-  outColor = vec4(color, 1.0);
-}
-`;
-
-type Light = {
-  readonly color: readonly [number, number, number];
-  readonly intensity: number;
-  readonly radius: number;
-  readonly x: number;
-  readonly y: number;
-};
-
-type GlassSurface = {
-  readonly edge: number;
-  readonly height: number;
-  readonly radius: number;
-  readonly refraction: number;
-  readonly strength: number;
-  readonly width: number;
-  readonly x: number;
-  readonly y: number;
-};
-
-const sourceLightStyles: Record<string, Pick<Light, "color" | "intensity" | "radius">> = {
-  dropzone: { color: [0.36, 0.62, 1], intensity: 0.045, radius: 440 },
-  logo: { color: [0.55, 0.72, 1], intensity: 0.17, radius: 170 },
-  status: { color: [0.34, 0.9, 0.82], intensity: 0.075, radius: 120 },
-};
-
-const pointerLightStyle = {
-  color: [0.38, 0.7, 1],
-  intensity: 0.09,
-  radius: 190,
-} as const;
-
-const glassSurfaceStyles: Record<
-  string,
-  Pick<GlassSurface, "edge" | "radius" | "refraction" | "strength">
-> = {
-  control: { edge: 0.055, radius: 999, refraction: 1.4, strength: 0.2 },
-  field: { edge: 0.045, radius: 13, refraction: 1.8, strength: 0.24 },
-  panel: { edge: 0.065, radius: 16, refraction: 3.2, strength: 0.32 },
-};
-
-function compileShader(context: WebGL2RenderingContext, type: number, source: string): WebGLShader {
-  const shader = context.createShader(type);
-  if (!shader) throw new Error("Could not create illumination shader");
-
-  context.shaderSource(shader, source);
-  context.compileShader(shader);
-  return shader;
-}
 
 type ParallelShaderCompile = {
   readonly COMPLETION_STATUS_KHR: number;
 };
 
+function between([minimum, maximum]: readonly [number, number]) {
+  return Math.random() * (maximum - minimum) + minimum;
+}
+
 function nextAnimationFrame() {
   return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
+function compileShader(context: WebGL2RenderingContext, type: number, source: string): WebGLShader {
+  const shader = context.createShader(type);
+  if (!shader) throw new Error("Could not create illumination shader");
+  context.shaderSource(shader, source);
+  context.compileShader(shader);
+  return shader;
+}
+
 async function createProgram(
   context: WebGL2RenderingContext,
-  fragmentShaderSource: string,
+  vertexSource: string,
+  fragmentSource: string,
 ): Promise<WebGLProgram> {
-  const vertexShader = compileShader(context, context.VERTEX_SHADER, vertexShaderSource);
-  const fragmentShader = compileShader(context, context.FRAGMENT_SHADER, fragmentShaderSource);
+  const vertexShader = compileShader(context, context.VERTEX_SHADER, vertexSource);
+  const fragmentShader = compileShader(context, context.FRAGMENT_SHADER, fragmentSource);
   const program = context.createProgram();
   if (!program) throw new Error("Could not create illumination program");
 
@@ -284,6 +207,7 @@ async function createProgram(
     context.deleteShader(fragmentShader);
     throw new Error(message);
   }
+
   context.detachShader(program, vertexShader);
   context.detachShader(program, fragmentShader);
   context.deleteShader(vertexShader);
@@ -305,102 +229,106 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
   readonly mode = "webgl2";
   readonly #canvas: HTMLCanvasElement;
   readonly #context: WebGL2RenderingContext;
-  readonly #dynamicProgram: WebGLProgram;
-  readonly #staticProgram: WebGLProgram;
-  readonly #framebuffer: WebGLFramebuffer;
-  readonly #staticTexture: WebGLTexture;
-  readonly #layoutResizeObserver: ResizeObserver;
-  readonly #mutationObserver: MutationObserver;
+  readonly #lightProgram: WebGLProgram;
+  readonly #particleBuffer: WebGLBuffer;
+  readonly #particleProgram: WebGLProgram;
+  readonly #particleVertexArray: WebGLVertexArrayObject;
   readonly #reducedMotion: MediaQueryList;
   readonly #resizeObserver: ResizeObserver;
   readonly #scheduler: WakeScheduler;
   #frameCount = 0;
-  #glassElements: HTMLElement[] = [];
-  #glassSurfaces: GlassSurface[] = [];
   #height = 1;
-  #pendingFullDraw = false;
-  #pendingRectangle: Rectangle | null = null;
+  #particleCount = 0;
   #pixelRatio = 1;
-  #pointer: Light | null = null;
-  #sourceElements: HTMLElement[] = [];
-  #sources: Light[] = [];
+  #pointer: { x: number; y: number } | null = null;
+  #startTime: number | null = null;
   #width = 1;
 
   constructor(
     canvas: HTMLCanvasElement,
     context: WebGL2RenderingContext,
-    dynamicProgram: WebGLProgram,
-    staticProgram: WebGLProgram,
+    lightProgram: WebGLProgram,
+    particleProgram: WebGLProgram,
   ) {
     this.#canvas = canvas;
     this.#context = context;
-    this.#dynamicProgram = dynamicProgram;
-    this.#staticProgram = staticProgram;
+    this.#lightProgram = lightProgram;
+    this.#particleProgram = particleProgram;
 
-    const framebuffer = context.createFramebuffer();
-    const staticTexture = context.createTexture();
-    if (!framebuffer || !staticTexture) throw new Error("Could not allocate illumination buffers");
-    this.#framebuffer = framebuffer;
-    this.#staticTexture = staticTexture;
+    const particleBuffer = context.createBuffer();
+    const particleVertexArray = context.createVertexArray();
+    if (!particleBuffer || !particleVertexArray) {
+      throw new Error("Could not allocate illumination particle buffers");
+    }
+    this.#particleBuffer = particleBuffer;
+    this.#particleVertexArray = particleVertexArray;
 
-    context.disable(context.BLEND);
     context.disable(context.DEPTH_TEST);
     context.disable(context.STENCIL_TEST);
+    context.enable(context.BLEND);
+    context.blendEquation(context.FUNC_ADD);
+    context.blendFunc(context.ONE, context.ONE);
+    context.clearColor(0, 0, 0, 0);
+
+    context.bindVertexArray(this.#particleVertexArray);
+    context.bindBuffer(context.ARRAY_BUFFER, this.#particleBuffer);
+    context.enableVertexAttribArray(0);
+    context.vertexAttribPointer(
+      0,
+      4,
+      context.FLOAT,
+      false,
+      FLOATS_PER_PARTICLE * Float32Array.BYTES_PER_ELEMENT,
+      0,
+    );
+    context.enableVertexAttribArray(1);
+    context.vertexAttribPointer(
+      1,
+      4,
+      context.FLOAT,
+      false,
+      FLOATS_PER_PARTICLE * Float32Array.BYTES_PER_ELEMENT,
+      4 * Float32Array.BYTES_PER_ELEMENT,
+    );
+    context.bindVertexArray(null);
 
     this.#reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     this.#scheduler = new WakeScheduler(
-      () => this.#drawPending(),
+      () => this.#drawFrame(),
       (state) => {
         this.#canvas.dataset.state = state;
       },
     );
     this.#resizeObserver = new ResizeObserver(() => this.#resize());
-    this.#layoutResizeObserver = new ResizeObserver(() => this.#queueLayoutSync());
-    this.#mutationObserver = new MutationObserver(() => this.#refreshSceneElements());
     this.#resizeObserver.observe(canvas);
-    this.#mutationObserver.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("pointermove", this.#onPointerMove, { passive: true });
-    window.addEventListener("scroll", this.#onLayoutChange, { passive: true });
-    document.addEventListener("visibilitychange", this.#onVisibilityChange);
     document.documentElement.addEventListener("pointerleave", this.#onPointerLeave, {
       passive: true,
     });
+    document.addEventListener("visibilitychange", this.#onVisibilityChange);
     this.#reducedMotion.addEventListener("change", this.#onReducedMotionChange);
-    this.#refreshSceneElements(false);
     this.#resize();
   }
 
   readonly #onPointerMove = (event: PointerEvent) => {
     if (this.#reducedMotion.matches || document.visibilityState === "hidden") return;
-    const previous = this.#pointer;
-    this.#pointer = {
-      ...pointerLightStyle,
-      x: event.clientX,
-      y: event.clientY,
-    };
-    const previousRectangle = previous
-      ? rectangleAround(previous.x, previous.y, previous.radius, this.#width, this.#height)
-      : null;
-    const nextRectangle = rectangleAround(
-      this.#pointer.x,
-      this.#pointer.y,
-      this.#pointer.radius,
-      this.#width,
-      this.#height,
-    );
-    this.#queueRectangle(unionRectangles(previousRectangle, nextRectangle));
+    this.#pointer = { x: event.clientX, y: event.clientY };
+    this.#scheduler.wake();
   };
 
-  readonly #onLayoutChange = () => this.#queueLayoutSync();
+  readonly #onPointerLeave = () => {
+    this.#pointer = null;
+  };
 
   readonly #onReducedMotionChange = () => {
-    const previous = this.#pointer;
     this.#pointer = null;
-    if (previous) {
-      this.#queueRectangle(
-        rectangleAround(previous.x, previous.y, previous.radius, this.#width, this.#height),
-      );
+    this.#startTime = null;
+    if (this.#reducedMotion.matches) {
+      this.#scheduler.dispose();
+      this.#drawFrame();
+      return;
     }
+    this.#scheduler.wake();
   };
 
   readonly #onVisibilityChange = () => {
@@ -408,231 +336,119 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
       this.#scheduler.suspend();
       return;
     }
+    this.#startTime = null;
     this.#scheduler.resume();
-    this.#queueFullDraw();
+    this.#scheduler.wake();
   };
 
-  readonly #onPointerLeave = () => {
-    const previous = this.#pointer;
-    this.#pointer = null;
-    if (!previous) return;
-    this.#queueRectangle(
-      rectangleAround(previous.x, previous.y, previous.radius, this.#width, this.#height),
+  #makeParticleData(width: number, height: number) {
+    const particleCount = PARTICLE_LAYERS.reduce(
+      (total, layer) => total + Math.max(1, Math.round(width * height * layer.density)),
+      0,
     );
-  };
+    const data = new Float32Array(particleCount * FLOATS_PER_PARTICLE);
+    let offset = 0;
 
-  #queueRectangle(rectangle: Rectangle | null) {
-    if (!rectangle) return;
-    this.#pendingRectangle = unionRectangles(this.#pendingRectangle, rectangle);
-    this.#scheduler.wake();
-  }
-
-  #queueFullDraw() {
-    this.#pendingFullDraw = true;
-    this.#scheduler.wake();
-  }
-
-  #queueLayoutSync() {
-    this.#syncSceneLayout();
-    this.#queueFullDraw();
-  }
-
-  #refreshSceneElements(queueDraw = true) {
-    this.#sourceElements = [
-      ...document.querySelectorAll<HTMLElement>("[data-illumination-source]"),
-    ];
-    this.#glassElements = [...document.querySelectorAll<HTMLElement>("[data-illumination-glass]")];
-    this.#layoutResizeObserver.disconnect();
-    new Set([...this.#sourceElements, ...this.#glassElements]).forEach((element) => {
-      this.#layoutResizeObserver.observe(element);
-    });
-    this.#syncSceneLayout();
-    if (queueDraw) this.#queueFullDraw();
-  }
-
-  #drawPending() {
-    if (this.#pendingFullDraw) {
-      this.#pendingFullDraw = false;
-      this.#pendingRectangle = null;
-      this.#drawToScreen();
-    } else {
-      const pendingRectangle = this.#pendingRectangle;
-      this.#pendingRectangle = null;
-      if (pendingRectangle) this.#drawToScreen(pendingRectangle);
+    for (const layer of PARTICLE_LAYERS) {
+      const count = Math.max(1, Math.round(width * height * layer.density));
+      for (let index = 0; index < count; index += 1) {
+        data.set(
+          [
+            Math.random(),
+            Math.random(),
+            between(layer.size),
+            between(layer.speed),
+            between(layer.alpha),
+            Math.random() * Math.PI * 2,
+            between([0.35, 0.8]),
+            layer.blur,
+          ],
+          offset,
+        );
+        offset += FLOATS_PER_PARTICLE;
+      }
     }
-    return this.#pendingFullDraw || this.#pendingRectangle !== null;
+
+    this.#particleCount = particleCount;
+    return data;
   }
 
   #resize() {
     const { height, width } = this.#canvas.getBoundingClientRect();
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.25);
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     const backingWidth = Math.max(1, Math.round(width * pixelRatio));
     const backingHeight = Math.max(1, Math.round(height * pixelRatio));
-
     if (this.#canvas.width === backingWidth && this.#canvas.height === backingHeight) return;
+
     this.#height = height;
     this.#pixelRatio = pixelRatio;
     this.#width = width;
     this.#canvas.width = backingWidth;
     this.#canvas.height = backingHeight;
-
-    const context = this.#context;
-    context.bindTexture(context.TEXTURE_2D, this.#staticTexture);
-    context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.LINEAR);
-    context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MAG_FILTER, context.LINEAR);
-    context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_S, context.CLAMP_TO_EDGE);
-    context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_T, context.CLAMP_TO_EDGE);
-    context.texImage2D(
-      context.TEXTURE_2D,
-      0,
-      context.RGBA8,
-      backingWidth,
-      backingHeight,
-      0,
-      context.RGBA,
-      context.UNSIGNED_BYTE,
-      null,
+    this.#context.viewport(0, 0, backingWidth, backingHeight);
+    this.#context.bindBuffer(this.#context.ARRAY_BUFFER, this.#particleBuffer);
+    this.#context.bufferData(
+      this.#context.ARRAY_BUFFER,
+      this.#makeParticleData(width, height),
+      this.#context.STATIC_DRAW,
     );
-
-    context.bindFramebuffer(context.FRAMEBUFFER, this.#framebuffer);
-    context.framebufferTexture2D(
-      context.FRAMEBUFFER,
-      context.COLOR_ATTACHMENT0,
-      context.TEXTURE_2D,
-      this.#staticTexture,
-      0,
-    );
-    if (context.checkFramebufferStatus(context.FRAMEBUFFER) !== context.FRAMEBUFFER_COMPLETE) {
-      throw new Error("Illumination framebuffer is incomplete");
-    }
-
-    this.#drawStatic(width, height, backingWidth, backingHeight);
-    this.#syncSceneLayout();
-    this.#drawToScreen();
-    this.#canvas.dataset.state = "idle";
+    this.#startTime = null;
+    this.#drawFrame();
+    if (!this.#reducedMotion.matches) this.#scheduler.wake();
   }
 
-  #drawStatic(cssWidth: number, cssHeight: number, width: number, height: number) {
+  #drawFrame() {
     const context = this.#context;
-    context.bindFramebuffer(context.FRAMEBUFFER, this.#framebuffer);
-    context.viewport(0, 0, width, height);
-    context.useProgram(this.#staticProgram);
-    context.uniform2f(
-      requireUniform(context, this.#staticProgram, "uCssResolution"),
-      cssWidth,
-      cssHeight,
-    );
-    context.drawArrays(context.TRIANGLES, 0, 3);
-  }
+    if (context.isContextLost()) return false;
+    const now = performance.now();
+    this.#startTime ??= now;
+    const elapsedSeconds = this.#reducedMotion.matches ? 0 : (now - this.#startTime) / 1000;
 
-  #syncSceneLayout() {
-    this.#sources = this.#sourceElements
-      .map((element): Light | null => {
-        const name = element.dataset.illuminationSource ?? "";
-        const style = sourceLightStyles[name];
-        if (!style) return null;
-        const rectangle = element.getBoundingClientRect();
-        return {
-          ...style,
-          x: rectangle.left + rectangle.width * 0.5,
-          y: rectangle.top + rectangle.height * 0.5,
-        };
-      })
-      .filter((light): light is Light => light !== null)
-      .slice(0, 3);
-    this.#glassSurfaces = this.#glassElements
-      .map((element): GlassSurface | null => {
-        const name = element.dataset.illuminationGlass ?? "";
-        const style = glassSurfaceStyles[name];
-        if (!style) return null;
-        const rectangle = element.getBoundingClientRect();
-        return {
-          ...style,
-          height: rectangle.height,
-          width: rectangle.width,
-          x: rectangle.left,
-          y: rectangle.top,
-        };
-      })
-      .filter((surface): surface is GlassSurface => surface !== null)
-      .slice(0, 6);
-  }
+    context.clear(context.COLOR_BUFFER_BIT);
 
-  #drawToScreen(dirtyRectangle?: Rectangle) {
-    const context = this.#context;
-    const lights = [...(this.#pointer ? [this.#pointer] : []), ...this.#sources].slice(0, 4);
-    const lightValues = new Float32Array(16);
-    const colorValues = new Float32Array(16);
-    const glassRectangleValues = new Float32Array(24);
-    const glassParameterValues = new Float32Array(24);
-    lights.forEach((light, index) => {
-      lightValues.set([light.x, light.y, light.radius, light.intensity], index * 4);
-      colorValues.set([...light.color, 1], index * 4);
-    });
-    this.#glassSurfaces.forEach((surface, index) => {
-      glassRectangleValues.set([surface.x, surface.y, surface.width, surface.height], index * 4);
-      glassParameterValues.set(
-        [surface.radius, surface.refraction, surface.strength, surface.edge],
-        index * 4,
+    if (this.#pointer) {
+      context.useProgram(this.#lightProgram);
+      context.uniform2f(
+        requireUniform(context, this.#lightProgram, "uCssResolution"),
+        this.#width,
+        this.#height,
       );
-    });
-
-    context.bindFramebuffer(context.FRAMEBUFFER, null);
-    context.viewport(0, 0, this.#canvas.width, this.#canvas.height);
-    if (dirtyRectangle) {
-      const scissor = toWebGLScissor(dirtyRectangle, this.#height, this.#pixelRatio);
-      context.enable(context.SCISSOR_TEST);
-      context.scissor(scissor.x, scissor.y, scissor.width, scissor.height);
-    } else {
-      context.disable(context.SCISSOR_TEST);
+      context.uniform4f(
+        requireUniform(context, this.#lightProgram, "uPointerLight"),
+        this.#pointer.x,
+        this.#pointer.y,
+        190,
+        0.055,
+      );
+      context.drawArrays(context.TRIANGLES, 0, 3);
     }
-    context.useProgram(this.#dynamicProgram);
-    context.activeTexture(context.TEXTURE0);
-    context.bindTexture(context.TEXTURE_2D, this.#staticTexture);
-    context.uniform1i(requireUniform(context, this.#dynamicProgram, "uStaticTexture"), 0);
-    context.uniform2f(
-      requireUniform(context, this.#dynamicProgram, "uCssResolution"),
-      this.#width,
-      this.#height,
+
+    context.useProgram(this.#particleProgram);
+    context.uniform1f(
+      requireUniform(context, this.#particleProgram, "uPixelRatio"),
+      this.#pixelRatio,
     );
-    context.uniform1i(requireUniform(context, this.#dynamicProgram, "uLightCount"), lights.length);
-    context.uniform1i(
-      requireUniform(context, this.#dynamicProgram, "uGlassCount"),
-      this.#glassSurfaces.length,
-    );
-    context.uniform4fv(requireUniform(context, this.#dynamicProgram, "uLights[0]"), lightValues);
-    context.uniform4fv(
-      requireUniform(context, this.#dynamicProgram, "uLightColors[0]"),
-      colorValues,
-    );
-    context.uniform4fv(
-      requireUniform(context, this.#dynamicProgram, "uGlassRects[0]"),
-      glassRectangleValues,
-    );
-    context.uniform4fv(
-      requireUniform(context, this.#dynamicProgram, "uGlassParams[0]"),
-      glassParameterValues,
-    );
-    context.drawArrays(context.TRIANGLES, 0, 3);
-    context.disable(context.SCISSOR_TEST);
+    context.uniform1f(requireUniform(context, this.#particleProgram, "uTime"), elapsedSeconds);
+    context.bindVertexArray(this.#particleVertexArray);
+    context.drawArrays(context.POINTS, 0, this.#particleCount);
+    context.bindVertexArray(null);
+
     this.#frameCount += 1;
     this.#canvas.dataset.frameCount = String(this.#frameCount);
+    return !this.#reducedMotion.matches && document.visibilityState !== "hidden";
   }
 
   dispose() {
     this.#scheduler.dispose();
     window.removeEventListener("pointermove", this.#onPointerMove);
-    window.removeEventListener("scroll", this.#onLayoutChange);
-    document.removeEventListener("visibilitychange", this.#onVisibilityChange);
     document.documentElement.removeEventListener("pointerleave", this.#onPointerLeave);
+    document.removeEventListener("visibilitychange", this.#onVisibilityChange);
     this.#reducedMotion.removeEventListener("change", this.#onReducedMotionChange);
-    this.#mutationObserver.disconnect();
     this.#resizeObserver.disconnect();
-    this.#layoutResizeObserver.disconnect();
-    this.#context.deleteFramebuffer(this.#framebuffer);
-    this.#context.deleteTexture(this.#staticTexture);
-    this.#context.deleteProgram(this.#dynamicProgram);
-    this.#context.deleteProgram(this.#staticProgram);
+    this.#context.deleteBuffer(this.#particleBuffer);
+    this.#context.deleteVertexArray(this.#particleVertexArray);
+    this.#context.deleteProgram(this.#lightProgram);
+    this.#context.deleteProgram(this.#particleProgram);
   }
 }
 
@@ -648,11 +464,11 @@ export async function createIlluminationRenderer(
   if (!context) return cssRenderer;
 
   try {
-    const [dynamicProgram, staticProgram] = await Promise.all([
-      createProgram(context, dynamicFragmentShaderSource),
-      createProgram(context, staticFragmentShaderSource),
+    const [lightProgram, particleProgram] = await Promise.all([
+      createProgram(context, lightVertexShaderSource, lightFragmentShaderSource),
+      createProgram(context, particleVertexShaderSource, particleFragmentShaderSource),
     ]);
-    return new WebGLIlluminationRenderer(canvas, context, dynamicProgram, staticProgram);
+    return new WebGLIlluminationRenderer(canvas, context, lightProgram, particleProgram);
   } catch {
     return cssRenderer;
   }
