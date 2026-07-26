@@ -75,7 +75,7 @@ fi
 # render, never publish a formula that 404s for that platform's users.
 short="$workdir/short-checksums.txt"
 grep -v " postflight-${targets[0]}\$" "$checksums" >"$short"
-if "$renderer" "$template" 9.8.7 "$short" >/dev/null 2>&1; then
+if "$renderer" "$template" "$version" "$short" >/dev/null 2>&1; then
   echo "the renderer accepted a checksums.txt missing postflight-${targets[0]}" >&2
   exit 1
 fi
