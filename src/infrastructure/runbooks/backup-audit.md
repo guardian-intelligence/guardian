@@ -59,19 +59,25 @@ accepted limit.
 
 ## 2. Security
 
-Run the probes with the bucket-scoped keypair from custody
-(`cloudflare_r2_backups_*`), against R2 directly:
+Run the probes with the bucket-scoped keypair against R2 directly. Take it
+from the ESO-materialized `guardian-backups-creds` Secret under a
+`--persona=write-all` session; the audit is not a reason to open custody:
 
 ```sh
 # expected: list_buckets DENIED; guardian-vault access DENIED;
 # write+read INSIDE guardian-backups OK; delete of a <7d object REFUSED
 # with ObjectLockedByBucketPolicy. The probe object under probe/ is the
 # canary — its undeletability IS the lock verification.
+for k in accessKey secretKey endpoint; do
+  export "r2_$k=$(kubectl get secret -n tenant-root guardian-backups-creds \
+    -o jsonpath="{.data.$k}" | base64 -d)"
+done
+
 python3 - <<'EOF'
 import boto3, os, botocore
-s3 = boto3.client("s3", endpoint_url=os.environ["cloudflare_r2_s3_api_endpoint"],
-    aws_access_key_id=os.environ["cloudflare_r2_backups_access_key_id"],
-    aws_secret_access_key=os.environ["cloudflare_r2_backups_secret_access_key"],
+s3 = boto3.client("s3", endpoint_url=os.environ["r2_endpoint"],
+    aws_access_key_id=os.environ["r2_accessKey"],
+    aws_secret_access_key=os.environ["r2_secretKey"],
     region_name="auto")
 def expect_denied(fn, label):
     try: fn(); print(f"FAIL: {label} was ALLOWED")

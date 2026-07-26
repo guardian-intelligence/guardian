@@ -1,6 +1,6 @@
 ---
 name: configure-guardian-github-oauth
-description: Create or update the GitHub OAuth App used as the GitHub social provider for Sign in with Guardian. Use for production or staging OAuth registration, branding, callback, client credentials, custody, and registry changes.
+description: Create or update the GitHub OAuth App used as the GitHub social provider for Sign in with Guardian. Use for production or staging OAuth registration, branding, callback, client credentials, and registry changes.
 ---
 
 1. Set `ENV` to `prod` or `staging`. For `prod`, set `SUFFIX` to empty and
@@ -26,9 +26,12 @@ description: Create or update the GitHub OAuth App used as the GitHub social pro
 6. Upload `/tmp/sign-in-with-guardian-${ENV}.png` as the application logo.
 7. Record the settings ID from the URL and the public Client ID. Generate one
    client secret only for a new registration or intentional rotation.
-8. Store the client secret as
-   `${UPPERCASE_ENV}_GITHUB_CLIENT_SECRET` in custody for
-   `guardian/guardian-mgmt/tenant-guardian-${ENV}/keycloak/github-oauth`.
+8. Write the client secret straight to OpenBao at
+   `guardian/guardian-mgmt/tenant-guardian-${ENV}/keycloak/github-oauth`,
+   key `GITHUB_CLIENT_SECRET`, with a namespace-scoped `secrets-writer`
+   token and the value on stdin — see `docs/secrets.md`, "Adding a secret
+   for a third-party integration". The value is reissuable from GitHub, so
+   it never passes through custody.
 9. Update
    `src/infrastructure/deployments/iam/github-oauth-apps.yaml` with the exact
    name, settings ID, Client ID, homepage, callback, realm

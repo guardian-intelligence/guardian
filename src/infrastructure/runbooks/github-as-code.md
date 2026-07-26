@@ -29,18 +29,21 @@ organizations — `guardian-intelligence` for the ruleset,
 `digital-guardian-software` for the fleet. The platform GitHub App cannot be
 used here: its installation token is scoped to ghcr reads.
 
-```sh
-# after: aspect infra custody --action restore
-export TF_ENCRYPTION=$(jq -n \
-  --arg p "$(. /dev/shm/guardian-custody/custody.env && printf %s "$tofu_state_encryption_passphrase")" \
-  '{key_provider: {pbkdf2: {custody: {passphrase: $p}}}}')
-export GITHUB_TOKEN=...   # custody, never a shell-history literal
-aspect infra tofu-init --root guardian-github
-```
+Applying this root is an operator ceremony, not an agent task: it needs the
+state passphrase and a token no in-cluster identity holds. Assemble the
+environment once per session per
+[cold-boot-bootstrap.md](cold-boot-bootstrap.md), "OpenTofu state
+encryption", then `aspect infra tofu-init --root guardian-github`. That
+section is the only place the recipe lives; do not re-derive it here.
 
 This root's state is encrypted from its first write, so `versions.tf` carries
 no `unencrypted` fallback — the migration ceremony in
 [cold-boot-bootstrap.md](cold-boot-bootstrap.md) does not apply to it.
+
+The ceremony is a known defect, not the target state: hand-run applies make
+this root a second control plane beside Flux, and the credentials it needs
+are what keep custody in routine circulation. The cutover to in-cluster
+reconciliation is designed in [`docs/tofu-gitops-design.md`](../../../docs/tofu-gitops-design.md).
 
 ## First run is an import, not an apply
 

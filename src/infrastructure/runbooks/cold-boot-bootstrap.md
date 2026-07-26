@@ -359,9 +359,9 @@ scheduler).
 
 ## OpenTofu state encryption
 
-All five bootstrap roots (`guardian-mgmt`, `guardian-mgmt-dns`,
+All six bootstrap roots (`guardian-mgmt`, `guardian-mgmt-dns`,
 `guardian-mgmt-edge-policy`, `guardian-mgmt-cloudflare-tokens`,
-`guardian-stripe-sandbox`) encrypt their
+`guardian-stripe-sandbox`, `guardian-github`) encrypt their
 R2 state at rest: pbkdf2 over the custody passphrase feeding AES-GCM,
 declared in each root's `versions.tf`. R2 holds ciphertext, custody holds the
 key — the same trust split as the OpenBao raft snapshots. Every `tofu`

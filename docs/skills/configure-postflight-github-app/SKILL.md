@@ -35,13 +35,13 @@ description: Create or update the Postflight GitHub App for production or stagin
    `/tmp/postflight-${ENV}.png` as the App logo.
 9. Record the public App ID, Client ID, slug, and App URL. Generate exactly one
    private key and no client secret.
-10. Store the App ID, webhook secret, and private-key PEM in environment
-    custody. Use `github_runner_app_prod_app_id`,
-    `github_runner_app_prod_webhook_secret`, and
-    `keys/postflight-runner.private-key.pem` for production; use
-    `github_runner_app_staging_app_id`,
-    `github_runner_app_staging_webhook_secret`, and
-    `keys/postflight-runner-staging.private-key.pem` for staging.
+10. Write the App ID, webhook secret, and private-key PEM straight to OpenBao
+    with a namespace-scoped `secrets-writer` token, values on stdin — see
+    `docs/secrets.md`, "Adding a secret for a third-party integration".
+    Production is `kv/guardian/guardian-mgmt/postflight-runner/github-app`,
+    keys `appId`, `webhookSecret`, and `githubAppPrivateKey`; a staging App
+    uses the same three keys under its own consumer subtree. GitHub reissues
+    all three, so none passes through custody.
 11. Require the webhook URL to return HTTP 405 for an unauthenticated `GET`
     before installation.
 12. Install production only in its intended customer organizations. Install
