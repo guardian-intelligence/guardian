@@ -370,6 +370,26 @@ Heartbeats `guardian_cli_nightly_promoter_heartbeat{stage}` on every run
 including its no-op paths, and `guardian_cli_nightly_promotion_created{stage}`
 when it actually creates a Promotion.
 
+### The gate: `check-deeptest-pass`
+
+The nightly Stage's promotion template opens with an `http` step that asks
+vmselect for `guardian_cli_deeptest_pass` at the exact digest being promoted
+— the Kargo controller queries `vmselect-shortterm` from its own pod, so
+nothing outside the cluster is involved. A verdict of 1 promotes; a verdict
+of 0 fails the Promotion terminally and no pin PR is ever opened. The two
+expressions are complements over a result that exists, so a digest with no
+verdict yet — one built between the runner's last hourly pass and 08:00 —
+matches neither and the step retries until the next run adjudicates it,
+bounded by `retry.timeout: 28m`. That budget spans a full runner cadence and
+stays under the 30 minutes at which `KargoPromotionStuck` warns; a digest
+that is still unadjudicated when it runs out errors the Promotion, which
+`KargoPromotionFailed` already pages on. No new alert exists for the gate,
+deliberately: an Errored Promotion is the signal.
+
+The promoter needs no knowledge of any of this. It copies the Stage's
+`.spec.promotionTemplate.spec` vars and steps into the Promotion it creates
+verbatim, so a step added to the template is a step the next promotion runs.
+
 ### Alerts
 
 | Alert | Severity | Fires when |
@@ -406,9 +426,10 @@ and step 7 happens only for a stable.
    so the dedup does not skip and `:edge` moves to a new digest.
 
 3. **Wait for a deep-test verdict.** The runner picks the new `:edge` up
-   within the hour. This is advisory today (see Known gaps) but it is the
-   check that would have caught a broken cross-compile before anyone
-   published it.
+   within the hour. Only nightly's Kargo promotion gates on that verdict —
+   a hand-authored rc or stable pin does not — so read it before writing the
+   pin: it is the check that would have caught a broken cross-compile before
+   anyone published it.
 
 4. **Wait for nightly** — required for an rc, optional for a stable. The
    08:00 promoter opens the pin PR; once it merges, the cutter publishes
@@ -568,13 +589,6 @@ into the same series; the `platform` label on
 `guardian_cli_install_canary_success` exists for it, and the `cli.` event
 prefix is already registered so a satellite can speak the same vocabulary
 through the public path.
-
-**The nightly promotion gate is not wired.** The deep-test runner produces
-`guardian_cli_deeptest_pass{digest}` and the promoter does not read it — it
-promotes the newest Freight unconditionally. Today the verdict is advisory
-and `GuardianCliDeeptestFailing` is the only thing standing between a
-failing edge digest and a nightly release. Wiring the gate is a separate
-change; the metric was shipped first so the gate has soak history to read.
 
 **Nothing canaries the ecosystem mirrors.** The install canary's methods are
 the release assets and the curl installer. A published npm version that
