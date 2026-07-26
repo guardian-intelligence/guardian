@@ -796,14 +796,13 @@ discovered late by a user.
   before it tries, because older npm cannot publish without a token and the
   point of this lane is that it holds none.
 
-- **Homebrew.** The `<owner>/homebrew-tap` repository has to exist — brew's
-  naming convention is what makes
-  `brew install guardian-intelligence/tap/postflight` resolve — and the
-  `guardian-promotions` App has to be installed on it with Contents read
-  **and** write. Read alone is enough to see the formula, not to PUT it.
-  The cutter mints that token by name (`repositories: homebrew-tap`), so an
-  App that is not installed there fails the token step before the release is
-  cut rather than after.
+- **Homebrew.** The `<owner>/homebrew-tap` repository and the
+  `guardian-promotions` App-installation grant on it are both declared in
+  the `guardian-github` tofu root (`runbooks/github-as-code.md`); the
+  ceremony is applying that root with a custody token, not clicking anything.
+  The cutter mints its tap token by name (`repositories: homebrew-tap`), so
+  an unapplied root fails the token step before the release is cut rather
+  than after.
 
 - **The Actions allowlist.** `rust-lang/crates-io-auth-action` is new
   third-party surface and is pinned in `.github/actions-allowlist.json`. The
