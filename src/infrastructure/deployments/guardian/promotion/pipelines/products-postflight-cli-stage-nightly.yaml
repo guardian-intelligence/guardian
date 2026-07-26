@@ -23,7 +23,30 @@ spec:
           value: https://github.com/guardian-intelligence/guardian.git
         - name: imageRepo
           value: ghcr.io/guardian-intelligence/postflight-cli
+        - name: vmQueryURL
+          value: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus/api/v1/query
       steps:
+        # The deep test's verdict belongs to the digest, not to the clock, so
+        # this asks for the answer to the exact digest being promoted rather
+        # than for a recent one. successExpression and failureExpression are
+        # complements over a result that exists: a definitive 0 fails the
+        # promotion terminally, while a digest that has no verdict yet — one
+        # built between the runner's last hourly pass and 08:00 — satisfies
+        # neither and the step retries until the next run adjudicates it. No
+        # data is not bad data. The budget spans a full runner cadence and
+        # stays under the 30 minutes at which KargoPromotionStuck warns.
+        - uses: http
+          as: check-deeptest-pass
+          retry:
+            timeout: 28m
+          config:
+            method: GET
+            url: ${{ vars.vmQueryURL }}
+            queryParams:
+              - name: query
+                value: last_over_time(guardian_cli_deeptest_pass{digest="${{ imageFrom(vars.imageRepo).Digest }}"}[3h])
+            successExpression: len(response.body.data.result) > 0 && float(response.body.data.result[0].value[1]) == 1.0
+            failureExpression: len(response.body.data.result) > 0 && float(response.body.data.result[0].value[1]) != 1.0
         - uses: git-clone
           config:
             repoURL: ${{ vars.repoURL }}
