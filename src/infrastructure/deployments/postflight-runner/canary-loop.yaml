@@ -43,7 +43,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: canary-loop
-              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:f4c10e67058830ef45b21c949add6e4883530f0a9e2f4babfd0a936dd281c4b6 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
+              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:0a87c5b89531560666aefacb9ba6775c721384d4e0349ba0fafe252245bb8212 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
               command:
                 - /app/canary-loop
               securityContext:
@@ -132,7 +132,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: canary-loop
-              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:f4c10e67058830ef45b21c949add6e4883530f0a9e2f4babfd0a936dd281c4b6 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
+              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:0a87c5b89531560666aefacb9ba6775c721384d4e0349ba0fafe252245bb8212 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
               command:
                 - /app/canary-loop
               securityContext:
@@ -221,7 +221,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: canary-loop
-              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:f4c10e67058830ef45b21c949add6e4883530f0a9e2f4babfd0a936dd281c4b6 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
+              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:0a87c5b89531560666aefacb9ba6775c721384d4e0349ba0fafe252245bb8212 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
               command:
                 - /app/canary-loop
               securityContext:
@@ -310,7 +310,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: canary-loop
-              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:f4c10e67058830ef45b21c949add6e4883530f0a9e2f4babfd0a936dd281c4b6 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
+              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:0a87c5b89531560666aefacb9ba6775c721384d4e0349ba0fafe252245bb8212 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
               command:
                 - /app/canary-loop
               securityContext:
@@ -399,7 +399,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: canary-loop
-              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:f4c10e67058830ef45b21c949add6e4883530f0a9e2f4babfd0a936dd281c4b6 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
+              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:0a87c5b89531560666aefacb9ba6775c721384d4e0349ba0fafe252245bb8212 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
               command:
                 - /app/canary-loop
               securityContext:
