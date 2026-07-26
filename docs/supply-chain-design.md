@@ -35,6 +35,8 @@ Verifiers MUST pin these exact identity strings (OIDC issuer
 
 - `postflight-cli` binaries, OCI artifact + SBOM attestations:
   `https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main`
+- `postflight-cli` `install.sh` release asset:
+  `https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-release.yml@refs/heads/main`
 - images.lock signature bundles:
   `https://github.com/guardian-intelligence/guardian/.github/workflows/images-lock-sign.yml@refs/heads/main`
 

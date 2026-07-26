@@ -60,10 +60,11 @@ with `cargo install`, not before.
 The cutter stages, per release: the four `postflight-<target>` binaries,
 their four `postflight-<target>.sigstore.json` bundles, a
 `postflight-<version>-src.tar.gz` source tarball cut from the build commit
-with `LICENSE.md` spliced in at the archive prefix, and a `checksums.txt`
-generated last so its glob covers everything else. The one release published
-so far predates the source tarball and carries only the binaries, the
-bundles and `checksums.txt`.
+with `LICENSE.md` spliced in at the archive prefix, `install.sh` with its own
+`install.sh.sigstore.json`, and a `checksums.txt` generated last so it covers
+everything else. The one release published so far predates the source tarball
+and the installer, and carries only the binaries, the bundles and
+`checksums.txt`.
 
 The installer needs curl, sed, grep and either `sha256sum` or `shasum` —
 no jq, because the releases JSON is parsed with anchored `sed` expressions
@@ -75,6 +76,24 @@ warning into an error. It installs to `~/.local/bin` (or
 stages the binary under a temporary name inside the destination directory
 and runs `postflight version` before giving it its final name — a download
 that cannot execute never shadows a working install.
+
+Four properties exist because the intended delivery is a pipe into `sh`:
+
+- **Truncation is inert.** Every statement lives inside `main`, called on the
+  last line, so a stream that dies in flight dies on an unterminated function
+  body without having run a command. `installer_test` truncates the script at
+  64-byte intervals across its whole length, under every POSIX shell on the
+  box, and asserts no prefix creates an install directory, writes to stdout,
+  or reaches the download.
+- **`--version <x.y.z>` pins.** It resolves `postflight-cli/v<x.y.z>`
+  directly, consulting no listing, so a CI job gets the same bytes on every
+  run. It is mutually exclusive with `--channel`.
+- **sudo is refused.** `SUDO_USER` set with no explicit
+  `POSTFLIGHT_INSTALL_DIR` is an error: `HOME` under sudo is root's, so the
+  install would land where the person who typed it will never look. Naming a
+  destination makes a shared install deliberate and is allowed.
+- **Only failures speak.** cosign narrates to stderr on success as well, so
+  its output is captured and printed only when verification fails.
 
 `make install` deliberately does not depend on the build target: the
 documented flow is `make && sudo make install`, and building under sudo
@@ -134,7 +153,7 @@ existing release bodies, so an rc-only pin edit cannot re-cut nightly.
 
 ## The sign-once contract
 
-Signatures are minted in exactly one place: the `postflight-cli-image`
+Build outputs are signed in exactly one place: the `postflight-cli-image`
 workflow, on a main push. Per run it produces
 
 - one `cosign sign-blob` bundle per binary, written into the artifact layer
@@ -155,11 +174,26 @@ same string carried by `supply-chain-design.md`, the countersigner's
 identity map, the deep-test runner, the install canary, the installer script
 and every release's notes.
 
-**Promotion never re-signs.** The cutter `crane export`s the pinned
-artifact, copies the bundles out of the layer, re-verifies every one of them
-against the identity above, and publishes them as release assets unchanged.
-Nothing downstream of the build has a signing capability, and there is no
-key for it to have.
+**Promotion never re-signs a build output.** The cutter `crane export`s the
+pinned artifact, copies the bundles out of the layer, re-verifies every one
+of them against the identity above, and publishes them as release assets
+unchanged. There is no key anywhere for it to re-sign with.
+
+The one asset the cutter signs itself is `install.sh`, under a second
+identity:
+
+```
+https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-release.yml@refs/heads/main
+```
+
+The installer is a source file rather than a build output. It tracks main,
+not the commit that produced the binaries — those can be many commits apart,
+because the edge lane dedups on built bytes and skips the push when a change
+leaves them identical. Signing it at build time would therefore ship a stale
+installer with every release whose binaries had not changed. The cutter
+copies it out of its own checkout, signs it, and verifies its own signature
+before publishing; a release that cannot verify its installer does not
+happen.
 
 A user verifies a downloaded asset with:
 
@@ -173,6 +207,34 @@ cosign verify-blob --bundle postflight-x86_64-unknown-linux-musl.sigstore.json \
 That is the command the release notes print, the command the installer runs
 when cosign is on PATH, and the command the install canary runs against
 every published asset every six hours.
+
+### Verifying the installer before running it
+
+Piping a URL into a shell means executing code the website served, and no
+script can vouch for itself. The answer is not to defend the pipe but to
+make an unpiped path first-class: every release carries `install.sh` and
+`install.sh.sigstore.json`, so the whole chain can be walked without
+extending any trust to `guardianintelligence.org`.
+
+```sh
+tag=postflight-cli/v1.2.3
+base="https://github.com/guardian-intelligence/guardian/releases/download/${tag//\//%2F}"
+curl -fsSLO "$base/install.sh" && curl -fsSLO "$base/install.sh.sigstore.json"
+cosign verify-blob --bundle install.sh.sigstore.json \
+  --certificate-identity https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-release.yml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  install.sh
+sh install.sh --version 1.2.3
+```
+
+The served copy and the released copy are the same bytes at the same commit
+— `installer_lockstep_test` holds `dist/install.sh` and the site's
+`public/postflight/install.sh` byte-identical — so a signature that fails
+against a file fetched from the website means the website is serving
+something the release lane never signed.
+
+The install canary verifies this bundle every six hours, on any release whose
+notes offer the recipe.
 
 Guardian's own countersignature is a second, independent signature over the
 same digests. It is minted in-cluster from `openbao://guardian-images`, and

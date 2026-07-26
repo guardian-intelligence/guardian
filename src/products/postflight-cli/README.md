@@ -19,8 +19,14 @@ account via the broker).
 
 Releases so far are nightlies (`postflight-cli/nightly-YYYYMMDD`), so the
 curl installer needs `--channel nightly` until the first stable cut, which is
-also when the remaining methods land. The channel ladder, the signing
-contract and the cut ceremony are in
+also when the remaining methods land. Pass `--version <x.y.z>` instead of a
+channel to pin one release, and `--require-verification` to fail rather than
+warn when cosign is missing.
+
+Every release also carries `install.sh` and a signature bundle for it, so the
+installer can be verified before it is run instead of piped in from the
+website. That recipe, the channel ladder, the signing contract and the cut
+ceremony are in
 [docs/postflight-cli-distribution.md](../../../docs/postflight-cli-distribution.md).
 
 The `make` path needs cargo — it drives `cargo build --release --locked` and

@@ -1,17 +1,13 @@
 #!/bin/sh
-# Installer for the postflight CLI, served at
-# https://guardianintelligence.org/postflight/install.sh and meant to be run
-# as `curl -fsSL <url> | sh`. It resolves the newest GitHub Release on a
-# channel, verifies what it downloaded, and drops the binary in ~/.local/bin
-# so no step of the happy path needs sudo.
+# Installer for the postflight CLI. Every release also carries this script and
+# a signature bundle for it; docs/postflight-cli-distribution.md has the recipe
+# for verifying it before running it.
 #
 #   curl -fsSL https://guardianintelligence.org/postflight/install.sh | sh
 #   curl -fsSL https://guardianintelligence.org/postflight/install.sh | sh -s -- --channel nightly
 #
-# Dependencies are deliberately limited to what a bare container already has:
-# curl, sed/grep, and either sha256sum (Linux) or shasum (macOS). No jq — the
-# releases JSON is parsed with sed, anchored so that key names appearing
-# inside release-note strings (always backslash-escaped in JSON) cannot match.
+# Nothing runs until `main "$@"` on the last line, so a download truncated in
+# flight dies on an unterminated function body having executed nothing.
 set -eu
 
 REPO="guardian-intelligence/guardian"
@@ -24,11 +20,6 @@ BUILD_IDENTITY="https://github.com/guardian-intelligence/guardian/.github/workfl
 ISSUER="https://token.actions.githubusercontent.com"
 CHANNELS="stable rc nightly"
 
-channel="${POSTFLIGHT_CHANNEL:-stable}"
-install_dir="${POSTFLIGHT_INSTALL_DIR:-}"
-require_verification=no
-print_tag=no
-
 log() {
   printf 'postflight: %s\n' "$1" >&2
 }
@@ -40,13 +31,16 @@ fail() {
 
 usage() {
   cat <<'EOF'
-usage: install.sh [--channel <stable|rc|nightly>] [--require-verification]
+usage: install.sh [--channel <stable|rc|nightly> | --version <x.y.z>]
+                  [--require-verification]
 
 options:
   --channel <ch>          release channel to install from (default: stable)
+  --version <x.y.z>       install exactly this version instead of whatever a
+                          channel currently points at
   --require-verification  fail unless cosign is available to check the
                           signature; without it a missing cosign only warns
-  --print-tag             print the release tag the channel resolves to and
+  --print-tag             print the release tag that would be installed and
                           exit without installing anything
   -h, --help              print this message
 
@@ -55,58 +49,6 @@ environment:
   POSTFLIGHT_INSTALL_DIR  install destination (default: ~/.local/bin)
 EOF
 }
-
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --channel)
-      [ "$#" -ge 2 ] || fail "--channel needs a value"
-      channel="$2"
-      shift 2
-      ;;
-    --channel=*)
-      channel="${1#--channel=}"
-      shift
-      ;;
-    --require-verification)
-      require_verification=yes
-      shift
-      ;;
-    --print-tag)
-      print_tag=yes
-      shift
-      ;;
-    -h | --help)
-      usage
-      exit 0
-      ;;
-    *)
-      usage >&2
-      fail "unknown argument: $1"
-      ;;
-  esac
-done
-
-case " $CHANNELS " in
-  *" $channel "*) ;;
-  *) fail "unknown channel '$channel' (choose one of: $CHANNELS)" ;;
-esac
-
-if [ -z "$install_dir" ]; then
-  [ -n "${HOME:-}" ] || fail "HOME is unset — set POSTFLIGHT_INSTALL_DIR to choose a destination"
-  install_dir="$HOME/.local/bin"
-fi
-
-for tool in curl sed grep; do
-  command -v "$tool" > /dev/null 2>&1 || fail "$tool is required but not on PATH"
-done
-
-if command -v cosign > /dev/null 2>&1; then
-  verify_signature=yes
-elif [ "$require_verification" = yes ]; then
-  fail "--require-verification was given but cosign is not on PATH (https://docs.sigstore.dev/cosign/installation)"
-else
-  verify_signature=no
-fi
 
 sha256_of() {
   if command -v sha256sum > /dev/null 2>&1; then
@@ -118,39 +60,19 @@ sha256_of() {
   fi
 }
 
-os="$(uname -s)"
-arch="$(uname -m)"
-case "$os:$arch" in
-  Linux:x86_64 | Linux:amd64) target="x86_64-unknown-linux-musl" ;;
-  Linux:aarch64 | Linux:arm64) target="aarch64-unknown-linux-musl" ;;
-  Darwin:x86_64) target="x86_64-apple-darwin" ;;
-  Darwin:arm64 | Darwin:aarch64) target="aarch64-apple-darwin" ;;
-  *)
-    fail "unsupported platform $os/$arch — released targets are:
-  x86_64-unknown-linux-musl
-  aarch64-unknown-linux-musl
-  x86_64-apple-darwin
-  aarch64-apple-darwin"
-    ;;
-esac
-
-# BSD mktemp (macOS) rejects a bare -d, so the template is not optional.
-work="$(mktemp -d "${TMPDIR:-/tmp}/postflight-install.XXXXXX")"
-staged=""
 cleanup() {
   rm -rf "$work"
   if [ -n "$staged" ]; then
     rm -f "$staged"
   fi
 }
-trap cleanup EXIT INT TERM
 
 fetch() {
   curl -fsSL --proto '=https' --tlsv1.2 --retry 3 -o "$2" "$1"
 }
 
-# POSTFLIGHT_RELEASES_DIR replaces the API with a directory of page-<n>.json
-# fixtures so the channel-resolution rules can be tested without a network.
+# POSTFLIGHT_RELEASES_DIR swaps the API for page-<n>.json fixtures, so channel
+# resolution is testable without a network.
 releases_page() {
   if [ -n "${POSTFLIGHT_RELEASES_DIR:-}" ]; then
     if [ -f "$POSTFLIGHT_RELEASES_DIR/page-$1.json" ]; then
@@ -163,15 +85,11 @@ releases_page() {
   fetch "$RELEASES_URL?per_page=$RELEASES_PER_PAGE&page=$1" "$2"
 }
 
-# /releases/latest is unusable here: every release so far is a prerelease, and
-# the repository also carries unrelated data drops, so the channel's newest
-# release is whichever listed release matches its tag shape first (the API
-# returns releases newest-first). Pages are pulled one at a time and kept for
-# the rest of the run, so the common case costs a single request against the
-# 60/hour unauthenticated budget and the fallback channel enumeration costs
-# none.
-last_page=0
-
+# /releases/latest is unusable: prereleases are invisible to it and the
+# repository carries unrelated data drops, so a channel's newest release is the
+# first listed one matching its tag shape. Pages are fetched one at a time and
+# kept, keeping the common case to a single request against GitHub's 60/hour
+# unauthenticated budget.
 load_page() {
   page_no="$1"
   [ "$page_no" -le "$RELEASES_MAX_PAGES" ] || return 1
@@ -247,9 +165,8 @@ scan_page() {
   return 1
 }
 
-# Callers redirect stdout rather than using a command substitution: the page
-# bookkeeping this fills in must survive into the next call, and a subshell
-# would drop it.
+# Callers redirect stdout rather than substituting: a subshell would drop the
+# page bookkeeping this leaves behind for the next call.
 resolve_tag() {
   resolve_page=1
   while load_page "$resolve_page"; do
@@ -261,76 +178,191 @@ resolve_tag() {
   return 1
 }
 
-if resolve_tag "$channel" > "$work/tag"; then
-  tag="$(cat "$work/tag")"
-else
-  available=""
-  for candidate in $CHANNELS; do
-    if resolve_tag "$candidate" > /dev/null; then
-      available="$available $candidate"
-    fi
+main() {
+  channel="${POSTFLIGHT_CHANNEL:-stable}"
+  channel_given=no
+  pinned_version=""
+  install_dir="${POSTFLIGHT_INSTALL_DIR:-}"
+  require_verification=no
+  print_tag=no
+  last_page=0
+  staged=""
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --channel)
+        [ "$#" -ge 2 ] || fail "--channel needs a value"
+        channel="$2"
+        channel_given=yes
+        shift 2
+        ;;
+      --channel=*)
+        channel="${1#--channel=}"
+        channel_given=yes
+        shift
+        ;;
+      --version)
+        [ "$#" -ge 2 ] || fail "--version needs a value"
+        pinned_version="$2"
+        shift 2
+        ;;
+      --version=*)
+        pinned_version="${1#--version=}"
+        shift
+        ;;
+      --require-verification)
+        require_verification=yes
+        shift
+        ;;
+      --print-tag)
+        print_tag=yes
+        shift
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *)
+        usage >&2
+        fail "unknown argument: $1"
+        ;;
+    esac
   done
-  [ -n "$available" ] || fail "no postflight CLI release exists on any channel yet"
-  suggested="${available# }"
-  suggested="${suggested%% *}"
-  fail "no release on the '$channel' channel yet. Available channels:$available
+
+  if [ -n "$pinned_version" ]; then
+    [ "$channel_given" = no ] \
+      || fail "--version and --channel are alternatives: a pinned version names one release, a channel tracks whatever is newest"
+    case "$pinned_version" in
+      [0-9]*) ;;
+      *) fail "--version takes a bare version like 0.1.0, not '$pinned_version'" ;;
+    esac
+  else
+    case " $CHANNELS " in
+      *" $channel "*) ;;
+      *) fail "unknown channel '$channel' (choose one of: $CHANNELS)" ;;
+    esac
+  fi
+
+  if [ -z "$install_dir" ]; then
+    [ -n "${HOME:-}" ] || fail "HOME is unset — set POSTFLIGHT_INSTALL_DIR to choose a destination"
+    install_dir="$HOME/.local/bin"
+  fi
+
+  # Under sudo, HOME is root's: the install would land where the person who
+  # typed it has no reason to look.
+  if [ -n "${SUDO_USER:-}" ] && [ -z "${POSTFLIGHT_INSTALL_DIR:-}" ]; then
+    fail "running under sudo would install into root's home rather than $SUDO_USER's. Nothing here needs root — rerun without sudo, or set POSTFLIGHT_INSTALL_DIR to install somewhere shared."
+  fi
+
+  for tool in curl sed grep; do
+    command -v "$tool" > /dev/null 2>&1 || fail "$tool is required but not on PATH"
+  done
+
+  if command -v cosign > /dev/null 2>&1; then
+    verify_signature=yes
+  elif [ "$require_verification" = yes ]; then
+    fail "--require-verification was given but cosign is not on PATH (https://docs.sigstore.dev/cosign/installation)"
+  else
+    verify_signature=no
+  fi
+
+  os="$(uname -s)"
+  arch="$(uname -m)"
+  case "$os:$arch" in
+    Linux:x86_64 | Linux:amd64) target="x86_64-unknown-linux-musl" ;;
+    Linux:aarch64 | Linux:arm64) target="aarch64-unknown-linux-musl" ;;
+    Darwin:x86_64) target="x86_64-apple-darwin" ;;
+    Darwin:arm64 | Darwin:aarch64) target="aarch64-apple-darwin" ;;
+    *)
+      fail "unsupported platform $os/$arch — released targets are:
+  x86_64-unknown-linux-musl
+  aarch64-unknown-linux-musl
+  x86_64-apple-darwin
+  aarch64-apple-darwin"
+      ;;
+  esac
+
+  # BSD mktemp (macOS) rejects a bare -d, so the template is not optional.
+  work="$(mktemp -d "${TMPDIR:-/tmp}/postflight-install.XXXXXX")"
+  trap cleanup EXIT INT TERM
+
+  if [ -n "$pinned_version" ]; then
+    # Named outright, so no listing is consulted and the answer cannot drift.
+    tag="$TAG_PREFIX/v$pinned_version"
+  elif resolve_tag "$channel" > "$work/tag"; then
+    tag="$(cat "$work/tag")"
+  else
+    available=""
+    for candidate in $CHANNELS; do
+      if resolve_tag "$candidate" > /dev/null; then
+        available="$available $candidate"
+      fi
+    done
+    [ -n "$available" ] || fail "no postflight CLI release exists on any channel yet"
+    suggested="${available# }"
+    suggested="${suggested%% *}"
+    fail "no release on the '$channel' channel yet. Available channels:$available
 Install from one explicitly, for example:
 
   curl -fsSL https://guardianintelligence.org/postflight/install.sh | sh -s -- --channel $suggested"
-fi
+  fi
 
-if [ "$print_tag" = yes ]; then
-  printf '%s\n' "$tag"
-  exit 0
-fi
+  if [ "$print_tag" = yes ]; then
+    printf '%s\n' "$tag"
+    exit 0
+  fi
 
-log "installing $tag ($target)"
+  log "installing $tag ($target)"
 
-# Release-asset URLs percent-encode the slash in the tag; a literal slash
-# resolves only through a redirect that not every proxy follows.
-tag_path="$(printf '%s' "$tag" | sed 's|/|%2F|g')"
-asset="postflight-$target"
+  # Release-asset URLs percent-encode the slash in the tag; a literal slash
+  # resolves only through a redirect that not every proxy follows.
+  tag_path="$(printf '%s' "$tag" | sed 's|/|%2F|g')"
+  asset="postflight-$target"
 
-fetch "$DOWNLOAD_URL/$tag_path/$asset" "$work/$asset" \
-  || fail "$tag has no $asset asset"
-fetch "$DOWNLOAD_URL/$tag_path/checksums.txt" "$work/checksums.txt" \
-  || fail "$tag has no checksums.txt asset"
+  fetch "$DOWNLOAD_URL/$tag_path/$asset" "$work/$asset" \
+    || fail "$tag carries no $asset asset — check that the release exists and covers this platform"
+  fetch "$DOWNLOAD_URL/$tag_path/checksums.txt" "$work/checksums.txt" \
+    || fail "$tag has no checksums.txt asset"
 
-expected="$(grep "^[0-9a-f]\{64\}  $asset\$" "$work/checksums.txt" | cut -d' ' -f1)"
-[ -n "$expected" ] || fail "checksums.txt carries no entry for $asset"
-actual="$(sha256_of "$work/$asset")"
-[ "$actual" = "$expected" ] || fail "sha256 mismatch for $asset (expected $expected, got $actual)"
+  expected="$(grep "^[0-9a-f]\{64\}  $asset\$" "$work/checksums.txt" | cut -d' ' -f1)"
+  [ -n "$expected" ] || fail "checksums.txt carries no entry for $asset"
+  actual="$(sha256_of "$work/$asset")"
+  [ "$actual" = "$expected" ] || fail "sha256 mismatch for $asset (expected $expected, got $actual)"
 
-if [ "$verify_signature" = yes ]; then
-  fetch "$DOWNLOAD_URL/$tag_path/$asset.sigstore.json" "$work/$asset.sigstore.json" \
-    || fail "$tag has no signature bundle for $asset"
-  cosign verify-blob \
-    --bundle "$work/$asset.sigstore.json" \
-    --certificate-identity "$BUILD_IDENTITY" \
-    --certificate-oidc-issuer "$ISSUER" \
-    "$work/$asset" > /dev/null \
-    || fail "signature verification failed for $asset"
-  log "signature verified against $BUILD_IDENTITY"
-else
-  log "cosign is not on PATH — checksum verified, signature not. Install cosign and rerun with --require-verification for the full chain."
-fi
+  if [ "$verify_signature" = yes ]; then
+    fetch "$DOWNLOAD_URL/$tag_path/$asset.sigstore.json" "$work/$asset.sigstore.json" \
+      || fail "$tag has no signature bundle for $asset"
+    # cosign narrates to stderr on success too; only a failure should speak.
+    if ! cosign_output="$(cosign verify-blob \
+      --bundle "$work/$asset.sigstore.json" \
+      --certificate-identity "$BUILD_IDENTITY" \
+      --certificate-oidc-issuer "$ISSUER" \
+      "$work/$asset" 2>&1)"; then
+      printf '%s\n' "$cosign_output" >&2
+      fail "signature verification failed for $asset"
+    fi
+    log "signature verified against $BUILD_IDENTITY"
+  else
+    log "cosign is not on PATH — checksum verified, signature not. Install cosign and rerun with --require-verification for the full chain."
+  fi
 
-mkdir -p "$install_dir" || fail "could not create $install_dir"
-chmod 0755 "$work/$asset"
+  mkdir -p "$install_dir" || fail "could not create $install_dir"
+  chmod 0755 "$work/$asset"
 
-# The binary is smoke-tested under a staged name inside the destination
-# directory: it only takes its final name once it has proven it runs, so a
-# broken download cannot shadow a working install, and TMPDIR being mounted
-# noexec (common on hardened hosts) cannot fail the test either.
-staged="$install_dir/.postflight.install.$$"
-mv "$work/$asset" "$staged" || fail "could not write to $install_dir"
-version="$("$staged" version)" || fail "the $target binary from $tag does not run on this machine"
-mv "$staged" "$install_dir/postflight" || fail "could not write $install_dir/postflight"
-staged=""
+  # The binary takes its final name only once it has proven it runs, and is
+  # staged in the destination directory so a noexec TMPDIR cannot fail it.
+  staged="$install_dir/.postflight.install.$$"
+  mv "$work/$asset" "$staged" || fail "could not write to $install_dir"
+  version="$("$staged" version)" || fail "the $target binary from $tag does not run on this machine"
+  mv "$staged" "$install_dir/postflight" || fail "could not write $install_dir/postflight"
+  staged=""
 
-log "installed $version to $install_dir/postflight"
+  log "installed $version to $install_dir/postflight"
 
-case ":${PATH:-}:" in
-  *":$install_dir:"*) ;;
-  *) log "$install_dir is not on your PATH — add it with: export PATH=\"$install_dir:\$PATH\"" ;;
-esac
+  case ":${PATH:-}:" in
+    *":$install_dir:"*) ;;
+    *) log "$install_dir is not on your PATH — add it with: export PATH=\"$install_dir:\$PATH\"" ;;
+  esac
+}
+
+main "$@"

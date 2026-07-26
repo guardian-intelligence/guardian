@@ -38,6 +38,7 @@ env:
   TARGETS: x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin
   NATIVE_TARGET: x86_64-unknown-linux-musl
   BUILD_IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main
+  RELEASE_IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-release.yml@refs/heads/main
   ISSUER: https://token.actions.githubusercontent.com
   CRANE_VERSION: v0.21.7
   CRANE_SHA256: 1a57bc98207fa1c0d04bf760699099e26f8383499bfd55b99c1b919a928a7230
@@ -49,6 +50,10 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      # The installer is the one asset signed here rather than at build time:
+      # it is a source file, not a build output, and it tracks main rather than
+      # the commit that produced the binaries.
+      id-token: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
@@ -245,7 +250,20 @@ jobs:
               sources_make=1
             fi
 
-            (cd "assets/$channel" && sha256sum postflight-* > checksums.txt)
+            # Shipping the installer with the release closes the chain the
+            # website cannot: a caller who trusts nothing but this repository's
+            # signing identity can fetch it, verify it, and run it.
+            cp src/products/postflight-cli/dist/install.sh "assets/$channel/install.sh"
+            cosign sign-blob --yes \
+              --bundle "assets/$channel/install.sh.sigstore.json" \
+              "assets/$channel/install.sh"
+            cosign verify-blob \
+              --bundle "assets/$channel/install.sh.sigstore.json" \
+              --certificate-identity "$RELEASE_IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              "assets/$channel/install.sh"
+
+            (cd "assets/$channel" && sha256sum postflight-* install.sh* > checksums.txt)
             printf 'revision=%s\nbinaries_digest=%s\nversion=%s\nsources_make=%s\n' \
               "$revision" "$binaries_digest" "$built" "$sources_make" > "meta/$channel.env"
           done 3< plan.txt
@@ -348,6 +366,15 @@ jobs:
               "  --certificate-identity $BUILD_IDENTITY \\" \
               "  --certificate-oidc-issuer $ISSUER \\" \
               "  postflight-<target>" \
+              '```' \
+              "" \
+              "\`install.sh\` is attached too, signed by the release lane, so the installer can be verified before it is run rather than piped in from the website:" \
+              "" \
+              '```sh' \
+              "cosign verify-blob --bundle install.sh.sigstore.json \\" \
+              "  --certificate-identity $RELEASE_IDENTITY \\" \
+              "  --certificate-oidc-issuer $ISSUER \\" \
+              "  install.sh" \
               '```')"
             gh release create "$tag" \
               --title "$title" \
