@@ -39,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: rollup
-          image: ghcr.io/guardian-intelligence/cockpit:edge@sha256:0589274466069f6c2e6df0f67ab38f7ac1288887d71d73085f80bce2b72e0ca2 # {"$imagepolicy": "guardian-imageops:cockpit"}
+          image: ghcr.io/guardian-intelligence/cockpit:edge@sha256:639eaa5eda21254f899748c75867a9e8b52f88bd900349c6d709b3bd31a1391e # {"$imagepolicy": "guardian-imageops:cockpit"}
           args:
             - rollup
             - --hub=cockpit-hub.guardian-cockpit.svc:80
