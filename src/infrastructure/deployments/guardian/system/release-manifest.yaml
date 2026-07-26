@@ -18,3 +18,5 @@ releases:
       image: ghcr.io/guardian-intelligence/postflight-cli@sha256:1c61b15daaeab034d6e85bcac397be1a5b458e89b9422f55d2cdd59baa36f460
     rc:
       image: ghcr.io/guardian-intelligence/postflight-cli@sha256:1c61b15daaeab034d6e85bcac397be1a5b458e89b9422f55d2cdd59baa36f460
+    stable:
+      image: ghcr.io/guardian-intelligence/postflight-cli@sha256:f8c69a8da836247d50221c66a3bf5843da891617151db1ccf309574d780d6030
