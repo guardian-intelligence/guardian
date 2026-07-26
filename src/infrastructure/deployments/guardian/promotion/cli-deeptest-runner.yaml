@@ -1,0 +1,623 @@
+# cli-deeptest-runner: the postflight CLI's pre-promotion verification. Every
+# hour it resolves ghcr's :edge artifact, re-establishes the whole signature
+# chain a user would (image signature, per-binary bundles, the manifest's
+# binaries digest), inspects the cross-compiled targets it cannot run, and
+# runs the native one — `version` plus a real device-flow initiation against
+# the live issuer. The verdict lands in guardian_cli_deeptest_pass keyed by
+# digest, so a digest carries its own answer to "is this promotable".
+#
+# The run's verdict is data, not a Job outcome: a clean 0 exits zero
+# (GuardianCliDeeptestFailing warns) and only an inability to produce a
+# verdict at all fails the Job.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cli-deeptest-runner
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: cli-deeptest-runner
+    app.kubernetes.io/part-of: guardian
+  annotations:
+    # The scripts' shell variables must reach the pod verbatim, not be
+    # blanked by Flux's envsubst pass.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  # cosign's image is ko-built and shell-less, and this cluster does not
+  # enable the ImageVolume source, so the binary is extracted from the pinned
+  # image: manifest by pinned digest, every layer blob verified against its
+  # manifest digest before extraction. The image is never run as a container.
+  # ghcr is read with an anonymous pull token — the same path this job's
+  # subject artifact is read over, and the same digest pin the countersigner
+  # and the release projector carry.
+  extract-cosign.sh: |
+    #!/bin/sh
+    set -eu
+    REGISTRY=ghcr.io
+    REPO="${COSIGN_IMAGE#ghcr.io/}"
+    REPO="${REPO%%[@:]*}"
+    DIGEST="${COSIGN_IMAGE##*@}"
+    cd /tmp
+    token="$(curl -fsS "https://$REGISTRY/token?service=$REGISTRY&scope=repository:$REPO:pull" | jq -r .token)"
+    test -n "$token" && test "$token" != null
+    fetch_manifest() {
+      curl -fsS -H "Authorization: Bearer $token" \
+        -H 'Accept: application/vnd.oci.image.index.v1+json' \
+        -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+        "https://$REGISTRY/v2/$REPO/manifests/$1"
+    }
+    # The registry is not trusted: every fetched byte is verified against
+    # the digest that named it, manifests included — the chain from the
+    # pinned digest to the extracted binary has no unverified link.
+    fetch_manifest "$DIGEST" > root.json
+    echo "${DIGEST#sha256:}  root.json" | sha256sum -c - >/dev/null
+    case "$(jq -r .mediaType root.json)" in
+      application/vnd.oci.image.index.v1+json|application/vnd.docker.distribution.manifest.list.v2+json)
+        arch_digest="$(jq -r '.manifests[] | select(.platform.os=="linux" and .platform.architecture=="amd64") | .digest' root.json | head -1)"
+        fetch_manifest "$arch_digest" > manifest.json
+        echo "${arch_digest#sha256:}  manifest.json" | sha256sum -c - >/dev/null
+        ;;
+      *)
+        cp root.json manifest.json
+        ;;
+    esac
+    for layer in $(jq -r '.layers[].digest' manifest.json); do
+      curl -fsSL -H "Authorization: Bearer $token" \
+        "https://$REGISTRY/v2/$REPO/blobs/$layer" -o layer.tgz
+      echo "${layer#sha256:}  layer.tgz" | sha256sum -c - >/dev/null
+      # Stream the member out instead of extracting the tree: ko layers ship
+      # their directories read-only (0555), which a non-root extract cannot
+      # write into.
+      member="$(tar tzf layer.tgz 2>/dev/null | grep -E '^/?ko-app/cosign$' || true)"
+      if [ -n "$member" ]; then
+        tar xzOf layer.tgz "$member" > /tools-bin/cosign
+        chmod 0755 /tools-bin/cosign
+      fi
+      rm -f layer.tgz
+    done
+    rm -f root.json manifest.json
+    /tools-bin/cosign version
+  deeptest.sh: |
+    #!/bin/bash
+    set -uo pipefail
+    VMINSERT="http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus"
+    CLICKHOUSE="http://chendpoint-clickhouse-analytics.tenant-root.svc.cozy.local:8123/"
+    REGISTRY=ghcr.io
+    REPO=guardian-intelligence/postflight-cli
+    IMAGE_REPO="$REGISTRY/$REPO"
+    BUILD_IDENTITY="https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main"
+    ISSUER=https://token.actions.githubusercontent.com
+    TARGETS="x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin"
+    NATIVE=x86_64-unknown-linux-musl
+    COSIGN=/tools-bin/cosign
+    TRUSTED_ROOT=/trusted-root/sigstore-trusted-root.json
+    export HOME=/tmp
+    # EPOCHREALTIME's decimal separator is locale-dependent and the timings
+    # below strip it to get integer microseconds.
+    export LC_ALL=C
+    cd /tmp
+
+    run_start="${EPOCHREALTIME/./}"
+    digest=unresolved
+    edge_seen=0
+    revision=unknown
+    cli_version=unknown
+    checks='{}'
+    failed=0
+    events_written=1
+
+    push() {
+      curl -fsS --retry 3 --max-time 15 --data-binary "$1" "$VMINSERT" \
+        || echo "failed to record '$1' in vminsert"
+    }
+    beat() {
+      push "guardian_cli_deeptest_heartbeat 1"
+    }
+    record() {
+      echo "check $1 = $2"
+      push "guardian_cli_deeptest_check{digest=\"$digest\",check=\"$1\"} $2"
+      checks="$(jq -c --arg c "$1" --argjson v "$2" '.[$c] = $v' <<<"$checks")"
+      [ "$2" = 1 ] || failed=1
+    }
+    # Microseconds since the given EPOCHREALTIME stamp, rendered as
+    # millisecond-with-fraction for the gauges.
+    since_ms() {
+      local elapsed=$(( ${EPOCHREALTIME/./} - $1 ))
+      printf '%d.%03d' $((elapsed / 1000)) $((elapsed % 1000))
+    }
+    us_ms() {
+      printf '%d.%03d' $(($1 / 1000)) $(($1 % 1000))
+    }
+    # A rejected INSERT costs no verdict — the artifact is not at fault — but
+    # a stale credential would otherwise lose events silently, so the write's
+    # own outcome is a metric. One series, not one per event name: a failure
+    # anywhere in the run holds it at 0 and the next run's first write clears
+    # it, so no exit path can pin it open.
+    event() {
+      printf 'INSERT INTO guardian_analytics.events (server_ts, site, event_name, trust_tier, schema_version, duration_ms, props) FORMAT JSONEachRow\n%s\n' \
+        "$(jq -cn --arg ts "$(date -u +'%Y-%m-%d %H:%M:%S')" --arg name "$1" \
+          --argjson duration "$2" --arg props "$3" \
+          '{server_ts: $ts, site: "postflight-cli", event_name: $name,
+            trust_tier: "server_observed", schema_version: 1,
+            duration_ms: $duration, props: $props}')" \
+        | curl -fsS --retry 3 --max-time 15 \
+            -H "X-ClickHouse-User: $CLICKHOUSE_USER" \
+            -H "X-ClickHouse-Key: $CLICKHOUSE_PASSWORD" \
+            --data-binary @- "$CLICKHOUSE" >/dev/null \
+        || { echo "failed to record $1 in ClickHouse"; events_written=0; }
+      push "guardian_cli_deeptest_event_write $events_written"
+    }
+    # Every exit that reached a digest publishes a verdict for it, so the
+    # promotion gate always has something to read. The edge marker rides with
+    # the verdict rather than with resolution: it is what tells the alert
+    # which digest is current, so it may only name a digest already adjudicated.
+    finish() {
+      local pass=1
+      [ "$failed" -eq 0 ] || pass=0
+      push "guardian_cli_deeptest_pass{digest=\"$digest\"} $pass"
+      push "guardian_cli_deeptest_edge_seen_seconds{digest=\"$digest\"} $edge_seen"
+      beat
+      event cli.deeptest.run "$(( (${EPOCHREALTIME/./} - run_start) / 1000 ))" \
+        "$(jq -cn --arg digest "$digest" --arg revision "$revision" \
+          --arg version "$cli_version" --argjson pass "$pass" --argjson checks "$checks" \
+          '{digest: $digest, revision: $revision, cli_version: $version,
+            pass: $pass, checks: $checks}')"
+      if [ "$pass" = 1 ]; then
+        echo "deep test PASSED for $IMAGE_REPO@$digest"
+      else
+        echo "deep test FAILED for $IMAGE_REPO@$digest: $checks"
+      fi
+    }
+
+    # The subject is whatever :edge points at right now, and its digest is
+    # computed from the manifest bytes in hand — not read from a header — so
+    # every metric below is labelled with the digest Kargo will promote.
+    token="$(curl -fsS "https://$REGISTRY/token?service=$REGISTRY&scope=repository:$REPO:pull" | jq -r .token)"
+    if [ -z "$token" ] || [ "$token" = null ] \
+      || ! curl -fsS -H "Authorization: Bearer $token" \
+        -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+        "https://$REGISTRY/v2/$REPO/manifests/edge" -o manifest.json; then
+      echo "cannot resolve $IMAGE_REPO:edge"
+      record edge_resolved 0
+      beat
+      exit 1
+    fi
+    digest="sha256:$(sha256sum manifest.json | cut -d' ' -f1)"
+    revision="$(jq -r '.annotations["org.opencontainers.image.revision"] // "unknown"' manifest.json)"
+    claimed_binaries="$(jq -r '.annotations["org.guardian.binaries-digest"] // ""' manifest.json)"
+    echo "edge is $IMAGE_REPO@$digest built from $revision"
+    record edge_resolved 1
+    # The moment this digest was seen as :edge, which is how
+    # GuardianCliDeeptestFailing tells the current subject apart from the
+    # digests later commits have superseded. `finish` publishes it.
+    edge_seen="$(date -u +%s)"
+
+    mkdir -p stage
+    layers=1
+    for layer in $(jq -r '.layers[].digest' manifest.json); do
+      curl -fsSL -H "Authorization: Bearer $token" \
+        "https://$REGISTRY/v2/$REPO/blobs/$layer" -o layer.tar || { layers=0; break; }
+      echo "${layer#sha256:}  layer.tar" | sha256sum -c - >/dev/null \
+        || { echo "layer $layer does not match its digest"; layers=0; break; }
+      tar -xf layer.tar -C stage || layers=0
+      rm -f layer.tar
+    done
+    for target in $TARGETS; do
+      test -s "stage/$target/postflight" && test -s "stage/$target/postflight.sigstore.json" \
+        || { echo "$target is missing from the artifact"; layers=0; }
+    done
+    record layers "$layers"
+    if [ "$layers" != 1 ]; then
+      finish
+      exit 0
+    fi
+
+    # The manifest's binaries-digest is the dedup identity the edge lane
+    # skips pushes on; recomputing it here proves the annotation describes
+    # the bytes actually shipped.
+    recomputed="$(for target in $TARGETS; do
+      sha256sum "stage/$target/postflight" | cut -d' ' -f1
+    done | sha256sum | cut -d' ' -f1)"
+    binaries_ok=1
+    if [ -z "$claimed_binaries" ] || [ "$recomputed" != "$claimed_binaries" ]; then
+      echo "binaries digest mismatch: manifest claims '${claimed_binaries:-none}', bytes hash to $recomputed"
+      binaries_ok=0
+    fi
+    record binaries_digest "$binaries_ok"
+
+    # --new-bundle-format=false is load-bearing: CI signatures live in legacy
+    # .sig tags, and once a digest carries any bundle referrer (the Guardian
+    # countersignature the release projector copies to ghcr for promoted
+    # digests) cosign's default discovery inspects only bundles and never
+    # finds the CI signature.
+    image_sig=1
+    if ! "$COSIGN" verify --new-bundle-format=false \
+      --certificate-identity "$BUILD_IDENTITY" \
+      --certificate-oidc-issuer "$ISSUER" \
+      --trusted-root "$TRUSTED_ROOT" \
+      "$IMAGE_REPO@$digest" >/dev/null 2>&1; then
+      echo "cosign verify FAILED for $IMAGE_REPO@$digest"
+      image_sig=0
+    fi
+    record image_signature "$image_sig"
+
+    blobs=1
+    for target in $TARGETS; do
+      "$COSIGN" verify-blob \
+        --bundle "stage/$target/postflight.sigstore.json" \
+        --certificate-identity "$BUILD_IDENTITY" \
+        --certificate-oidc-issuer "$ISSUER" \
+        --trusted-root "$TRUSTED_ROOT" \
+        "stage/$target/postflight" >/dev/null 2>&1 \
+        || { echo "verify-blob FAILED for $target"; blobs=0; }
+    done
+    record blob_signatures "$blobs"
+
+    # Three of the four targets can only be inspected, never run here: the
+    # object magic plus the machine/cputype word is what proves the lane
+    # cross-compiled what its directory name claims.
+    field() {
+      od -An -tx1 -N"$2" -j"$3" "$1" | tr -d ' \n'
+    }
+    structure=1
+    for target in $TARGETS; do
+      case "$target" in
+        x86_64-unknown-linux-musl)  magic=7f454c46; arch=3e00; at=18; len=2 ;;
+        aarch64-unknown-linux-musl) magic=7f454c46; arch=b700; at=18; len=2 ;;
+        x86_64-apple-darwin)        magic=cffaedfe; arch=07000001; at=4; len=4 ;;
+        aarch64-apple-darwin)       magic=cffaedfe; arch=0c000001; at=4; len=4 ;;
+      esac
+      got_magic="$(field "stage/$target/postflight" 4 0)"
+      got_arch="$(field "stage/$target/postflight" "$len" "$at")"
+      if [ "$got_magic" != "$magic" ] || [ "$got_arch" != "$arch" ]; then
+        echo "$target is not the object it claims: magic $got_magic arch $got_arch"
+        structure=0
+      fi
+    done
+    record structure "$structure"
+
+    # Never countersign what the canonical CI identity did not sign — applied
+    # to execution. Inspecting bytes is safe; running them is not, so an
+    # artifact whose chain did not close is a verdict and nothing more.
+    if [ "$image_sig" != 1 ] || [ "$blobs" != 1 ] || [ "$binaries_ok" != 1 ]; then
+      echo "refusing to run $IMAGE_REPO@$digest: its signature chain did not verify"
+      finish
+      exit 0
+    fi
+
+    BIN="stage/$NATIVE/postflight"
+    # The CLI has no business seeing this pod's ClickHouse credential. Every
+    # invocation below is bounded, and the bounds sum well inside the Job's
+    # deadline so a build that hangs still reaches `finish` with a verdict:
+    # 5s for `version`, 20s for the device flow, and a 60s ceiling over the
+    # whole benchmark loop.
+    CLI=(env -u CLICKHOUSE_USER -u CLICKHOUSE_PASSWORD "$BIN")
+    version_out="$(timeout 5 "${CLI[@]}" version 2>&1)"
+    cli_version="${version_out##* }"
+    if [[ "$version_out" =~ ^postflight\ version\ [0-9]+\.[0-9]+\.[0-9]+ ]]; then
+      record version 1
+    else
+      echo "unexpected version output: $version_out"
+      cli_version=unknown
+      record version 0
+    fi
+
+    # A real device-code request against the live issuer, driven exactly as a
+    # user drives it. The code is never approved and expires on its own; the
+    # time to the printed code is the auth endpoint's round trip.
+    auth_start="${EPOCHREALTIME/./}"
+    timeout 20 "${CLI[@]}" auth login </dev/null >login.out 2>&1 &
+    login_pid=$!
+    auth_rtt=""
+    for _ in $(seq 1 200); do
+      if grep -q 'First, copy your one-time code:' login.out; then
+        auth_rtt="$(since_ms "$auth_start")"
+        break
+      fi
+      kill -0 "$login_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill "$login_pid" 2>/dev/null
+    wait "$login_pid" 2>/dev/null
+    if [ -n "$auth_rtt" ]; then
+      record device_flow 1
+    else
+      echo "device-flow initiation printed no one-time code:"
+      cat login.out
+      record device_flow 0
+    fi
+
+    # Report-only from here down: startup cost, shipped sizes, auth RTT. No
+    # baselines exist yet, so nothing below moves the verdict. The timings
+    # include the wrapper's two execs, which are constant across runs.
+    samples=()
+    bench_deadline=$(( SECONDS + 60 ))
+    for _ in $(seq 1 20); do
+      started="${EPOCHREALTIME/./}"
+      timeout 5 "${CLI[@]}" version >/dev/null 2>&1
+      samples+=( $(( ${EPOCHREALTIME/./} - started )) )
+      [ "$SECONDS" -lt "$bench_deadline" ] || break
+    done
+    mapfile -t sorted < <(printf '%s\n' "${samples[@]}" | sort -n)
+    taken=${#sorted[@]}
+    startup_min="$(us_ms "${sorted[0]}")"
+    startup_p50="$(us_ms "${sorted[$(( (taken - 1) / 2 ))]}")"
+    startup_p95="$(us_ms "${sorted[$(( (taken * 95 - 1) / 100 ))]}")"
+
+    sizes='{}'
+    for target in $TARGETS; do
+      size="$(wc -c < "stage/$target/postflight" | tr -d ' ')"
+      push "guardian_cli_binary_size_bytes{digest=\"$digest\",target=\"$target\"} $size"
+      sizes="$(jq -c --arg t "$target" --argjson s "$size" '.[$t] = $s' <<<"$sizes")"
+    done
+
+    push "guardian_cli_deeptest_startup_ms{digest=\"$digest\",stat=\"min\"} $startup_min"
+    push "guardian_cli_deeptest_startup_ms{digest=\"$digest\",stat=\"p50\"} $startup_p50"
+    push "guardian_cli_deeptest_startup_ms{digest=\"$digest\",stat=\"p95\"} $startup_p95"
+    if [ -n "$auth_rtt" ]; then
+      push "guardian_cli_deeptest_auth_rtt_ms{digest=\"$digest\"} $auth_rtt"
+    fi
+
+    finish
+    event cli.deeptest.benchmark "${startup_p50%%.*}" "$(jq -cn \
+      --arg digest "$digest" --arg version "$cli_version" \
+      --argjson min "$startup_min" --argjson p50 "$startup_p50" --argjson p95 "$startup_p95" \
+      --argjson samples "$taken" --argjson rtt "${auth_rtt:-null}" --argjson sizes "$sizes" \
+      '{digest: $digest, cli_version: $version, samples: $samples,
+        startup_ms: {min: $min, p50: $p50, p95: $p95},
+        auth_rtt_ms: $rtt, binary_size_bytes: $sizes}')"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cli-deeptest-runner
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: cli-deeptest-runner
+    app.kubernetes.io/part-of: guardian
+spec:
+  # Hourly, offset well clear of the 08:00 nightly promotion so the gate
+  # reads a verdict rather than racing one.
+  schedule: "20 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cli-deeptest-runner
+            app.kubernetes.io/part-of: guardian
+            guardian.dev/role: analytics-client
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: extract-cosign
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/sh", "/scripts/extract-cosign.sh"]
+              env:
+                # An env value is invisible to the imageset extractor, so
+                # this pin is hand-declared in images.declared.lock. It may
+                # never drift from the countersigner's and the projector's
+                # pin — TestDeeptestRunnerCosignPinMatchesTheRegistryLane
+                # enforces that.
+                - name: COSIGN_IMAGE
+                  value: "ghcr.io/sigstore/cosign/cosign:v3.1.1@sha256:6bbe0d281d955c79f85b325f0f7e651c1bcab5a4fa4ad4903d74955178a3b2eb"
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                  ephemeral-storage: 512Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+                  ephemeral-storage: 1Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: tools-bin
+                  mountPath: /tools-bin
+                - name: tmp
+                  mountPath: /tmp
+          containers:
+            - name: deeptest
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/bash", "/scripts/deeptest.sh"]
+              env:
+                - name: CLICKHOUSE_USER
+                  value: cli_canary
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: cli-release-canary
+                      key: clickhouse_password
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                  ephemeral-storage: 512Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+                  ephemeral-storage: 2Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: tools-bin
+                  mountPath: /tools-bin
+                - name: tmp
+                  mountPath: /tmp
+                - name: trusted-root
+                  mountPath: /trusted-root
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: cli-deeptest-runner
+            - name: tools-bin
+              emptyDir: {}
+            - name: tmp
+              emptyDir:
+                sizeLimit: 1Gi
+            - name: trusted-root
+              configMap:
+                name: sigstore-trusted-root
+---
+# Egress half. The runner reads ghcr (artifact, cosign image, signatures) and
+# drives the CLI's device flow against the public issuer — both world:443 —
+# then writes its verdict to vminsert and its events to the analytics
+# ClickHouse.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cli-deeptest-runner
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: cli-deeptest-runner
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: cli-deeptest-runner
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            clickhouse.altinity.com/chi: clickhouse-analytics
+      toPorts:
+        - ports:
+            - port: "8123"
+              protocol: TCP
+---
+# Ingress half: tenant-root's generated isolation does not admit other
+# namespaces (same reason as the nightly promoter's pair).
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-cli-deeptest-runner
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: guardian-analytics
+            k8s:app.kubernetes.io/name: cli-deeptest-runner
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: cli-deeptest-runner
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: cli-deeptest-runner
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: cli-deeptest-runner.rules
+      interval: 60s
+      rules:
+        - alert: GuardianCliDeeptestSilent
+          # The count_over_time guard keeps this from firing during bring-up,
+          # before the first scheduled run has ever pushed a sample.
+          expr: >-
+            absent_over_time(guardian_cli_deeptest_heartbeat[3h])
+            and on() count_over_time(guardian_cli_deeptest_heartbeat[8d]) > 0
+          labels:
+            severity: warning
+            guardian_component: cli-release-train
+          annotations:
+            summary: "cli-deeptest-runner has not run in 3h"
+            description: >-
+              The hourly CLI deep test has pushed no heartbeat for three
+              cadences, so no edge digest is accumulating a verdict and the
+              08:00 nightly promotion has nothing to check. Check the newest
+              cli-deeptest-runner Job logs in guardian-analytics.
+        - alert: GuardianCliDeeptestFailing
+          # A digest keeps its verdict series for the whole window after a
+          # commit moves :edge past it, so the failing verdict is joined
+          # against the freshest edge marker: only the digest a promotion
+          # could still pick up alerts.
+          expr: >-
+            last_over_time(guardian_cli_deeptest_pass[90m]) == 0
+            and on(digest) (last_over_time(guardian_cli_deeptest_edge_seen_seconds[90m])
+            == scalar(max(last_over_time(guardian_cli_deeptest_edge_seen_seconds[90m]))))
+          labels:
+            severity: warning
+            guardian_component: cli-release-train
+          annotations:
+            summary: "the postflight CLI edge artifact is failing its deep test"
+            description: >-
+              guardian_cli_deeptest_pass is 0 for the digest :edge currently
+              points at — signature chain, binaries digest, target structure,
+              `version`, or device-flow initiation. Nightly promotion of this
+              digest will fail its gate. guardian_cli_deeptest_check names the
+              failing check; the newest cli-deeptest-runner Job logs in
+              guardian-analytics carry the detail.
+        - alert: GuardianCliDeeptestEventWriteFailing
+          expr: last_over_time(guardian_cli_deeptest_event_write[90m]) == 0
+          labels:
+            severity: warning
+            guardian_component: cli-release-train
+          annotations:
+            summary: "cli-deeptest-runner cannot write its events to ClickHouse"
+            description: >-
+              The runner's INSERT into guardian_analytics.events is being
+              rejected, so deep-test and benchmark history is being lost while
+              the verdict metrics keep flowing. Usual cause is a `cli_canary`
+              password that no longer matches the chart's — re-run the relay in
+              runbooks/analytics-clickhouse.md.

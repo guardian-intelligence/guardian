@@ -170,6 +170,25 @@ func TestReleaseProjectorToolPinsMoveTogether(t *testing.T) {
 	}
 }
 
+// The CLI deep-test runner extracts cosign the same way and verifies the
+// same release lane's signatures, so its pin joins the countersigner's and
+// the projector's: one cosign may not judge what another cosign version
+// signed.
+func TestDeeptestRunnerCosignPinMatchesTheRegistryLane(t *testing.T) {
+	runnerYAML := "src/infrastructure/deployments/guardian/promotion/cli-deeptest-runner.yaml"
+	countersignerYAML := "src/infrastructure/deployments/guardian/system/zot-countersigner.yaml"
+
+	cosignPin := regexp.MustCompile(`ghcr\.io/sigstore/cosign/cosign:v\d+\.\d+\.\d+@sha256:[a-f0-9]{64}`)
+	runnerCosign := cosignPin.FindString(readText(t, runfilePath(runnerYAML)))
+	countersignerCosign := cosignPin.FindString(readText(t, runfilePath(countersignerYAML)))
+	if runnerCosign == "" {
+		t.Fatalf("%s: no COSIGN_IMAGE tag@digest pin found", runnerYAML)
+	}
+	if runnerCosign != countersignerCosign {
+		t.Fatalf("deep-test runner COSIGN_IMAGE %s and countersigner COSIGN_IMAGE %s differ: move them together", runnerCosign, countersignerCosign)
+	}
+}
+
 func TestTalmChartTalosVersionAgreesWithInstallerImage(t *testing.T) {
 	chart := extractMinor(t, talmChartRunfile,
 		`talosVersion: "v(\d+)\.(\d+)"`)

@@ -1,5 +1,15 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+generatorOptions:
+  # The deep-test runner mounts this ConfigMap by its static name.
+  disableNameSuffixHash: true
+configMapGenerator:
+  # The same pinned Sigstore trusted root the registry lane verifies against,
+  # projected from the bundle into the runner's namespace.
+  - name: sigstore-trusted-root
+    namespace: guardian-analytics
+    files:
+      - ../../../bootstrap/bundle/sigstore-trusted-root.json
 resources:
   - namespace.yaml
   - kargo-helmrelease.yaml
@@ -8,3 +18,4 @@ resources:
   - kargo-alerts.yaml
   - remediator.yaml
   - cli-nightly-promoter.yaml
+  - cli-deeptest-runner.yaml

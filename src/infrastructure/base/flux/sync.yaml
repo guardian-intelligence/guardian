@@ -716,6 +716,9 @@ spec:
     # cert-manager (health-checked by guardian-system) must be serving before
     # the chart's self-signed Issuer can mint the webhooks-server cert.
     - name: guardian-system
+    # The CLI deep-test runner in this slice deploys into guardian-analytics
+    # and mounts its ClickHouse credential.
+    - name: guardian-analytics
   prune: true
   wait: false
   healthChecks:

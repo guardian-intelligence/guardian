@@ -65,11 +65,12 @@ docker.io/clickhouse/clickhouse-server@sha256:cc8c5bf275148b2de01a31e8fd6b55ba1b
 
 # --- fetched-not-run artifacts (pinned in manifest env values, which the ---
 # --- extractor cannot see; declared here so the dark haul carries them)  ---
-# The countersigner's and release projector's cosign binary source
-# (COSIGN_IMAGE in zot-countersigner.yaml and release-projector.yaml — keep
-# all three in lockstep, and on the same release as the multitool cosign
-# pin). Never admitted as a pod image: its layers are fetched through the
-# zot mirror and digest-verified by the extract script.
+# The cosign binary source for every manifest carrying a COSIGN_IMAGE env pin:
+# zot-countersigner.yaml, release-projector.yaml and cli-deeptest-runner.yaml
+# today — `grep -rl COSIGN_IMAGE src/infrastructure/deployments` is the live
+# index. All of them move together, and on the same release as the multitool
+# cosign pin. Never admitted as a pod image: its layers are fetched by digest
+# and verified against it before the binary is extracted.
 ghcr.io/sigstore/cosign/cosign@sha256:6bbe0d281d955c79f85b325f0f7e651c1bcab5a4fa4ad4903d74955178a3b2eb
 # The release projector's regctl binary source (release-projector.yaml
 # REGCTL_IMAGE — keep in lockstep, and on the same release as the multitool
