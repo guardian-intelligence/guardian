@@ -96,7 +96,13 @@ export async function finishGitHubAuthorization(page: Page, cfg: JourneyConfig):
         }
         const code = await nextTotpCode(page, cfg.githubTotpSeed);
         await page.locator(SELECTORS.totpInput).first().fill(code);
-        await clickIfPresent(page, SELECTORS.githubSubmit);
+        // GitHub auto-submits on the sixth digit, and by the time this
+        // best-effort click fires the redirect chain can already be on a
+        // Guardian page whose own submit buttons must not be pressed —
+        // the generic selector once denied the device consent this way.
+        if (new URL(page.url()).hostname === "github.com") {
+          await clickIfPresent(page, SELECTORS.githubSubmit);
+        }
         totpSent = true;
         break;
       }
