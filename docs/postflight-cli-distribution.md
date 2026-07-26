@@ -778,13 +778,6 @@ into the same series; the `platform` label on
 prefix is already registered so a satellite can speak the same vocabulary
 through the public path.
 
-**The `uninstall` canary method is written but not yet listed.** It cannot
-pass against a release published before `postflight self uninstall` existed,
-so `METHODS` gains it once a nightly carries the subcommand — one env edit,
-and the cell goes live on the next six-hourly run. Until then removal is
-covered by the crate's tests and the installer's, not against the live
-release.
-
 **Nothing canaries the ecosystem mirrors.** The install canary's methods are
 the release assets and the curl installer. A published npm version that
 resolves nothing to run, a crate that stopped building on a fresh
