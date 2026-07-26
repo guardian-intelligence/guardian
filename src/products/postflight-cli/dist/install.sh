@@ -6,8 +6,8 @@
 #   curl -fsSL https://guardianintelligence.org/postflight/install.sh | sh
 #   curl -fsSL https://guardianintelligence.org/postflight/install.sh | sh -s -- --channel nightly
 #
-# Nothing runs until `main "$@"` on the last line, so a download truncated in
-# flight dies on an unterminated function body having executed nothing.
+# Nothing runs until the braced call on the last line, so a download truncated
+# in flight dies on an unterminated body having executed nothing.
 set -eu
 
 REPO="guardian-intelligence/guardian"
@@ -54,10 +54,41 @@ environment:
 EOF
 }
 
+# The home of whoever invoked sudo, since under sudo $HOME is root's. Both
+# variables sudo can be configured to leave behind are consulted before the
+# passwd database, and a relative or unexpanded answer is treated as no answer.
+invoking_home() {
+  if [ -n "${SUDO_HOME:-}" ]; then
+    printf '%s\n' "$SUDO_HOME"
+    return 0
+  fi
+  # The name is interpolated into an eval, which is the only way to ask a
+  # POSIX shell to expand `~user`. So it has to be a name and nothing else —
+  # this script runs as root often enough that a crafted SUDO_USER must not
+  # become a command.
+  case "${SUDO_USER:-}" in
+    "" | *[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  invoking_dir=""
+  invoking_dir="$(eval printf '%s' "~$SUDO_USER" 2> /dev/null)" || return 1
+  case "$invoking_dir" in
+    /*) printf '%s\n' "$invoking_dir" ;;
+    *) return 1 ;;
+  esac
+}
+
 # Mirrors the CLI's own config_dir: XDG first, ~/.config second, and no
 # guessing when neither is set.
+#
+# Under sudo it resolves to the invoking user's config rather than root's,
+# because that is where their CLI will read it. A receipt written into root's
+# home describes an install nobody can see: `postflight version` reports no
+# provenance, and `self uninstall` refuses to remove a binary this script did
+# in fact install.
 config_dir() {
-  if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+  if [ -n "${SUDO_USER:-}" ] && invoking_dir="$(invoking_home)"; then
+    printf '%s\n' "$invoking_dir/.config/postflight"
+  elif [ -n "${XDG_CONFIG_HOME:-}" ]; then
     printf '%s\n' "$XDG_CONFIG_HOME/postflight"
   elif [ -n "${HOME:-}" ]; then
     printf '%s\n' "$HOME/.config/postflight"
@@ -99,6 +130,31 @@ write_receipt() { # <binary> <channel> <tag> <version> <target> <sha256>
   "installed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
+  # Written as root into their directory, so it has to be handed back — a
+  # root-owned receipt is one the CLI can read and never rewrite, which is an
+  # upgrade that reports success and leaves the provenance describing the
+  # release before it.
+  if [ -n "${SUDO_USER:-}" ]; then
+    chown "$SUDO_USER" "$receipt_dir" "$receipt_dir/install-receipt.json" 2> /dev/null \
+      || log "could not hand $receipt_dir/install-receipt.json back to $SUDO_USER"
+  fi
+}
+
+# Where an existing installation put its binary, so a re-run upgrades it in
+# place. Only a receipt naming a postflight binary that is still there counts:
+# anything else is not evidence about a live installation.
+recorded_install_dir() {
+  recorded_cfg=""
+  recorded_path=""
+  recorded_cfg="$(config_dir)" || return 1
+  [ -f "$recorded_cfg/install-receipt.json" ] || return 1
+  recorded_path="$(receipt_binary_path "$recorded_cfg/install-receipt.json")"
+  case "$recorded_path" in
+    */postflight) ;;
+    *) return 1 ;;
+  esac
+  [ -e "$recorded_path" ] || return 1
+  printf '%s\n' "${recorded_path%/*}"
 }
 
 # The capture stops at the first quote rather than the last: a receipt written
@@ -305,6 +361,7 @@ main() {
   require_verification=no
   print_tag=no
   uninstall=no
+  upgrading_in_place=no
   last_page=0
   staged=""
   work=""
@@ -374,13 +431,25 @@ main() {
   fi
 
   if [ -z "$install_dir" ]; then
-    [ -n "${HOME:-}" ] || fail "HOME is unset — set POSTFLIGHT_INSTALL_DIR to choose a destination"
-    install_dir="$HOME/.local/bin"
+    # A re-run upgrades the installation already on this machine rather than
+    # laying down a second one. Without this, someone who installed into
+    # /usr/local/bin and later re-ran the one-liner would get a fresh copy in
+    # ~/.local/bin, a receipt describing only that copy, and the original still
+    # ahead of it on PATH — an upgrade that changes nothing they run.
+    if install_dir="$(recorded_install_dir)"; then
+      upgrading_in_place=yes
+    else
+      install_dir=""
+      [ -n "${HOME:-}" ] || fail "HOME is unset — set POSTFLIGHT_INSTALL_DIR to choose a destination"
+      install_dir="$HOME/.local/bin"
+    fi
   fi
 
-  # Under sudo, HOME is root's: the install would land where the person who
-  # typed it has no reason to look.
-  if [ -n "${SUDO_USER:-}" ] && [ -z "${POSTFLIGHT_INSTALL_DIR:-}" ]; then
+  # Under sudo, HOME is root's: a fresh install would land where the person who
+  # typed it has no reason to look. Upgrading a recorded installation is
+  # exempt — its destination came from the receipt, not from whose home this is.
+  if [ -n "${SUDO_USER:-}" ] && [ -z "${POSTFLIGHT_INSTALL_DIR:-}" ] \
+    && [ "$upgrading_in_place" = no ]; then
     fail "running under sudo would install into root's home rather than $SUDO_USER's. Nothing here needs root — rerun without sudo, or set POSTFLIGHT_INSTALL_DIR to install somewhere shared."
   fi
 
@@ -391,6 +460,10 @@ main() {
   if [ "$uninstall" = yes ]; then
     uninstall_installation
     exit 0
+  fi
+
+  if [ "$upgrading_in_place" = yes ]; then
+    log "upgrading the installation at $install_dir — set POSTFLIGHT_INSTALL_DIR to install somewhere else instead"
   fi
 
   for tool in curl grep; do
@@ -522,4 +595,9 @@ Install from one explicitly, for example:
   esac
 }
 
-main "$@"
+# Braced so the call is a single compound command. Bare `main "$@"` is still a
+# complete, runnable command once a truncation has clipped its arguments — it
+# would install whatever the default channel points at, from a script the
+# reader only ever saw half of. An unterminated brace group is a syntax error,
+# and a syntax error runs nothing.
+{ main "$@"; }
