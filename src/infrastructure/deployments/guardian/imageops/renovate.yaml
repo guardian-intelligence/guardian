@@ -1,0 +1,257 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: renovate
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/name: renovate
+    app.kubernetes.io/part-of: guardian
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  run.sh: |
+    #!/usr/bin/bash
+    set -euo pipefail
+
+    VMINSERT=http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus
+
+    base64url() {
+      openssl base64 -A | tr '+/' '-_' | tr -d '='
+    }
+
+    mint_installation_token() {
+      local now header payload signing_input signature jwt response
+      now="$(date -u +%s)"
+      header="$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | base64url)"
+      payload="$(jq -cn \
+        --argjson iat "$((now - 60))" \
+        --argjson exp "$((now + 540))" \
+        --arg iss "$RENOVATE_GITHUB_APP_ID" \
+        '{iat: $iat, exp: $exp, iss: $iss}' | base64url)"
+      signing_input="${header}.${payload}"
+      signature="$(printf '%s' "$signing_input" \
+        | openssl dgst -sha256 \
+            -sign "$RENOVATE_GITHUB_APP_PRIVATE_KEY" -binary \
+        | base64url)"
+      jwt="${signing_input}.${signature}"
+      response="$(curl -fsS --retry 3 --max-time 30 \
+        -X POST \
+        -H "Accept: application/vnd.github+json" \
+        -H "Authorization: Bearer ${jwt}" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        "https://api.github.com/app/installations/${RENOVATE_GITHUB_APP_INSTALLATION_ID}/access_tokens")"
+      jq -er '.token' <<<"$response"
+    }
+
+    beat() {
+      curl -fsS --retry 3 --max-time 15 --data-binary \
+        "guardian_renovate_heartbeat 1" \
+        "$VMINSERT"
+    }
+
+    export RENOVATE_TOKEN
+    RENOVATE_TOKEN="$(mint_installation_token)"
+    renovate
+    beat
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: renovate
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/name: renovate
+    app.kubernetes.io/part-of: guardian
+spec:
+  schedule: "17 */6 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 1800
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 2700
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: renovate
+            app.kubernetes.io/part-of: guardian
+        spec:
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          securityContext:
+            fsGroup: 12021
+            fsGroupChangePolicy: OnRootMismatch
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: renovate
+              # The -full image carries the package managers Renovate needs
+              # for lockfile updates instead of installing them every run.
+              image: docker.io/renovate/renovate:43.270.0-full@sha256:a3633423e9837f936db53068b7ab07e7b2dc74bbc0aaa5657a9fa6d89d63c162
+              imagePullPolicy: IfNotPresent
+              command: ["/usr/bin/bash", "/scripts/run.sh"]
+              env:
+                - name: HOME
+                  value: /tmp/home
+                - name: LOG_LEVEL
+                  value: info
+                - name: RENOVATE_ALLOWED_COMMANDS
+                  value: '["tools/ops/multitool-repin","tools/ops/oathtool-repin"]'
+                - name: RENOVATE_AUTODISCOVER
+                  value: "false"
+                - name: RENOVATE_BASE_DIR
+                  value: /tmp/renovate
+                - name: RENOVATE_CACHE_DIR
+                  value: /tmp/cache
+                - name: RENOVATE_GIT_AUTHOR
+                  value: "guardian-renovate[bot] <301916145+guardian-renovate[bot]@users.noreply.github.com>"
+                - name: RENOVATE_GITHUB_APP_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: renovate-github-app
+                      key: githubAppID
+                - name: RENOVATE_GITHUB_APP_INSTALLATION_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: renovate-github-app
+                      key: githubAppInstallationID
+                - name: RENOVATE_GITHUB_APP_PRIVATE_KEY
+                  value: /var/run/secrets/renovate/githubAppPrivateKey
+                - name: RENOVATE_PLATFORM
+                  value: github
+                - name: RENOVATE_REPOSITORIES
+                  value: guardian-intelligence/guardian
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 2Gi
+                  ephemeral-storage: 2Gi
+                limits:
+                  cpu: "2"
+                  memory: 4Gi
+                  ephemeral-storage: 8Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+                runAsGroup: 12021
+                runAsNonRoot: true
+                runAsUser: 12021
+              volumeMounts:
+                - name: github-app
+                  mountPath: /var/run/secrets/renovate
+                  readOnly: true
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: github-app
+              secret:
+                secretName: renovate-github-app
+                defaultMode: 288
+                items:
+                  - key: githubAppPrivateKey
+                    path: githubAppPrivateKey
+            - name: scripts
+              configMap:
+                name: renovate
+            - name: tmp
+              emptyDir:
+                sizeLimit: 8Gi
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: renovate
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/name: renovate
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: renovate
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-renovate
+  labels:
+    app.kubernetes.io/name: renovate
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: guardian-imageops
+            k8s:app.kubernetes.io/name: renovate
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: renovate
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/name: renovate
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: renovate.rules
+      interval: 60s
+      rules:
+        - alert: GuardianRenovateSilent
+          # Guard on the CronJob schedule, not on the heartbeat having once
+          # existed, so a newly deployed scheduler that never succeeds pages.
+          expr: >-
+            absent_over_time(guardian_renovate_heartbeat[13h])
+            and on() (time() - max(kube_cronjob_status_last_schedule_time{
+              namespace="guardian-imageops", cronjob="renovate"}) > 3600)
+          labels:
+            severity: warning
+            guardian_component: dependency-management
+          annotations:
+            summary: "Renovate has not completed successfully in 13h"
+            description: >-
+              Renovate is scheduled every six hours and heartbeats only after
+              a successful run. Check the newest renovate Job logs in
+              guardian-imageops and the guardian Dependency Dashboard.

@@ -2,6 +2,7 @@ docker.io/alpine/
 docker.io/clickhouse/
 docker.io/grafana/
 docker.io/otel/
+docker.io/renovate/
 ghcr.io/cloudnative-pg/
 ghcr.io/authzed/
 quay.io/authzed/

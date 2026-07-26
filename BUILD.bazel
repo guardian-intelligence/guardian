@@ -34,9 +34,13 @@ sh_test(
     name = "renovate_config_test",
     timeout = "long",
     srcs = [".github/scripts/check-renovate-config.sh"],
-    args = ["$(rootpath @nodejs//:npx)"],
+    args = [
+        "$(rootpath @nodejs//:node)",
+        "$(rootpath @nodejs//:npx)",
+    ],
     data = [
         "renovate.json5",
+        "@nodejs//:node",
         "@nodejs//:npm_files",
         "@nodejs//:npx",
     ],
