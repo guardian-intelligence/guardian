@@ -33,6 +33,7 @@ usage() {
   cat <<'EOF'
 usage: install.sh [--channel <stable|rc|nightly> | --version <x.y.z>]
                   [--require-verification]
+       install.sh --uninstall
 
 options:
   --channel <ch>          release channel to install from (default: stable)
@@ -42,12 +43,119 @@ options:
                           signature; without it a missing cosign only warns
   --print-tag             print the release tag that would be installed and
                           exit without installing anything
+  --uninstall             remove an installation this script created. Prefer
+                          `postflight self uninstall`; this is the path for
+                          when the binary is too broken to remove itself
   -h, --help              print this message
 
 environment:
   POSTFLIGHT_CHANNEL      same as --channel
   POSTFLIGHT_INSTALL_DIR  install destination (default: ~/.local/bin)
 EOF
+}
+
+# Mirrors the CLI's own config_dir: XDG first, ~/.config second, and no
+# guessing when neither is set.
+config_dir() {
+  if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+    printf '%s\n' "$XDG_CONFIG_HOME/postflight"
+  elif [ -n "${HOME:-}" ]; then
+    printf '%s\n' "$HOME/.config/postflight"
+  else
+    return 1
+  fi
+}
+
+json_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# The binary carries its crate version and nothing else — that is what lets one
+# signed artifact ride every channel — so the release tag, the channel and the
+# install method are recorded beside it. `postflight version` reads this back,
+# and `postflight self uninstall` uses it to know the file is its to remove.
+write_receipt() { # <binary> <channel> <tag> <version> <target> <sha256>
+  receipt_dir=""
+  if ! receipt_dir="$(config_dir)"; then
+    log "neither XDG_CONFIG_HOME nor HOME is set — no install receipt written, so \`postflight version\` will not know which release this is"
+    return 0
+  fi
+  if ! mkdir -p "$receipt_dir" 2> /dev/null; then
+    log "could not create $receipt_dir — no install receipt written"
+    return 0
+  fi
+  # A receipt is provenance, not the install: failing to write one must not
+  # fail an install that already succeeded.
+  cat > "$receipt_dir/install-receipt.json" 2> /dev/null <<EOF || log "could not write $receipt_dir/install-receipt.json"
+{
+  "schema": 1,
+  "method": "install.sh",
+  "binary_path": "$(json_escape "$1")",
+  "channel": "$(json_escape "$2")",
+  "tag": "$(json_escape "$3")",
+  "version": "$(json_escape "$4")",
+  "target": "$(json_escape "$5")",
+  "binary_sha256": "$(json_escape "$6")",
+  "installed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+}
+
+# The capture stops at the first quote rather than the last: a receipt written
+# on one line would otherwise hand back the rest of the JSON as a path. An
+# install directory containing a literal quote reads as absent and falls back
+# to the default, which is the safe way to be wrong.
+receipt_binary_path() { # <receipt file>
+  sed -n 's/.*"binary_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" \
+    | sed 's/\\\\/\\/g' \
+    | head -n 1
+}
+
+# The binary removes itself when it can: that path ends the session at the
+# sign-in service, which a shell script has no good way to do. Here we handle
+# the case it cannot — a binary that will not run is exactly when someone
+# reaches for the installer to get rid of it.
+uninstall_installation() {
+  uninstall_dir=""
+  uninstall_receipt=""
+  uninstall_bin="$install_dir/postflight"
+  if uninstall_dir="$(config_dir)"; then
+    uninstall_receipt="$uninstall_dir/install-receipt.json"
+    if [ -f "$uninstall_receipt" ]; then
+      recorded="$(receipt_binary_path "$uninstall_receipt")"
+      [ -n "$recorded" ] && uninstall_bin="$recorded"
+    fi
+  fi
+
+  if [ -x "$uninstall_bin" ] && "$uninstall_bin" self uninstall --yes; then
+    return 0
+  fi
+
+  if [ ! -e "$uninstall_bin" ] && [ ! -f "$uninstall_receipt" ]; then
+    fail "nothing to uninstall: no binary at $uninstall_bin and no install receipt"
+  fi
+
+  log "removing files directly — the installed binary could not remove itself"
+  if [ -e "$uninstall_bin" ]; then
+    rm -f "$uninstall_bin" || fail "could not remove $uninstall_bin"
+    log "removed $uninstall_bin"
+  else
+    # Reported rather than shrugged off: a receipt naming a binary that is not
+    # there means removal is finishing someone else's job, and staying quiet
+    # about it is how a leftover install elsewhere goes unnoticed.
+    log "no binary at $uninstall_bin — it was already gone"
+  fi
+  if [ -n "$uninstall_dir" ]; then
+    for leftover in install-receipt.json credentials.json; do
+      if [ -e "$uninstall_dir/$leftover" ]; then
+        rm -f "$uninstall_dir/$leftover" || fail "could not remove $uninstall_dir/$leftover"
+        log "removed $uninstall_dir/$leftover"
+      fi
+    done
+    rmdir "$uninstall_dir" 2> /dev/null || true
+  fi
+  [ ! -e "$uninstall_bin" ] || fail "$uninstall_bin is still there"
+  log "any sign-in session at the service was not ended here — it expires on its own"
 }
 
 sha256_of() {
@@ -61,7 +169,9 @@ sha256_of() {
 }
 
 cleanup() {
-  rm -rf "$work"
+  if [ -n "$work" ]; then
+    rm -rf "$work"
+  fi
   if [ -n "$staged" ]; then
     rm -f "$staged"
   fi
@@ -185,11 +295,17 @@ main() {
   install_dir="${POSTFLIGHT_INSTALL_DIR:-}"
   require_verification=no
   print_tag=no
+  uninstall=no
   last_page=0
   staged=""
+  work=""
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --uninstall)
+        uninstall=yes
+        shift
+        ;;
       --channel)
         [ "$#" -ge 2 ] || fail "--channel needs a value"
         channel="$2"
@@ -229,7 +345,12 @@ main() {
     esac
   done
 
-  if [ -n "$pinned_version" ]; then
+  if [ "$uninstall" = yes ]; then
+    if [ "$channel_given" = yes ] || [ -n "$pinned_version" ] \
+      || [ "$print_tag" = yes ] || [ "$require_verification" = yes ]; then
+      fail "--uninstall removes what is already installed and takes no other options"
+    fi
+  elif [ -n "$pinned_version" ]; then
     [ "$channel_given" = no ] \
       || fail "--version and --channel are alternatives: a pinned version names one release, a channel tracks whatever is newest"
     case "$pinned_version" in
@@ -254,7 +375,16 @@ main() {
     fail "running under sudo would install into root's home rather than $SUDO_USER's. Nothing here needs root — rerun without sudo, or set POSTFLIGHT_INSTALL_DIR to install somewhere shared."
   fi
 
-  for tool in curl sed grep; do
+  command -v sed > /dev/null 2>&1 || fail "sed is required but not on PATH"
+
+  # Removal needs no network and no release listing, so it runs before any of
+  # the machinery installing does.
+  if [ "$uninstall" = yes ]; then
+    uninstall_installation
+    exit 0
+  fi
+
+  for tool in curl grep; do
     command -v "$tool" > /dev/null 2>&1 || fail "$tool is required but not on PATH"
   done
 
@@ -353,11 +483,29 @@ Install from one explicitly, for example:
   # staged in the destination directory so a noexec TMPDIR cannot fail it.
   staged="$install_dir/.postflight.install.$$"
   mv "$work/$asset" "$staged" || fail "could not write to $install_dir"
-  version="$("$staged" version)" || fail "the $target binary from $tag does not run on this machine"
+  if ! version_out="$("$staged" version 2>&1)"; then
+    printf '%s\n' "$version_out" >&2
+    fail "the $target binary from $tag does not run on this machine"
+  fi
+  # Only the first line is the version: a reinstall over an existing one finds
+  # the old receipt still in place, and the binary reports its provenance under
+  # the version it leads with.
+  version="$(printf '%s\n' "$version_out" | head -n 1)"
+  version="${version##* }"
   mv "$staged" "$install_dir/postflight" || fail "could not write $install_dir/postflight"
   staged=""
 
-  log "installed $version to $install_dir/postflight"
+  # A pinned version tracks no channel, and recording one would tell
+  # `postflight version` it is following something it is not.
+  if [ -n "$pinned_version" ]; then
+    receipt_channel=""
+  else
+    receipt_channel="$channel"
+  fi
+  write_receipt "$install_dir/postflight" "$receipt_channel" \
+    "$tag" "$version" "$target" "$actual"
+
+  log "installed postflight $version to $install_dir/postflight"
 
   case ":${PATH:-}:" in
     *":$install_dir:"*) ;;

@@ -43,6 +43,53 @@ sudo make install            # or: make install PREFIX="$HOME/.local"
 installed binary (drop the `sudo` and pass the same `PREFIX` if you installed
 under `$HOME`), `make clean` drops the cargo output directory.
 
+## Uninstall
+
+```sh
+postflight self uninstall
+```
+
+This removes the binary, the stored credentials, and the install receipt, and
+ends the session at the sign-in service on the way out — deleting the
+credentials file alone leaves that session open until it idles out. Pass
+`--keep-credentials` to stay signed in, or `--yes` to skip the confirmation;
+without a terminal to answer it, confirmation is required rather than assumed.
+
+A copy installed by cargo, Homebrew, or npm is left alone and the right
+command is printed instead: removing it here would leave the package manager
+believing it is still installed. Same for a copy with no install receipt —
+`make uninstall` handles a source install, and anything else is a `rm`.
+
+When the binary is too broken to run, the installer does it:
+
+```sh
+curl -fsSL https://guardianintelligence.org/postflight/install.sh | sh -s -- --uninstall
+```
+
+That path removes the same files but cannot end the session, which then
+expires on its own.
+
+## Provenance
+
+The binary carries its crate version and nothing else — identical sources
+rebuild byte-identically, which is what lets one signed artifact ride every
+channel from edge to stable. Which release a copy came from is therefore
+recorded beside it, in `~/.config/postflight/install-receipt.json`, by
+whatever installed it:
+
+```
+$ postflight version
+postflight version 0.2.0-nightly
+  release   postflight-cli/nightly-20260726
+  channel   nightly
+  installed 2026-07-26T05:24:16Z via install.sh
+```
+
+A receipt is evidence about the one path it names, so a `cargo install` copy
+sitting alongside an installer-managed one does not borrow its provenance and
+prints the version alone. `postflight version --short` prints the bare version
+for scripts.
+
 Release assets are per target (`postflight-x86_64-unknown-linux-musl`,
 `aarch64-unknown-linux-musl`, and both darwin triples) and ship a sigstore
 bundle each plus a `checksums.txt`. Verify before running:

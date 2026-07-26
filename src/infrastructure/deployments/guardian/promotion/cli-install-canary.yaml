@@ -225,22 +225,72 @@ data:
       return 0
     }
 
-    method_installer_script() {
-      local channel="$1"
-      local home="$WORK/$channel/home" out installed
-      resolve_release_version "$channel" || return 1
+    # The installed binary reports its provenance under its version, so only
+    # the first line is the version. Comparing whole outputs would compare an
+    # installed copy that has a receipt against a release asset that has none.
+    version_line() { # <binary> <home>
+      local out
+      out="$(env HOME="$2" "$1" version 2>&1)" || return 1
+      printf '%s\n' "$out" | head -n 1
+    }
+
+    install_via_script() { # <channel> <home>
+      local channel="$1" home="$2" out
       rm -rf "$home"
       mkdir -p "$home" || { detail="cannot create $home"; return 1; }
       out="$(curl -fsSL --max-time 60 "$INSTALLER_URL" \
         | env HOME="$home" sh -s -- --channel "$channel" 2>&1)" \
         || { detail="fetching or running $INSTALLER_URL failed: $out"; return 1; }
-      installed="$home/.local/bin/postflight"
-      [ -x "$installed" ] \
+      [ -x "$home/.local/bin/postflight" ] \
         || { detail="installer left no executable at ~/.local/bin/postflight"; return 1; }
-      out="$("$installed" version 2>&1)" \
-        || { detail="installed binary did not run: $out"; return 1; }
+      return 0
+    }
+
+    method_installer_script() {
+      local channel="$1"
+      local home="$WORK/$channel/home" out installed
+      resolve_release_version "$channel" || return 1
+      install_via_script "$channel" "$home" || return 1
+      installed="$home/.local/bin/postflight"
+      out="$(version_line "$installed" "$home")" \
+        || { detail="installed binary did not run"; return 1; }
       [ "$out" = "$release_version" ] \
         || { detail="installer produced '$out' but release $tag carries '$release_version'"; return 1; }
+      # Provenance the binary cannot carry: without the receipt, `postflight
+      # version` cannot say which release it is and uninstall cannot tell
+      # whether the file is its to remove.
+      [ -f "$home/.config/postflight/install-receipt.json" ] \
+        || { detail="installer wrote no install receipt"; return 1; }
+      grep -qF "\"tag\": \"$tag\"" "$home/.config/postflight/install-receipt.json" \
+        || { detail="install receipt does not name $tag"; return 1; }
+      return 0
+    }
+
+    # Removal is the path nobody exercises until they are already annoyed, so
+    # it is exercised here every six hours instead.
+    method_uninstall() {
+      local channel="$1"
+      local home="$WORK/$channel/uninstall-home" out installed
+      install_via_script "$channel" "$home" || return 1
+      installed="$home/.local/bin/postflight"
+      # Refusing without a terminal is what stops a piped `| sh` from reading
+      # as consent. Asserted before the real removal, while there is still
+      # something for a wrongly-accepted confirmation to destroy.
+      if env HOME="$home" "$installed" self uninstall < /dev/null > /dev/null 2>&1; then
+        detail="self uninstall accepted a non-terminal stdin without --yes"
+        return 1
+      fi
+      [ -x "$installed" ] \
+        || { detail="a refused self uninstall removed the binary anyway"; return 1; }
+      out="$(env HOME="$home" "$installed" self uninstall --yes 2>&1)" \
+        || { detail="self uninstall failed: $out"; return 1; }
+      # Every file the install created, named individually: asserting the home
+      # directory is empty would pass for a run that installed nothing.
+      for leftover in .local/bin/postflight .config/postflight/install-receipt.json \
+        .config/postflight; do
+        [ ! -e "$home/$leftover" ] \
+          || { detail="self uninstall left ~/$leftover behind"; return 1; }
+      done
       return 0
     }
 
@@ -324,6 +374,7 @@ data:
           case "$method" in
             release-assets) method_release_assets "$channel" && ok=1 ;;
             installer-script) method_installer_script "$channel" && ok=1 ;;
+            uninstall) method_uninstall "$channel" && ok=1 ;;
             *) detail="unregistered install method $method" ;;
           esac
         fi
@@ -421,6 +472,10 @@ spec:
               image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
               command: ["/bin/bash", "/scripts/canary.sh"]
               env:
+                # `uninstall` joins the moment a release carries a binary with
+                # `postflight self uninstall`. Listing it before then would
+                # fail every cell against a release that predates the
+                # subcommand, which is noise rather than signal.
                 - name: METHODS
                   value: "release-assets installer-script"
                 - name: INSTALLER_URL

@@ -298,7 +298,10 @@ data:
     # 5s for `version`, 20s for the device flow, and a 60s ceiling over the
     # whole benchmark loop.
     CLI=(env -u CLICKHOUSE_USER -u CLICKHOUSE_PASSWORD "$BIN")
-    version_out="$(timeout 5 "${CLI[@]}" version 2>&1)"
+    # First line only: `version` prints where a copy came from underneath the
+    # version itself when an install receipt sits beside it, and what is being
+    # asserted here is the version the binary claims.
+    version_out="$(timeout 5 "${CLI[@]}" version 2>&1 | head -n 1)"
     cli_version="${version_out##* }"
     if [[ "$version_out" =~ ^postflight\ version\ [0-9]+\.[0-9]+\.[0-9]+ ]]; then
       record version 1

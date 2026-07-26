@@ -131,6 +131,75 @@ assert_truncation_inert() { # <shell>
   done
 }
 
+run_uninstall() { # <shell> <home>
+  local shell="$1" home="$2"
+  env -u POSTFLIGHT_INSTALL_DIR -u SUDO_USER HOME="$home" \
+    "$shell" "$installer" --uninstall > "$tmp/out" 2> "$tmp/err"
+}
+
+# The receipt is one line of JSON with more keys after binary_path, which is
+# exactly what a greedy capture swallows whole — leaving removal pointed at a
+# path that does not exist, and reporting success for having removed nothing.
+write_receipt() { # <home> <binary>
+  mkdir -p "$1/.config/postflight"
+  printf '{"schema":1,"method":"install.sh","binary_path":"%s","channel":"nightly","tag":"postflight-cli/nightly-20260726","version":"0.2.0-nightly"}\n' \
+    "$2" > "$1/.config/postflight/install-receipt.json"
+}
+
+assert_uninstall_paths() { # <shell>
+  local shell="$1" home="$tmp/uninstall-home"
+
+  # A binary that will not run is the case this path exists for: the receipt
+  # still says where it is, and it has to go.
+  rm -rf "$home"
+  mkdir -p "$home/.local/bin"
+  printf '#!/bin/sh\nexit 3\n' > "$home/.local/bin/postflight"
+  chmod +x "$home/.local/bin/postflight"
+  write_receipt "$home" "$home/.local/bin/postflight"
+  echo '{"access_token":"at"}' > "$home/.config/postflight/credentials.json"
+  if run_uninstall "$shell" "$home"; then
+    [[ ! -e "$home/.local/bin/postflight" ]] \
+      || fail "$shell: --uninstall left the binary behind"
+    [[ ! -e "$home/.config/postflight/install-receipt.json" ]] \
+      || fail "$shell: --uninstall left the receipt behind"
+    [[ ! -e "$home/.config/postflight/credentials.json" ]] \
+      || fail "$shell: --uninstall left credentials behind"
+  else
+    fail "$shell: --uninstall of a broken binary failed: $(cat "$tmp/err")"
+  fi
+
+  # A binary that runs removes itself, session included — something a shell
+  # script cannot do — so the installer must delegate and then keep its hands off.
+  rm -rf "$home"
+  mkdir -p "$home/.local/bin"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" > "%s/invoked"\nexit 0\n' "$home" \
+    > "$home/.local/bin/postflight"
+  chmod +x "$home/.local/bin/postflight"
+  write_receipt "$home" "$home/.local/bin/postflight"
+  if run_uninstall "$shell" "$home"; then
+    [[ "$(cat "$home/invoked" 2> /dev/null)" == "self uninstall --yes" ]] \
+      || fail "$shell: --uninstall did not delegate to the binary, got '$(cat "$home/invoked" 2> /dev/null)'"
+    [[ -e "$home/.config/postflight/install-receipt.json" ]] \
+      || fail "$shell: --uninstall removed the receipt the binary was told to handle"
+  else
+    fail "$shell: --uninstall did not delegate: $(cat "$tmp/err")"
+  fi
+
+  # Nothing installed: say so rather than exit clean on having done nothing.
+  rm -rf "$home"
+  mkdir -p "$home"
+  if run_uninstall "$shell" "$home"; then
+    fail "$shell: --uninstall succeeded with nothing installed"
+  fi
+
+  rm -rf "$home"
+  mkdir -p "$home"
+  if env -u POSTFLIGHT_INSTALL_DIR HOME="$home" "$shell" "$installer" \
+    --uninstall --channel nightly > "$tmp/out" 2> "$tmp/err"; then
+    fail "$shell: --uninstall alongside --channel was accepted"
+  fi
+}
+
 for shell in "${shells[@]}"; do
   expect_tag "$shell" "$mixed" nightly "postflight-cli/nightly-20260724"
   expect_tag "$shell" "$mixed" rc "postflight-cli/v0.3.0-rc.1"
@@ -174,6 +243,7 @@ for shell in "${shells[@]}"; do
     fail "$shell: sudo with an explicit install dir was refused: $(cat "$tmp/err")"
   fi
 
+  assert_uninstall_paths "$shell"
   assert_truncation_inert "$shell"
 done
 
