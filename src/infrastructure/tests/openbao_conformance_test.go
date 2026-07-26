@@ -423,6 +423,8 @@ func TestFluxSubstitutionSafetyConformance(t *testing.T) {
 		"src/infrastructure/deployments/alerting",
 		"src/infrastructure/deployments/analytics/system",
 		"src/infrastructure/deployments/authorization/prod",
+		"src/infrastructure/deployments/guardian/promotion",
+		"src/infrastructure/deployments/guardian/promotion/pipelines",
 		"src/infrastructure/deployments/guardian/system",
 		"src/infrastructure/deployments/iam/prod",
 		"src/infrastructure/deployments/products",

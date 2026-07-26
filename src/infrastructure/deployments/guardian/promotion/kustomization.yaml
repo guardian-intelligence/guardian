@@ -1,7 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 generatorOptions:
-  # The deep-test runner mounts this ConfigMap by its static name.
+  # The release-train jobs mount these ConfigMaps by their static names.
   disableNameSuffixHash: true
 configMapGenerator:
   # The same pinned Sigstore trusted root the registry lane verifies against,
@@ -10,6 +10,12 @@ configMapGenerator:
     namespace: guardian-analytics
     files:
       - ../../../bootstrap/bundle/sigstore-trusted-root.json
+  # The channel lanes the install matrix walks, projected into the canary's
+  # namespace from the one reviewable definition of what Guardian releases.
+  - name: release-manifest
+    namespace: guardian-analytics
+    files:
+      - ../system/release-manifest.yaml
 resources:
   - namespace.yaml
   - kargo-helmrelease.yaml
@@ -19,3 +25,4 @@ resources:
   - remediator.yaml
   - cli-nightly-promoter.yaml
   - cli-deeptest-runner.yaml
+  - cli-install-canary.yaml

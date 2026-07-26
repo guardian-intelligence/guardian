@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -187,6 +188,56 @@ func TestDeeptestRunnerCosignPinMatchesTheRegistryLane(t *testing.T) {
 	if runnerCosign != countersignerCosign {
 		t.Fatalf("deep-test runner COSIGN_IMAGE %s and countersigner COSIGN_IMAGE %s differ: move them together", runnerCosign, countersignerCosign)
 	}
+}
+
+// The install canary verifies published release assets with a cosign
+// extracted from the same pinned image the countersigner signs with: the
+// cosign that checks a signature may never drift from the cosign that mints
+// it, so a bump PR for one goes red until the other follows.
+func TestInstallCanaryCosignPinMatchesCountersigner(t *testing.T) {
+	canaryYAML := "src/infrastructure/deployments/guardian/promotion/cli-install-canary.yaml"
+	countersignerYAML := "src/infrastructure/deployments/guardian/system/zot-countersigner.yaml"
+
+	cosignPin := regexp.MustCompile(`ghcr\.io/sigstore/cosign/cosign:v\d+\.\d+\.\d+@sha256:[a-f0-9]{64}`)
+	canaryCosign := cosignPin.FindString(readText(t, runfilePath(canaryYAML)))
+	countersignerCosign := cosignPin.FindString(readText(t, runfilePath(countersignerYAML)))
+	if canaryCosign == "" {
+		t.Fatalf("%s: no COSIGN_IMAGE tag@digest pin found", canaryYAML)
+	}
+	if canaryCosign != countersignerCosign {
+		t.Fatalf("install canary COSIGN_IMAGE %s and countersigner COSIGN_IMAGE %s differ: move them together", canaryCosign, countersignerCosign)
+	}
+}
+
+// TARGETS, BUILD_IDENTITY and ISSUER name what the release cutter signs and
+// under which identity. The install canary re-verifies exactly that set, and
+// a target added to the cutter alone would still be downloaded and
+// checksummed by the canary while never being verify-blob'd or asserted for
+// object format — a green cell over an unverified artifact.
+func TestInstallCanaryReleaseContractMatchesCutter(t *testing.T) {
+	canaryYAML := "src/infrastructure/deployments/guardian/promotion/cli-install-canary.yaml"
+	cutterYAML := ".github/workflows/postflight-cli-release.yml"
+	canary := readText(t, runfilePath(canaryYAML))
+	cutter := readText(t, runfilePath(cutterYAML))
+
+	for _, key := range []string{"TARGETS", "BUILD_IDENTITY", "ISSUER"} {
+		want := scalarValue(t, cutter, cutterYAML, key,
+			regexp.MustCompile(`(?m)^ {2}`+key+`:[ \t]+(\S.*?)[ \t]*$`))
+		got := scalarValue(t, canary, canaryYAML, key,
+			regexp.MustCompile(`(?m)^[ \t]*- name: `+key+`[ \t]*\n[ \t]*value:[ \t]+(\S.*?)[ \t]*$`))
+		if got != want {
+			t.Fatalf("install canary %s = %q but release cutter %s = %q: move them together", key, got, key, want)
+		}
+	}
+}
+
+func scalarValue(t *testing.T, raw, path, key string, re *regexp.Regexp) string {
+	t.Helper()
+	match := re.FindStringSubmatch(raw)
+	if match == nil {
+		t.Fatalf("%s: no %s value found", path, key)
+	}
+	return strings.Trim(match[1], `"'`)
 }
 
 func TestTalmChartTalosVersionAgreesWithInstallerImage(t *testing.T) {

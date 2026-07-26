@@ -21,6 +21,7 @@ func TestValidateEvent(t *testing.T) {
 	}{
 		{"registered exact name", ok(&analyticsv1.Event{Name: "page_view", Path: "/"}), ""},
 		{"registered prefix name", ok(&analyticsv1.Event{Name: "company.route_view", Path: "/letters"}), ""},
+		{"cli canary name", ok(&analyticsv1.Event{Name: "cli.install_canary.method", Path: "/postflight"}), ""},
 		{"unregistered name", &analyticsv1.Event{Name: "cryptominer.ping"}, rejectName},
 		{"prefix alone is not a name", &analyticsv1.Event{Name: "company."}, rejectName},
 		{"vital without web_vital name", &analyticsv1.Event{Name: "page_view", VitalName: "LCP"}, rejectVital},
