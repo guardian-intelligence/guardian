@@ -3,7 +3,6 @@ name = "postflight"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
-publish = false
 description = "Command-line front door for Postflight, fast CI for GitHub by Guardian Intelligence"
 license = "MIT"
 repository = "https://github.com/guardian-intelligence/guardian"

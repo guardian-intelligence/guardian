@@ -872,7 +872,7 @@
           "REPO_MAPPING:rules_rust+,bazel_tools bazel_tools",
           "REPO_MAPPING:rules_rust+,rules_cc rules_cc+",
           "FILE:@@//src/products/postflight-cli/Cargo.lock a104f5f3ca530999f27eec1d3fc1698185832e480260f85533244729247e769d",
-          "FILE:@@//src/products/postflight-cli/Cargo.toml a35bf84fbc1a65eda1d97e02297eb4f515ec7f103859e251eceb33df1cbc5613"
+          "FILE:@@//src/products/postflight-cli/Cargo.toml 5b14b7dfe7a31c4243e41e22f02334bfb2e41aa6e7a21a59faf608a0b30aea03"
         ],
         "generatedRepoSpecs": {
           "postflight_cli_crates": {
