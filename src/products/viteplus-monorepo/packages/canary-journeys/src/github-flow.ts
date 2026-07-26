@@ -74,6 +74,7 @@ export async function finishGitHubAuthorization(page: Page, cfg: JourneyConfig):
   const deadline = Date.now() + 105_000;
   let totpSent = false;
   let grantSent = false;
+  let deviceGrantSent = false;
   while (Date.now() < deadline) {
     let state;
     try {
@@ -106,6 +107,15 @@ export async function finishGitHubAuthorization(page: Page, cfg: JourneyConfig):
         }
         await clickIfPresent(page, SELECTORS.grantEnabled);
         grantSent = true;
+        break;
+      }
+      case "grant-device": {
+        if (deviceGrantSent) {
+          await page.waitForTimeout(250);
+          break;
+        }
+        await clickIfPresent(page, PROBE_SELECTORS.deviceGrant);
+        deviceGrantSent = true;
         break;
       }
       case "wait":

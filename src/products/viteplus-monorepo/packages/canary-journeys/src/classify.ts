@@ -4,12 +4,13 @@ export interface OAuthPageState {
   hasTOTP: boolean;
   canGrant: boolean;
   grantBlocked: boolean;
+  hasDeviceGrant: boolean;
   hasKeycloakPage: boolean;
   hasCollision: boolean;
   hasError: boolean;
 }
 
-export type OAuthPageAction = "wait" | "complete" | "submit-totp" | "grant";
+export type OAuthPageAction = "wait" | "complete" | "submit-totp" | "grant" | "grant-device";
 
 export function classifyOAuthPage(state: OAuthPageState, guardianHost: string): OAuthPageAction {
   if (state.host === guardianHost) {
@@ -24,6 +25,9 @@ export function classifyOAuthPage(state: OAuthPageState, guardianHost: string): 
     }
     if (state.hasKeycloakPage) {
       throw new Error("Keycloak rendered a page during the brokered login");
+    }
+    if (state.hasDeviceGrant) {
+      return "grant-device";
     }
     return "wait";
   }
