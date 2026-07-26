@@ -10,15 +10,18 @@ account via the broker).
 |---|---|---|---|
 | make | `make && sudo make install` in this directory of a monorepo clone | all | live |
 | raw | download the Release asset for your target, verify it, run it | all | live |
-| curl | `curl -fsSL https://guardianintelligence.org/postflight/install.sh \| sh` | stable, `--channel nightly\|rc` | planned |
+| curl | `curl -fsSL https://guardianintelligence.org/postflight/install.sh \| sh` | stable, `--channel nightly\|rc` | live |
 | cargo | `cargo install postflight` | stable | planned |
 | cargo-binstall | `cargo binstall postflight` | stable | planned |
 | npm/bun | `npm i -g @guardian-intelligence/postflight` | stable | planned |
 | brew | `brew install guardian-intelligence/tap/postflight` | stable | planned |
 | mise | tool `ubi:guardian-intelligence/guardian` with `exe=postflight` and `tag_regex=^postflight-cli/v` | stable | planned |
 
-Releases so far are nightlies (`postflight-cli/nightly-YYYYMMDD`); the methods
-marked planned land with the first stable cut.
+Releases so far are nightlies (`postflight-cli/nightly-YYYYMMDD`), so the
+curl installer needs `--channel nightly` until the first stable cut, which is
+also when the remaining methods land. The channel ladder, the signing
+contract and the cut ceremony are in
+[docs/postflight-cli-distribution.md](../../../docs/postflight-cli-distribution.md).
 
 The `make` path needs cargo — it drives `cargo build --release --locked` and
 installs the binary into `$(DESTDIR)$(PREFIX)/bin` (`PREFIX` defaults to
