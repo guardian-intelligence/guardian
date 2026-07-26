@@ -1367,6 +1367,83 @@ FROM generate_series(1, 150) AS i`,
 	}
 }
 
+func TestJobPlanHoldBoundedUnderFleetChurn(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := applyMigrations(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	bus := &jobPlanBus{changed: make(chan struct{})}
+	ss := &syncServer{
+		st: &pgStore{pool: pool}, secret: []byte(e2eSyncSecret),
+		hostOfflineTimeout: time.Minute, tracer: noop.NewTracerProvider().Tracer("e2e"),
+		jobPlans: bus,
+	}
+	server := httptest.NewServer(http.HandlerFunc(ss.handleJobPlans))
+	t.Cleanup(server.Close)
+
+	get := func(cursor string) (syncproto.JobPlanSnapshot, time.Duration) {
+		t.Helper()
+		request, err := http.NewRequest(http.MethodGet, server.URL+"?host_id=host-churn&cursor="+cursor, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+e2eSyncSecret)
+		started := time.Now()
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("status = %s", response.Status)
+		}
+		var snapshot syncproto.JobPlanSnapshot
+		if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
+			t.Fatal(err)
+		}
+		return snapshot, time.Since(started)
+	}
+
+	snapshot, _ := get("")
+	if snapshot.Cursor == "" {
+		t.Fatal("empty cursor on initial snapshot")
+	}
+
+	// Fleet-wide plan churn signals the bus faster than the hold; a host
+	// whose own snapshot never changes must still get its response at the
+	// hold deadline instead of riding the churn into the client timeout.
+	churnCtx, stopChurn := context.WithCancel(ctx)
+	defer stopChurn()
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-churnCtx.Done():
+				return
+			case <-ticker.C:
+				bus.signal()
+			}
+		}
+	}()
+
+	held, elapsed := get(snapshot.Cursor)
+	if held.Cursor != snapshot.Cursor {
+		t.Fatalf("cursor changed under churn without plan changes: %q -> %q", snapshot.Cursor, held.Cursor)
+	}
+	if elapsed < jobPlanHold-time.Second {
+		t.Fatalf("held %s, want ~%s", elapsed, jobPlanHold)
+	}
+	if elapsed > jobPlanHold+5*time.Second {
+		t.Fatalf("hold not bounded: %s", elapsed)
+	}
+}
+
 func TestObservedAssignmentRevivesCapacityFailedDemand(t *testing.T) {
 	control := startE2EControlPlane(t)
 	ctx := context.Background()
