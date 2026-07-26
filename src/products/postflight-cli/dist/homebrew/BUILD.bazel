@@ -1,0 +1,24 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+filegroup(
+    name = "formula",
+    srcs = [
+        "postflight.rb.tmpl",
+        "render-formula.sh",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+sh_test(
+    name = "render_formula_test",
+    size = "small",
+    srcs = ["render-formula-test.sh"],
+    args = [
+        "$(location render-formula.sh)",
+        "$(location postflight.rb.tmpl)",
+    ],
+    data = [
+        "postflight.rb.tmpl",
+        "render-formula.sh",
+    ],
+)

@@ -1,0 +1,40 @@
+#!/usr/bin/env node
+"use strict";
+
+const { spawnSync } = require("node:child_process");
+
+const PACKAGES = {
+  "darwin arm64": "@guardian-intelligence/postflight-darwin-arm64",
+  "darwin x64": "@guardian-intelligence/postflight-darwin-x64",
+  "linux arm64": "@guardian-intelligence/postflight-linux-arm64",
+  "linux x64": "@guardian-intelligence/postflight-linux-x64",
+};
+
+const platform = `${process.platform} ${process.arch}`;
+const pkg = PACKAGES[platform];
+if (pkg === undefined) {
+  console.error(
+    `postflight: no prebuilt binary for ${platform}. Build from source: https://github.com/guardian-intelligence/guardian/tree/main/src/products/postflight-cli`,
+  );
+  process.exit(1);
+}
+
+let binary;
+try {
+  binary = require.resolve(`${pkg}/bin/postflight`);
+} catch {
+  console.error(
+    `postflight: ${pkg} is not installed. Reinstall without --omit=optional so the binary for this platform is fetched.`,
+  );
+  process.exit(1);
+}
+
+const result = spawnSync(binary, process.argv.slice(2), { stdio: "inherit" });
+if (result.error) {
+  console.error(`postflight: ${result.error.message}`);
+  process.exit(1);
+}
+if (result.signal) {
+  process.kill(process.pid, result.signal);
+}
+process.exit(result.status ?? 1);

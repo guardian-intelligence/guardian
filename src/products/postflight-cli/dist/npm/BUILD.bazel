@@ -1,0 +1,5 @@
+filegroup(
+    name = "packages",
+    srcs = glob(["postflight*/**"]),
+    visibility = ["//visibility:public"],
+)

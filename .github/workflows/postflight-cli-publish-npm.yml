@@ -1,0 +1,141 @@
+name: postflight-cli-publish-npm
+
+# Mirrors a stable postflight CLI release onto npm: the meta package plus the
+# four platform packages carrying the exact bytes the Release ships. Nothing
+# is built or signed here — the binaries come off the Release and must pass
+# `cosign verify-blob` against the build identity before they are packed.
+# Auth is npm trusted publishing (OIDC, no token secrets), and the registry
+# side of that trust names this file: renaming it revokes publish rights.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: postflight-cli-publish-npm
+  cancel-in-progress: false
+
+env:
+  # Release target ↔ npm platform package suffix.
+  PLATFORMS: >-
+    x86_64-unknown-linux-musl:linux-x64
+    aarch64-unknown-linux-musl:linux-arm64
+    x86_64-apple-darwin:darwin-x64
+    aarch64-apple-darwin:darwin-arm64
+  BUILD_IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main
+  ISSUER: https://token.actions.githubusercontent.com
+  PACKAGE_ROOT: src/products/postflight-cli/dist/npm
+
+jobs:
+  publish:
+    if: startsWith(github.event.release.tag_name, 'postflight-cli/v') && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # The packaging sources come off the default branch, not the release
+      # tag: the cutter tags at the image's `org.opencontainers.image.revision`
+      # — the commit whose binary bytes last changed — which can sit hundreds
+      # of commits behind main and predate these templates entirely.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Assert npm can publish without a token
+        run: |
+          have="$(npm --version)"
+          need=11.5.1
+          if [[ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)" != "$need" ]]; then
+            echo "npm $have predates trusted publishing (need >= $need)" >&2
+            exit 1
+          fi
+
+      - name: Download and verify the release binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release download "$TAG" --repo "${{ github.repository }}" --dir assets
+          (cd assets && sha256sum -c checksums.txt)
+          for pair in $PLATFORMS; do
+            target="${pair%%:*}"
+            cosign verify-blob \
+              --bundle "assets/postflight-$target.sigstore.json" \
+              --certificate-identity "$BUILD_IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              "assets/postflight-$target"
+          done
+
+      - name: Assemble the packages
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#postflight-cli/v}"
+          for pair in $PLATFORMS; do
+            target="${pair%%:*}"
+            dir="$PACKAGE_ROOT/postflight-${pair##*:}"
+            install -D -m 0755 "assets/postflight-$target" "$dir/bin/postflight"
+          done
+          for dir in "$PACKAGE_ROOT"/postflight*; do
+            cp LICENSE.md "$dir/LICENSE.md"
+            jq --arg v "$version" \
+              '.version = $v | if .optionalDependencies then .optionalDependencies |= map_values($v) else . end' \
+              "$dir/package.json" > package.json.next
+            mv package.json.next "$dir/package.json"
+          done
+
+      - name: Assert the packed binary is the version being published
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          expected="postflight version ${TAG#postflight-cli/v}"
+          got="$("$PACKAGE_ROOT/postflight-linux-x64/bin/postflight" version)"
+          if [[ "$got" != "$expected" ]]; then
+            echo "release $TAG ships a binary reporting '$got' — the version bump never rode this freight" >&2
+            exit 1
+          fi
+
+      - name: Publish to npm
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          publish() {
+            local dir="$1" out status
+            set +e
+            out="$(npm publish --provenance --access public "$dir" 2>&1)"
+            status=$?
+            set -e
+            printf '%s\n' "$out"
+            if ((status != 0)); then
+              # npm versions are immutable, so a re-run after a partial
+              # publish must converge rather than dying on the packages it
+              # already landed. Anything else is still fatal.
+              grep -qE 'EPUBLISHCONFLICT|cannot publish over' <<<"$out" || return "$status"
+              echo "$dir is already published at this version"
+            fi
+          }
+
+          # Platform packages first: the meta package's optionalDependencies
+          # pin this exact version, and an install that won the race between
+          # the two publishes would resolve nothing to run.
+          for pair in $PLATFORMS; do
+            publish "$PACKAGE_ROOT/postflight-${pair##*:}"
+          done
+          publish "$PACKAGE_ROOT/postflight"
+          echo "published @guardian-intelligence/postflight ${TAG#postflight-cli/v}" >> "$GITHUB_STEP_SUMMARY"

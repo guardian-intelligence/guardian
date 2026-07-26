@@ -13,9 +13,15 @@ guidelines). A workflow earns a file here for exactly one of two reasons:
    of the merge button: merge cadence is the scarce resource.
 2. **Trusted publisher identity** — post-merge jobs that build, sign, and
    push artifacts (`images.yml`, `images-lock-sign.yml`,
-   `postflight-cli-image.yml`, `postflight-cli-release.yml`). Each workflow
-   file path IS a cosign/Fulcio identity the cluster and the world verify.
-   NEVER rename these files; thin them in place.
+   `postflight-cli-image.yml`, `postflight-cli-release.yml`), plus the
+   ecosystem mirrors (`postflight-cli-publish-npm.yml`,
+   `postflight-cli-publish-crates.yml`). Each workflow file path IS an
+   identity someone else checks: Fulcio-side for the signing lanes, where
+   the cluster and the world verify the certificate, and registry-side for
+   the mirrors, where npm and crates.io trusted publishing authorize by
+   org/repo/workflow-filename — a rename there silently revokes publish
+   rights with nothing in the Bazel graph to catch it. NEVER rename these
+   files; thin them in place.
 
 Nothing else: schedulers, preview environments, promotion glue, and any
 form of cluster administration run in-cluster. YAML residents of that

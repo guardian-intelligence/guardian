@@ -8,7 +8,9 @@ name: postflight-cli-release
 # build commit — nothing is re-signed here. Releases are cut with a short-lived
 # guardian-promotions App token (the same identity that opens promotion PRs),
 # minted only after the dedup check: unlike GITHUB_TOKEN, App-authored releases
-# fire `release:` workflows, which stable's npm publish will ride.
+# fire `release:` workflows, which stable's npm publish will ride. A stable cut
+# also renders the Homebrew formula from the checksums of the assets it just
+# published and mirrors it to the tap.
 
 on:
   push:
@@ -255,6 +257,19 @@ jobs:
           app-id: ${{ secrets.PROMOTIONS_APP_ID }}
           private-key: ${{ secrets.PROMOTIONS_APP_PRIVATE_KEY }}
 
+      # An installation token carries only the repositories it was minted for,
+      # so the tap write needs one of its own — the token above 404s on it.
+      # Minted before the cut so a tap that is unreachable fails the release
+      # rather than stranding it half-published.
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        if: contains(steps.plan.outputs.cuts, 'stable')
+        id: tap
+        with:
+          app-id: ${{ secrets.PROMOTIONS_APP_ID }}
+          private-key: ${{ secrets.PROMOTIONS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+
       - name: Cut the releases
         if: steps.plan.outputs.cuts != ''
         env:
@@ -341,3 +356,38 @@ jobs:
               "assets/$channel"/*
             echo "released $tag from $image" >> "$GITHUB_STEP_SUMMARY"
           done 3< plan.txt
+
+      - name: Mirror the Homebrew formula
+        if: contains(steps.plan.outputs.cuts, 'stable')
+        env:
+          GH_TOKEN: ${{ steps.tap.outputs.token }}
+          TAP: ${{ github.repository_owner }}/homebrew-tap
+          FORMULA: src/products/postflight-cli/dist/homebrew
+        run: |
+          . meta/stable.env
+
+          # The renderer takes the version on argv and the formula's own `test`
+          # block asserts it back out of the binary at install time; assert it
+          # here, off the verified artifact, rather than on a user's machine.
+          reported="$("assets/stable/postflight-$NATIVE_TARGET" version)"
+          if [[ "$reported" != "postflight version $version" ]]; then
+            echo "stable: the formula would promise $version but the artifact reports '$reported'" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          "$FORMULA/render-formula.sh" "$FORMULA/postflight.rb.tmpl" \
+            "$version" assets/stable/checksums.txt > postflight.rb
+
+          # On 404 gh api prints the error JSON to stdout and --jq never
+          # applies — only the exit code says whether the tap already carries a
+          # formula, whose blob sha an update has to name.
+          previous=()
+          if sha="$(gh api "repos/$TAP/contents/Formula/postflight.rb" \
+              --jq .sha 2>/dev/null)"; then
+            previous=(-f sha="$sha")
+          fi
+          gh api -X PUT "repos/$TAP/contents/Formula/postflight.rb" \
+            -f message="postflight $version" \
+            -f content="$(base64 -w0 postflight.rb)" \
+            "${previous[@]}" > /dev/null
+          echo "mirrored postflight $version to $TAP" >> "$GITHUB_STEP_SUMMARY"

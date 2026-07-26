@@ -1,0 +1,36 @@
+class Postflight < Formula
+  desc "Run GitHub CI on warm, isolated infrastructure"
+  homepage "https://guardianintelligence.org/postflight"
+  version "@VERSION@"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/guardian-intelligence/guardian/releases/download/postflight-cli%2Fv@VERSION@/postflight-aarch64-apple-darwin"
+      sha256 "@SHA256_AARCH64_APPLE_DARWIN@"
+    end
+    on_intel do
+      url "https://github.com/guardian-intelligence/guardian/releases/download/postflight-cli%2Fv@VERSION@/postflight-x86_64-apple-darwin"
+      sha256 "@SHA256_X86_64_APPLE_DARWIN@"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/guardian-intelligence/guardian/releases/download/postflight-cli%2Fv@VERSION@/postflight-aarch64-unknown-linux-musl"
+      sha256 "@SHA256_AARCH64_UNKNOWN_LINUX_MUSL@"
+    end
+    on_intel do
+      url "https://github.com/guardian-intelligence/guardian/releases/download/postflight-cli%2Fv@VERSION@/postflight-x86_64-unknown-linux-musl"
+      sha256 "@SHA256_X86_64_UNKNOWN_LINUX_MUSL@"
+    end
+  end
+
+  def install
+    bin.install Dir["postflight-*"].first => "postflight"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/postflight version")
+  end
+end
