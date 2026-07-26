@@ -101,6 +101,12 @@ func (s *syncServer) handleJobPlans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// One deadline for the whole request: the bus signals on every plan
+	// change fleet-wide, so a host whose own snapshot is quiet would
+	// otherwise have its hold extended past the client's HTTP timeout
+	// whenever other hosts churn faster than the hold.
+	deadline := time.NewTimer(jobPlanHold)
+	defer deadline.Stop()
 	for {
 		changed := s.jobPlans.subscribe()
 		snapshot, err := s.jobPlanSnapshot(r.Context(), hostID)
@@ -114,17 +120,14 @@ func (s *syncServer) handleJobPlans(w http.ResponseWriter, r *http.Request) {
 			_ = json.NewEncoder(w).Encode(snapshot)
 			return
 		}
-		timer := time.NewTimer(jobPlanHold)
 		select {
 		case <-changed:
-			timer.Stop()
-		case <-timer.C:
+		case <-deadline.C:
 			w.Header().Set("Cache-Control", "no-store")
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(snapshot)
 			return
 		case <-r.Context().Done():
-			timer.Stop()
 			return
 		}
 	}
