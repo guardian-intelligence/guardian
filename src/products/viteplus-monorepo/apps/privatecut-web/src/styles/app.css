@@ -822,8 +822,7 @@ html[data-illumination="webgl2"] .privatecut-header__glow-control {
   border: 1px solid rgb(186 207 247 / 12%);
   border-radius: 0.8rem;
   background:
-    radial-gradient(70% 100% at 50% 0%, rgb(168 216 245 / 5%), transparent),
-    rgb(8 10 21 / 78%);
+    radial-gradient(70% 100% at 50% 0%, rgb(168 216 245 / 5%), transparent), rgb(8 10 21 / 78%);
   box-shadow:
     inset 0 1px 1px rgb(216 236 248 / 8%),
     0 0.9rem 2rem rgb(0 0 0 / 20%);

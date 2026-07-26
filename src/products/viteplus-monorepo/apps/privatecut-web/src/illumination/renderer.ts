@@ -1,9 +1,4 @@
-import {
-  type Rectangle,
-  rectangleAround,
-  toWebGLScissor,
-  unionRectangles,
-} from "./geometry";
+import { type Rectangle, rectangleAround, toWebGLScissor, unionRectangles } from "./geometry";
 import { WakeScheduler } from "./scheduler";
 
 export type IlluminationMode = "css" | "webgl2";
@@ -212,10 +207,7 @@ type GlassSurface = {
   readonly y: number;
 };
 
-const sourceLightStyles: Record<
-  string,
-  Pick<Light, "color" | "intensity" | "radius">
-> = {
+const sourceLightStyles: Record<string, Pick<Light, "color" | "intensity" | "radius">> = {
   dropzone: { color: [0.36, 0.62, 1], intensity: 0.045, radius: 440 },
   logo: { color: [0.55, 0.72, 1], intensity: 0.17, radius: 170 },
   status: { color: [0.34, 0.9, 0.82], intensity: 0.075, radius: 120 },
@@ -236,11 +228,7 @@ const glassSurfaceStyles: Record<
   panel: { edge: 0.065, radius: 16, refraction: 3.2, strength: 0.32 },
 };
 
-function compileShader(
-  context: WebGL2RenderingContext,
-  type: number,
-  source: string,
-): WebGLShader {
+function compileShader(context: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = context.createShader(type);
   if (!shader) throw new Error("Could not create illumination shader");
 
@@ -453,9 +441,7 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
     this.#sourceElements = [
       ...document.querySelectorAll<HTMLElement>("[data-illumination-source]"),
     ];
-    this.#glassElements = [
-      ...document.querySelectorAll<HTMLElement>("[data-illumination-glass]"),
-    ];
+    this.#glassElements = [...document.querySelectorAll<HTMLElement>("[data-illumination-glass]")];
     this.#layoutResizeObserver.disconnect();
     new Set([...this.#sourceElements, ...this.#glassElements]).forEach((element) => {
       this.#layoutResizeObserver.observe(element);
@@ -584,10 +570,7 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
       colorValues.set([...light.color, 1], index * 4);
     });
     this.#glassSurfaces.forEach((surface, index) => {
-      glassRectangleValues.set(
-        [surface.x, surface.y, surface.width, surface.height],
-        index * 4,
-      );
+      glassRectangleValues.set([surface.x, surface.y, surface.width, surface.height], index * 4);
       glassParameterValues.set(
         [surface.radius, surface.refraction, surface.strength, surface.edge],
         index * 4,
@@ -612,18 +595,12 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
       this.#width,
       this.#height,
     );
-    context.uniform1i(
-      requireUniform(context, this.#dynamicProgram, "uLightCount"),
-      lights.length,
-    );
+    context.uniform1i(requireUniform(context, this.#dynamicProgram, "uLightCount"), lights.length);
     context.uniform1i(
       requireUniform(context, this.#dynamicProgram, "uGlassCount"),
       this.#glassSurfaces.length,
     );
-    context.uniform4fv(
-      requireUniform(context, this.#dynamicProgram, "uLights[0]"),
-      lightValues,
-    );
+    context.uniform4fv(requireUniform(context, this.#dynamicProgram, "uLights[0]"), lightValues);
     context.uniform4fv(
       requireUniform(context, this.#dynamicProgram, "uLightColors[0]"),
       colorValues,
@@ -675,12 +652,7 @@ export async function createIlluminationRenderer(
       createProgram(context, dynamicFragmentShaderSource),
       createProgram(context, staticFragmentShaderSource),
     ]);
-    return new WebGLIlluminationRenderer(
-      canvas,
-      context,
-      dynamicProgram,
-      staticProgram,
-    );
+    return new WebGLIlluminationRenderer(canvas, context, dynamicProgram, staticProgram);
   } catch {
     return cssRenderer;
   }

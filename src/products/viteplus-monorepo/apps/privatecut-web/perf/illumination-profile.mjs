@@ -220,8 +220,9 @@ const pageMetrics = await page.evaluate(() => {
     animations: {
       infinite: document
         .getAnimations()
-        .filter((animation) => animation.effect?.getTiming().iterations === Number.POSITIVE_INFINITY)
-        .length,
+        .filter(
+          (animation) => animation.effect?.getTiming().iterations === Number.POSITIVE_INFINITY,
+        ).length,
       total: document.getAnimations().length,
     },
     canvases: [...document.querySelectorAll("canvas")].map((canvas) => ({
@@ -291,8 +292,7 @@ const report = {
         ((afterProfile.ScriptDuration ?? 0) - (beforeNavigation.ScriptDuration ?? 0)) * 1_000,
       ),
       styleMs: round(
-        ((afterProfile.RecalcStyleDuration ?? 0) -
-          (beforeNavigation.RecalcStyleDuration ?? 0)) *
+        ((afterProfile.RecalcStyleDuration ?? 0) - (beforeNavigation.RecalcStyleDuration ?? 0)) *
           1_000,
       ),
       taskMs: round(

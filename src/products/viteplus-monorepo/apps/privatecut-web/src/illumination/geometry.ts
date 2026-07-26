@@ -24,10 +24,7 @@ export function rectangleAround(
   };
 }
 
-export function unionRectangles(
-  left: Rectangle | null,
-  right: Rectangle | null,
-): Rectangle | null {
+export function unionRectangles(left: Rectangle | null, right: Rectangle | null): Rectangle | null {
   if (!left) return right;
   if (!right) return left;
   const x = Math.min(left.x, right.x);

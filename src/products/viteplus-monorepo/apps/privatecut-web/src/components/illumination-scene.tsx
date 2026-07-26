@@ -1,8 +1,5 @@
 import { useEffect, useRef } from "react";
-import {
-  createIlluminationRenderer,
-  type IlluminationRenderer,
-} from "~/illumination/renderer";
+import { createIlluminationRenderer, type IlluminationRenderer } from "~/illumination/renderer";
 
 export function IlluminationScene() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
