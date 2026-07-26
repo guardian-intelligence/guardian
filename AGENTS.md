@@ -17,7 +17,7 @@ Reference https://github.com/guardian-intelligence/verself/tree/main/docs for in
 * Roll Forward, not Backward: avoid data corruption/security issues by root-causing issues and rolling the cluster forward to a known good state.
 * Feature Flag client code, not services: it's impossible to reason about how a service will behave with a runtime configuration change. Prefer rolling restarts with a different OCI and direct traffic safely.
 * Traces, Logs, and Metrics describe how the system works, not code. Commit/OCI hashes are useful for orienting yourself in time and space.
-* Secure the Supply Chain - Pin dependencies, regularly accept security patches. Repo uses Renovate + GitHub App integration, Kargo proposes rendered stage images. Trust tiers, doorbell semantics, the Actions-allowlist lockstep, and per-PR due diligence are in docs/dependency-management.md; policy is renovate.json5.
+* Secure the Supply Chain - Pin dependencies, regularly accept security patches. Repo uses Renovate + GitHub App integration; Flux image automation moves first-party workload pins, and Kargo runs the postflight CLI release train. Trust tiers, doorbell semantics, the Actions-allowlist lockstep, and per-PR due diligence are in docs/dependency-management.md; policy is renovate.json5.
 </operations_guidelines>
 
 <development_loop>
@@ -53,7 +53,7 @@ Step by step:
 Common post-merge issues:
 - `KustomizationNotApplied`
 - Flux: `BuildFailed`, `denied by ValidatingAdmissionPolicy ...`, `HealthCheckFailed`, `dependency '...' is not ready`
-- Kargo: manages promotions of pushed code to edge (every change), nightly, RC, and release builds. Check the Kargo configuration for the distributable that failed promotion.
+- Kargo: runs the postflight CLI release train (nightly, RC, release); cluster workload pins move via Flux image automation (`src/infrastructure/deployments/guardian/imageops`). Check the pipeline under `src/infrastructure/deployments/guardian/promotion` if a CLI promotion fails.
 - Flagger: A failed canary rolls back automatically and pages (Alerta) sometime later.
 - Alerta: typically high signal, if there's unnecessary/unrelated noise, continue to monitor but assume it's your duty to fix noise unless you can make a strong case to flag to the user to fix separately. If it's a small fixup, even if unrelated, just tack on the fix instead of bothering the user. Default `cluster-watch` tails Alerta but alerts take ~15 minutes of sustained failure.
 

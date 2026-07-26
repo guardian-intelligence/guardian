@@ -9,8 +9,8 @@
 # old Failed object would page forever.
 #
 # Stage/Warehouse condition labels are the raw metav1 status strings: key on
-# ="False", never !="True" — NoFreight stages (idle gamma/prod) report
-# Healthy=Unknown and must not page.
+# ="False", never !="True" — a NoFreight stage reports Healthy=Unknown and
+# must not page.
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMRule
 metadata:
