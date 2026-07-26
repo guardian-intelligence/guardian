@@ -28,8 +28,9 @@ pub fn login(options: &LoginOptions) -> Result<(), Error> {
     // ours to render and ours to enforce device-flow policy on, and keeping
     // the printed URL constant lets the server side evolve underneath every
     // CLI binary already in the wild. The code rides in the URL so the page
-    // arrives prefilled; it is still printed on its own line because the
-    // page asks the user to check it matches (RFC 8628 §3.3.1).
+    // arrives prefilled; it is still printed on its own line because RFC
+    // 8628 §3.3.1 requires displaying it and it is the manual-entry
+    // fallback when the link is opened on another device.
     println!(
         "First, copy your one-time code: {}",
         authorization.user_code
