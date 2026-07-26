@@ -127,7 +127,7 @@ edge (OCI, never user-facing) -> nightly -> rc -> stable
 | Channel | Tag | Prerelease | Pin advanced by |
 |---|---|---|---|
 | edge | none (OCI tags `:edge` and `:sha-<commit>`) | n/a | the `postflight-cli-image` workflow, on every main push touching the crate |
-| nightly | `postflight-cli/nightly-YYYYMMDD` | yes | Kargo promotion PR, fired daily at 08:00 UTC by `cli-nightly-promoter` |
+| nightly | `postflight-cli/nightly-YYYYMMDD` | yes | Kargo promotion PR, fired by `cli-nightly-promoter` at its next departure (see Cadence) |
 | rc | `postflight-cli/v<version>-rc.<n>` | yes | a human PR |
 | stable | `postflight-cli/v<version>` | no (`--latest`) | a human PR |
 
@@ -622,6 +622,20 @@ would page on the first transient public-internet hiccup.
 
 ### Cadence: `cli-nightly-promoter`
 
+The channel advances by departures, not by a wall clock. The promoter ticks
+every 15 minutes and departs when three things line up: the newest Freight
+that has **soaked** (existed for `SOAK_SECONDS`, 1h) is not the one the last
+*successful* promotion shipped, no attempt at it happened inside
+`RETRY_SECONDS`, and the last departure is at least `DEPARTURE_SECONDS`
+(6h) behind. A departure takes the newest soaked Freight, so commits landing
+between departures batch into one hop — and a new commit never delays a
+departure, it can only change which Freight boards. Those two properties
+are the design: restart-the-soak schemes livelock under steady merge
+traffic, and the departure interval is the single churn dial. "Already
+shipped" is judged against the last **Succeeded** promotion deliberately —
+judging against the stage's `lastPromotion` regardless of phase would read
+a gate-failed attempt as done and wedge the channel on it forever.
+
 Heartbeats `guardian_cli_nightly_promoter_heartbeat{stage}` on every run
 including its no-op paths, and `guardian_cli_nightly_promotion_created{stage}`
 when it actually creates a Promotion.
@@ -634,9 +648,9 @@ vmselect for `guardian_cli_deeptest_pass` at the exact digest being promoted
 nothing outside the cluster is involved. A verdict of 1 promotes; a verdict
 of 0 fails the Promotion terminally and no pin PR is ever opened. The two
 expressions are complements over a result that exists, so a digest with no
-verdict yet — one built between the runner's last hourly pass and 08:00 —
-matches neither and the step retries until the next run adjudicates it,
-bounded by `retry.timeout: 28m`. That budget spans a full runner cadence and
+verdict yet — one the runner has not adjudicated by departure time, which
+the soak makes rare — matches neither and the step retries until the next
+run adjudicates it, bounded by `retry.timeout: 28m`. That budget spans a full runner cadence and
 stays under the 30 minutes at which `KargoPromotionStuck` warns; a digest
 that is still unadjudicated when it runs out errors the Promotion, which
 `KargoPromotionFailed` already pages on. No new alert exists for the gate,
@@ -655,7 +669,7 @@ verbatim, so a step added to the template is a step the next promotion runs.
 | `GuardianCliDeeptestFailing` | warning | `guardian_cli_deeptest_pass` is 0 for the digest `:edge` currently points at |
 | `GuardianCliDeeptestSilent` | warning | no deep-test heartbeat for 3h |
 | `GuardianCliDeeptestEventWriteFailing` | warning | the runner's ClickHouse INSERT is being rejected |
-| `GuardianCliNightlyPromoterSilent` | warning | no promoter heartbeat for 26h |
+| `GuardianCliNightlyPromoterSilent` | warning | no promoter heartbeat for 2h |
 
 Only the install canary pages critical, and deliberately: it is the only
 loop watching what a user actually hits.
@@ -687,8 +701,9 @@ and step 7 happens only for a stable.
    pin: it is the check that would have caught a broken cross-compile before
    anyone published it.
 
-4. **Wait for nightly** — required for an rc, optional for a stable. The
-   08:00 promoter opens the pin PR; once it merges, the cutter publishes
+4. **Wait for the channel** — required for an rc, optional for a stable.
+   The promoter's next departure opens the pin PR (within the soak plus the
+   departure interval, worst case); once it merges, the cutter publishes
    `postflight-cli/nightly-<YYYYMMDD>` from that digest. An rc's lineage
    assert requires the digest to appear in a nightly release body, so an rc
    cannot be cut before its nightly exists. A stable's lineage is a version
