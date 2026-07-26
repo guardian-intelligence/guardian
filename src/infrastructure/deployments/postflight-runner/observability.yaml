@@ -22,13 +22,24 @@ spec:
           annotations:
             summary: "Postflight canary PR loop is failing"
             description: "The latest canary controller run failed for {{ $labels.owner }}/{{ $labels.repository }}. Inspect its newest postflight-canary-loop Job and open pull request."
+        # Each absence leg stands down while its CronJob declares suspend: a
+        # fleet teardown lands in Git as suspension, and an absence page over a
+        # declared stop is noise that trains critical away from meaning stop
+        # everything. last_over_time bridges kube-state-metrics scrape gaps so
+        # a missed scrape mid-suspension cannot reopen the gate; the first
+        # suspend=0 sample after un-suspend re-arms it immediately.
         - alert: PostflightCanaryLoopAbsent
           expr: |-
-            absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="postflight-canary"}[30m])
-            or absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="simulated-customer-node"}[30m])
-            or absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="simulated-customer-go"}[30m])
-            or absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="simulated-customer-python"}[30m])
-            or absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="simulated-customer-gradle"}[30m])
+            (absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="postflight-canary"}[30m])
+              unless on() (last_over_time(kube_cronjob_spec_suspend{namespace="postflight-runner",cronjob="postflight-canary-loop"}[10m]) > 0))
+            or (absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="simulated-customer-node"}[30m])
+              unless on() (last_over_time(kube_cronjob_spec_suspend{namespace="postflight-runner",cronjob="postflight-canary-loop-node"}[10m]) > 0))
+            or (absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="simulated-customer-go"}[30m])
+              unless on() (last_over_time(kube_cronjob_spec_suspend{namespace="postflight-runner",cronjob="postflight-canary-loop-go"}[10m]) > 0))
+            or (absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="simulated-customer-python"}[30m])
+              unless on() (last_over_time(kube_cronjob_spec_suspend{namespace="postflight-runner",cronjob="postflight-canary-loop-python"}[10m]) > 0))
+            or (absent_over_time(postflight_canary_loop_heartbeat{owner="digital-guardian-software",repository="simulated-customer-gradle"}[30m])
+              unless on() (last_over_time(kube_cronjob_spec_suspend{namespace="postflight-runner",cronjob="postflight-canary-loop-gradle"}[10m]) > 0))
           for: 2m
           labels:
             severity: critical
@@ -36,7 +47,20 @@ spec:
             exported_instance: prod/postflight-canary-loop
           annotations:
             summary: "Postflight canary PR loop is stale"
-            description: "No canary heartbeat for {{ $labels.owner }}/{{ $labels.repository }} has reached VictoriaMetrics for 30 minutes. Its CronJob, GitHub App secret, or network path is unavailable."
+            description: "No canary heartbeat for {{ $labels.owner }}/{{ $labels.repository }} has reached VictoriaMetrics for 30 minutes and its CronJob is not suspended. The CronJob, GitHub App secret, or network path is unavailable."
+        # The gate above must not become a way for the canary estate to die
+        # quietly: a suspension that outlives a day is a forgotten one.
+        - alert: PostflightCanaryLoopSuspended
+          expr: |-
+            max by (cronjob) (kube_cronjob_spec_suspend{namespace="postflight-runner",cronjob=~"postflight-canary-loop.*"}) > 0
+          for: 24h
+          labels:
+            severity: warning
+            guardian_stage: prod
+            exported_instance: "prod/{{ $labels.cronjob }}"
+          annotations:
+            summary: "Postflight canary loop {{ $labels.cronjob }} has been suspended for a day"
+            description: "{{ $labels.cronjob }} has declared suspend for over 24 hours, so nothing exercises this canary lane. Re-provision the fleet and un-suspend it, or retire the lane."
         - alert: PostflightCanaryLoopMissing
           expr: |-
             absent(kube_cronjob_status_last_schedule_time{namespace="postflight-runner",cronjob="postflight-canary-loop"})
