@@ -7,7 +7,12 @@
 //! recommending the command that will never work.
 
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
+// Every released target is Linux or macOS, so device+inode identity is always
+// available — and it is the only way to tell one file reached by several names
+// from several installations.
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use crate::error::Error;
@@ -109,7 +114,7 @@ pub fn resolve(path: &Path) -> PathBuf {
 /// `cargo_home` is passed in rather than read here: the process environment is
 /// shared by every test thread, so ownership rules are decided from a value the
 /// caller supplies.
-pub fn owner_of(binary: &Path, receipt: Option<Receipt>, cargo_home: Option<&Path>) -> Owner {
+pub fn owner_of(binary: &Path, receipt: Option<&Receipt>, cargo_home: Option<&Path>) -> Owner {
     // A manager's claim outranks our own receipt. The two can only disagree
     // when a manager has installed over a path our installer once owned, and
     // in that case the file is now theirs — acting on the stale receipt would
@@ -118,9 +123,100 @@ pub fn owner_of(binary: &Path, receipt: Option<Receipt>, cargo_home: Option<&Pat
         return Owner::Managed(manager);
     }
     match receipt {
-        Some(receipt) if receipt::describes(&receipt, binary) => Owner::Installed,
+        Some(receipt) if receipt::describes(receipt, binary) => Owner::Installed,
         _ => Owner::Unclaimed,
     }
+}
+
+/// A copy of the CLI found on this machine.
+#[derive(Debug)]
+pub struct Installation {
+    /// Where it was found, before symlinks — the name the user knows it by and
+    /// the one their shell resolves.
+    pub path: PathBuf,
+    pub owner: Owner,
+}
+
+const BIN_NAME: &str = "postflight";
+
+/// Directories an installation lands in whether or not they are on `$PATH`.
+///
+/// A copy in a directory the user has since dropped from `PATH` is invisible
+/// to `which` and still very much installed.
+fn known_bin_dirs(home: Option<&Path>, cargo_home: Option<&Path>) -> Vec<PathBuf> {
+    let mut dirs = vec![
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/home/linuxbrew/.linuxbrew/bin"),
+    ];
+    if let Some(home) = home {
+        dirs.push(home.join(".local").join("bin"));
+        dirs.push(home.join(".linuxbrew").join("bin"));
+    }
+    if let Some(cargo_home) = cargo_home {
+        dirs.push(cargo_home.join("bin"));
+    }
+    dirs
+}
+
+/// Every copy of the CLI this machine can be shown to have, nearest first.
+///
+/// Searching `$PATH` alone is not enough in either direction: a Homebrew copy
+/// shadowed by a newer one in `~/.local/bin` is exactly the situation worth
+/// reporting, and a copy in a directory no longer on `PATH` is still installed.
+/// Results are deduplicated by device and inode, so a symlink, a hardlink and
+/// the file itself are one installation rather than three — which is what keeps
+/// a Homebrew keg and the `bin` link into it from reading as a double install.
+pub fn installations(
+    running: Option<&Path>,
+    path_var: Option<&OsStr>,
+    home: Option<&Path>,
+    cargo_home: Option<&Path>,
+    receipt: Option<&Receipt>,
+) -> Vec<Installation> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    // First, because it is the copy the user just invoked — and because it may
+    // be in neither `$PATH` nor any of the homes below, having been run from a
+    // build directory or a path only this shell knows.
+    if let Some(running) = running {
+        candidates.push(running.to_path_buf());
+    }
+    if let Some(path_var) = path_var {
+        candidates.extend(env::split_paths(path_var).map(|dir| dir.join(BIN_NAME)));
+    }
+    candidates.extend(
+        known_bin_dirs(home, cargo_home)
+            .into_iter()
+            .map(|dir| dir.join(BIN_NAME)),
+    );
+    if let Some(receipt) = receipt {
+        candidates.push(PathBuf::from(&receipt.binary_path));
+    }
+
+    let mut seen: Vec<(u64, u64)> = Vec::new();
+    let mut found: Vec<Installation> = Vec::new();
+    for candidate in candidates {
+        let Ok(metadata) = fs::metadata(&candidate) else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let identity = (metadata.dev(), metadata.ino());
+        if seen.contains(&identity) {
+            continue;
+        }
+        seen.push(identity);
+        // Classified on the resolved path, reported under the one it was found
+        // by: `/opt/homebrew/bin/postflight` is the name its owner recognises,
+        // while only the keg behind it says Homebrew.
+        let owner = owner_of(&resolve(&candidate), receipt, cargo_home);
+        found.push(Installation {
+            path: candidate,
+            owner,
+        });
+    }
+    found
 }
 
 fn manager_for(binary: &Path, cargo_home: Option<&Path>) -> Option<Manager> {
@@ -230,7 +326,7 @@ mod tests {
         let binary = dir.join("postflight");
         fs::write(&binary, b"binary").unwrap();
 
-        match owner_of(&binary, Some(receipt_for(&binary)), None) {
+        match owner_of(&binary, Some(&receipt_for(&binary)), None) {
             Owner::Installed => {}
             other => panic!("a receipt naming this path should claim it, got {other:?}"),
         }
@@ -245,7 +341,7 @@ mod tests {
         fs::write(&other, b"binary").unwrap();
 
         assert!(matches!(
-            owner_of(&binary, Some(receipt_for(&other)), None),
+            owner_of(&binary, Some(&receipt_for(&other)), None),
             Owner::Unclaimed
         ));
     }
@@ -352,7 +448,7 @@ mod tests {
     fn a_manager_outranks_a_stale_receipt() {
         let path = Path::new("/opt/homebrew/Cellar/postflight/0.2.0/bin/postflight");
         assert!(matches!(
-            owner_of(path, Some(receipt_for(path)), None),
+            owner_of(path, Some(&receipt_for(path)), None),
             Owner::Managed(Manager::Homebrew)
         ));
     }
