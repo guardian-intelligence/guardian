@@ -110,9 +110,19 @@ expect_rejected() { # <shell> <description> <args...>
 # truncation of this one must reach EOF inside main's body and die there,
 # having executed nothing — no install directory, no output.
 assert_truncation_inert() { # <shell>
-  local shell="$1" size offset home
+  local shell="$1" size offset home tail_start
   size="$(wc -c < "$installer")"
-  for ((offset = 1; offset < size; offset += 64)); do
+  # Every proper prefix has to be inert. The prefix missing only the trailing
+  # newline is not one — a shell runs a final line with or without it — so the
+  # sweep stops one byte short of that.
+  #
+  # Coarse across the body, then byte by byte across the tail, because the tail
+  # holds the only statement that executes anything and a 64-byte stride can
+  # step straight over the single offset that leaves a runnable command behind.
+  # One did: `main "$@"` clipped to `main` is complete and installs the default
+  # channel, which is why the call is braced.
+  tail_start=$((size > 512 ? size - 512 : 1))
+  for ((offset = 1; offset + 1 < size; offset += (offset < tail_start ? 64 : 1))); do
     head -c "$offset" "$installer" > "$tmp/truncated.sh"
     home="$tmp/truncation-home"
     rm -rf "$home"
@@ -211,6 +221,75 @@ assert_uninstall_paths() { # <shell>
   fi
 }
 
+# A re-run with no destination named upgrades the installation that is already
+# here. The failure this prevents is silent: a second copy appears in the
+# default directory, the receipt describes only that one, and the original
+# stays ahead of it on PATH — so the upgrade changes nothing the user runs.
+assert_rerun_upgrades_in_place() { # <shell>
+  local shell="$1" home="$tmp/rerun-home"
+  rm -rf "$home"
+  mkdir -p "$home/opt"
+  : > "$home/opt/postflight"
+  write_receipt "$home" "$home/opt/postflight"
+
+  if env -u POSTFLIGHT_INSTALL_DIR -u SUDO_USER \
+    POSTFLIGHT_RELEASES_DIR="$mixed" HOME="$home" \
+    "$shell" "$installer" --channel nightly --print-tag \
+    > "$tmp/out" 2> "$tmp/err"; then
+    grep -q "upgrading the installation at $home/opt " "$tmp/err" \
+      || fail "$shell: a re-run did not adopt the recorded install dir: $(cat "$tmp/err")"
+  else
+    fail "$shell: a re-run over a recorded install failed: $(cat "$tmp/err")"
+  fi
+
+  # A receipt naming a binary that is no longer there is not evidence about a
+  # live installation, so the default destination applies again.
+  rm -f "$home/opt/postflight"
+  if env -u POSTFLIGHT_INSTALL_DIR -u SUDO_USER \
+    POSTFLIGHT_RELEASES_DIR="$mixed" HOME="$home" \
+    "$shell" "$installer" --channel nightly --print-tag \
+    > "$tmp/out" 2> "$tmp/err"; then
+    if grep -q "upgrading the installation" "$tmp/err"; then
+      fail "$shell: a receipt naming a missing binary was treated as an installation"
+    fi
+  else
+    fail "$shell: a re-run with a stale receipt failed: $(cat "$tmp/err")"
+  fi
+}
+
+# Under sudo, $HOME is root's. A receipt written there describes an install
+# nobody can see: the user's own CLI reads its config from their home, so
+# `postflight version` reports no provenance and `self uninstall` refuses to
+# remove a binary this script did install.
+assert_sudo_receipt_follows_the_invoking_user() { # <shell>
+  local shell="$1" root_home="$tmp/sudo-root" user_home="$tmp/sudo-user"
+  rm -rf "$root_home" "$user_home"
+  mkdir -p "$root_home" "$user_home/.local/bin"
+  printf '#!/bin/sh\nexit 3\n' > "$user_home/.local/bin/postflight"
+  chmod +x "$user_home/.local/bin/postflight"
+  write_receipt "$user_home" "$user_home/.local/bin/postflight"
+
+  if env -u POSTFLIGHT_INSTALL_DIR SUDO_USER=someone SUDO_HOME="$user_home" \
+    HOME="$root_home" "$shell" "$installer" --uninstall \
+    > "$tmp/out" 2> "$tmp/err"; then
+    [[ ! -e "$user_home/.config/postflight/install-receipt.json" ]] \
+      || fail "$shell: under sudo the receipt was looked for in root's home"
+  else
+    fail "$shell: under sudo --uninstall did not find the invoking user's receipt: $(cat "$tmp/err")"
+  fi
+
+  # A name that is not a name never reaches the eval that expands `~user`.
+  rm -rf "$root_home"
+  mkdir -p "$root_home"
+  if env -u POSTFLIGHT_INSTALL_DIR -u SUDO_HOME \
+    SUDO_USER='someone;touch '"$tmp/injected" HOME="$root_home" \
+    "$shell" "$installer" --uninstall > "$tmp/out" 2> "$tmp/err"; then
+    fail "$shell: --uninstall succeeded with a crafted SUDO_USER"
+  fi
+  [[ ! -e "$tmp/injected" ]] \
+    || fail "$shell: a crafted SUDO_USER reached the shell"
+}
+
 for shell in "${shells[@]}"; do
   expect_tag "$shell" "$mixed" nightly "postflight-cli/nightly-20260724"
   expect_tag "$shell" "$mixed" rc "postflight-cli/v0.3.0-rc.1"
@@ -254,7 +333,21 @@ for shell in "${shells[@]}"; do
     fail "$shell: sudo with an explicit install dir was refused: $(cat "$tmp/err")"
   fi
 
+  # ...and unless the destination came from a receipt, which names a real
+  # installation rather than whichever home the shell happens to have.
+  rm -rf "$tmp/sudo-upgrade"
+  mkdir -p "$tmp/sudo-upgrade/opt"
+  : > "$tmp/sudo-upgrade/opt/postflight"
+  write_receipt "$tmp/sudo-upgrade" "$tmp/sudo-upgrade/opt/postflight"
+  if ! env -u POSTFLIGHT_INSTALL_DIR POSTFLIGHT_RELEASES_DIR="$mixed" \
+    SUDO_USER=someone SUDO_HOME="$tmp/sudo-upgrade" HOME="$tmp/sudo-home" \
+    "$shell" "$installer" --channel nightly --print-tag > "$tmp/out" 2> "$tmp/err"; then
+    fail "$shell: sudo upgrading a recorded install was refused: $(cat "$tmp/err")"
+  fi
+
   assert_uninstall_paths "$shell"
+  assert_rerun_upgrades_in_place "$shell"
+  assert_sudo_receipt_follows_the_invoking_user "$shell"
   assert_truncation_inert "$shell"
 done
 
