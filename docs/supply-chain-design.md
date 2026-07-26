@@ -6,7 +6,8 @@ postflight CLI) is signed; cluster-internal images are governed by the
 merge gate and the admission backstop, not signatures. Complements
 `adrs/0003-validate-rendered-manifests.md` (Git-time invariants),
 `adrs/0010-two-release-signatures-one-format-per-lane.md` (the release
-signing model) and the cold-boot runbook (offline consumption).
+signing model), `postflight-cli-distribution.md` (how the signed CLI
+artifact reaches users) and the cold-boot runbook (offline consumption).
 
 ## The trust model in one paragraph
 
@@ -115,7 +116,9 @@ digest pinning at apply time, and Flagger gates the rollout where a Canary
 exists. Third-party workload images are ordinary dependencies: Renovate
 proposes their bumps as reviewed PRs. The one Kargo lane left is the
 postflight CLI release train, whose Stage opens channel-pin PRs that the
-`promotion-automerge` workflow arms.
+`promotion-automerge` workflow arms; its channel ladder, the rc/stable cut
+ceremony, and the rule that promotion never re-signs are in
+`postflight-cli-distribution.md`.
 
 The ruleset (required checks + the bot bypass) is the enforcement's
 load-bearing half and lives outside Git — re-assert it when recreating the
