@@ -1,7 +1,8 @@
-# GitHub as code — main's ruleset and the simulated customer fleet
+# GitHub as code — main's ruleset, the Homebrew tap, and the simulated customer fleet
 
 `src/infrastructure/bootstrap/guardian-github` describes the GitHub objects
-that gate merges and the repositories the simulated customer fleet runs in.
+that gate merges, the Homebrew tap the postflight-cli release cutter mirrors
+its formula to, and the repositories the simulated customer fleet runs in.
 Everything below is copy-paste executable.
 
 ## Why this root exists
@@ -43,9 +44,12 @@ no `unencrypted` fallback — the migration ceremony in
 
 ## First run is an import, not an apply
 
-Every object this root describes already exists. A plan that proposes to
-*create* the ruleset or any repository means the import did not happen — stop
-and fix that, never let it create a second `main-protection`.
+The ruleset and the fleet repositories predate this root. A plan that
+proposes to *create* any of them means the import did not happen — stop and
+fix that, never let it create a second `main-protection`. The Homebrew tap
+is the one object born here: a create for `github_repository.homebrew_tap`
+and its App grant is the expected plan until the first apply, and drift
+afterwards.
 
 ```sh
 cd src/infrastructure/bootstrap/guardian-github
@@ -73,6 +77,18 @@ Repositories carry `prevent_destroy`. They accumulate the pull-request history
 the billing showback is reconciled against, so removing one from the map is
 not enough to delete it — that is deliberate. To retire a repository, remove
 it from both files, then delete it by hand and `tofu state rm` the address.
+
+## The Homebrew tap
+
+`brew install guardian-intelligence/tap/postflight` resolves because the
+repository is named `homebrew-tap`; the release cutter's stable path writes
+`Formula/postflight.rb` there with a tap-scoped `guardian-promotions` token.
+Both halves live in this root: the repository and the App-installation grant
+that makes the token mintable. If a stable cut fails at its
+`create-github-app-token` step naming `homebrew-tap`, this root has not been
+applied — apply it, then re-run the cutter with `workflow_dispatch`. The
+formula is machine-written: to change what it says, change
+`dist/homebrew/postflight.rb.tmpl` and cut a release, never the tap.
 
 ## Changing the required check
 
