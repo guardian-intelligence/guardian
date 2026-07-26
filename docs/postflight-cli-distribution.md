@@ -634,11 +634,10 @@ discovered late by a user.
   for every user after any DR rebuild of the app.
 
   Until it is done the two loops fail differently, which is worth knowing
-  before reading a red dashboard: the deep-test runner keeps producing
-  verdicts and metrics and only loses its event history
-  (`GuardianCliDeeptestEventWriteFailing` warns), while the install canary's
-  Job exits non-zero because a failed event write is one of the two
-  conditions it treats as a hollow run.
+  before reading a red dashboard: both loops keep producing verdicts and
+  metrics and only lose their event history —
+  `GuardianCliDeeptestEventWriteFailing` and
+  `GuardianCliInstallCanaryEventWriteFailing` warn.
 
 ## Known gaps
 
