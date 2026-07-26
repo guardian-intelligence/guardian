@@ -4,12 +4,11 @@
 # binaries digest), inspects the cross-compiled targets it cannot run, and
 # runs the native one — `version` plus a real device-flow initiation against
 # the live issuer. The verdict lands in guardian_cli_deeptest_pass keyed by
-# digest, which is what nightly promotion gates on: a digest with no verdict
-# never promotes.
+# digest, so a digest carries its own answer to "is this promotable".
 #
-# The run's verdict is data, not a Job outcome: a clean 0 exits zero (the
-# gate fast-fails and GuardianCliDeeptestFailing warns), and only an inability
-# to produce a verdict at all fails the Job.
+# The run's verdict is data, not a Job outcome: a clean 0 exits zero
+# (GuardianCliDeeptestFailing warns) and only an inability to produce a
+# verdict at all fails the Job.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -585,10 +584,9 @@ spec:
             summary: "cli-deeptest-runner has not run in 3h"
             description: >-
               The hourly CLI deep test has pushed no heartbeat for three
-              cadences, so no edge digest is accumulating a verdict: the
-              08:00 nightly promotion will retry its gate for 28 minutes and
-              then error. Check the newest cli-deeptest-runner Job logs in
-              guardian-analytics.
+              cadences, so no edge digest is accumulating a verdict and the
+              08:00 nightly promotion has nothing to check. Check the newest
+              cli-deeptest-runner Job logs in guardian-analytics.
         - alert: GuardianCliDeeptestFailing
           # A digest keeps its verdict series for the whole window after a
           # commit moves :edge past it, so the failing verdict is joined
