@@ -138,6 +138,34 @@ test("device approval interrupted across browser contexts lands on the retry sur
   await contextB.close();
 });
 
+// The bounce theme is the only place device-flow failures get their names:
+// Keycloak's terminal pages share one "failed" header and the theme
+// discriminates the body message into the product's ?error= vocabulary. Pin
+// the two outcomes a person can cause — deny and expiry — which need no
+// brokered login because the status page renders for any visitor.
+test("device terminal failures land on their own product errors", async ({ page }) => {
+  const cfg = loadJourneyConfig(process.env);
+  test.setTimeout(cfg.timeoutMs);
+
+  step("denied-bounce");
+  await page.goto(`${cfg.issuer}/device/status?error=access_denied`);
+  await awaitPostflightLanding(
+    page,
+    "/postflight/device",
+    '[data-device-error="denied"]',
+    "denied landing",
+  );
+
+  step("expired-bounce");
+  await page.goto(`${cfg.issuer}/device/status?error=expired_token`);
+  await awaitPostflightLanding(
+    page,
+    "/postflight/device",
+    '[data-device-error="expired"]',
+    "expired landing",
+  );
+});
+
 test("device approval signs the CLI in end to end", async ({ page, request }) => {
   const cfg = loadJourneyConfig(process.env);
   test.setTimeout(cfg.timeoutMs);

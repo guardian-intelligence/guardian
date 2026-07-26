@@ -20,9 +20,9 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0
-      # Three journeys per run (device interrupted-edge, device end-to-end,
-      # returning user), two of which sign in at GitHub — sequential TOTP
-      # windows alone can add a minute.
+      # Four journeys per run (device terminal-error mapping, device
+      # interrupted-edge, device end-to-end, returning user), two of which
+      # sign in at GitHub — sequential TOTP windows alone can add a minute.
       activeDeadlineSeconds: 480
       template:
         metadata:
