@@ -9,7 +9,7 @@
     "url": "git+https://github.com/guardian-intelligence/guardian.git",
     "directory": "src/products/postflight-cli/dist/npm/postflight-linux-x64"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "files": ["bin"],
   "engines": {
     "node": ">=20"
