@@ -1,6 +1,6 @@
 [package]
 name = "postflight"
-version = "0.2.0-rc.1"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.97"
 description = "Command-line front door for Postflight, fast CI for GitHub by Guardian Intelligence"
