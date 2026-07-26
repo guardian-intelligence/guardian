@@ -583,11 +583,14 @@ spec:
       interval: 60s
       rules:
         - alert: GuardianCliDeeptestSilent
-          # The count_over_time guard keeps this from firing during bring-up,
-          # before the first scheduled run has ever pushed a sample.
+          # Guarded on the CronJob having been scheduled, not on the heartbeat
+          # having once existed: guarding on the metric's own history cannot
+          # distinguish "not deployed yet" from "deployed and has never once
+          # completed a run", and suppresses the second forever.
           expr: >-
             absent_over_time(guardian_cli_deeptest_heartbeat[3h])
-            and on() count_over_time(guardian_cli_deeptest_heartbeat[8d]) > 0
+            and on() (time() - max(kube_cronjob_status_last_schedule_time{
+              namespace="guardian-analytics", cronjob="cli-deeptest-runner"}) > 3600)
           labels:
             severity: warning
             guardian_component: cli-release-train
