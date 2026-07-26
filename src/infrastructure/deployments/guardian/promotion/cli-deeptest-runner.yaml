@@ -2,9 +2,10 @@
 # hour it resolves ghcr's :edge artifact, re-establishes the whole signature
 # chain a user would (image signature, per-binary bundles, the manifest's
 # binaries digest), inspects the cross-compiled targets it cannot run, and
-# runs the native one — `version` plus a real device-flow initiation against
-# the live issuer. The verdict lands in guardian_cli_deeptest_pass keyed by
-# digest, so a digest carries its own answer to "is this promotable".
+# runs the native one — `version`, a real device-flow initiation against the
+# live issuer, and the session verbs driven against forged credentials. The
+# verdict lands in guardian_cli_deeptest_pass keyed by digest, so a digest
+# carries its own answer to "is this promotable".
 #
 # The run's verdict is data, not a Job outcome: a clean 0 exits zero
 # (GuardianCliDeeptestFailing warns) and only an inability to produce a
@@ -336,6 +337,64 @@ data:
       record device_flow 0
     fi
 
+    # `auth status` and `auth logout` answer for the session at the issuer, not
+    # for the file on disk, and a credential this job forges is the only session
+    # it can hold without a browser approval. Three cases pin the behaviour that
+    # decays silently: a credential the issuer never minted must read as ended
+    # and be removed, an unreachable issuer must be an error that leaves the
+    # credential alone, and signing out must clear the machine and report the
+    # session ended rather than merely local. The end-to-end proof that logout
+    # kills the server-side session needs a real approval and lives in the
+    # postflight device-flow journey canary.
+    AUTH_HOME=/tmp/auth-home
+    AUTH_CREDENTIALS="$AUTH_HOME/postflight/credentials.json"
+    AUTH_CLI=(env -u CLICKHOUSE_USER -u CLICKHOUSE_PASSWORD XDG_CONFIG_HOME="$AUTH_HOME" "$BIN")
+    forge_credential() {
+      rm -rf "$AUTH_HOME"
+      mkdir -p "$AUTH_HOME/postflight"
+      jq -n --arg issuer "$1" '{issuer: $issuer, client_id: "postflight-cli",
+        access_token: "deeptest-never-minted", refresh_token: "deeptest-never-minted"}' \
+        > "$AUTH_CREDENTIALS"
+    }
+
+    forge_credential "$AUTH_ISSUER"
+    status_out="$(timeout 20 "${AUTH_CLI[@]}" auth status 2>&1)"
+    status_rc=$?
+    if [ "$status_rc" -ne 0 ] && [[ "$status_out" == *"session has ended"* ]] \
+      && [ ! -f "$AUTH_CREDENTIALS" ]; then
+      record auth_status_live 1
+    else
+      echo "auth status did not take the issuer's answer (rc=$status_rc): $status_out"
+      record auth_status_live 0
+    fi
+
+    # Nothing listens on this port, so the request cannot leave the pod: an
+    # issuer the CLI cannot reach is the case where reporting "signed out" would
+    # be a lie and deleting the credential would be destructive.
+    forge_credential http://127.0.0.1:1
+    status_out="$(timeout 20 "${AUTH_CLI[@]}" auth status 2>&1)"
+    status_rc=$?
+    if [ "$status_rc" -ne 0 ] && [[ "$status_out" != *"Signed in"* ]] \
+      && [ -f "$AUTH_CREDENTIALS" ]; then
+      record auth_status_offline 1
+    else
+      echo "auth status mishandled an unreachable issuer (rc=$status_rc): $status_out"
+      record auth_status_offline 0
+    fi
+
+    forge_credential "$AUTH_ISSUER"
+    logout_out="$(timeout 20 "${AUTH_CLI[@]}" auth logout 2>&1)"
+    logout_rc=$?
+    if [ "$logout_rc" -eq 0 ] && [[ "$logout_out" == *"Signed out."* ]] \
+      && [[ "$logout_out" != *"could not be ended"* ]] \
+      && [ ! -f "$AUTH_CREDENTIALS" ]; then
+      record auth_logout 1
+    else
+      echo "auth logout did not sign this machine out (rc=$logout_rc): $logout_out"
+      record auth_logout 0
+    fi
+    rm -rf "$AUTH_HOME"
+
     # Report-only from here down: startup cost, shipped sizes, auth RTT. No
     # baselines exist yet, so nothing below moves the verdict. The timings
     # include the wrapper's two execs, which are constant across runs.
@@ -449,6 +508,12 @@ spec:
               image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
               command: ["/bin/bash", "/scripts/deeptest.sh"]
               env:
+                # The issuer the forged-credential checks point the CLI at. It
+                # is the binary's own compiled-in default, held there by
+                # TestDeeptestAuthIssuerMatchesTheCliDefault: pointed anywhere
+                # else, the checks would pass against a server no user talks to.
+                - name: AUTH_ISSUER
+                  value: https://guardianintelligence.org/realms/guardianintelligence.org
                 - name: CLICKHOUSE_USER
                   value: cli_canary
                 - name: CLICKHOUSE_PASSWORD

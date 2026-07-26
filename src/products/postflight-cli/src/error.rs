@@ -17,11 +17,19 @@ pub enum Error {
     #[error("the sign-in service returned OAuth error \"{error}\"")]
     OAuth { error: String },
 
+    #[error(
+        "the sign-in service renewed this session and then rejected the renewed token; run `postflight auth login` again"
+    )]
+    RefreshedTokenRejected,
+
     #[error("could not read the identity token: {0}")]
     Claims(String),
 
     #[error("could not access stored credentials: {0}")]
     Storage(#[from] std::io::Error),
+
+    #[error("the stored credentials are unreadable ({0}); run `postflight auth login` again")]
+    UnreadableCredentials(String),
 
     #[error("{0}")]
     Environment(String),

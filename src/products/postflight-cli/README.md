@@ -120,3 +120,18 @@ Sign-in uses the OAuth device grant against the `guardianintelligence.org`
 realm. The CLI prints the product's own approval page
 (`/postflight/device`), never the issuer's verification URI — that page is
 where device-flow policy (phishing context, per-user opt-out) lives.
+
+`auth login` writes `credentials.json` (mode 0600) under
+`~/.config/postflight`, recording the issuer and client that minted the tokens
+so every later command asks the same server. Neither session verb trusts that
+file on its own:
+
+- **`auth status`** asks the issuer who the stored token belongs to. A rejected
+  access token is retried once behind a refresh and the rotated set is written
+  back, so a session stays signed in across the access token's lifetime without
+  anyone re-approving. Credentials the issuer has disowned are removed and
+  reported as an ended session. Failing to *reach* the issuer is an error that
+  leaves the credentials alone — unreachable is not signed out.
+- **`auth logout`** ends the session at the issuer before removing the local
+  credentials, and removes them whatever the answer: nobody who asked to sign
+  out should be left holding a usable token because the network was down.

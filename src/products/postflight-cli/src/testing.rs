@@ -1,9 +1,12 @@
-//! Minimal HTTP/1.1 server for exercising the device flow against canned
-//! responses. Every response carries `Connection: close` so the client
-//! reconnects per request and each `accept` maps to exactly one exchange.
+//! Minimal HTTP/1.1 server for exercising the OAuth calls against canned
+//! responses, plus the scratch state the credential tests need. Every response
+//! carries `Connection: close` so the client reconnects per request and each
+//! `accept` maps to exactly one exchange.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::JoinHandle;
 
 pub struct TestServer {
@@ -30,6 +33,15 @@ impl TestServer {
             url: format!("http://{addr}"),
             handle,
         }
+    }
+
+    /// An address nothing is listening on: the kernel hands out the port and
+    /// the listener is closed before anything connects to it.
+    pub fn unreachable_url() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let addr = listener.local_addr().expect("test listener addr");
+        drop(listener);
+        format!("http://{addr}")
     }
 
     /// Join the server thread and return the raw requests it captured.
@@ -64,4 +76,52 @@ pub fn json_response(status: u16, body: &str) -> String {
         "HTTP/1.1 {status} Status\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
+}
+
+pub fn no_content_response() -> String {
+    String::from("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+}
+
+pub fn agent() -> ureq::Agent {
+    ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .build(),
+    )
+}
+
+/// A directory of its own per test, removed when the test drops it, so the
+/// credential tests never observe each other's files.
+pub struct ScratchDir(PathBuf);
+
+static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+pub fn scratch_dir(name: &str) -> ScratchDir {
+    let unique = SCRATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "postflight-cli-test-{}-{unique}-{name}",
+        std::process::id()
+    ));
+    std::fs::remove_dir_all(&path).ok();
+    ScratchDir(path)
+}
+
+impl std::ops::Deref for ScratchDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for ScratchDir {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
 }

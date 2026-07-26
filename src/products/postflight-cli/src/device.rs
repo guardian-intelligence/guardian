@@ -135,15 +135,7 @@ fn unexpected_status(status: u16, response: &mut ureq::http::Response<ureq::Body
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{TestServer, json_response};
-
-    fn agent() -> ureq::Agent {
-        ureq::Agent::new_with_config(
-            ureq::Agent::config_builder()
-                .http_status_as_error(false)
-                .build(),
-        )
-    }
+    use crate::testing::{TestServer, agent, json_response};
 
     #[test]
     fn start_parses_device_authorization() {
