@@ -14,6 +14,9 @@ metadata:
     guardian.dev/product: postflight
 spec:
   schedule: "0,10,20,30,40,50 * * * *"
+  # Workers are torn down overnight (2026-07-26); un-suspend when the
+  # Postflight fleet is re-provisioned.
+  suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 1
@@ -100,6 +103,9 @@ metadata:
     guardian.dev/product: postflight
 spec:
   schedule: "2,12,22,32,42,52 * * * *"
+  # Workers are torn down overnight (2026-07-26); un-suspend when the
+  # Postflight fleet is re-provisioned.
+  suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 1
@@ -186,6 +192,9 @@ metadata:
     guardian.dev/product: postflight
 spec:
   schedule: "4,14,24,34,44,54 * * * *"
+  # Workers are torn down overnight (2026-07-26); un-suspend when the
+  # Postflight fleet is re-provisioned.
+  suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 1
@@ -272,6 +281,9 @@ metadata:
     guardian.dev/product: postflight
 spec:
   schedule: "6,16,26,36,46,56 * * * *"
+  # Workers are torn down overnight (2026-07-26); un-suspend when the
+  # Postflight fleet is re-provisioned.
+  suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 1
@@ -358,6 +370,9 @@ metadata:
     guardian.dev/product: postflight
 spec:
   schedule: "8,18,28,38,48,58 * * * *"
+  # Workers are torn down overnight (2026-07-26); un-suspend when the
+  # Postflight fleet is re-provisioned.
+  suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 1
