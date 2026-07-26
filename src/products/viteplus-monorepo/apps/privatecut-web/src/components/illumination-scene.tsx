@@ -11,8 +11,12 @@ export function IlluminationScene() {
     const renderer = createIlluminationRenderer(canvas);
     canvas.dataset.mode = renderer.mode;
     canvas.dataset.state = "idle";
+    document.documentElement.dataset.illumination = renderer.mode;
 
-    return () => renderer.dispose();
+    return () => {
+      delete document.documentElement.dataset.illumination;
+      renderer.dispose();
+    };
   }, []);
 
   return (

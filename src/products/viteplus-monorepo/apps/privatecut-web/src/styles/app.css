@@ -59,6 +59,12 @@ body {
   pointer-events: none;
 }
 
+html[data-illumination="webgl2"] .stage-light,
+html[data-illumination="webgl2"] .stage-lines,
+html[data-illumination="webgl2"] .stage-grain {
+  display: none;
+}
+
 .stage-light {
   position: fixed;
   inset: 0;
@@ -126,18 +132,6 @@ body {
   --spotlight-scale: 1;
   --spotlight-pulse: 4.8s;
   --spotlight-sweep: 6.8s;
-}
-
-.stage-particles {
-  position: fixed;
-  inset: 0;
-  z-index: -4;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  opacity: 0.65;
-  -webkit-mask-image: linear-gradient(#000 0%, #000 74%, transparent 100%);
-  mask-image: linear-gradient(#000 0%, #000 74%, transparent 100%);
 }
 
 .stage-lines {
