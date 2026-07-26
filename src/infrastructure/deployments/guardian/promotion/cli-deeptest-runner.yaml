@@ -245,11 +245,15 @@ data:
 
     blobs=1
     for target in $TARGETS; do
+      # cosign accepts --trusted-root on verify but rejects it on verify-blob
+      # unless the bundle is new-format ("--trusted-root only supported with
+      # --new-bundle-format"), and sign-blob mints these old-format. The blob
+      # leg therefore resolves the root through TUF, exactly as the installer
+      # a user runs does.
       "$COSIGN" verify-blob \
         --bundle "stage/$target/postflight.sigstore.json" \
         --certificate-identity "$BUILD_IDENTITY" \
         --certificate-oidc-issuer "$ISSUER" \
-        --trusted-root "$TRUSTED_ROOT" \
         "stage/$target/postflight" >/dev/null 2>&1 \
         || { echo "verify-blob FAILED for $target"; blobs=0; }
     done
