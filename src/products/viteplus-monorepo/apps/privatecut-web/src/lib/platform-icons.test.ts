@@ -54,7 +54,7 @@ function readRgbPngPixels(path: string) {
   expect(png.readUInt8(28)).toBe(0);
 
   const imageData: Buffer[] = [];
-  for (let offset = 8; offset < png.length; ) {
+  for (let offset = 8; offset < png.length;) {
     const length = png.readUInt32BE(offset);
     const type = png.subarray(offset + 4, offset + 8).toString("ascii");
     if (type === "IDAT") {
