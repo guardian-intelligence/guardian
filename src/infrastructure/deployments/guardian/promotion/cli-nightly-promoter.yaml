@@ -249,11 +249,15 @@ spec:
       interval: 60s
       rules:
         - alert: GuardianCliNightlyPromoterSilent
-          # The count_over_time guard keeps this from firing during bring-up,
-          # before the first scheduled run has ever pushed a sample.
+          # Guarded on the CronJob having been scheduled, not on the heartbeat
+          # having once existed: guarding on the metric's own history cannot
+          # distinguish "not deployed yet" from "deployed and has never once
+          # completed a run", and suppresses the second forever. The install
+          # canary was silenced that way for its entire life — see #1177.
           expr: >-
             absent_over_time(guardian_cli_nightly_promoter_heartbeat[26h])
-            and on() count_over_time(guardian_cli_nightly_promoter_heartbeat[8d]) > 0
+            and on() (time() - max(kube_cronjob_status_last_schedule_time{
+              namespace="guardian-products", cronjob="cli-nightly-promoter"}) > 3600)
           labels:
             severity: warning
             guardian_component: cli-release-train
