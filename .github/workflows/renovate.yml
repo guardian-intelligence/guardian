@@ -1,8 +1,8 @@
 # Scheduled Renovate run — the proposer for source-plane pins (renovate.json5
 # is the policy; this workflow is only the scheduler). Runs as the
-# guardian-renovate App, NOT GITHUB_TOKEN, for the same reason as
-# promotion-automerge: its PRs and commits must be attributed to a distinct
-# bot identity and must trigger the normal PR workflows.
+# guardian-renovate App, NOT GITHUB_TOKEN: its PRs and commits must be
+# attributed to a distinct bot identity and must trigger the normal PR
+# workflows, which GITHUB_TOKEN-attributed events do not.
 #
 # A silently dead scheduler is the Kargo-wedge failure mode: every proposal
 # it would raise freezes, and nothing downstream notices the absence.

@@ -117,16 +117,15 @@ suite still runs on main (loud-after-merge), the admission policy enforces
 digest pinning at apply time, and Flagger gates the rollout where a Canary
 exists. Third-party workload images are ordinary dependencies: Renovate
 proposes their bumps as reviewed PRs. The one Kargo lane left is the
-postflight CLI release train, whose Stage opens channel-pin PRs that the
-`promotion-automerge` workflow arms; its channel ladder, the rc/stable cut
-ceremony, and the rule that promotion never re-signs are in
+postflight CLI release train, whose Stage pushes the channel-pin commit
+straight to main through the same bypass; its channel ladder, the
+rc/stable cut ceremony, and the rule that promotion never re-signs are in
 `postflight-cli-distribution.md`.
 
 The ruleset (required checks + the bot bypass) is the enforcement's
-load-bearing half and lives outside Git — re-assert it when recreating the
-repo: `gh api repos/<owner>/<repo>/rulesets` with required check
-`build-and-test` and the guardian-promotions App as bypass actor, plus
-allow-auto-merge.
+load-bearing half and lives outside Git — it is described and applied by
+the `guardian-github` OpenTofu root, with required check `build-and-test`
+and the guardian-promotions App as bypass actor.
 
 This deliberately weakens the old invariant "pin == the digest CI builds
 from this same commit" to "pin ∈ digests published from main history".

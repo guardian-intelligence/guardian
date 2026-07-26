@@ -20,7 +20,7 @@ gh api apps/<app-slug>
 | - | -: | -: | - | - |
 | [Postflight by Guardian](https://github.com/apps/postflight-by-guardian) | `3370540` | `123769944` | Selected repositories | Postflight's GitHub control plane: receives `workflow_job` webhooks and manages the Actions and runner resources needed to execute customer CI. |
 | Postflight by Guardian (Staging) | Pending owner creation | Canary organization only | Selected repositories | Exercises installation, webhook, Actions, and runner flows without using production App credentials. |
-| [Guardian Promotions](https://github.com/apps/guardian-promotions) | `4206397` | `144138265` | Selected repositories | Gives Kargo a distinct bot identity for opening promotion PRs and arming their automerge. |
+| [Guardian Promotions](https://github.com/apps/guardian-promotions) | `4206397` | `144138265` | Selected repositories | Gives Kargo and Flux image automation a distinct bot identity for pushing promotion commits. |
 | [guardian-renovate](https://github.com/apps/guardian-renovate) | `4260384` | `145549950` | Selected repositories | Runs Renovate as a distinct bot identity so dependency commits and PRs trigger the normal validation workflows. |
 | [guardian-platform-app](https://github.com/apps/guardian-platform-app) | `4276780` | `145993975` | Selected repositories | Shared non-human identity for GitHub API automation that does not need its own installation boundary. Consumers mint short-lived installation tokens instead of using personal access tokens. |
 
@@ -49,19 +49,21 @@ in
 
 ## Guardian Promotions
 
-Kargo uses this App to authenticate Git operations and open image-promotion
-PRs. A GitHub workflow then mints a second short-lived App token to arm
-automerge. Required checks and branch protection remain the merge authority;
-the bot itself is untrusted.
+Kargo and Flux image automation use this App to push promotion commits —
+channel pins and workload pins respectively — straight to main through the
+ruleset's bypass grant. Every digest such a commit can carry has already
+passed the merge gate; the conformance suite re-checks the result
+loud-after-merge on main.
 
 - [Kargo promotion pipelines](../src/infrastructure/deployments/guardian/promotion/pipelines/)
 - [OpenBao-backed Kargo credential](../src/infrastructure/deployments/guardian/promotion/pipelines/products-secrets.yaml)
 - [Flux image automation](../src/infrastructure/deployments/guardian/imageops/) (pushes pin bumps to main as the same App identity)
-- [Promotion automerge workflow](../.github/workflows/promotion-automerge.yml)
 - [Supply-chain design](supply-chain-design.md)
 
 Required permissions are contents and pull requests write plus metadata read.
 Every other permission is disabled. The App has no webhook subscriptions.
+Pull requests write is a residue of the retired PR-based promotion path and
+can be dropped at the next owner pass over App permissions.
 
 ## guardian-renovate
 
