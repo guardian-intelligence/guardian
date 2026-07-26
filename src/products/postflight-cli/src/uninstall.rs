@@ -143,9 +143,16 @@ fn decline(binary: &Path, owner: &Owner, dir: &Path, options: &Options) -> Resul
     }
     match auth::sign_out()? {
         SignOut::NothingStored => {}
-        SignOut::Revoked | SignOut::LocalOnly { .. } => {
+        SignOut::Revoked => {
             eprintln!(
-                "postflight: removed the credentials at {}.",
+                "postflight: removed the credentials at {} and ended the session.",
+                dir.join("credentials.json").display()
+            );
+        }
+        SignOut::LocalOnly { reason } => {
+            eprintln!(
+                "postflight: removed the credentials at {}. The session could not be ended \
+                 ({reason}) and expires on its own.",
                 dir.join("credentials.json").display()
             );
         }
