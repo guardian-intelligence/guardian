@@ -37,19 +37,19 @@ locals {
   # reconciled against; losing one loses the evidence, not just the fixture.
   customer_fleet = {
     "postflight-canary" = {
-      description = "Turborepo build, cycling vercel/turborepo#13426 through Postflight"
+      description = "Private Postflight CI canary seeded from vercel/turborepo; alternates the real PR #13426 regression patch."
     }
     "simulated-customer-node" = {
-      description = "Node/pnpm customer workload"
+      description = "Synthetic Postflight customer: Node.js and Next.js CI workload"
     }
     "simulated-customer-go" = {
-      description = "Go module customer workload"
+      description = "Synthetic Postflight customer: Go CI workload"
     }
     "simulated-customer-python" = {
-      description = "Python/uv customer workload"
+      description = "Synthetic Postflight customer: Python CI workload"
     }
     "simulated-customer-gradle" = {
-      description = "Gradle/JVM customer workload"
+      description = "Synthetic Postflight customer: Gradle and JVM CI workload"
     }
   }
 }
