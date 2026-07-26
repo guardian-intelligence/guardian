@@ -282,8 +282,21 @@ data:
       fi
       [ -x "$installed" ] \
         || { detail="a refused self uninstall removed the binary anyway"; return 1; }
-      out="$(env HOME="$home" "$installed" self uninstall --yes 2>&1)" \
+      # A second copy ahead of ours on PATH, which removal must find, report,
+      # and leave alone. Anything it did not install is not its to delete, and
+      # a copy it never mentions is how someone concludes the uninstall failed
+      # — from where they are standing, `postflight` still runs.
+      mkdir -p "$home/other" || { detail="cannot create $home/other"; return 1; }
+      cp "$installed" "$home/other/postflight" \
+        || { detail="could not stage a second copy"; return 1; }
+      out="$(env HOME="$home" PATH="$home/other:$PATH" "$installed" self uninstall --yes 2>&1)" \
         || { detail="self uninstall failed: $out"; return 1; }
+      [ -x "$home/other/postflight" ] \
+        || { detail="self uninstall removed a copy it did not install"; return 1; }
+      case "$out" in
+        *"$home/other/postflight"*) ;;
+        *) detail="self uninstall did not report the copy at $home/other/postflight: $out"; return 1 ;;
+      esac
       # Every file the install created, named individually: asserting the home
       # directory is empty would pass for a run that installed nothing.
       for leftover in .local/bin/postflight .config/postflight/install-receipt.json \

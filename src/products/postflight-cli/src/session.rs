@@ -9,6 +9,8 @@ use crate::error::Error;
 #[derive(Debug, Deserialize)]
 struct OAuthErrorBody {
     error: String,
+    #[serde(default)]
+    error_description: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,7 +109,10 @@ fn oauth_error(status: u16, response: &mut ureq::http::Response<ureq::Body>) -> 
     if body.error == "invalid_grant" {
         return InvalidGrant::Yes;
     }
-    InvalidGrant::No(Error::OAuth { error: body.error })
+    InvalidGrant::No(Error::OAuth {
+        error: body.error,
+        description: body.error_description,
+    })
 }
 
 pub fn unexpected_status(status: u16, response: &mut ureq::http::Response<ureq::Body>) -> Error {

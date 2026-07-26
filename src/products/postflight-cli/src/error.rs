@@ -14,8 +14,21 @@ pub enum Error {
     )]
     Expired,
 
-    #[error("the sign-in service returned OAuth error \"{error}\"")]
-    OAuth { error: String },
+    #[error(
+        "this sign-in request is no longer valid — it may already have been completed elsewhere; run `postflight auth login` again"
+    )]
+    RequestInvalidated,
+
+    #[error(
+        "the sign-in service did not recognize this CLI (OAuth error \"{error}\"); update the postflight CLI and try again"
+    )]
+    ClientNotRecognized { error: String },
+
+    #[error("the sign-in service returned OAuth error \"{error}\"{}", .description.as_deref().map(|d| format!(": {d}")).unwrap_or_default())]
+    OAuth {
+        error: String,
+        description: Option<String>,
+    },
 
     #[error(
         "the sign-in service renewed this session and then rejected the renewed token; run `postflight auth login` again"

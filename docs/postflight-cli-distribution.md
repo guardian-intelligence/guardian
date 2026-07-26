@@ -82,21 +82,35 @@ stages the binary under a temporary name inside the destination directory
 and runs `postflight version` before giving it its final name — a download
 that cannot execute never shadows a working install.
 
-Four properties exist because the intended delivery is a pipe into `sh`:
+Five properties exist because the intended delivery is a pipe into `sh`:
 
-- **Truncation is inert.** Every statement lives inside `main`, called on the
-  last line, so a stream that dies in flight dies on an unterminated function
-  body without having run a command. `installer_test` truncates the script at
-  64-byte intervals across its whole length, under every POSIX shell on the
-  box, and asserts no prefix creates an install directory, writes to stdout,
-  or reaches the download.
+- **Truncation is inert.** Every statement lives inside `main`, and the call to
+  it on the last line is braced — `{ main "$@"; }` — so that no prefix of the
+  script is a runnable command. Bare `main "$@"` is not enough: a stream cut
+  between the name and its arguments leaves `main`, which is complete, and
+  installs whatever the default channel points at from a script the reader only
+  ever saw half of. An unterminated brace group is a syntax error, and a syntax
+  error runs nothing. `installer_test` sweeps every proper prefix — 64-byte
+  strides across the body, then byte by byte across the last 512, because the
+  tail holds the only statement that executes anything and a coarse stride
+  stepped straight over this one — under every POSIX shell on the box, and
+  asserts no prefix creates an install directory, writes to stdout, or reaches
+  the download.
+- **A re-run upgrades in place.** With no `POSTFLIGHT_INSTALL_DIR`, the
+  destination comes from the existing receipt when it names a binary that is
+  still there. Otherwise someone who installed into `/usr/local/bin` and later
+  re-ran the one-liner would get a second copy in `~/.local/bin`, a receipt
+  describing only that copy, and the original still ahead of it on `PATH` — an
+  upgrade that changes nothing they run, and reports success.
 - **`--version <x.y.z>` pins.** It resolves `postflight-cli/v<x.y.z>`
   directly, consulting no listing, so a CI job gets the same bytes on every
   run. It is mutually exclusive with `--channel`.
-- **sudo is refused.** `SUDO_USER` set with no explicit
+- **sudo is refused for a fresh install.** `SUDO_USER` set with no explicit
   `POSTFLIGHT_INSTALL_DIR` is an error: `HOME` under sudo is root's, so the
   install would land where the person who typed it will never look. Naming a
-  destination makes a shared install deliberate and is allowed.
+  destination makes a shared install deliberate; so does upgrading a recorded
+  installation, whose destination came from the receipt rather than from whose
+  home the shell happens to have.
 - **Only failures speak.** cosign narrates to stderr on success as well, so
   its output is captured and printed only when verification fails.
 
@@ -260,7 +274,14 @@ artifact that promoted would no longer be the artifact that was tested.
 
 So provenance is recorded beside the binary rather than inside it.
 `install.sh` writes `install-receipt.json` into the CLI's config directory
-(`$XDG_CONFIG_HOME/postflight`, else `~/.config/postflight`):
+(`$XDG_CONFIG_HOME/postflight`, else `~/.config/postflight`) — and under sudo,
+into the *invoking* user's config rather than root's, handed back to them with
+`chown`. A receipt in root's home describes an install nobody can see: the
+user's own CLI reads its config from their home, so `postflight version` would
+report no provenance and `self uninstall` would refuse to remove a binary this
+script did in fact install. A root-owned receipt is worse still — readable and
+never writable, so an upgrade reports success while the provenance still
+describes the release before it.
 
 ```json
 {
@@ -294,11 +315,28 @@ records no channel, because it follows none.
 
 ## Uninstall
 
-`postflight self uninstall` removes the binary, the credentials and the
-receipt, and removes the config directory if nothing else is in it. It reports
-what it removed and what it left.
+`postflight self uninstall` sweeps the whole machine, removes everything the
+installer put there — binaries, credentials, receipt, and the config directory
+if nothing else is in it — and reports every copy it was not entitled to touch
+alongside the command that removes each.
 
-Three properties are load-bearing:
+The sweep looks at `$PATH`, the homes each install method actually uses
+(`~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`,
+`/home/linuxbrew/.linuxbrew/bin`, `$CARGO_HOME/bin`), the path the receipt
+records, and the running binary — that last one because it may be in none of
+the others, having been run from a build directory. Results are deduplicated by
+**device and inode**, so a file reached by several names is one installation:
+without that, a Homebrew keg and the `bin` symlink into it read as a double
+install and the same inode gets offered for removal twice.
+
+Searching `$PATH` alone fails in both directions. A copy in a directory the
+user has since dropped from `PATH` is invisible to `which` and still installed;
+and a Homebrew copy *shadowed* by a newer one in `~/.local/bin` is exactly the
+situation worth reporting, because after a successful uninstall it is what
+`postflight` still resolves to — which is how someone concludes the uninstall
+silently failed.
+
+Four properties are load-bearing:
 
 **It ends the session, not just the file.** Removal calls the same sign-out
 path as `postflight auth logout`, which POSTs the refresh token to the
@@ -309,15 +347,52 @@ had closed. A revocation that cannot be delivered is reported and the local
 copy is removed anyway; leaving a token on disk because the network was down
 is the worse failure.
 
-**It refuses what it does not own.** With no receipt naming the running
-binary, the path is matched against the package managers — Homebrew
-(`/Cellar/`, `/homebrew/`, `/linuxbrew/`), npm (`/node_modules/`), cargo
-(`$CARGO_HOME/bin`) — and the right command is printed instead. Deleting a
-brew-managed file behind brew's back desyncs its manifest and leaves the user
-worse off than before they asked. Anything else unrecognised is declined with
-`make uninstall` and `rm` as the alternatives. In both cases the credentials
-are still removed, because they are ours whoever owns the binary, and the exit
-status is non-zero: the thing that was asked for did not fully happen.
+**It refuses what it does not own, and says so.** Each path is matched against
+the package managers first and only then against our own receipt: the two can
+disagree only when a manager has installed over a path the installer once
+owned, and in that case the file is theirs now. A manager's command is printed
+instead of a removal. Deleting a brew-managed file behind brew's back desyncs
+its manifest; deleting an npm package directory leaves a dangling symlink in
+`{prefix}/bin` that npm has no command to notice or repair. Anything
+unrecognised is declined with `make uninstall` and `rm` as the alternatives.
+The credentials are still removed whatever else is found, because they are ours
+whoever owns the binary.
+
+Deleting another manager's files would be the wrong kind of thorough, and no
+CLI that ships through more than one channel does it. But **silence is the
+failure to engineer against** — `kubectl krew upgrade` skips a Homebrew-installed
+krew with no message and exit 0, forever, while its own notice keeps
+recommending the command that will never work. The receipt's absence was a
+perfect signal and it is never read as one. So every copy found is named, with
+its owner and its removal command, on the success path as well as the refusal
+path.
+
+**One receipt, one owned installation.** The receipt is a single file per
+machine, so at most one copy can be *proved* ours; anything else the sweep
+finds is reported rather than removed. The exit status is non-zero when a
+binary would not go, or when nothing here was ours to remove: the thing that
+was asked for did not fully happen.
+
+Detection is in `src/products/postflight-cli/src/scope.rs`, shared with every
+other verb that changes an installation, and it works on the **resolved** path:
+
+| Manager | Marker | Why that marker |
+| --- | --- | --- |
+| Homebrew | a `Cellar` path component | The prefix is unusable as a signal — on an Intel Mac it is `/usr/local`, which is also where `make install` lands. Every keg is `<prefix>/Cellar/<formula>/<version>` and every linked binary resolves through one, so the keg identifies Homebrew on a relocated prefix, a Linuxbrew prefix and a keg-only formula alike. |
+| npm, pnpm, bun, Yarn | a `node_modules` component, then the manager's own home (`.bun`, `pnpm`, `.yarn`) | They all produce `node_modules` and take different removal commands. Naming npm for all four sends three of them a command that does nothing. |
+| npx | an `_npx` component | Not an installation at all. There is nothing to remove and nothing to upgrade, and npm expires the cache itself — so no command is offered. |
+| cargo | under `$CARGO_HOME/bin` | — |
+
+Resolution matters as much as the markers. `current_exe()` lies in two ways
+that both land here: macOS returns `_NSGetExecutablePath`, which `dyld(3)` says
+"may be a symbolic link and not the real file", so an Intel-Mac Homebrew
+install arrives as `/usr/local/bin/postflight` and matches nothing until it is
+canonicalised; and Linux returns `<path> (deleted)` for an unlinked binary,
+which Rust neither strips nor errors on (rust-lang/rust#69343) and which is
+exactly what replacing a binary in place leaves behind for the process that
+replaced it. Both are corrected in `scope::running_binary` before anything is
+matched. Comparing whole path components rather than substrings is what keeps
+somebody's `~/src/homebrew` checkout from reading as a Homebrew prefix.
 
 **Confirmation is required, not assumed.** Without `--yes`, a non-terminal
 stdin is refused rather than treated as consent — the same reasoning that
@@ -721,14 +796,13 @@ discovered late by a user.
   before it tries, because older npm cannot publish without a token and the
   point of this lane is that it holds none.
 
-- **Homebrew.** The `<owner>/homebrew-tap` repository has to exist — brew's
-  naming convention is what makes
-  `brew install guardian-intelligence/tap/postflight` resolve — and the
-  `guardian-promotions` App has to be installed on it with Contents read
-  **and** write. Read alone is enough to see the formula, not to PUT it.
-  The cutter mints that token by name (`repositories: homebrew-tap`), so an
-  App that is not installed there fails the token step before the release is
-  cut rather than after.
+- **Homebrew.** The `<owner>/homebrew-tap` repository and the
+  `guardian-promotions` App-installation grant on it are both declared in
+  the `guardian-github` tofu root (`runbooks/github-as-code.md`); the
+  ceremony is applying that root with a custody token, not clicking anything.
+  The cutter mints its tap token by name (`repositories: homebrew-tap`), so
+  an unapplied root fails the token step before the release is cut rather
+  than after.
 
 - **The Actions allowlist.** `rust-lang/crates-io-auth-action` is new
   third-party surface and is pinned in `.github/actions-allowlist.json`. The

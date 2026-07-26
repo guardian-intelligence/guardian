@@ -54,7 +54,7 @@ catalog:
   tailwindcss: ^4
   three: 0.185.1
   tsx: 4.23.1
-  typescript: ^5.9.3
+  typescript: ^6.0.3
   valibot: 1.4.2
   # Pinned to specific versions so the on-host Verdaccio mirror does not
   # have to keep up with @latest publish drift on every install.

@@ -2,9 +2,8 @@
 # the mutable `edge` tag; digestReflectionPolicy: Always re-resolves the
 # digest behind it on the policy's own interval, so the Setters markers
 # write tag@digest pins — the admission policy's digest-pinning requirement
-# holds. 1m matches the Kargo Warehouse poll cadence this replaces. The
-# alphabetical policy is vacuous over a single tag; the digest comes from
-# reflection.
+# holds. The alphabetical policy is vacuous over a single tag; the digest
+# comes from reflection.
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
 metadata:
@@ -200,6 +199,122 @@ metadata:
 spec:
   imageRepositoryRef:
     name: visual-harness
+  filterTags:
+    pattern: '^edge$'
+  policy:
+    alphabetical:
+      order: asc
+  digestReflectionPolicy: Always
+  interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: alert-relay
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  image: ghcr.io/guardian-intelligence/alert-relay
+  interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: alert-relay
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  imageRepositoryRef:
+    name: alert-relay
+  filterTags:
+    pattern: '^edge$'
+  policy:
+    alphabetical:
+      order: asc
+  digestReflectionPolicy: Always
+  interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: analytics-ingest
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  image: ghcr.io/guardian-intelligence/analytics-ingest
+  interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: analytics-ingest
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  imageRepositoryRef:
+    name: analytics-ingest
+  filterTags:
+    pattern: '^edge$'
+  policy:
+    alphabetical:
+      order: asc
+  digestReflectionPolicy: Always
+  interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: authorization
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  image: ghcr.io/guardian-intelligence/authorization
+  interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: authorization
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  imageRepositoryRef:
+    name: authorization
+  filterTags:
+    pattern: '^edge$'
+  policy:
+    alphabetical:
+      order: asc
+  digestReflectionPolicy: Always
+  interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: cockpit
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  image: ghcr.io/guardian-intelligence/cockpit
+  interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: cockpit
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  imageRepositoryRef:
+    name: cockpit
   filterTags:
     pattern: '^edge$'
   policy:

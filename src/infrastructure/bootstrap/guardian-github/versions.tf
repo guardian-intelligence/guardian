@@ -26,9 +26,9 @@ terraform {
 
   # No credential material is created here — this root only describes
   # repository and branch policy — so the state lives with the other
-  # non-custody roots in guardian-backups.
+  # non-custody roots in guardian-vault.
   backend "s3" {
-    bucket = "guardian-backups"
+    bucket = "guardian-vault"
     key    = "opentofu/guardian-github.tfstate"
     region = "auto"
 

@@ -5,6 +5,7 @@ mod auth;
 mod device;
 mod error;
 mod receipt;
+mod scope;
 mod session;
 #[cfg(test)]
 mod testing;

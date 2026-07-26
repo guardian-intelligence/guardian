@@ -6,6 +6,16 @@ Deep references: `docs/openbao-design.md` (OpenBao internals and trade-offs),
 `src/infrastructure/runbooks/openbao-static-seal-self-init.md` (exact
 commands).
 
+**If you are here to add, rotate, or wire up a secret, you will not touch
+custody.** That path is a Git PR plus one `bao kv put` through a
+namespace-scoped writer token — jump to "Adding a secret for a third-party
+integration". Custody is a sealed disaster-recovery artifact; the runbooks
+that open it are `cold-boot-bootstrap.md`, `openbao-static-seal-self-init.md`,
+`etcd-snapshot-restore.md`, `wiped-node-drill.md`, `cert-rotation.md`, and
+`custody.md` itself. A document outside that set telling you to restore
+custody is a bug in the document — `TestCustodyCeremonyConfinedToRecoveryRunbooks`
+fails the build for it.
+
 ## The one principle
 
 **Anyone may write a secret; reading one is gated by what it unlocks.** A
@@ -29,14 +39,19 @@ a narrow, explicit, named read grant for the agent.
    OpenBao static seal key, and the `custody.env` operator keys (provider
    and R2 state-backend credentials, plus
    `tofu_state_encryption_passphrase` — the pbkdf2 key that keeps the
-   bootstrap roots' OpenTofu state ciphertext in R2): precisely the members
-   ceremonies must read (a CA or seal-key rotation is read-modify by
-   nature; a tofu apply must decrypt its own state). An
-   encrypted restic repository replicated to R2 and pulled to offline media
-   on a cadence, whose steady state is **sealed**: it opens for disasters and
-   rotation ceremonies, every open pages, and nothing routine touches it.
-   Manifest and tooling: `src/infrastructure/cmd/custody/main.go`; lifecycle
-   and ceremonies: `src/infrastructure/runbooks/custody.md`.
+   bootstrap roots' OpenTofu state ciphertext in R2). An encrypted restic
+   repository replicated to R2 and pulled to offline media on a cadence,
+   whose steady state is **sealed**: every open pages, and it opens for
+   exactly three things — disaster recovery, a CA or seal-key rotation
+   (read-modify by nature), and a bootstrap-root `tofu apply` (which must
+   decrypt its own state). Manifest and tooling:
+   `src/infrastructure/cmd/custody/main.go`; lifecycle and ceremonies:
+   `src/infrastructure/runbooks/custody.md`.
+
+   The third opener is a defect, not a design point: it is the only one that
+   recurs in ordinary work, and it exists because tofu is applied from a
+   workstation instead of reconciled from Git. Retiring it is
+   [`docs/tofu-gitops-design.md`](tofu-gitops-design.md).
 3. **The bootstrap set** — the values bring-up machinery needs before a
    cluster exists: R2 state-backend credentials, provider keys, and the other
    inputs of `src/infrastructure/runbooks/cold-boot-bootstrap.md`. Each value

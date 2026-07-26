@@ -1,10 +1,10 @@
-# Companion to every Kargo promotion Stage: a pin-bump PR opened by the
-# guardian-promotions bot changes only the stage manifest (web.yaml,
-# keycloak.yaml, ...) — the artifact inventory is a GENERATED union of the
-# declared lock and rendered refs (see //src/infrastructure/imageset), so a
-# pin move needs no lock edit. This workflow only arms automerge; the bot is
-# untrusted either way — the required checks and branch protection decide
-# whether the PR merges.
+# Companion to the postflight CLI release train: a promotion PR opened by
+# the guardian-promotions bot changes only the channel pins
+# (release/channels.yaml, release-manifest.yaml) — the artifact inventory is
+# a GENERATED union of the declared lock and rendered refs (see
+# //src/infrastructure/imageset), so a pin move needs no lock edit. This
+# workflow only arms automerge; the bot is untrusted either way — the
+# required checks and branch protection decide whether the PR merges.
 #
 # Automerge is armed with the guardian-promotions App token, NOT
 # GITHUB_TOKEN: the eventual merge is attributed to the arming actor, and

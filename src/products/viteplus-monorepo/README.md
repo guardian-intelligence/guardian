@@ -6,9 +6,9 @@ vite-plus. `node_modules` is pinned by `pnpm-lock.yaml`.
 ## Dev loop
 
 ```bash
-pnpm install
-pnpm run dev      # guardianintelligence-web dev server (HMR)
-pnpm run ready    # pre-merge gate: lint + test + typecheck + build
+vp install
+vp dev
+vp run ready   # pre-merge gate: lint + test + typecheck + build
 ```
 
 ## Build / ship

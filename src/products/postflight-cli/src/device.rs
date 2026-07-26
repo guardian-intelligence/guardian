@@ -37,6 +37,8 @@ pub struct TokenSet {
 #[derive(Debug, Deserialize)]
 struct OAuthErrorBody {
     error: String,
+    #[serde(default)]
+    error_description: Option<String>,
 }
 
 #[derive(Debug)]
@@ -85,16 +87,34 @@ impl<'a> DeviceFlow<'a> {
         if status == 200 {
             return Ok(Poll::Ready(Box::new(response.body_mut().read_json()?)));
         }
+        // OAuth error codes only mean something on a 4xx: a 5xx is the
+        // service (or a proxy in front of it) failing, whatever the body.
+        if status >= 500 {
+            return Err(unexpected_status(status, &mut response));
+        }
         let Ok(body) = response.body_mut().read_json::<OAuthErrorBody>() else {
             return Err(unexpected_status(status, &mut response));
         };
         match body.error.as_str() {
             "authorization_pending" => Ok(Poll::Pending),
             "slow_down" => Ok(Poll::SlowDown),
-            "access_denied" => Err(Error::AccessDenied),
+            // Keycloak also answers `access_denied` (403, "Realm not enabled")
+            // for a disabled realm; only the 400 means a person pressed Deny.
+            "access_denied" if status == 400 => Err(Error::AccessDenied),
             "expired_token" => Err(Error::Expired),
-            other => Err(Error::OAuth {
-                error: other.to_owned(),
+            // The issuer forgets a device code once it has been redeemed, and
+            // a grace period after expiry: this request no longer exists.
+            "invalid_grant"
+                if body.error_description.as_deref() == Some("Device code not valid") =>
+            {
+                Err(Error::RequestInvalidated)
+            }
+            "invalid_client" | "unauthorized_client" => {
+                Err(Error::ClientNotRecognized { error: body.error })
+            }
+            _ => Err(Error::OAuth {
+                error: body.error,
+                description: body.error_description,
             }),
         }
     }
@@ -109,18 +129,42 @@ impl<'a> DeviceFlow<'a> {
     ) -> Result<TokenSet, Error> {
         let mut interval = authorization.interval.max(1);
         let mut waited: u64 = 0;
+        let mut transient_failures: u32 = 0;
         loop {
             if waited >= authorization.expires_in {
                 return Err(Error::Expired);
             }
             sleep(Duration::from_secs(interval));
             waited += interval;
-            match self.poll_once(&authorization.device_code)? {
-                Poll::Ready(tokens) => return Ok(*tokens),
-                Poll::Pending => {}
-                Poll::SlowDown => interval += 5,
+            match self.poll_once(&authorization.device_code) {
+                Ok(Poll::Ready(tokens)) => return Ok(*tokens),
+                Ok(Poll::Pending) => transient_failures = 0,
+                Ok(Poll::SlowDown) => {
+                    transient_failures = 0;
+                    interval += 5;
+                }
+                // A dropped connection or erroring issuer mid-wait is not a
+                // verdict on the sign-in: keep polling until the outage
+                // outlives the request or stays solid past the cap.
+                Err(err) if transient(&err) => {
+                    transient_failures += 1;
+                    if transient_failures >= MAX_TRANSIENT_POLL_FAILURES {
+                        return Err(err);
+                    }
+                }
+                Err(err) => return Err(err),
             }
         }
+    }
+}
+
+const MAX_TRANSIENT_POLL_FAILURES: u32 = 6;
+
+fn transient(err: &Error) -> bool {
+    match err {
+        Error::Http(_) => true,
+        Error::UnexpectedStatus { status, .. } => *status >= 500,
+        _ => false,
     }
 }
 
@@ -231,6 +275,143 @@ mod tests {
             .expect_err("denied approval should fail");
 
         assert!(matches!(err, Error::AccessDenied));
+        server.finish();
+    }
+
+    #[test]
+    fn poll_maps_expired_token() {
+        let server = TestServer::serve(vec![json_response(400, r#"{"error": "expired_token"}"#)]);
+        let agent = agent();
+        let flow = DeviceFlow::new(&agent, &server.url, "postflight-cli");
+
+        let err = flow
+            .poll_once("dev-123")
+            .expect_err("expired code should fail");
+
+        assert!(matches!(err, Error::Expired));
+        server.finish();
+    }
+
+    #[test]
+    fn poll_maps_a_forgotten_device_code() {
+        let server = TestServer::serve(vec![json_response(
+            400,
+            r#"{"error": "invalid_grant", "error_description": "Device code not valid"}"#,
+        )]);
+        let agent = agent();
+        let flow = DeviceFlow::new(&agent, &server.url, "postflight-cli");
+
+        let err = flow
+            .poll_once("dev-123")
+            .expect_err("forgotten code should fail");
+
+        assert!(matches!(err, Error::RequestInvalidated));
+        server.finish();
+    }
+
+    #[test]
+    fn poll_maps_an_unrecognized_client() {
+        let server = TestServer::serve(vec![json_response(
+            401,
+            r#"{"error": "invalid_client", "error_description": "Invalid client or Invalid client credentials"}"#,
+        )]);
+        let agent = agent();
+        let flow = DeviceFlow::new(&agent, &server.url, "postflight-cli");
+
+        let err = flow
+            .poll_once("dev-123")
+            .expect_err("unknown client should fail");
+
+        assert!(matches!(err, Error::ClientNotRecognized { .. }));
+        server.finish();
+    }
+
+    #[test]
+    fn poll_keeps_the_description_on_unmapped_errors() {
+        let server = TestServer::serve(vec![json_response(
+            400,
+            r#"{"error": "invalid_scope", "error_description": "Client no longer has requested consent from user"}"#,
+        )]);
+        let agent = agent();
+        let flow = DeviceFlow::new(&agent, &server.url, "postflight-cli");
+
+        let err = flow
+            .poll_once("dev-123")
+            .expect_err("revoked consent should fail");
+
+        assert!(err.to_string().contains("invalid_scope"));
+        assert!(
+            err.to_string()
+                .contains("Client no longer has requested consent from user")
+        );
+        server.finish();
+    }
+
+    #[test]
+    fn poll_reads_a_denied_realm_as_a_service_error_not_a_human_no() {
+        let server = TestServer::serve(vec![json_response(
+            403,
+            r#"{"error": "access_denied", "error_description": "Realm not enabled"}"#,
+        )]);
+        let agent = agent();
+        let flow = DeviceFlow::new(&agent, &server.url, "postflight-cli");
+
+        let err = flow
+            .poll_once("dev-123")
+            .expect_err("disabled realm should fail");
+
+        assert!(matches!(err, Error::OAuth { .. }));
+        server.finish();
+    }
+
+    #[test]
+    fn wait_for_approval_outlives_a_transient_outage() {
+        let server = TestServer::serve(vec![
+            json_response(502, "<html>bad gateway</html>"),
+            json_response(503, r#"{"error": "temporarily_unavailable"}"#),
+            json_response(400, r#"{"error": "authorization_pending"}"#),
+            json_response(
+                200,
+                r#"{"access_token": "at-1", "refresh_token": "rt-1", "id_token": "idt-1"}"#,
+            ),
+        ]);
+        let agent = agent();
+        let flow = DeviceFlow::new(&agent, &server.url, "postflight-cli");
+        let authorization = DeviceAuthorization {
+            device_code: "dev-123".into(),
+            user_code: "WDJB-MJHT".into(),
+            expires_in: 600,
+            interval: 5,
+        };
+
+        let tokens = flow
+            .wait_for_approval(&authorization, &mut |_| {})
+            .expect("a brief outage must not kill the wait");
+
+        assert_eq!(tokens.access_token, "at-1");
+        server.finish();
+    }
+
+    #[test]
+    fn wait_for_approval_gives_up_on_a_solid_outage() {
+        let outage = (0..MAX_TRANSIENT_POLL_FAILURES)
+            .map(|_| json_response(502, "<html>bad gateway</html>"))
+            .collect();
+        let server = TestServer::serve(outage);
+        let agent = agent();
+        let flow = DeviceFlow::new(&agent, &server.url, "postflight-cli");
+        let authorization = DeviceAuthorization {
+            device_code: "dev-123".into(),
+            user_code: "WDJB-MJHT".into(),
+            expires_in: 600,
+            interval: 5,
+        };
+
+        let err = flow
+            .wait_for_approval(&authorization, &mut |_| {})
+            .expect_err("a solid outage should eventually surface");
+
+        assert!(matches!(err, Error::UnexpectedStatus { status: 502, .. }));
         server.finish();
     }
 

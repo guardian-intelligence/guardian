@@ -24,6 +24,34 @@ type keycloakClientRepresentation struct {
 	Attributes                map[string]string `json:"attributes"`
 }
 
+// Keycloak compiles login-theme templates once and serves them from cache:
+// only a pod roll makes a bounce-theme edit take effect, and the roll is
+// driven by the hand-maintained checksum annotation on the Deployment. A
+// stale annotation ships a silently stale theme, so pin the two together
+// the way the realm reconciler's generated checksum already is.
+func TestBounceThemeChecksumRollsTheKeycloakDeployment(t *testing.T) {
+	t.Parallel()
+
+	const root = "src/infrastructure/deployments/iam/prod/"
+	raw, err := os.ReadFile(runfilePath(root + "bounce-theme.yaml"))
+	if err != nil {
+		t.Fatalf("read bounce-theme.yaml: %v", err)
+	}
+	// The annotation hashes everything after the top-level `data:` line —
+	// the same bytes `awk '/^data:/{f=1;next} f'` prints.
+	_, data, ok := strings.Cut(string(raw), "\ndata:\n")
+	if !ok {
+		t.Fatal("bounce-theme.yaml has no top-level data: block")
+	}
+	sum := sha256.Sum256([]byte(data))
+	deployment := findDoc(t, yamlDocs(t, runfilePath(root+"keycloak.yaml")), "Deployment", "keycloak")
+	checksum := stringValue(nestedValue(t, deployment,
+		"spec", "template", "metadata", "annotations", "guardian.dev/bounce-theme-checksum"))
+	if want := hex.EncodeToString(sum[:]); checksum != want {
+		t.Fatalf("keycloak.yaml bounce-theme checksum = %q, want %q; recompute after editing bounce-theme.yaml: awk '/^data:/{f=1;next} f' bounce-theme.yaml | sha256sum", checksum, want)
+	}
+}
+
 func TestCustomerIdentityRealmConformance(t *testing.T) {
 	t.Parallel()
 

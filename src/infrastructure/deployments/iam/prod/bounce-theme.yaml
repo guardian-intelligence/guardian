@@ -1,9 +1,9 @@
 # guardian-bounce: the realm login theme that keeps Keycloak invisible. The
 # overridden templates either bounce straight back to the product surface
-# (login.ftl, info.ftl, error.ftl) or render Guardian-branded (the device
-# code form). Every other template falls through parent=keycloak and renders
-# byte-identically to stock, so nothing else (web login, canary journeys)
-# changes.
+# (login.ftl, info.ftl, error.ftl, the device code form) or render
+# Guardian-branded (the device-flow consent page). Every other template
+# falls through parent=keycloak and renders byte-identically to stock, so
+# nothing else (web login, canary journeys) changes.
 #
 # Keycloak caches compiled templates: edits here must also bump the
 # guardian.dev/bounce-theme-checksum annotation in keycloak.yaml so the
@@ -75,11 +75,22 @@ data:
     <title>Postflight</title></head>
     <body><a href="https://guardianintelligence.org/postflight/device/done">Continue</a></body></html>
     <#elseif messageHeader?? && messageHeader == msg("oauth2DeviceVerificationFailedHeader")>
+    <#-- One failed header covers every terminal outcome; the body message
+         is the discriminator (locale-proof: it renders through the request's
+         own bundle). Everything else — the endpoint sends server_error for
+         login flows that die mid-way — is "failed". -->
+    <#if message?? && message.summary == msg("oauth2DeviceConsentDeniedMessage")>
+    <#assign bounce = "https://guardianintelligence.org/postflight/device?error=denied">
+    <#elseif message?? && message.summary == msg("oauth2DeviceExpiredUserCodeMessage")>
+    <#assign bounce = "https://guardianintelligence.org/postflight/device?error=expired">
+    <#else>
+    <#assign bounce = "https://guardianintelligence.org/postflight/device?error=failed">
+    </#if>
     <!DOCTYPE html>
     <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">
-    <meta http-equiv="refresh" content="0;url=https://guardianintelligence.org/postflight/device?error=expired">
+    <meta http-equiv="refresh" content="0;url=${bounce}">
     <title>Postflight</title></head>
-    <body><a href="https://guardianintelligence.org/postflight/device?error=expired">Continue</a></body></html>
+    <body><a href="${bounce}">Continue</a></body></html>
     <#else>
     <!DOCTYPE html>
     <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">
@@ -102,35 +113,66 @@ data:
   login-oauth2-device-verify-user-code.ftl: |
     <#-- Reached only when a device code was mistyped, expired, or reused:
          the product's approval page always arrives with a valid code in the
-         URL, which skips this form entirely. -->
+         URL, which skips this form entirely. The approval page is also the
+         only code-entry surface, so failures bounce back to it with the body
+         message as the discriminator (locale-proof: it renders through the
+         request's own bundle). -->
+    <#if message?? && message.summary == msg("oauth2DeviceExpiredUserCodeMessage")>
+    <#assign bounce = "https://guardianintelligence.org/postflight/device?error=expired">
+    <#elseif message?? && message.type = 'error'>
+    <#assign bounce = "https://guardianintelligence.org/postflight/device?error=invalid">
+    <#else>
+    <#assign bounce = "https://guardianintelligence.org/postflight/device">
+    </#if>
     <!DOCTYPE html>
     <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">
-    <title>Postflight — enter code</title>
+    <meta http-equiv="refresh" content="0;url=${bounce}">
+    <title>Postflight</title></head>
+    <body><a href="${bounce}">Continue</a></body></html>
+  login-oauth-grant.ftl: |
+    <#-- The device-flow consent screen (required action OAUTH_GRANT): the
+         one page that must stay Keycloak-rendered — submitting this form is
+         what marks the device code approved or denied — so it renders
+         Guardian-branded instead of bouncing. Keycloak persists the grant
+         per user and client, so returning users skip it. Must not reproduce
+         stock Keycloak DOM (#kc-*, .login-pf-page): the canary journeys
+         treat that DOM as a rendered Keycloak page and hard-fail. -->
+    <#assign clientLabel><#if client.name?has_content>${advancedMsg(client.name)}<#else>${client.clientId}</#if></#assign>
+    <!DOCTYPE html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">
+    <title>Approve sign-in — Postflight</title>
     <style>
       body { margin: 0; min-height: 100vh; display: flex; align-items: center;
         justify-content: center; font-family: system-ui, sans-serif;
         background: radial-gradient(120% 90% at 15% 0%, #2d1a6b 0%, #1b0f45 55%, #120a30 100%); }
       .card { width: min(92vw, 390px); padding: 34px; border-radius: 14px;
         background: #fcfcfd; color: #17141d; box-shadow: 0 35px 90px rgb(28 7 89 / 0.42); }
-      .error { padding: 10px 12px; border: 1px solid rgb(178 34 52 / 0.35); border-radius: 10px;
-        background: rgb(178 34 52 / 0.08); color: #8f1d2c; font-size: 14px; }
-      input { width: 100%; box-sizing: border-box; padding: 12px 14px; margin: 6px 0 16px;
-        border: 1px solid rgb(23 20 29 / 0.18); border-radius: 10px; text-align: center;
-        font-family: ui-monospace, Menlo, monospace; font-size: 22px; letter-spacing: 0.14em;
-        text-transform: uppercase; }
-      button { width: 100%; padding: 12px; border: 0; border-radius: 10px; background: #4930a8;
-        color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
-      .hint { margin-top: 16px; font-size: 13px; color: #5e5871; line-height: 1.5; }
+      .card p { color: #5e5871; line-height: 1.5; }
+      .buttons { display: flex; gap: 10px; margin-top: 20px; }
+      .buttons button { flex: 1; padding: 12px; border-radius: 10px; font-size: 15px;
+        font-weight: 600; cursor: pointer; }
+      .approve { border: 0; background: #4930a8; color: #fff; }
+      .deny { order: -1; border: 1px solid rgb(23 20 29 / 0.18); background: #fff; color: #17141d; }
+      .caution { margin-top: 16px; font-size: 13px; color: #5e5871; line-height: 1.5; }
     </style></head>
     <body><div class="card">
-      <h2>Enter your one-time code</h2>
-      <#if message?? && message.type = 'error'><p class="error">${kcSanitize(message.summary)?no_esc}</p></#if>
-      <form action="${url.oauth2DeviceVerificationAction}" method="post">
-        <input id="device-user-code" name="device_user_code" autocomplete="off"
-          spellcheck="false" autofocus dir="ltr" />
-        <button type="submit">Continue</button>
+      <h2>Approve sign-in</h2>
+      <p><strong>${kcSanitize(clientLabel)?no_esc}</strong> is asking to sign in as you.
+      It will hold your Guardian identity until you sign it out.</p>
+      <form action="${url.oauthAction}" method="post">
+        <input type="hidden" name="code" value="${oauth.code}">
+        <#-- Approve must stay first in the DOM (Deny sits left via CSS
+             order): anything that submits this form without naming a
+             button — implicit submission, a stray generic submit click —
+             submits with the first submit button, and that default must
+             never be the destructive verb. Stock Keycloak orders accept
+             first for the same reason. -->
+        <div class="buttons">
+          <button id="postflight-grant-approve" class="approve" type="submit" name="accept" value="1">Approve</button>
+          <button id="postflight-grant-deny" class="deny" type="submit" name="cancel" value="1">Deny</button>
+        </div>
       </form>
-      <p class="hint">The code is shown by the terminal running the postflight CLI. If it
-      expired, run <code>postflight auth login</code> again, or start over at
-      <a href="https://guardianintelligence.org/postflight/device">guardianintelligence.org/postflight/device</a>.</p>
+      <p class="caution">Only approve a sign-in you started yourself moments ago. If someone
+      sent you here or asked you to approve this, deny it — approving would give their
+      terminal access to your account.</p>
     </div></body></html>

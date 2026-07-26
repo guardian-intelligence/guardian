@@ -1,3 +1,9 @@
+filegroup(
+    name = "markdown",
+    srcs = glob(["**/*.md"]),
+    visibility = ["//src/infrastructure/tests:__pkg__"],
+)
+
 exports_files([
     "TRIBAL_KNOWLEDGE.md",
     "github-apps.md",

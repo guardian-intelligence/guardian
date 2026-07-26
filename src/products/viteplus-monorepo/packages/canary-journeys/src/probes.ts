@@ -16,6 +16,7 @@ export interface ProbeSelectors {
   totpInput: string;
   grantEnabled: string;
   grantBlocked: string;
+  deviceGrant: string;
   keycloakPage: string;
   collision: string;
   errors: string;
@@ -28,6 +29,10 @@ export const PROBE_SELECTORS: ProbeSelectors = {
   grantEnabled: SELECTORS.grantEnabled,
   grantBlocked:
     "button[name=authorize][value='1'][disabled], input[name=authorize][value='1'][disabled], button[value=authorize][disabled]",
+  // The Guardian-branded device-flow consent page (bounce theme): rendered
+  // only for a user whose consent is not yet persisted, so most runs never
+  // see it — but a consent reset must not strand the journey.
+  deviceGrant: "#postflight-grant-approve",
   keycloakPage:
     "#kc-page-title, #kc-header, .login-pf-page, #kc-error-message, form#kc-idp-review-profile-form",
   collision: "#linkAccount, #instruction1",
@@ -50,6 +55,7 @@ export function oauthPageProbe(sel: ProbeSelectors): OAuthPageState {
     hasTOTP: Boolean(document.querySelector(sel.totpInput)),
     canGrant: Boolean(document.querySelector(sel.grantEnabled)),
     grantBlocked: Boolean(document.querySelector(sel.grantBlocked)),
+    hasDeviceGrant: Boolean(document.querySelector(sel.deviceGrant)),
     hasKeycloakPage: Boolean(document.querySelector(sel.keycloakPage)),
     hasCollision: Boolean(document.querySelector(sel.collision)),
     hasError: Array.from(document.querySelectorAll(sel.errors)).some(visible),
