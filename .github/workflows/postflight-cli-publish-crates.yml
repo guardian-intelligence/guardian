@@ -42,14 +42,24 @@ jobs:
           channel="$(grep -o 'channel = "[0-9][0-9.]*"' rust-toolchain.toml | grep -o '[0-9][0-9.]*')"
           rustup toolchain install "$channel" --profile minimal --no-self-update
 
-      - name: Assert the manifest version matches the release
+      - name: Assert the crate is publishable and matches the release
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           version="${TAG#postflight-cli/v}"
-          manifest="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          meta="$(cargo metadata --no-deps --format-version 1)"
+          manifest="$(jq -r '.packages[0].version' <<<"$meta")"
           if [[ "$manifest" != "$version" ]]; then
             echo "release $TAG carries crate version $manifest — the version bump never landed" >&2
+            exit 1
+          fi
+          # publish = false is the standing guard against publishing before the
+          # crates.io name is claimed; cargo's own refusal names neither the key
+          # nor the ceremony, so it is read here instead.
+          if [[ "$(jq -r '.packages[0].publish' <<<"$meta")" != "null" ]]; then
+            echo "Cargo.toml still carries publish = false: claim the crates.io name and" >&2
+            echo "register the trusted publisher, then drop the key. See" >&2
+            echo "docs/postflight-cli-distribution.md, ceremonies." >&2
             exit 1
           fi
 
