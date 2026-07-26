@@ -97,6 +97,40 @@ for page in {1..10}; do
 done
 write_stable_page "$deep/page-11.json" "3.0.0"
 
+expect_rejected() { # <shell> <description> <args...>
+  local shell="$1" what="$2"
+  shift 2
+  if run "$shell" "$mixed" "$@"; then
+    fail "$shell: $what was accepted, want a failure"
+  fi
+}
+
+# The hazard `curl | sh` is actually criticised for: the shell executes what it
+# has parsed, so a connection that dies mid-stream runs half a script. Every
+# truncation of this one must reach EOF inside main's body and die there,
+# having executed nothing — no install directory, no output.
+assert_truncation_inert() { # <shell>
+  local shell="$1" size offset home
+  size="$(wc -c < "$installer")"
+  for ((offset = 1; offset < size; offset += 64)); do
+    head -c "$offset" "$installer" > "$tmp/truncated.sh"
+    home="$tmp/truncation-home"
+    rm -rf "$home"
+    mkdir -p "$home"
+    env -u POSTFLIGHT_INSTALL_DIR -u SUDO_USER \
+      POSTFLIGHT_RELEASES_DIR="$mixed" HOME="$home" \
+      "$shell" "$tmp/truncated.sh" --channel nightly \
+      > "$tmp/out" 2> "$tmp/err" || true
+    # A prefix ending on a definition boundary exits cleanly; what none of them
+    # may do is act. Reaching the "installing" line means the download and the
+    # write to the install directory were next.
+    if [[ -e "$home/.local/bin" ]] || [[ -s "$tmp/out" ]] || grep -q installing "$tmp/err"; then
+      fail "$shell: the installer truncated to $offset bytes took effect"
+      return
+    fi
+  done
+}
+
 for shell in "${shells[@]}"; do
   expect_tag "$shell" "$mixed" nightly "postflight-cli/nightly-20260724"
   expect_tag "$shell" "$mixed" rc "postflight-cli/v0.3.0-rc.1"
@@ -112,6 +146,35 @@ for shell in "${shells[@]}"; do
   expect_tag "$shell" "$paged" nightly "postflight-cli/nightly-20260101"
 
   expect_missing "$shell" "$deep" stable "nightly" "nightly"
+
+  # A pinned version names its release outright: no listing is consulted, so
+  # the answer cannot drift with what has been published since.
+  if run "$shell" "$nightly_only" --version 1.2.3 --print-tag; then
+    [[ "$(cat "$tmp/out")" == "postflight-cli/v1.2.3" ]] \
+      || fail "$shell: --version 1.2.3 resolved to '$(cat "$tmp/out")'"
+  else
+    fail "$shell: --version 1.2.3 exited nonzero: $(cat "$tmp/err")"
+  fi
+  expect_rejected "$shell" "--version alongside --channel" \
+    --version 1.2.3 --channel nightly --print-tag
+  expect_rejected "$shell" "--version carrying its own v prefix" \
+    --version v1.2.3 --print-tag
+
+  # sudo would install into root's home rather than the caller's, where they
+  # would never find it.
+  if env -u POSTFLIGHT_INSTALL_DIR POSTFLIGHT_RELEASES_DIR="$mixed" \
+    SUDO_USER=someone HOME="$tmp/sudo-home" \
+    "$shell" "$installer" --channel nightly --print-tag > "$tmp/out" 2> "$tmp/err"; then
+    fail "$shell: an install under sudo was accepted"
+  fi
+  # ...unless a destination was named, which makes a shared install deliberate.
+  if ! env POSTFLIGHT_RELEASES_DIR="$mixed" POSTFLIGHT_INSTALL_DIR="$tmp/bin" \
+    SUDO_USER=someone HOME="$tmp/sudo-home" \
+    "$shell" "$installer" --channel nightly --print-tag > "$tmp/out" 2> "$tmp/err"; then
+    fail "$shell: sudo with an explicit install dir was refused: $(cat "$tmp/err")"
+  fi
+
+  assert_truncation_inert "$shell"
 done
 
 if [[ "$failures" -gt 0 ]]; then

@@ -193,6 +193,17 @@ data:
           "$dir/postflight-$target" >/dev/null 2>&1 \
           || { detail="cosign verify-blob failed for postflight-$target in $tag"; return 1; }
       done
+      # A release that hands out the recipe for verifying its installer has to
+      # honour it.
+      if jq -r .body <<<"$release" | grep -qF install.sh.sigstore.json; then
+        [ -f "$dir/install.sh" ] \
+          || { detail="release $tag offers a signed install.sh but carries none"; return 1; }
+        "$COSIGN" verify-blob --bundle "$dir/install.sh.sigstore.json" \
+          --certificate-identity "$RELEASE_IDENTITY" \
+          --certificate-oidc-issuer "$ISSUER" \
+          "$dir/install.sh" >/dev/null 2>&1 \
+          || { detail="cosign verify-blob failed for install.sh in $tag"; return 1; }
+      fi
       # The targets this pod cannot execute are asserted structurally: a
       # cross-compile that silently produced the wrong object format still
       # passes its checksum and its signature.
@@ -420,6 +431,8 @@ spec:
                   value: x86_64-unknown-linux-musl
                 - name: BUILD_IDENTITY
                   value: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main
+                - name: RELEASE_IDENTITY
+                  value: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-release.yml@refs/heads/main
                 - name: ISSUER
                   value: https://token.actions.githubusercontent.com
                 - name: CH_USER
