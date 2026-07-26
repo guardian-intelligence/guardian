@@ -128,8 +128,10 @@ data:
                    ok: ($ok == 1), tag: $tag, digest: $digest,
                    detail: $detail} | tojson)}')"
       printf '%s\n%s\n' "$INSERT_EVENT" "$row" \
-        | curl -fsS --max-time 20 -u "$CH_USER:$CH_PASSWORD" "$CLICKHOUSE" \
-            --data-binary @- >/dev/null \
+        | curl -fsS --max-time 20 \
+            -H "X-ClickHouse-User: $CH_USER" \
+            -H "X-ClickHouse-Key: ${CH_PASSWORD:-}" \
+            --data-binary @- "$CLICKHOUSE" >/dev/null \
         || { echo "clickhouse insert failed for $channel/$method"; events_failed=1; }
     }
 
@@ -328,11 +330,13 @@ data:
     echo "install matrix: $cells cells, $failures failing"
     # A failing cell is reported, not thrown: the VMRule pages on two
     # consecutive failures of the same cell, and a Job exit code here would
-    # page on the first transient public-internet hiccup instead. The run
-    # only fails when the sweep itself was hollow or its records did not
-    # land.
+    # page on the first transient public-internet hiccup instead. Lost event
+    # history is likewise a metric, not an exit code — the matrix result is
+    # already in vminsert by this point, and failing the Job over ClickHouse
+    # would bury a green sweep under KubeJobFailed. The run only fails when
+    # the sweep itself was hollow.
+    push "guardian_cli_install_canary_event_write $((1 - events_failed))"
     test "$cells" -gt 0 || { echo "the matrix evaluated nothing"; exit 1; }
-    test "$events_failed" -eq 0
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -425,6 +429,10 @@ spec:
                     secretKeyRef:
                       name: cli-release-canary
                       key: clickhouse_password
+                      # Event history is the credential's only consumer. A
+                      # required key would keep the whole matrix from starting
+                      # over a secret the sweep never needs.
+                      optional: true
               securityContext:
                 allowPrivilegeEscalation: false
                 runAsNonRoot: true
@@ -593,3 +601,18 @@ spec:
               manifest mount, the GitHub listing) or not running at all.
               Check the newest cli-install-canary Job logs in
               guardian-analytics.
+
+        - alert: GuardianCliInstallCanaryEventWriteFailing
+          expr: last_over_time(guardian_cli_install_canary_event_write[13h]) == 0
+          labels:
+            severity: warning
+            guardian_component: cli-release-train
+          annotations:
+            summary: "the postflight CLI install matrix cannot record to ClickHouse"
+            description: >-
+              The install matrix is running and its verdicts are in vminsert,
+              but its rows are being rejected: install history is accruing
+              nothing queryable. Usually the cli_canary credential — absent
+              before its first OpenBao relay, stale after a DR rebuild that
+              regenerated the chart's users. See
+              runbooks/analytics-clickhouse.md.

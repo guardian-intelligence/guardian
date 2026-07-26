@@ -143,7 +143,7 @@ data:
             duration_ms: $duration, props: $props}')" \
         | curl -fsS --retry 3 --max-time 15 \
             -H "X-ClickHouse-User: $CLICKHOUSE_USER" \
-            -H "X-ClickHouse-Key: $CLICKHOUSE_PASSWORD" \
+            -H "X-ClickHouse-Key: ${CLICKHOUSE_PASSWORD:-}" \
             --data-binary @- "$CLICKHOUSE" >/dev/null \
         || { echo "failed to record $1 in ClickHouse"; events_written=0; }
       push "guardian_cli_deeptest_event_write $events_written"
@@ -449,6 +449,10 @@ spec:
                     secretKeyRef:
                       name: cli-release-canary
                       key: clickhouse_password
+                      # Event history is the credential's only consumer. A
+                      # required key would keep the verdict this whole job
+                      # exists to publish from ever being produced.
+                      optional: true
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities:
