@@ -123,7 +123,16 @@ uninstall_installation() {
     uninstall_receipt="$uninstall_dir/install-receipt.json"
     if [ -f "$uninstall_receipt" ]; then
       recorded="$(receipt_binary_path "$uninstall_receipt")"
-      [ -n "$recorded" ] && uninstall_bin="$recorded"
+      # A receipt is a file in the user's config directory, and removal reads
+      # a path out of it. Requiring the name keeps a corrupted or edited one
+      # from aiming `rm` at something that was never ours.
+      case "$recorded" in
+        */postflight) uninstall_bin="$recorded" ;;
+        "") ;;
+        *)
+          log "the install receipt names '$recorded', which is not a postflight binary — falling back to $uninstall_bin"
+          ;;
+      esac
     fi
   fi
 

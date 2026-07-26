@@ -185,6 +185,17 @@ assert_uninstall_paths() { # <shell>
     fail "$shell: --uninstall did not delegate: $(cat "$tmp/err")"
   fi
 
+  # Removal reads a path out of a file in the user's config directory. A
+  # receipt naming something that is not a postflight binary must not aim
+  # `rm` at it.
+  rm -rf "$home"
+  mkdir -p "$home/.local/bin"
+  echo "not ours" > "$home/bystander"
+  write_receipt "$home" "$home/bystander"
+  run_uninstall "$shell" "$home" || true
+  [[ -f "$home/bystander" ]] \
+    || fail "$shell: --uninstall removed a file the receipt named that was not a postflight binary"
+
   # Nothing installed: say so rather than exit clean on having done nothing.
   rm -rf "$home"
   mkdir -p "$home"
