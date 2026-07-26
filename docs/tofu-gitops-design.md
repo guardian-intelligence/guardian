@@ -83,16 +83,38 @@ cluster itself depends on.
 - `guardian-mgmt-dns` — moves, but **never** auto-approved: it is the one
   root that can sever the cluster's own reachability.
 
-**Custody tier — a design point, not debt:**
+**Operator tier — applied from a workstation, permanently:**
 
 - `guardian-mgmt-cloudflare-tokens` — the minter token is Account API Tokens
   Write, root-equivalent, and doctrine is that it never exists in-cluster.
-- `guardian-mgmt` — provisions the metal the controller runs on. Reconciling
-  the substrate from inside the substrate is the circularity DR exists to
-  break.
+- `guardian-mgmt` — provisions the metal the controller runs on. At cold boot
+  you need the Latitude token to build the substrate that would run the
+  controller that holds the Latitude token; reconciling the substrate from
+  inside the substrate is the circularity DR exists to break.
 
-These two keep the ceremony permanently. Custody still opens for them — just
-never for routine work, and never on a schedule set by ordinary PRs.
+**Where an apply runs and where its credential lives are separate
+questions.** These two roots are applied by an operator forever. That does
+not make them custody material, and treating the two axes as one is what put
+`custody.env` in the bundle in the first place.
+
+Their credentials belong in **tier 3, the bootstrap set** (`secrets.md`):
+one age-encrypted object per value in R2, encrypted to the repo-committed
+recipient key. Writing or rotating one is a blind write — encrypt to a public
+key and upload, no passphrase and no bundle open. Decryption happens at
+disaster recovery and drills, using the age identity from the operator vault,
+which is precisely why the minter still never exists in-cluster: the cluster
+can read the ciphertext and decrypt nothing.
+
+So no tofu root needs the custody bundle. The GitOps tier reads OpenBao, the
+operator tier reads the bootstrap set, and `custody.env` leaves the bundle
+entirely — which finishes the custody shrink to its irreducible members
+(Talos genesis, `talm.key`, `talosconfig`, the LINSTOR master passphrase, and
+the OpenBao seal metadata).
+
+**Prerequisite: tier 3 is documented but not built.** There is no age or
+bootstrap-set tooling in `src/infrastructure/cmd/`, and `custody.env` is
+still the only home for these values. Building it is a precondition for the
+operator tier's half of this design, not a config change.
 
 ## Credentials and state
 
@@ -103,17 +125,19 @@ correct independent of this design: all of them are reissuable from their
 owning console, and `secrets.md` already classes reissuable third-party
 credentials as OpenBao material.
 
-State encryption takes **two passphrases, not one**:
+State encryption takes **two passphrases, not one**, and this falls out of
+the tier boundary rather than a general rule about duplication:
 
 - GitOps tier — a new passphrase generated into OpenBao, recovered with the
-  rest of the estate by raft snapshot restore.
-- Custody tier — keeps `tofu_state_encryption_passphrase`.
+  rest of the estate by raft snapshot restore. It cannot live in the
+  bootstrap set, because reading that requires the operator age identity,
+  which decrypts root-equivalent tokens; the cluster must never hold it.
+- Operator tier — a bootstrap-set object. It cannot live in OpenBao, because
+  at cold boot there is no cluster to serve it.
 
-Migrating a root is a one-time rekey: state pull under the old passphrase,
-push under the new. Sharing a single passphrase across both tiers was
-rejected because a secret duplicated into a lower tier inherits the weaker
-tier's exposure, and the entire point is that the GitOps tier's key may live
-somewhere the cluster can read.
+Neither passphrase can be moved to the other's home, so one shared passphrase
+is not available even in principle. Migrating a root is a one-time rekey:
+state pull under the old passphrase, push under the new.
 
 ## Migration
 
@@ -124,12 +148,21 @@ somewhere the cluster can read.
 2. Rekey and migrate `guardian-stripe-sandbox` and
    `guardian-mgmt-edge-policy`.
 3. `guardian-mgmt-dns`, manual approval only.
-4. Delete the workstation path for migrated roots: drop their `TF_ENCRYPTION`
-   references, shrink `custody.env`, and narrow the cold-boot runbook's
-   "OpenTofu state encryption" section to the custody-tier roots.
+4. Build the bootstrap set (tier 3), and move the operator tier's provider
+   tokens, R2 backend keypair, and state passphrase into it. Independent of
+   the controller — it can run in parallel with steps 0–3.
+5. Delete the workstation path for migrated roots: drop their `TF_ENCRYPTION`
+   references, empty `custody.env` out of the bundle manifest, and narrow the
+   cold-boot runbook's "OpenTofu state encryption" section to the operator
+   tier reading its passphrase from the bootstrap set.
 
-Step 4 is the deliverable. Until it lands, this has added a system without
-removing one.
+Steps 4 and 5 are the deliverable. Until they land this has added a system
+without removing one, and custody still opens for ordinary work.
+
+While `custody.env` is being emptied, the bundle's three optional reissuable
+GitHub App PEMs (`keys/*.private-key.pem`) belong in OpenBao by the same
+argument that moved them out of the provisioning skills. They are not part of
+this design; they are the obvious neighbouring cleanup.
 
 ## Risks
 
