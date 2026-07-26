@@ -9,4 +9,4 @@
 # src/infrastructure/deployments/guardian/system/release-manifest.yaml.
 channels:
   nightly:
-    image: ghcr.io/guardian-intelligence/postflight-cli@sha256:69b7beae2cd06a4aaae62d629e15be5d6e43a6d1a701b790e1ca3e80c13d4631
+    image: ghcr.io/guardian-intelligence/postflight-cli@sha256:73e2d835bc9196f103d1c5a58cf06d6d8007ea6ab5f7d23d838f567fda860b46
