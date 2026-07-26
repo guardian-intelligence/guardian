@@ -50,6 +50,15 @@ body {
   isolation: isolate;
 }
 
+.illumination-scene {
+  position: fixed;
+  inset: 0;
+  z-index: -6;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
 .stage-light {
   position: fixed;
   inset: 0;
