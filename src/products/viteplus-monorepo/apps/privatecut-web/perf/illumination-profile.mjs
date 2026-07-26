@@ -175,6 +175,16 @@ for (let attempt = 0; attempt < attempts; attempt += 1) {
   pointerRuns.push(await sampleFrames(page, "pointer"));
 }
 
+const settledFrameStart = await page
+  .locator(".illumination-scene")
+  .evaluate((element) => Number(element.dataset.frameCount ?? "0"))
+  .catch(() => null);
+await page.waitForTimeout(1_000);
+const settledFrameEnd = await page
+  .locator(".illumination-scene")
+  .evaluate((element) => Number(element.dataset.frameCount ?? "0"))
+  .catch(() => null);
+
 const field = page.locator(".link-input__field");
 await field.click();
 await field.fill("https://x.com/privatecut-performance-probe");
@@ -232,6 +242,9 @@ const pageMetrics = await page.evaluate(() => {
           ? Math.max(...profile.longAnimationFrames.map((entry) => entry.duration))
           : 0,
     },
+    slowestInteractions: [...profile.events]
+      .sort((left, right) => right.duration - left.duration)
+      .slice(0, 5),
     navigation: navigation
       ? {
           domContentLoaded: navigation.domContentLoadedEventEnd,
@@ -275,6 +288,10 @@ const report = {
     idle: summarizeRuns(idleRuns),
     page: pageMetrics,
     pointer: summarizeRuns(pointerRuns),
+    settledFrameDelta:
+      settledFrameStart === null || settledFrameEnd === null
+        ? null
+        : settledFrameEnd - settledFrameStart,
     startupCdp: {
       taskMs: round(
         ((afterNavigation.TaskDuration ?? 0) - (beforeNavigation.TaskDuration ?? 0)) * 1_000,
@@ -306,7 +323,7 @@ await browser.close();
 
 const failures = [];
 if (shouldGate) {
-  const { page: measuredPage, pointer } = report.axes;
+  const { page: measuredPage, pointer, settledFrameDelta } = report.axes;
   if (pointer.p95Ms > p95BudgetMs) {
     failures.push(`pointer p95 ${pointer.p95Ms}ms > ${round(p95BudgetMs)}ms`);
   }
@@ -325,6 +342,9 @@ if (shouldGate) {
   }
   if (measuredPage.illumination && measuredPage.illumination.state !== "idle") {
     failures.push(`illumination did not settle: ${measuredPage.illumination.state}`);
+  }
+  if (settledFrameDelta !== null && settledFrameDelta !== 0) {
+    failures.push(`illumination rendered ${settledFrameDelta} idle frames`);
   }
 }
 

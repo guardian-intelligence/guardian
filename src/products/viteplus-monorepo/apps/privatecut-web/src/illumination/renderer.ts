@@ -4,6 +4,7 @@ import {
   toWebGLScissor,
   unionRectangles,
 } from "./geometry";
+import { WakeScheduler } from "./scheduler";
 
 export type IlluminationMode = "css" | "webgl2";
 
@@ -185,18 +186,21 @@ function compileShader(
 
   context.shaderSource(shader, source);
   context.compileShader(shader);
-  if (!context.getShaderParameter(shader, context.COMPILE_STATUS)) {
-    const message = context.getShaderInfoLog(shader) ?? "Unknown shader compilation error";
-    context.deleteShader(shader);
-    throw new Error(message);
-  }
   return shader;
 }
 
-function createProgram(
+type ParallelShaderCompile = {
+  readonly COMPLETION_STATUS_KHR: number;
+};
+
+function nextAnimationFrame() {
+  return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+}
+
+async function createProgram(
   context: WebGL2RenderingContext,
   fragmentShaderSource: string,
-): WebGLProgram {
+): Promise<WebGLProgram> {
   const vertexShader = compileShader(context, context.VERTEX_SHADER, vertexShaderSource);
   const fragmentShader = compileShader(context, context.FRAGMENT_SHADER, fragmentShaderSource);
   const program = context.createProgram();
@@ -205,14 +209,37 @@ function createProgram(
   context.attachShader(program, vertexShader);
   context.attachShader(program, fragmentShader);
   context.linkProgram(program);
-  context.deleteShader(vertexShader);
-  context.deleteShader(fragmentShader);
+
+  const parallelCompile = context.getExtension(
+    "KHR_parallel_shader_compile",
+  ) as ParallelShaderCompile | null;
+  if (parallelCompile) {
+    while (!context.getProgramParameter(program, parallelCompile.COMPLETION_STATUS_KHR)) {
+      await nextAnimationFrame();
+    }
+  }
+
+  for (const shader of [vertexShader, fragmentShader]) {
+    if (!context.getShaderParameter(shader, context.COMPILE_STATUS)) {
+      const message = context.getShaderInfoLog(shader) ?? "Unknown shader compilation error";
+      context.deleteProgram(program);
+      context.deleteShader(vertexShader);
+      context.deleteShader(fragmentShader);
+      throw new Error(message);
+    }
+  }
 
   if (!context.getProgramParameter(program, context.LINK_STATUS)) {
     const message = context.getProgramInfoLog(program) ?? "Unknown shader link error";
     context.deleteProgram(program);
+    context.deleteShader(vertexShader);
+    context.deleteShader(fragmentShader);
     throw new Error(message);
   }
+  context.detachShader(program, vertexShader);
+  context.detachShader(program, fragmentShader);
+  context.deleteShader(vertexShader);
+  context.deleteShader(fragmentShader);
   return program;
 }
 
@@ -234,20 +261,31 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
   readonly #staticProgram: WebGLProgram;
   readonly #framebuffer: WebGLFramebuffer;
   readonly #staticTexture: WebGLTexture;
+  readonly #mutationObserver: MutationObserver;
+  readonly #reducedMotion: MediaQueryList;
   readonly #resizeObserver: ResizeObserver;
+  readonly #scheduler: WakeScheduler;
+  readonly #sourceResizeObserver: ResizeObserver;
   #frameCount = 0;
   #height = 1;
+  #pendingFullDraw = false;
+  #pendingRectangle: Rectangle | null = null;
   #pixelRatio = 1;
   #pointer: Light | null = null;
-  #pointerFrame = 0;
+  #sourceElements: HTMLElement[] = [];
   #sources: Light[] = [];
   #width = 1;
 
-  constructor(canvas: HTMLCanvasElement, context: WebGL2RenderingContext) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    context: WebGL2RenderingContext,
+    dynamicProgram: WebGLProgram,
+    staticProgram: WebGLProgram,
+  ) {
     this.#canvas = canvas;
     this.#context = context;
-    this.#dynamicProgram = createProgram(context, dynamicFragmentShaderSource);
-    this.#staticProgram = createProgram(context, staticFragmentShaderSource);
+    this.#dynamicProgram = dynamicProgram;
+    this.#staticProgram = staticProgram;
 
     const framebuffer = context.createFramebuffer();
     const staticTexture = context.createTexture();
@@ -259,16 +297,31 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
     context.disable(context.DEPTH_TEST);
     context.disable(context.STENCIL_TEST);
 
+    this.#reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    this.#scheduler = new WakeScheduler(
+      () => this.#drawPending(),
+      (state) => {
+        this.#canvas.dataset.state = state;
+      },
+    );
     this.#resizeObserver = new ResizeObserver(() => this.#resize());
+    this.#sourceResizeObserver = new ResizeObserver(() => this.#queueSourceSync());
+    this.#mutationObserver = new MutationObserver(() => this.#refreshSourceElements());
     this.#resizeObserver.observe(canvas);
+    this.#mutationObserver.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("pointermove", this.#onPointerMove, { passive: true });
+    window.addEventListener("scroll", this.#onLayoutChange, { passive: true });
+    document.addEventListener("visibilitychange", this.#onVisibilityChange);
     document.documentElement.addEventListener("pointerleave", this.#onPointerLeave, {
       passive: true,
     });
+    this.#reducedMotion.addEventListener("change", this.#onReducedMotionChange);
+    this.#refreshSourceElements(false);
     this.#resize();
   }
 
   readonly #onPointerMove = (event: PointerEvent) => {
+    if (this.#reducedMotion.matches || document.visibilityState === "hidden") return;
     const previous = this.#pointer;
     this.#pointer = {
       ...pointerLightStyle,
@@ -285,33 +338,77 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
       this.#width,
       this.#height,
     );
-    this.#schedulePointerDraw(unionRectangles(previousRectangle, nextRectangle));
+    this.#queueRectangle(unionRectangles(previousRectangle, nextRectangle));
+  };
+
+  readonly #onLayoutChange = () => this.#queueSourceSync();
+
+  readonly #onReducedMotionChange = () => {
+    const previous = this.#pointer;
+    this.#pointer = null;
+    if (previous) {
+      this.#queueRectangle(
+        rectangleAround(previous.x, previous.y, previous.radius, this.#width, this.#height),
+      );
+    }
+  };
+
+  readonly #onVisibilityChange = () => {
+    if (document.visibilityState === "hidden") {
+      this.#scheduler.suspend();
+      return;
+    }
+    this.#scheduler.resume();
+    this.#queueFullDraw();
   };
 
   readonly #onPointerLeave = () => {
     const previous = this.#pointer;
     this.#pointer = null;
     if (!previous) return;
-    this.#schedulePointerDraw(
+    this.#queueRectangle(
       rectangleAround(previous.x, previous.y, previous.radius, this.#width, this.#height),
     );
   };
 
-  #schedulePointerDraw(rectangle: Rectangle | null) {
+  #queueRectangle(rectangle: Rectangle | null) {
     if (!rectangle) return;
     this.#pendingRectangle = unionRectangles(this.#pendingRectangle, rectangle);
-    if (this.#pointerFrame !== 0) return;
-    this.#canvas.dataset.state = "scheduled";
-    this.#pointerFrame = window.requestAnimationFrame(() => {
-      this.#pointerFrame = 0;
+    this.#scheduler.wake();
+  }
+
+  #queueFullDraw() {
+    this.#pendingFullDraw = true;
+    this.#scheduler.wake();
+  }
+
+  #queueSourceSync() {
+    this.#syncSources();
+    this.#queueFullDraw();
+  }
+
+  #refreshSourceElements(queueDraw = true) {
+    this.#sourceElements = [
+      ...document.querySelectorAll<HTMLElement>("[data-illumination-source]"),
+    ];
+    this.#sourceResizeObserver.disconnect();
+    this.#sourceElements.forEach((element) => this.#sourceResizeObserver.observe(element));
+    this.#syncSources();
+    if (queueDraw) this.#queueFullDraw();
+  }
+
+  #drawPending() {
+    if (this.#pendingFullDraw) {
+      this.#pendingFullDraw = false;
+      this.#pendingRectangle = null;
+      this.#drawToScreen();
+    } else {
       const pendingRectangle = this.#pendingRectangle;
       this.#pendingRectangle = null;
       if (pendingRectangle) this.#drawToScreen(pendingRectangle);
-      this.#canvas.dataset.state = "idle";
-    });
+    }
+    return this.#pendingFullDraw || this.#pendingRectangle !== null;
   }
-
-  #pendingRectangle: Rectangle | null = null;
 
   #resize() {
     const { height, width } = this.#canvas.getBoundingClientRect();
@@ -376,7 +473,7 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
   }
 
   #syncSources() {
-    this.#sources = [...document.querySelectorAll<HTMLElement>("[data-illumination-source]")]
+    this.#sources = this.#sourceElements
       .map((element): Light | null => {
         const name = element.dataset.illuminationSource ?? "";
         const style = sourceLightStyles[name];
@@ -439,10 +536,15 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
   }
 
   dispose() {
-    window.cancelAnimationFrame(this.#pointerFrame);
+    this.#scheduler.dispose();
     window.removeEventListener("pointermove", this.#onPointerMove);
+    window.removeEventListener("scroll", this.#onLayoutChange);
+    document.removeEventListener("visibilitychange", this.#onVisibilityChange);
     document.documentElement.removeEventListener("pointerleave", this.#onPointerLeave);
+    this.#reducedMotion.removeEventListener("change", this.#onReducedMotionChange);
+    this.#mutationObserver.disconnect();
     this.#resizeObserver.disconnect();
+    this.#sourceResizeObserver.disconnect();
     this.#context.deleteFramebuffer(this.#framebuffer);
     this.#context.deleteTexture(this.#staticTexture);
     this.#context.deleteProgram(this.#dynamicProgram);
@@ -450,22 +552,29 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
   }
 }
 
-export function createIlluminationRenderer(canvas: HTMLCanvasElement): IlluminationRenderer {
+const cssRenderer: IlluminationRenderer = {
+  mode: "css",
+  dispose() {},
+};
+
+export async function createIlluminationRenderer(
+  canvas: HTMLCanvasElement,
+): Promise<IlluminationRenderer> {
   const context = canvas.getContext("webgl2", contextOptions);
-  if (!context) {
-    return {
-      mode: "css",
-      dispose() {},
-    };
-  }
+  if (!context) return cssRenderer;
 
   try {
-    return new WebGLIlluminationRenderer(canvas, context);
+    const [dynamicProgram, staticProgram] = await Promise.all([
+      createProgram(context, dynamicFragmentShaderSource),
+      createProgram(context, staticFragmentShaderSource),
+    ]);
+    return new WebGLIlluminationRenderer(
+      canvas,
+      context,
+      dynamicProgram,
+      staticProgram,
+    );
   } catch {
-    context.getExtension("WEBGL_lose_context")?.loseContext();
-    return {
-      mode: "css",
-      dispose() {},
-    };
+    return cssRenderer;
   }
 }
