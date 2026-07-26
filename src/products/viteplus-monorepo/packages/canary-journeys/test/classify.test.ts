@@ -10,6 +10,7 @@ function state(partial: Partial<OAuthPageState>): OAuthPageState {
     hasTOTP: false,
     canGrant: false,
     grantBlocked: false,
+    hasDeviceGrant: false,
     hasKeycloakPage: false,
     hasCollision: false,
     hasError: false,
@@ -63,6 +64,19 @@ describe("classifyOAuthPage", () => {
         GUARDIAN_HOST,
       ),
     ).toThrow(/refused automatic linking/);
+  });
+
+  it("approves the branded device consent page", () => {
+    expect(
+      classifyOAuthPage(
+        state({
+          host: GUARDIAN_HOST,
+          path: "/realms/guardianintelligence.org/login-actions/required-action",
+          hasDeviceGrant: true,
+        }),
+        GUARDIAN_HOST,
+      ),
+    ).toBe("grant-device");
   });
 
   it("submits TOTP on the two-factor page", () => {

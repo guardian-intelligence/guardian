@@ -27,13 +27,18 @@ pub fn login(options: &LoginOptions) -> Result<(), Error> {
     // Deliberately NOT the issuer's verification_uri: the approval page is
     // ours to render and ours to enforce device-flow policy on, and keeping
     // the printed URL constant lets the server side evolve underneath every
-    // CLI binary already in the wild.
+    // CLI binary already in the wild. The code rides in the URL so the page
+    // arrives prefilled; it is still printed on its own line because the
+    // page asks the user to check it matches (RFC 8628 §3.3.1).
     println!(
         "First, copy your one-time code: {}",
         authorization.user_code
     );
     println!();
-    println!("Then approve this sign-in at: {}", options.device_url);
+    println!(
+        "Then approve this sign-in at: {}?user_code={}",
+        options.device_url, authorization.user_code
+    );
     println!();
     println!(
         "Waiting for approval... (this request expires in {} minutes)",

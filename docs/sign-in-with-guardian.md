@@ -22,12 +22,13 @@ connections to a Guardian account; they are not the account model.
   local session and returns to Postflight without visiting Keycloak, because
   Keycloak demands a confirmation page when the hint is missing.
 - The realm ships the `guardian-bounce` login theme: Keycloak never renders
-  a visible page of its own. Denying the GitHub authorize prompt (or hitting
-  a Keycloak URL without the hint) lands on the themed login page, which
+  a visible page of its own except the device-flow consent screen, which is
+  Guardian-branded (approving it is what marks the device code approved, so
+  it cannot bounce). Denying the GitHub authorize prompt (or hitting a
+  Keycloak URL without the hint) lands on the themed login page, which
   bounces straight back to Postflight; the device-flow terminal pages bounce
-  to the product's approval surfaces the same way. Only the device-code
-  re-entry form stays interactive, Guardian-branded, for expired or mistyped
-  codes.
+  to the product's approval page carrying the outcome
+  (`?error=denied|expired|invalid|failed`), which renders the matching copy.
 - Every web relying party is confidential, uses authorization code flow with
   PKCE S256, an exact callback, a server-side token exchange, and an encrypted
   HttpOnly `Secure` `SameSite=Lax` session cookie.
@@ -156,6 +157,12 @@ userinfo refuses the access token and the refresh token is `invalid_grant`.
 This is the only place the server side of `postflight auth logout` is proven:
 ending a session needs a session, and the CLI's own pre-promotion deep test
 has no browser to approve one with.
+
+A third, browserless-cheap journey pins the device-flow error vocabulary:
+Keycloak's terminal pages share one "failed" header, and the bounce theme
+discriminates the body message into the approval page's `?error=` values, so
+the journey drives the deny and expiry mappings end to end and asserts the
+approval page renders each with its own copy.
 
 An operator approves the OAuth App once in an interactive browser during
 machine-account enrollment and verifies that it appears under the account's

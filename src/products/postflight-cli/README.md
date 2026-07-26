@@ -118,8 +118,11 @@ is the same graph CI gates.
 
 Sign-in uses the OAuth device grant against the `guardianintelligence.org`
 realm. The CLI prints the product's own approval page
-(`/postflight/device`), never the issuer's verification URI — that page is
-where device-flow policy (phishing context, per-user opt-out) lives.
+(`/postflight/device?user_code=…`), never the issuer's verification URI —
+that page is where device-flow policy (phishing context, per-user opt-out)
+lives. The code rides in the URL so the page arrives prefilled; the code is
+still printed so the user can check the page shows the same one
+(RFC 8628 §3.3.1).
 
 `auth login` writes `credentials.json` (mode 0600) under
 `~/.config/postflight`, recording the issuer and client that minted the tokens
