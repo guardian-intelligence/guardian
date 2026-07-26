@@ -65,6 +65,12 @@ html[data-illumination="webgl2"] .stage-grain {
   display: none;
 }
 
+html[data-illumination="webgl2"] .privatecut-header__orb::before,
+html[data-illumination="webgl2"] .privatecut-header__glow-control {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 .stage-light {
   position: fixed;
   inset: 0;

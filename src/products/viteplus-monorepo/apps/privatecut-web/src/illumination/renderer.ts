@@ -130,15 +130,55 @@ precision highp float;
 uniform int uLightCount;
 uniform vec4 uLightColors[4];
 uniform vec4 uLights[4];
+uniform int uGlassCount;
+uniform vec4 uGlassRects[6];
+uniform vec4 uGlassParams[6];
 uniform vec2 uCssResolution;
 uniform sampler2D uStaticTexture;
 
 in vec2 vUv;
 out vec4 outColor;
 
+float roundedRectangleDistance(
+  vec2 point,
+  vec2 center,
+  vec2 halfSize,
+  float radius
+) {
+  vec2 offset = abs(point - center) - halfSize + radius;
+  return length(max(offset, 0.0)) + min(max(offset.x, offset.y), 0.0) - radius;
+}
+
 void main() {
   vec2 cssPoint = vec2(vUv.x, 1.0 - vUv.y) * uCssResolution;
   vec3 color = texture(uStaticTexture, vUv).rgb;
+
+  for (int index = 0; index < 6; index++) {
+    if (index >= uGlassCount) break;
+    vec4 rectangle = uGlassRects[index];
+    vec4 parameters = uGlassParams[index];
+    vec2 center = rectangle.xy + rectangle.zw * 0.5;
+    vec2 halfSize = rectangle.zw * 0.5;
+    float distanceToSurface = roundedRectangleDistance(
+      cssPoint,
+      center,
+      halfSize,
+      min(parameters.x, min(halfSize.x, halfSize.y))
+    );
+    if (distanceToSurface <= 0.0) {
+      vec2 normalized = (cssPoint - center) / max(halfSize, vec2(1.0));
+      vec2 normal = normalize(normalized + vec2(0.0001));
+      float rim = 1.0 - smoothstep(0.0, 16.0, -distanceToSurface);
+      vec2 refraction = vec2(normal.x, -normal.y) * parameters.y / uCssResolution;
+      vec3 refracted = vec3(
+        texture(uStaticTexture, vUv + refraction * 1.12).r,
+        texture(uStaticTexture, vUv + refraction).g,
+        texture(uStaticTexture, vUv + refraction * 0.86).b
+      );
+      color = mix(color, refracted, parameters.z * (0.34 + rim * 0.3));
+      color += vec3(0.36, 0.55, 0.82) * parameters.w * rim;
+    }
+  }
 
   for (int index = 0; index < 4; index++) {
     if (index >= uLightCount) break;
@@ -161,6 +201,17 @@ type Light = {
   readonly y: number;
 };
 
+type GlassSurface = {
+  readonly edge: number;
+  readonly height: number;
+  readonly radius: number;
+  readonly refraction: number;
+  readonly strength: number;
+  readonly width: number;
+  readonly x: number;
+  readonly y: number;
+};
+
 const sourceLightStyles: Record<
   string,
   Pick<Light, "color" | "intensity" | "radius">
@@ -175,6 +226,15 @@ const pointerLightStyle = {
   intensity: 0.09,
   radius: 190,
 } as const;
+
+const glassSurfaceStyles: Record<
+  string,
+  Pick<GlassSurface, "edge" | "radius" | "refraction" | "strength">
+> = {
+  control: { edge: 0.055, radius: 999, refraction: 1.4, strength: 0.2 },
+  field: { edge: 0.045, radius: 13, refraction: 1.8, strength: 0.24 },
+  panel: { edge: 0.065, radius: 16, refraction: 3.2, strength: 0.32 },
+};
 
 function compileShader(
   context: WebGL2RenderingContext,
@@ -261,12 +321,14 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
   readonly #staticProgram: WebGLProgram;
   readonly #framebuffer: WebGLFramebuffer;
   readonly #staticTexture: WebGLTexture;
+  readonly #layoutResizeObserver: ResizeObserver;
   readonly #mutationObserver: MutationObserver;
   readonly #reducedMotion: MediaQueryList;
   readonly #resizeObserver: ResizeObserver;
   readonly #scheduler: WakeScheduler;
-  readonly #sourceResizeObserver: ResizeObserver;
   #frameCount = 0;
+  #glassElements: HTMLElement[] = [];
+  #glassSurfaces: GlassSurface[] = [];
   #height = 1;
   #pendingFullDraw = false;
   #pendingRectangle: Rectangle | null = null;
@@ -305,8 +367,8 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
       },
     );
     this.#resizeObserver = new ResizeObserver(() => this.#resize());
-    this.#sourceResizeObserver = new ResizeObserver(() => this.#queueSourceSync());
-    this.#mutationObserver = new MutationObserver(() => this.#refreshSourceElements());
+    this.#layoutResizeObserver = new ResizeObserver(() => this.#queueLayoutSync());
+    this.#mutationObserver = new MutationObserver(() => this.#refreshSceneElements());
     this.#resizeObserver.observe(canvas);
     this.#mutationObserver.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("pointermove", this.#onPointerMove, { passive: true });
@@ -316,7 +378,7 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
       passive: true,
     });
     this.#reducedMotion.addEventListener("change", this.#onReducedMotionChange);
-    this.#refreshSourceElements(false);
+    this.#refreshSceneElements(false);
     this.#resize();
   }
 
@@ -341,7 +403,7 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
     this.#queueRectangle(unionRectangles(previousRectangle, nextRectangle));
   };
 
-  readonly #onLayoutChange = () => this.#queueSourceSync();
+  readonly #onLayoutChange = () => this.#queueLayoutSync();
 
   readonly #onReducedMotionChange = () => {
     const previous = this.#pointer;
@@ -382,18 +444,23 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
     this.#scheduler.wake();
   }
 
-  #queueSourceSync() {
-    this.#syncSources();
+  #queueLayoutSync() {
+    this.#syncSceneLayout();
     this.#queueFullDraw();
   }
 
-  #refreshSourceElements(queueDraw = true) {
+  #refreshSceneElements(queueDraw = true) {
     this.#sourceElements = [
       ...document.querySelectorAll<HTMLElement>("[data-illumination-source]"),
     ];
-    this.#sourceResizeObserver.disconnect();
-    this.#sourceElements.forEach((element) => this.#sourceResizeObserver.observe(element));
-    this.#syncSources();
+    this.#glassElements = [
+      ...document.querySelectorAll<HTMLElement>("[data-illumination-glass]"),
+    ];
+    this.#layoutResizeObserver.disconnect();
+    new Set([...this.#sourceElements, ...this.#glassElements]).forEach((element) => {
+      this.#layoutResizeObserver.observe(element);
+    });
+    this.#syncSceneLayout();
     if (queueDraw) this.#queueFullDraw();
   }
 
@@ -454,7 +521,7 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
     }
 
     this.#drawStatic(width, height, backingWidth, backingHeight);
-    this.#syncSources();
+    this.#syncSceneLayout();
     this.#drawToScreen();
     this.#canvas.dataset.state = "idle";
   }
@@ -472,7 +539,7 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
     context.drawArrays(context.TRIANGLES, 0, 3);
   }
 
-  #syncSources() {
+  #syncSceneLayout() {
     this.#sources = this.#sourceElements
       .map((element): Light | null => {
         const name = element.dataset.illuminationSource ?? "";
@@ -487,6 +554,22 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
       })
       .filter((light): light is Light => light !== null)
       .slice(0, 3);
+    this.#glassSurfaces = this.#glassElements
+      .map((element): GlassSurface | null => {
+        const name = element.dataset.illuminationGlass ?? "";
+        const style = glassSurfaceStyles[name];
+        if (!style) return null;
+        const rectangle = element.getBoundingClientRect();
+        return {
+          ...style,
+          height: rectangle.height,
+          width: rectangle.width,
+          x: rectangle.left,
+          y: rectangle.top,
+        };
+      })
+      .filter((surface): surface is GlassSurface => surface !== null)
+      .slice(0, 6);
   }
 
   #drawToScreen(dirtyRectangle?: Rectangle) {
@@ -494,9 +577,21 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
     const lights = [...(this.#pointer ? [this.#pointer] : []), ...this.#sources].slice(0, 4);
     const lightValues = new Float32Array(16);
     const colorValues = new Float32Array(16);
+    const glassRectangleValues = new Float32Array(24);
+    const glassParameterValues = new Float32Array(24);
     lights.forEach((light, index) => {
       lightValues.set([light.x, light.y, light.radius, light.intensity], index * 4);
       colorValues.set([...light.color, 1], index * 4);
+    });
+    this.#glassSurfaces.forEach((surface, index) => {
+      glassRectangleValues.set(
+        [surface.x, surface.y, surface.width, surface.height],
+        index * 4,
+      );
+      glassParameterValues.set(
+        [surface.radius, surface.refraction, surface.strength, surface.edge],
+        index * 4,
+      );
     });
 
     context.bindFramebuffer(context.FRAMEBUFFER, null);
@@ -521,6 +616,10 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
       requireUniform(context, this.#dynamicProgram, "uLightCount"),
       lights.length,
     );
+    context.uniform1i(
+      requireUniform(context, this.#dynamicProgram, "uGlassCount"),
+      this.#glassSurfaces.length,
+    );
     context.uniform4fv(
       requireUniform(context, this.#dynamicProgram, "uLights[0]"),
       lightValues,
@@ -528,6 +627,14 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
     context.uniform4fv(
       requireUniform(context, this.#dynamicProgram, "uLightColors[0]"),
       colorValues,
+    );
+    context.uniform4fv(
+      requireUniform(context, this.#dynamicProgram, "uGlassRects[0]"),
+      glassRectangleValues,
+    );
+    context.uniform4fv(
+      requireUniform(context, this.#dynamicProgram, "uGlassParams[0]"),
+      glassParameterValues,
     );
     context.drawArrays(context.TRIANGLES, 0, 3);
     context.disable(context.SCISSOR_TEST);
@@ -544,7 +651,7 @@ class WebGLIlluminationRenderer implements IlluminationRenderer {
     this.#reducedMotion.removeEventListener("change", this.#onReducedMotionChange);
     this.#mutationObserver.disconnect();
     this.#resizeObserver.disconnect();
-    this.#sourceResizeObserver.disconnect();
+    this.#layoutResizeObserver.disconnect();
     this.#context.deleteFramebuffer(this.#framebuffer);
     this.#context.deleteTexture(this.#staticTexture);
     this.#context.deleteProgram(this.#dynamicProgram);

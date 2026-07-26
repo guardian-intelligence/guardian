@@ -12,7 +12,6 @@ export function Header() {
       </a>
       <span
         className="privatecut-header__orb"
-        data-illumination-glass="orb"
         data-illumination-source="logo"
         aria-hidden="true"
       >
