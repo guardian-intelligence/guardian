@@ -148,8 +148,9 @@ therefore represents a real change. Commit provenance lives in the manifest
 annotations (`org.opencontainers.image.revision`) and the Fulcio
 certificate, not in the binary.
 
-Channel-pin PRs touch only `release/`, which the lane's path filter
-excludes, so promoting a pin never rebuilds the artifact it pins.
+Channel-pin commits touch only `release/` and the release manifest, which
+the lane's path filter excludes, so promoting a pin never rebuilds the
+artifact it pins.
 
 **nightly** is automatic but not immediate. Kargo's own auto-promotion fires
 the moment Freight is discovered, which would make the word "nightly" a lie,
@@ -157,9 +158,9 @@ so the `postflight-cli-nightly` Stage carries no promotion policy and a
 CronJob in `guardian-products` creates the Promotion CR once a day instead.
 Promotion itself stays entirely Kargo's: the job composes the Stage's
 promotion template inline (Kargo's webhook does not copy template steps into
-directly-created Promotions) and the controller runs the pin-bump PR,
-automerge and reconciler as usual. The job refuses to stack a second
-promotion while one is Pending or Running.
+directly-created Promotions) and the controller pushes the pin-bump commit
+to main and hands off to the reconciler as usual. The job refuses to stack
+a second promotion while one is Pending or Running.
 
 **rc** and **stable** have no Kargo stage. Their pins land by hand-authored
 PR, which is why the cutter reads `channels.yaml` with a real YAML parser: a

@@ -74,21 +74,14 @@ spec:
           config:
             path: ./repo
             message: promote postflight-cli (nightly) to ${{ imageFrom(vars.imageRepo).Digest }}
+        # The pin lands on main directly through the ruleset's bot bypass —
+        # the same path Flux image automation walks for workload pins. A pin
+        # move is not a content change: every digest it can write has already
+        # passed the merge gate and the deep-test gate above, and the
+        # conformance suite re-checks the channel/manifest pairing
+        # loud-after-merge on main. A non-fast-forward race against a
+        # concurrent merge fails the promotion; the promoter's retry cadence
+        # rebuilds it from a fresh clone.
         - uses: git-push
-          as: push
           config:
             path: ./repo
-            generateTargetBranch: true
-        - uses: git-open-pr
-          as: open-pr
-          config:
-            repoURL: ${{ vars.repoURL }}
-            provider: github
-            sourceBranch: ${{ outputs.push.branch }}
-            targetBranch: main
-            title: promote postflight-cli (nightly) to ${{ imageFrom(vars.imageRepo).Digest }}
-        - uses: git-wait-for-pr
-          if: ${{ status('open-pr') == 'Succeeded' }}
-          config:
-            repoURL: ${{ vars.repoURL }}
-            prNumber: ${{ outputs['open-pr'].pr.id }}
