@@ -1,6 +1,6 @@
 ---
 name: create-github-login-canary
-description: Create and secure the GitHub machine account used by the Sign in with Guardian full-browser OAuth canary. Use when provisioning or replacing the login-canary GitHub user, avatar, password, TOTP seed, recovery codes, and custody values.
+description: Create and secure the GitHub machine account used by the Sign in with Guardian full-browser OAuth canary. Use when provisioning or replacing the login-canary GitHub user, avatar, password, TOTP seed, recovery codes, and OpenBao values.
 ---
 
 1. Set `EMAIL` to the operator's existing deliverable address with
@@ -24,11 +24,10 @@ description: Create and secure the GitHub machine account used by the Sign in wi
    no Keycloak page renders), approve **Sign in with Guardian** once, land on
    the Postflight console, and verify the App is listed under GitHub's
    **Settings → Applications → Authorized OAuth Apps**.
-9. Store `USERNAME`, the password, and the TOTP setup key as
-   `PROD_GITHUB_LOGIN_CANARY_USERNAME`,
-   `PROD_GITHUB_LOGIN_CANARY_PASSWORD`, and
-   `PROD_GITHUB_LOGIN_CANARY_TOTP_SECRET` in custody. Store recovery codes
-   only in custody; never transmit credentials or recovery codes in chat.
-10. Import the three canary values to
+9. Write `USERNAME`, the password, the TOTP setup key, and the recovery codes
+   straight to OpenBao at
    `guardian/guardian-mgmt/tenant-guardian-prod/keycloak/login-canary-github`
-   and wipe the restored custody workspace immediately.
+   with a namespace-scoped `secrets-writer` token, values on stdin — see
+   `docs/secrets.md`, "Adding a secret for a third-party integration". Every
+   one of them is reissuable from GitHub, so none passes through custody.
+   Never transmit credentials or recovery codes in chat.
