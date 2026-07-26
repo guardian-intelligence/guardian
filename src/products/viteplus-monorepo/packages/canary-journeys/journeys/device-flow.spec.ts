@@ -19,7 +19,11 @@ async function startDeviceFlow(
   cfg: JourneyConfig,
 ): Promise<DeviceAuthorization> {
   const response = await request.post(`${cfg.issuer}/protocol/openid-connect/auth/device`, {
-    form: { client_id: "postflight-cli" },
+    // The scope the CLI asks for, because the token this mints has to be the
+    // token the CLI holds: without `openid` the issuer mints a plain OAuth
+    // access token and userinfo — the CLI's whole liveness check — answers 403
+    // "Missing openid scope" no matter how healthy the session is.
+    form: { client_id: "postflight-cli", scope: "openid" },
   });
   expect(response.status()).toBe(200);
   const body = (await response.json()) as DeviceAuthorization;
