@@ -76,10 +76,7 @@ function DeviceApprovalPage() {
             {errorMessage}
           </p>
         ) : null}
-        <p>
-          A terminal running the postflight CLI is asking to sign in as you. Check that this code
-          matches the one your terminal printed:
-        </p>
+        <p>A terminal running the postflight CLI is asking to sign in as you.</p>
         <label className="postflight-device-code-label" htmlFor="device-user-code">
           One-time code
         </label>
