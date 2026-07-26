@@ -22,6 +22,14 @@ rust_binary(
     ],
 )
 
+# The infrastructure conformance tests read the compiled-in issuer out of the
+# crate source to hold the deep-test runner's forged credentials to it.
+filegroup(
+    name = "sources",
+    srcs = glob(["src/**/*.rs"]),
+    visibility = ["//visibility:public"],
+)
+
 rust_test(
     name = "postflight_test",
     crate = ":postflight",

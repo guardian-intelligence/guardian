@@ -32,7 +32,10 @@ async function pollDeviceToken(
   request: APIRequestContext,
   cfg: JourneyConfig,
   deviceCode: string,
-): Promise<{ status: number; body: { access_token?: string; error?: string } }> {
+): Promise<{
+  status: number;
+  body: { access_token?: string; refresh_token?: string; error?: string };
+}> {
   const response = await request.post(`${cfg.issuer}/protocol/openid-connect/token`, {
     form: {
       client_id: "postflight-cli",
@@ -41,6 +44,19 @@ async function pollDeviceToken(
     },
   });
   return { status: response.status(), body: await response.json() };
+}
+
+// The question `postflight auth status` asks on every run: does this token
+// still name a session.
+async function userInfoStatus(
+  request: APIRequestContext,
+  cfg: JourneyConfig,
+  accessToken: string,
+): Promise<number> {
+  const response = await request.get(`${cfg.issuer}/protocol/openid-connect/userinfo`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return response.status();
 }
 
 // Clicks Approve on the device page and rides the flow to GitHub, returning
@@ -152,7 +168,36 @@ test("device approval signs the CLI in end to end", async ({ page, request }) =>
     outcome = await pollDeviceToken(request, cfg, device.device_code);
   }
   expect(outcome.status).toBe(200);
-  expect(outcome.body.access_token).toBeTruthy();
+  const accessToken = outcome.body.access_token as string;
+  const refreshToken = outcome.body.refresh_token as string;
+  expect(accessToken).toBeTruthy();
+  expect(refreshToken, "the CLI needs a refresh token to sign itself out").toBeTruthy();
+
+  // What `postflight auth status` and `postflight auth logout` rest on. The
+  // CLI's own tests cover the requests it makes; only a canary holding a real
+  // session can say the issuer still answers them the way the CLI reads — that
+  // a live token names a session, and that signing out ends that session on the
+  // server rather than deleting a file on someone's laptop.
+  step("cli-session-live");
+  expect(await userInfoStatus(request, cfg, accessToken)).toBe(200);
+
+  step("cli-session-ended");
+  const ended = await request.post(`${cfg.issuer}/protocol/openid-connect/logout`, {
+    form: { client_id: "postflight-cli", refresh_token: refreshToken },
+  });
+  expect(ended.status()).toBeLessThan(300);
+  expect(await userInfoStatus(request, cfg, accessToken)).toBe(401);
+
+  step("cli-refresh-token-dead");
+  const replayed = await request.post(`${cfg.issuer}/protocol/openid-connect/token`, {
+    form: {
+      client_id: "postflight-cli",
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    },
+  });
+  expect(replayed.status()).toBe(400);
+  expect((await replayed.json()).error).toBe("invalid_grant");
 
   step("logout");
   await page.goto(`${cfg.pageUrl.replace(/\/$/, "")}/auth/logout`);

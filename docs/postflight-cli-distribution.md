@@ -473,6 +473,23 @@ rather than trusting a header, and records these checks:
 | `structure` | object magic plus the machine/cputype word matches the target the directory name claims |
 | `version` | the native binary prints `postflight version <semver>` |
 | `device_flow` | a real device-code request against the live issuer prints its one-time code |
+| `auth_status_live` | `auth status` on a credential the issuer never minted reports the session ended and removes it |
+| `auth_status_offline` | `auth status` against an unreachable issuer errors and leaves the credential in place |
+| `auth_logout` | `auth logout` ends the session and removes the credential |
+
+The three session checks run against credentials the job forges, because a real
+one needs a browser approval this job cannot give. `auth_status_offline` is what
+binds the other two to the network: a `status` that decided locally could not
+both report an ended session for a forged credential and error for an
+unreachable issuer. `AUTH_ISSUER` names the issuer they point at and may not
+drift from the binary's compiled-in default —
+`TestDeeptestAuthIssuerMatchesTheCliDefault` holds them together, and
+`TestDeeptestRecordsTheAuthSessionChecks` keeps the checks from being dropped
+without their alerting. What they cannot prove is that signing out ends the
+session *at the issuer*: that needs a session to end, so it is asserted in the
+postflight device-flow journey canary ([canaries.md](canaries.md)), which
+completes a real approval and then walks the same userinfo → logout → userinfo
+sequence the CLI does.
 
 `structure` is read-only inspection and runs unconditionally. Execution does
 not: if `image_signature`, `blob_signatures` or `binaries_digest` is 0 the

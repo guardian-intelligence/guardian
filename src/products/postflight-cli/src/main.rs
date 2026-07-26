@@ -5,6 +5,7 @@ mod auth;
 mod device;
 mod error;
 mod receipt;
+mod session;
 #[cfg(test)]
 mod testing;
 mod uninstall;
@@ -73,9 +74,9 @@ struct UninstallArgs {
 enum AuthCommand {
     /// Sign in from this terminal by approving the request in a browser.
     Login(LoginArgs),
-    /// Show the account you are signed in as.
+    /// Ask Guardian whether this machine is still signed in, and as whom.
     Status,
-    /// Remove credentials stored on this machine.
+    /// End this machine's session and remove its credentials.
     Logout,
 }
 

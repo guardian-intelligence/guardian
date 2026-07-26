@@ -147,6 +147,16 @@ structured page classification fails closed on the same negative cases the
 journey has always held: no rendered Keycloak page, no automatic account
 linking on email collision.
 
+A second journey in the same package drives the device grant the postflight
+CLI signs in with: approve the code, ride the broker to GitHub and back, and
+take delivery of a token set. It then asserts what the CLI's session verbs
+rest on — a live access token names a session at the userinfo endpoint, a
+back-channel logout with the refresh token ends that session, and afterwards
+userinfo refuses the access token and the refresh token is `invalid_grant`.
+This is the only place the server side of `postflight auth logout` is proven:
+ending a session needs a session, and the CLI's own pre-promotion deep test
+has no browser to approve one with.
+
 An operator approves the OAuth App once in an interactive browser during
 machine-account enrollment and verifies that it appears under the account's
 authorized OAuth Apps. Scheduled runs use a fresh browser profile and fail if
