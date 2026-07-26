@@ -315,11 +315,28 @@ records no channel, because it follows none.
 
 ## Uninstall
 
-`postflight self uninstall` removes the binary, the credentials and the
-receipt, and removes the config directory if nothing else is in it. It reports
-what it removed and what it left.
+`postflight self uninstall` sweeps the whole machine, removes everything the
+installer put there — binaries, credentials, receipt, and the config directory
+if nothing else is in it — and reports every copy it was not entitled to touch
+alongside the command that removes each.
 
-Three properties are load-bearing:
+The sweep looks at `$PATH`, the homes each install method actually uses
+(`~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`,
+`/home/linuxbrew/.linuxbrew/bin`, `$CARGO_HOME/bin`), the path the receipt
+records, and the running binary — that last one because it may be in none of
+the others, having been run from a build directory. Results are deduplicated by
+**device and inode**, so a file reached by several names is one installation:
+without that, a Homebrew keg and the `bin` symlink into it read as a double
+install and the same inode gets offered for removal twice.
+
+Searching `$PATH` alone fails in both directions. A copy in a directory the
+user has since dropped from `PATH` is invisible to `which` and still installed;
+and a Homebrew copy *shadowed* by a newer one in `~/.local/bin` is exactly the
+situation worth reporting, because after a successful uninstall it is what
+`postflight` still resolves to — which is how someone concludes the uninstall
+silently failed.
+
+Four properties are load-bearing:
 
 **It ends the session, not just the file.** Removal calls the same sign-out
 path as `postflight auth logout`, which POSTs the refresh token to the
@@ -330,17 +347,31 @@ had closed. A revocation that cannot be delivered is reported and the local
 copy is removed anyway; leaving a token on disk because the network was down
 is the worse failure.
 
-**It refuses what it does not own.** The running path is matched against the
-package managers first, and only then against our own receipt: the two can
+**It refuses what it does not own, and says so.** Each path is matched against
+the package managers first and only then against our own receipt: the two can
 disagree only when a manager has installed over a path the installer once
 owned, and in that case the file is theirs now. A manager's command is printed
 instead of a removal. Deleting a brew-managed file behind brew's back desyncs
 its manifest; deleting an npm package directory leaves a dangling symlink in
 `{prefix}/bin` that npm has no command to notice or repair. Anything
-unrecognised is declined with `make uninstall` and `rm` as the alternatives. In
-every case the credentials are still removed, because they are ours whoever
-owns the binary, and the exit status is non-zero: the thing that was asked for
-did not fully happen.
+unrecognised is declined with `make uninstall` and `rm` as the alternatives.
+The credentials are still removed whatever else is found, because they are ours
+whoever owns the binary.
+
+Deleting another manager's files would be the wrong kind of thorough, and no
+CLI that ships through more than one channel does it. But **silence is the
+failure to engineer against** — `kubectl krew upgrade` skips a Homebrew-installed
+krew with no message and exit 0, forever, while its own notice keeps
+recommending the command that will never work. The receipt's absence was a
+perfect signal and it is never read as one. So every copy found is named, with
+its owner and its removal command, on the success path as well as the refusal
+path.
+
+**One receipt, one owned installation.** The receipt is a single file per
+machine, so at most one copy can be *proved* ours; anything else the sweep
+finds is reported rather than removed. The exit status is non-zero when a
+binary would not go, or when nothing here was ours to remove: the thing that
+was asked for did not fully happen.
 
 Detection is in `src/products/postflight-cli/src/scope.rs`, shared with every
 other verb that changes an installation, and it works on the **resolved** path:
