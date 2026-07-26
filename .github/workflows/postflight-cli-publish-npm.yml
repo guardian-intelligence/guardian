@@ -105,7 +105,9 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           expected="postflight version ${TAG#postflight-cli/v}"
-          got="$("$PACKAGE_ROOT/postflight-linux-x64/bin/postflight" version)"
+          # First line only: `version` prints provenance underneath itself when
+          # an install receipt sits beside the binary.
+          got="$("$PACKAGE_ROOT/postflight-linux-x64/bin/postflight" version | head -n 1)"
           if [[ "$got" != "$expected" ]]; then
             echo "release $TAG ships a binary reporting '$got' — the version bump never rode this freight" >&2
             exit 1

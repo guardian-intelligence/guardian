@@ -158,8 +158,8 @@ data:
       ( cd "$dir" && grep -E " postflight-${NATIVE_TARGET}\$" checksums.txt | sha256sum -c - ) >/dev/null 2>&1 \
         || { detail="checksum mismatch for postflight-$NATIVE_TARGET in $tag"; return 1; }
       chmod +x "$dir/postflight-$NATIVE_TARGET"
-      out="$("$dir/postflight-$NATIVE_TARGET" version 2>&1)" \
-        || { detail="postflight-$NATIVE_TARGET did not run: $out"; return 1; }
+      out="$(version_line "$dir/postflight-$NATIVE_TARGET" "$HOME")" \
+        || { detail="postflight-$NATIVE_TARGET did not run"; return 1; }
       case "$out" in
         "postflight version "*) release_version="$out" ;;
         *) detail="unexpected version output from postflight-$NATIVE_TARGET: $out"; return 1 ;;
