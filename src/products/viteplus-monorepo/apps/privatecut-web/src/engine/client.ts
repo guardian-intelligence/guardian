@@ -5,6 +5,7 @@ import type { SizeLimitBytes } from "./limits";
 import type {
   EncodeOutcome,
   MediaSource,
+  OutputContainer,
   ProbeSummary,
   SelectionRange,
   WorkerRequest,
@@ -64,9 +65,10 @@ export class PrivateCutEngine {
   encode(
     selection: SelectionRange,
     limitBytes: SizeLimitBytes,
+    outputFormat: OutputContainer,
     onProgress: (pass: number, fraction: number) => void,
   ): Promise<EncodeResult> {
-    return this.call({ kind: "encode", selection, limitBytes }, { onProgress });
+    return this.call({ kind: "encode", selection, limitBytes, outputFormat }, { onProgress });
   }
 
   private call<T>(

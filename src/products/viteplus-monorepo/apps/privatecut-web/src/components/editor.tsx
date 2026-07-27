@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import type { EncodeResult, PrivateCutEngine, ThumbnailTile } from "~/engine/client";
 import { estimateSelection } from "~/engine/estimate";
+import { OUTPUT_CONTAINER_INFO, OUTPUT_CONTAINERS } from "~/engine/formats";
 import type { SizeLimitBytes } from "~/engine/limits";
 import {
   DEFAULT_SIZE_LIMIT_BYTES,
   MAX_SELECTION_SECONDS,
   SIZE_LIMIT_PRESETS_BYTES,
 } from "~/engine/limits";
-import type { MediaSource, ProbeSummary, SelectionRange } from "~/engine/types";
+import type { MediaSource, OutputContainer, ProbeSummary, SelectionRange } from "~/engine/types";
 import { emitSpan } from "~/lib/telemetry/browser";
 import { formatBitrate, formatSeconds } from "~/lib/format";
 import { ResultCard } from "./result-card";
@@ -35,6 +37,9 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
   }));
   const [snapToKeyframes, setSnapToKeyframes] = useState(true);
   const [limitBytes, setLimitBytes] = useState<SizeLimitBytes>(DEFAULT_SIZE_LIMIT_BYTES);
+  const [outputFormat, setOutputFormat] = useState<OutputContainer>(
+    () => summary.outputProfiles.find((profile) => profile.format === "mp4")?.format ?? "webm",
+  );
   const [tiles, setTiles] = useState<readonly ThumbnailTile[]>([]);
   const [phase, setPhase] = useState<Phase>({ kind: "selecting" });
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -66,9 +71,15 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
     }
   }, [selection.startS]);
 
+  const outputProfile =
+    summary.outputProfiles.find((profile) => profile.format === outputFormat) ??
+    summary.outputProfiles[0];
+  if (outputProfile === undefined) {
+    throw new Error("No supported output format.");
+  }
   const estimate = useMemo(
-    () => estimateSelection(summary, selection, limitBytes),
-    [summary, selection, limitBytes],
+    () => estimateSelection(summary, selection, outputProfile, limitBytes),
+    [summary, selection, outputProfile, limitBytes],
   );
 
   // Portrait footage should hug a narrow column so the media, timeline, and
@@ -81,10 +92,11 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
       duration_s: estimate.durationS.toFixed(2),
       video_bps: String(Math.round(estimate.videoBitsPerSecond)),
       limit_bytes: String(limitBytes),
+      output_format: outputFormat,
     });
     const startedAt = performance.now();
     engine
-      .encode(selection, limitBytes, (pass, fraction) =>
+      .encode(selection, limitBytes, outputFormat, (pass, fraction) =>
         setPhase({ kind: "encoding", pass, fraction }),
       )
       .then((result) => {
@@ -100,6 +112,9 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
           frame_rate: String(Math.round(outcome.frameRate)),
           wall_ms: String(Math.round(outcome.wallMs)),
           source_codec: summary.video.codec,
+          source_container: summary.container,
+          output_format: outcome.outputFormat,
+          output_codec: outcome.codec,
         });
         setPhase({ kind: "done", result });
       })
@@ -113,7 +128,15 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
           message: error instanceof Error ? error.message : "Encoding failed.",
         });
       });
-  }, [engine, selection, limitBytes, estimate, summary.video.codec]);
+  }, [
+    engine,
+    selection,
+    limitBytes,
+    outputFormat,
+    estimate,
+    summary.video.codec,
+    summary.container,
+  ]);
 
   if (phase.kind === "done") {
     return (
@@ -149,65 +172,135 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
           if (phase.kind === "selecting") setSelection(next);
         }}
       />
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Size cap">
-        <span className="font-mono text-sm text-mist-faint">size cap</span>
-        {SIZE_LIMIT_PRESETS_BYTES.map((preset) => (
-          <button
-            key={preset}
-            type="button"
-            aria-pressed={preset === limitBytes}
-            disabled={phase.kind === "encoding"}
-            onClick={() => setLimitBytes(preset)}
-            className={
-              preset === limitBytes
-                ? "rounded-full bg-mist px-3 py-1 font-mono text-sm text-night disabled:opacity-60"
-                : "rounded-full border border-line-strong px-3 py-1 font-mono text-sm text-mist-dim transition-colors hover:text-mist disabled:opacity-60"
-            }
-          >
-            {preset / 1_000_000} MB
-          </button>
-        ))}
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="font-mono text-sm text-mist-dim">
-          <span className="text-mist">{formatSeconds(estimate.durationS)}</span> selected
-          {" → "}
-          {estimate.likelyRemux ? (
-            <span className="text-glow-warm">original quality, no re-encode</span>
-          ) : (
-            <>
-              <span className="text-mist">{formatBitrate(estimate.videoBitsPerSecond)}</span>
-              {" → "}
-              <span className="text-mist">
-                {estimate.label}
-                {estimate.frameRate < summary.video.frameRate - 1
-                  ? ` ${Math.round(estimate.frameRate)}fps`
-                  : ""}
-              </span>
-            </>
-          )}
+      <div className="rounded-2xl border border-line bg-white/[0.025] p-4">
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+          <fieldset className="min-w-0" aria-label="Output format">
+            <legend className="mb-2 text-xs font-medium uppercase tracking-[0.16em] text-mist-faint">
+              Format
+            </legend>
+            <div className="grid grid-cols-2 gap-1 rounded-xl border border-line bg-night/60 p-1">
+              {OUTPUT_CONTAINERS.map((format) => {
+                const available = summary.outputProfiles.some(
+                  (profile) => profile.format === format,
+                );
+                const info = OUTPUT_CONTAINER_INFO[format];
+                return (
+                  <button
+                    key={format}
+                    type="button"
+                    aria-pressed={format === outputFormat}
+                    onClick={() => {
+                      if (phase.kind === "encoding") {
+                        toast.info("Your clip is already being created", {
+                          description: "Export settings can be changed after this encode finishes.",
+                        });
+                        return;
+                      }
+                      if (available) {
+                        setOutputFormat(format);
+                        return;
+                      }
+                      toast.warning(`${info.label} isn't available in this browser`, {
+                        description:
+                          format === "mp4"
+                            ? "Firefox isn't exposing an H.264/AAC encoder. Export WebM here, or open PrivateCut in Chrome to create MP4."
+                            : "This browser isn't exposing a compatible WebM encoder. Choose MP4 or open PrivateCut in Chrome.",
+                      });
+                    }}
+                    className={
+                      format === outputFormat
+                        ? "rounded-lg bg-mist px-3 py-2 text-sm font-medium text-night shadow-sm"
+                        : available
+                          ? "rounded-lg px-3 py-2 text-sm text-mist-dim transition-colors hover:bg-white/[0.04] hover:text-mist"
+                          : "rounded-lg px-3 py-2 text-sm text-mist-faint transition-colors hover:bg-white/[0.04] hover:text-mist"
+                    }
+                  >
+                    {info.label}
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
+          <fieldset className="min-w-0" aria-label="Size cap">
+            <legend className="mb-2 text-xs font-medium uppercase tracking-[0.16em] text-mist-faint">
+              Maximum size
+            </legend>
+            <div className="grid grid-cols-4 gap-1 rounded-xl border border-line bg-night/60 p-1">
+              {SIZE_LIMIT_PRESETS_BYTES.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  aria-pressed={preset === limitBytes}
+                  onClick={() => {
+                    if (phase.kind === "encoding") {
+                      toast.info("Your clip is already being created", {
+                        description: "The size cap can be changed after this encode finishes.",
+                      });
+                      return;
+                    }
+                    setLimitBytes(preset);
+                  }}
+                  className={
+                    preset === limitBytes
+                      ? "rounded-lg bg-mist px-2 py-2 text-sm font-medium text-night shadow-sm"
+                      : "rounded-lg px-2 py-2 text-sm text-mist-dim transition-colors hover:bg-white/[0.04] hover:text-mist"
+                  }
+                >
+                  {preset / 1_000_000}
+                  <span className="ml-1 text-[0.7rem] opacity-70">MB</span>
+                </button>
+              ))}
+            </div>
+          </fieldset>
         </div>
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-mist-faint">
-          <input
-            type="checkbox"
-            checked={snapToKeyframes}
-            onChange={(e) => setSnapToKeyframes(e.currentTarget.checked)}
-            className="accent-[#7d6bff]"
-          />
-          snap to keyframes
-        </label>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+          <div className="font-mono text-xs text-mist-dim sm:text-sm">
+            <span className="text-mist">{formatSeconds(estimate.durationS)}</span> selected
+            {" · "}
+            {estimate.likelyRemux ? (
+              <span className="text-glow-warm">original quality, no re-encode</span>
+            ) : (
+              <>
+                <span className="text-mist">{formatBitrate(estimate.videoBitsPerSecond)}</span>
+                {" · "}
+                <span className="text-mist">
+                  {estimate.label}
+                  {estimate.frameRate < summary.video.frameRate - 1
+                    ? ` ${Math.round(estimate.frameRate)}fps`
+                    : ""}
+                </span>
+              </>
+            )}
+          </div>
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-mist-faint sm:text-sm">
+            <input
+              type="checkbox"
+              checked={snapToKeyframes}
+              onChange={(e) => setSnapToKeyframes(e.currentTarget.checked)}
+              className="accent-[#7d6bff]"
+            />
+            snap to keyframes
+          </label>
+        </div>
       </div>
       {phase.kind === "failed" && (
         <p className="rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-200">
           {phase.message}
         </p>
       )}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
         <button
           type="button"
-          disabled={phase.kind === "encoding"}
-          onClick={encode}
-          className="rounded-xl bg-mist px-8 py-3 font-medium text-night transition-transform hover:scale-[1.02] disabled:opacity-60"
+          onClick={() => {
+            if (phase.kind === "encoding") {
+              toast.info("Your clip is already being created", {
+                description: "Keep this tab open until the current encode finishes.",
+              });
+              return;
+            }
+            encode();
+          }}
+          className="rounded-xl bg-mist px-8 py-3 font-medium text-night transition-transform hover:scale-[1.01]"
         >
           {phase.kind === "encoding" ? (
             <EncodingLabel pass={phase.pass} fraction={phase.fraction} />

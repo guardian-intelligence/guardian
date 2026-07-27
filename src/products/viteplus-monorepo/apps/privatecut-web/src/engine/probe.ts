@@ -7,6 +7,7 @@ import {
   type InputAudioTrack,
   type InputVideoTrack,
 } from "mediabunny";
+import { resolveOutputProfiles } from "./output";
 import type { MediaSource, ProbeSummary } from "./types";
 
 export interface OpenedInput {
@@ -41,11 +42,16 @@ export async function openInput(source: MediaSource): Promise<OpenedInput> {
     throw new Error("This browser cannot decode this video's codec.");
   }
   const audioTrack = await input.getPrimaryAudioTrack();
+  const outputProfiles = await resolveOutputProfiles(audioTrack !== null);
+  if (outputProfiles.length === 0) {
+    throw new Error("This browser cannot encode MP4 or WebM video.");
+  }
   const durationS = await input.computeDuration();
   const stats = await videoTrack.computePacketStats(240);
   const keyframesS = await scanKeyframes(videoTrack);
   const summary: ProbeSummary = {
     durationS,
+    container: (await input.getFormat()).name,
     video: {
       width: await videoTrack.getDisplayWidth(),
       height: await videoTrack.getDisplayHeight(),
@@ -54,6 +60,8 @@ export async function openInput(source: MediaSource): Promise<OpenedInput> {
       bitsPerSecond: stats.averageBitrate,
     },
     hasAudio: audioTrack !== null,
+    audioCodec: audioTrack ? await audioTrack.getCodec() : null,
+    outputProfiles,
     keyframesS,
   };
   return { input, videoTrack, audioTrack, summary };

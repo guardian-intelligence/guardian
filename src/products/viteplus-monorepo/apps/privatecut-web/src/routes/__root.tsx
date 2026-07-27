@@ -1,5 +1,6 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { CanvasDocument } from "~/components/canvas-document";
+import { Toaster } from "~/components/ui/sonner";
 import { SITE_DESCRIPTION, SITE_TITLE, SITE_URL } from "~/lib/site";
 import { TelemetryProbe } from "~/lib/telemetry/page-view";
 import { deployMetaTags } from "~/lib/telemetry/server-deploy-meta";
@@ -81,6 +82,7 @@ function RootComponent() {
         <CanvasDocument>
           <Outlet />
         </CanvasDocument>
+        <Toaster />
         <TelemetryProbe />
         <Scripts />
       </body>

@@ -3,13 +3,14 @@ import {
   EncodedAudioPacketSource,
   EncodedPacketSink,
   EncodedVideoPacketSource,
-  Mp4OutputFormat,
   Output,
 } from "mediabunny";
 import { estimateContainerBytes } from "./budget";
+import { canRemuxCodecs } from "./formats";
+import { createOutputFormat } from "./output";
 import type { OpenedInput } from "./probe";
 import { measureAudioBytes, measureVideoBytes } from "./probe";
-import type { SelectionRange } from "./types";
+import type { OutputContainer, SelectionRange } from "./types";
 
 const KEYFRAME_TOLERANCE_S = 0.05;
 
@@ -26,8 +27,19 @@ export async function planRemux(
   opened: OpenedInput,
   selection: SelectionRange,
   limitBytes: number,
+  outputFormat: OutputContainer,
 ): Promise<RemuxPlan | null> {
   const { summary } = opened;
+  const videoCodec = await opened.videoTrack.getCodec();
+  const audioCodec = opened.audioTrack ? await opened.audioTrack.getCodec() : null;
+  if (
+    videoCodec === null ||
+    (opened.audioTrack !== null && audioCodec === null) ||
+    !canRemuxCodecs(outputFormat, videoCodec, audioCodec)
+  ) {
+    return null;
+  }
+  if (outputFormat === "webm" && (await opened.videoTrack.getRotation()) !== 0) return null;
   const onKeyframe = summary.keyframesS.some(
     (t) => Math.abs(t - selection.startS) <= KEYFRAME_TOLERANCE_S,
   );
@@ -58,12 +70,13 @@ export interface RemuxOutcome {
 export async function executeRemux(
   opened: OpenedInput,
   plan: RemuxPlan,
+  outputFormat: OutputContainer,
 ): Promise<RemuxOutcome | null> {
   const videoCodec = await opened.videoTrack.getCodec();
   if (videoCodec === null) return null;
   const target = new BufferTarget();
   const output = new Output({
-    format: new Mp4OutputFormat({ fastStart: "in-memory" }),
+    format: createOutputFormat(outputFormat),
     target,
   });
 

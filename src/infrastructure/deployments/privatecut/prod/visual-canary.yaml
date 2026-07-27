@@ -1,9 +1,9 @@
-# Steady-state visual canary for privatecut: the visual-harness journey suite run
-# against the production site every 30 minutes, failing on visual drift from
-# the committed baselines or on a critical element dropping below the fold in
-# any form factor. Baselines ship inside the image (journeys/** is part of the
-# image sources), so the comparison and the bytes it compares against move
-# together and a refresh is an ordinary reviewed PR.
+# Steady-state browser canary for privatecut: the visual-harness journey suite
+# runs against the production site every 30 minutes, failing on visual drift,
+# a critical element dropping below the fold, or a WebM-input MP4/WebM export
+# failure. Baselines ship inside the image (journeys/** is part of the image
+# sources), so the comparison and the bytes it compares against move together
+# and a refresh is an ordinary reviewed PR.
 #
 # It runs against https://rumi.engineering, not an in-cluster Service: the
 # thing customers see includes the edge, so a regression introduced by cache
@@ -155,7 +155,7 @@ spec:
             exported_instance: prod/privatecut-visual-canary
           annotations:
             summary: "privatecut visual canary is failing"
-            description: "A privatecut-visual-canary run failed against https://rumi.engineering: visual drift from a committed baseline, a critical element below the fold, or the harness failing to start. Pull the pod logs for the failing form factor; refresh baselines only after confirming the change was intended."
+            description: "A privatecut-visual-canary run failed against https://rumi.engineering: visual drift, a critical element below the fold, WebM input or MP4/WebM export failure, or the harness failing to start. Pull the pod logs for the failing journey; refresh baselines only after confirming visual changes were intended."
         # Fires only once the canary has succeeded at least once: with no
         # successful run the series does not exist and the expression is
         # empty, so standing this up cannot page before first success. 95m
