@@ -9,11 +9,15 @@ Today it signs you in and manages its own install. Job control ships next.
 
 ### Installer script (macOS and Linux)
 
+Install [cosign](https://docs.sigstore.dev/cosign/installation), then:
+
 ```sh
 curl -fsSL https://guardianintelligence.org/postflight/install.sh | sh
 ```
 
-Installs the latest stable release to `~/.local/bin`. Re-run it to upgrade.
+The installer verifies the release signature against Guardian's pinned GitHub
+Actions identity, then installs the latest stable release to `~/.local/bin`.
+Re-run it to upgrade.
 Pass `-s -- --channel rc` or `--channel nightly` for prereleases, `--uninstall` to remove.
 
 ### Homebrew

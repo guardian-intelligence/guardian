@@ -949,6 +949,9 @@ func TestQuiesceUsesTheAssignedMountpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("quiesce: %v", err)
 	}
+	if artifact.Digest != "" || artifact.Version != "" {
+		t.Fatalf("quiesce published process checkpoint %+v", artifact)
+	}
 	var events []string
 	for _, point := range artifact.Timing {
 		events = append(events, point.Event)
@@ -956,7 +959,7 @@ func TestQuiesceUsesTheAssignedMountpoint(t *testing.T) {
 	if got := strings.Join(events, ","); got != "quiesce_rpc_started,checkpoint_dump_completed,quiesce_rpc_completed" {
 		t.Fatalf("quiesce timing %s", got)
 	}
-	if got := second.guest.quiesces("vm-a"); len(got) != 1 || len(got[0].Mountpoints) != 3 || got[0].Mountpoints[0] != runnerStateMountpoint || got[0].Mountpoints[1] != rendezvous.WorkspaceMountpoint || got[0].Mountpoints[2] != processMountpoint {
+	if got := second.guest.quiesces("vm-a"); len(got) != 1 || got[0].Checkpoint != nil || len(got[0].Mountpoints) != 3 || got[0].Mountpoints[0] != runnerStateMountpoint || got[0].Mountpoints[1] != rendezvous.WorkspaceMountpoint || got[0].Mountpoints[2] != processMountpoint {
 		t.Fatalf("quiesced %v, want the assigned mountpoint", got)
 	}
 

@@ -54,7 +54,7 @@ func TestCloudflareOriginPullIsRequired(t *testing.T) {
 }
 
 // personaSpec declares one rung of the persona ladder
-// (src/infrastructure/base/cozystack/platform-admins.yaml). The ladder is
+// (src/infrastructure/base/cozystack-identities/platform-admins.yaml). The ladder is
 // meant to grow: adding a rung is a manifest block plus an entry here, and
 // this test is what makes the pair inseparable. Everything it asserts is a
 // property a hand-written persona could get quietly wrong — a user left in two
@@ -98,7 +98,7 @@ var personaLadder = []personaSpec{
 }
 
 func TestPersonaLadderShape(t *testing.T) {
-	path := runfilePath("src/infrastructure/base/cozystack/platform-admins.yaml")
+	path := runfilePath("src/infrastructure/base/cozystack-identities/platform-admins.yaml")
 	raw := readText(t, path)
 	docs := yamlDocs(t, path)
 

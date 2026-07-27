@@ -36,9 +36,7 @@ func validateJobPlan(plan syncproto.JobPlan) error {
 		return errors.New("job plan identity is incomplete")
 	}
 	if plan.Process.ExpectedDigest != "" || plan.Process.ExpectedVersion != "" || plan.Process.Generation != "" {
-		if plan.Process.ExpectedDigest == "" || plan.Process.ExpectedVersion == "" || plan.Process.Generation == "" {
-			return errors.New("job plan process snapshot identity is incomplete")
-		}
+		return errors.New("job plan process restoration is disabled")
 	}
 	return nil
 }
@@ -151,7 +149,7 @@ func desiredFromPlan(plan syncproto.JobPlan, status vm.Status) syncproto.Desired
 			WorkflowJob: assignment.Identity.WorkflowJob,
 		},
 		Workspace: plan.Workspace, Tool: plan.Tool, Process: plan.Process,
-		Transfer:  plan.Transfer,
+		Transfer: plan.Transfer,
 	}
 }
 

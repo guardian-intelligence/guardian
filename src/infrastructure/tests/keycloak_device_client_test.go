@@ -39,7 +39,7 @@ func TestPlatformAgentDeviceClientConformance(t *testing.T) {
 		"guardian_auth platform-agent kubelogin flow (offline_access is what keeps agent sessions unattended)")
 
 	listed := false
-	for _, doc := range yamlDocs(t, runfilePath("src/infrastructure/base/cozystack/kustomization.yaml")) {
+	for _, doc := range yamlDocs(t, runfilePath("src/infrastructure/base/cozystack-identities/kustomization.yaml")) {
 		for _, res := range sliceValue(doc["resources"]) {
 			if stringValue(res) == "kubernetes-device-client.yaml" {
 				listed = true
@@ -47,11 +47,11 @@ func TestPlatformAgentDeviceClientConformance(t *testing.T) {
 		}
 	}
 	if !listed {
-		t.Fatalf("base/cozystack/kustomization.yaml does not apply kubernetes-device-client.yaml; the %s client would never reach Keycloak", clientID)
+		t.Fatalf("base/cozystack-identities/kustomization.yaml does not apply kubernetes-device-client.yaml; the %s client would never reach Keycloak", clientID)
 	}
 
 	found := false
-	for _, doc := range yamlDocs(t, runfilePath("src/infrastructure/base/cozystack/kubernetes-device-client.yaml")) {
+	for _, doc := range yamlDocs(t, runfilePath("src/infrastructure/base/cozystack-identities/kubernetes-device-client.yaml")) {
 		if stringValue(doc["kind"]) != "KeycloakClient" {
 			continue
 		}

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -34,7 +35,7 @@ var (
 // makes the pack immune to a concurrent reap (POSIX keeps the bytes alive
 // until the last handle closes).
 type preparedBundle struct {
-	File      *os.File
+	File      io.ReadCloser
 	SizeBytes int64
 	CacheHit  bool
 	ThinBase  string
@@ -52,7 +53,7 @@ func (s *Service) prepareBundle(ctx context.Context, identity AssignmentIdentity
 
 	bundlePath := s.bundlePath(repoKey, spec.SHA, spec.Have, spec.FetchDepth)
 	s.touchMirrorStamp(repoKey)
-	if file, size, ok := openIfNonEmpty(bundlePath); ok {
+	if file, size, ok := s.openBundle(bundlePath); ok {
 		now := time.Now()
 		_ = os.Chtimes(bundlePath, now, now) // LRU recency for the reaper
 		s.Metrics.CacheHits.Add(1)
@@ -75,7 +76,7 @@ func (s *Service) prepareBundle(ctx context.Context, identity AssignmentIdentity
 		effectiveHave = spec.Have
 	}
 	bundlePath = s.bundlePath(repoKey, spec.SHA, effectiveHave, spec.FetchDepth)
-	if file, size, ok := openIfNonEmpty(bundlePath); ok {
+	if file, size, ok := s.openBundle(bundlePath); ok {
 		now := time.Now()
 		_ = os.Chtimes(bundlePath, now, now)
 		s.Metrics.CacheHits.Add(1)
@@ -84,7 +85,7 @@ func (s *Service) prepareBundle(ctx context.Context, identity AssignmentIdentity
 	if err := s.createBundle(ctx, mirrorDir, bundlePath, spec.SHA, effectiveHave, spec.FetchDepth); err != nil {
 		return preparedBundle{}, err
 	}
-	file, size, ok := openIfNonEmpty(bundlePath)
+	file, size, ok := s.openBundle(bundlePath)
 	if !ok {
 		return preparedBundle{}, fmt.Errorf("bundle disappeared after creation")
 	}
@@ -105,6 +106,37 @@ func openIfNonEmpty(path string) (*os.File, int64, bool) {
 		return nil, 0, false
 	}
 	return file, stat.Size(), true
+}
+
+type trackedBundleFile struct {
+	*os.File
+	service *Service
+	path    string
+	once    sync.Once
+}
+
+func (f *trackedBundleFile) Close() error {
+	err := f.File.Close()
+	f.once.Do(func() {
+		f.service.bundleMu.Lock()
+		defer f.service.bundleMu.Unlock()
+		f.service.bundleReaders[f.path]--
+		if f.service.bundleReaders[f.path] == 0 {
+			delete(f.service.bundleReaders, f.path)
+		}
+	})
+	return err
+}
+
+func (s *Service) openBundle(path string) (io.ReadCloser, int64, bool) {
+	s.bundleMu.Lock()
+	defer s.bundleMu.Unlock()
+	file, size, ok := openIfNonEmpty(path)
+	if !ok {
+		return nil, 0, false
+	}
+	s.bundleReaders[path]++
+	return &trackedBundleFile{File: file, service: s, path: path}, size, true
 }
 
 func (s *Service) mirrorDir(repoKey string) string {
@@ -218,29 +250,69 @@ func classifyFetchError(err error) error {
 // temp file and renames it into the cache. Partial packs are structurally
 // unservable: only the rename publishes the path.
 func (s *Service) createBundle(ctx context.Context, mirrorDir, bundlePath, sha, have string, fetchDepth int) error {
-	if err := os.MkdirAll(filepath.Dir(bundlePath), 0o700); err != nil {
-		return err
+	reservation := s.cfg.MaxPackBytes
+	if reservation > s.cfg.BundleBudgetBytes {
+		reservation = s.cfg.BundleBudgetBytes
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(bundlePath), ".checkout-*.pack")
+	tmp, err := s.reserveBundle(bundlePath, reservation)
 	if err != nil {
 		return err
 	}
 	tmpPath := tmp.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
-	if err := s.writePack(ctx, mirrorDir, sha, have, fetchDepth, tmp); err != nil {
+	if err := s.writePack(ctx, mirrorDir, sha, have, fetchDepth, reservation, tmp); err != nil {
 		_ = tmp.Close()
+		s.releaseBundleReservation(tmpPath, reservation)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
+		s.releaseBundleReservation(tmpPath, reservation)
 		return err
 	}
-	return os.Rename(tmpPath, bundlePath)
+	return s.publishReservedBundle(tmpPath, bundlePath, reservation)
+}
+
+func (s *Service) reserveBundle(bundlePath string, reservation int64) (*os.File, error) {
+	s.bundleMu.Lock()
+	defer s.bundleMu.Unlock()
+	if err := s.makeBundleRoom(reservation); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(bundlePath), 0o700); err != nil {
+		return nil, err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(bundlePath), ".checkout-*.pack")
+	if err != nil {
+		return nil, err
+	}
+	s.bundleReserved += reservation
+	s.bundleTemps[tmp.Name()] = struct{}{}
+	return tmp, nil
+}
+
+func (s *Service) releaseBundleReservation(tmpPath string, reservation int64) {
+	s.bundleMu.Lock()
+	defer s.bundleMu.Unlock()
+	_ = os.Remove(tmpPath)
+	delete(s.bundleTemps, tmpPath)
+	s.bundleReserved -= reservation
+}
+
+func (s *Service) publishReservedBundle(tmpPath, bundlePath string, reservation int64) error {
+	s.bundleMu.Lock()
+	defer s.bundleMu.Unlock()
+	err := os.Rename(tmpPath, bundlePath)
+	if err != nil {
+		_ = os.Remove(tmpPath)
+	}
+	delete(s.bundleTemps, tmpPath)
+	s.bundleReserved -= reservation
+	return err
 }
 
 // writePack creates a full target closure or a thin have..target pack,
 // enforcing MaxPackBytes as the bytes stream: an oversized pack kills the
 // writer mid-flight instead of filling the disk first.
-func (s *Service) writePack(ctx context.Context, mirrorDir, sha, have string, fetchDepth int, out io.Writer) error {
+func (s *Service) writePack(ctx context.Context, mirrorDir, sha, have string, fetchDepth int, maxBytes int64, out io.Writer) error {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.GitTimeout)
 	defer cancel()
 
@@ -274,7 +346,7 @@ func (s *Service) writePack(ctx context.Context, mirrorDir, sha, have string, fe
 		}
 		packObjects.Stdin = revStdout
 	}
-	limited := &limitedWriter{w: out, remaining: s.cfg.MaxPackBytes}
+	limited := &limitedWriter{w: out, remaining: maxBytes}
 	packObjects.Stdout = limited
 
 	if err := packObjects.Start(); err != nil {

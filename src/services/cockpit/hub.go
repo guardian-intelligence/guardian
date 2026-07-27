@@ -27,6 +27,9 @@ const (
 	// before it is dropped: fan-out must stay O(1) for the hub, so a stalled
 	// stream loses its slot rather than backpressuring the flush.
 	subscriberBuffer = 8
+	// subscriberLimit bounds the unauthenticated public stream's aggregate
+	// fan-out state in one Cockpit process.
+	subscriberLimit = 256
 )
 
 // nodeState is one sampler's accumulated history plus the delta-chain
@@ -49,16 +52,17 @@ type subscriber struct {
 // 1 s frames. All state is guarded by mu; flush work is O(nodes) +
 // O(subscribers × channel-send), independent of subscriber read speed.
 type hub struct {
-	mu         sync.Mutex
-	nodes      []*nodeState
-	subs       map[*subscriber]struct{}
-	frameCount uint64
+	mu             sync.Mutex
+	nodes          []*nodeState
+	subs           map[*subscriber]struct{}
+	maxSubscribers int
+	frameCount     uint64
 
 	m *hubMetrics
 }
 
 func newHub(nodeCount int, m *hubMetrics) *hub {
-	h := &hub{subs: map[*subscriber]struct{}{}, m: m}
+	h := &hub{subs: map[*subscriber]struct{}{}, maxSubscribers: subscriberLimit, m: m}
 	for i := 0; i < nodeCount; i++ {
 		h.nodes = append(h.nodes, &nodeState{ring: newRing(ringCapacity)})
 	}
@@ -150,9 +154,13 @@ func (h *hub) flush(now time.Time) {
 // with registration: the burst is a keyframe carrying each node's most
 // recent flushed second, and because both happen under one lock the next
 // broadcast frame's deltas chain exactly off the burst's last tick.
-func (h *hub) addSubscriber() (*subscriber, *cockpitv1.Frame) {
+func (h *hub) addSubscriber() (*subscriber, *cockpitv1.Frame, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if len(h.subs) >= h.maxSubscribers {
+		return nil, nil, errSubscriberLimit
+	}
 
 	var enc []encodeNode
 	baseTs, haveBase := int64(0), false
@@ -185,7 +193,7 @@ func (h *hub) addSubscriber() (*subscriber, *cockpitv1.Frame) {
 	sub := &subscriber{ch: make(chan *cockpitv1.Frame, subscriberBuffer)}
 	h.subs[sub] = struct{}{}
 	h.m.subscribers.Store(int64(len(h.subs)))
-	return sub, encodeFrame(baseTs, enc)
+	return sub, encodeFrame(baseTs, enc), nil
 }
 
 // removeSubscriber detaches a stream whose handler is returning (client
@@ -323,7 +331,10 @@ func (s *hubService) Subscribe(
 	_ *connect.Request[cockpitv1.SubscribeRequest],
 	stream *connect.ServerStream[cockpitv1.Frame],
 ) error {
-	sub, burst := s.hub.addSubscriber()
+	sub, burst, err := s.hub.addSubscriber()
+	if err != nil {
+		return connect.NewError(connect.CodeResourceExhausted, err)
+	}
 	defer s.hub.removeSubscriber(sub)
 	if err := stream.Send(burst); err != nil {
 		return err
@@ -344,7 +355,10 @@ func (s *hubService) Subscribe(
 	}
 }
 
-var errSlowSubscriber = constError("subscriber fell behind the broadcast")
+var (
+	errSlowSubscriber  = constError("subscriber fell behind the broadcast")
+	errSubscriberLimit = constError("subscriber capacity reached")
+)
 
 type constError string
 

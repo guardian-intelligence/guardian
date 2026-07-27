@@ -42,13 +42,28 @@ cases:
     objectName: some-pod
     user: {username: "keycloak:cozy#other", groups: ["guardian-persona-write-basic", "system:authenticated"]}
     expect: allow
-  - name: mint secrets-writer token
+  - name: mint workload secrets-writer token
     operation: CREATE
     resource: {group: "", version: v1, resource: serviceaccounts}
     subResource: token
     objectName: secrets-writer
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: secrets-writer, namespace: guardian-analytics}
     user: {username: "keycloak:cozy#platform-write-basic", groups: ["system:authenticated"]}
     expect: allow
+  - name: mint tenant-root secrets-writer token
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: secrets-writer
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: secrets-writer, namespace: tenant-root}
+    user: {username: "keycloak:cozy#platform-write-basic", groups: ["system:authenticated"]}
+    expect: deny
   - name: mint secrets-reader token
     operation: CREATE
     resource: {group: "", version: v1, resource: serviceaccounts}

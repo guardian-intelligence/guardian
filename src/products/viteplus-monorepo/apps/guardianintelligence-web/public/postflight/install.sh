@@ -32,15 +32,12 @@ fail() {
 usage() {
   cat <<'EOF'
 usage: install.sh [--channel <stable|rc|nightly> | --version <x.y.z>]
-                  [--require-verification]
        install.sh --uninstall
 
 options:
   --channel <ch>          release channel to install from (default: stable)
   --version <x.y.z>       install exactly this version instead of whatever a
                           channel currently points at
-  --require-verification  fail unless cosign is available to check the
-                          signature; without it a missing cosign only warns
   --print-tag             print the release tag that would be installed and
                           exit without installing anything
   --uninstall             remove an installation this script created. Prefer
@@ -366,7 +363,6 @@ main() {
   channel_given=no
   pinned_version=""
   install_dir="${POSTFLIGHT_INSTALL_DIR:-}"
-  require_verification=no
   print_tag=no
   uninstall=no
   upgrading_in_place=no
@@ -400,10 +396,6 @@ main() {
         pinned_version="${1#--version=}"
         shift
         ;;
-      --require-verification)
-        require_verification=yes
-        shift
-        ;;
       --print-tag)
         print_tag=yes
         shift
@@ -421,7 +413,7 @@ main() {
 
   if [ "$uninstall" = yes ]; then
     if [ "$channel_given" = yes ] || [ -n "$pinned_version" ] \
-      || [ "$print_tag" = yes ] || [ "$require_verification" = yes ]; then
+      || [ "$print_tag" = yes ]; then
       fail "--uninstall removes what is already installed and takes no other options"
     fi
   elif [ -n "$pinned_version" ]; then
@@ -478,14 +470,6 @@ main() {
     command -v "$tool" > /dev/null 2>&1 || fail "$tool is required but not on PATH"
   done
 
-  if command -v cosign > /dev/null 2>&1; then
-    verify_signature=yes
-  elif [ "$require_verification" = yes ]; then
-    fail "--require-verification was given but cosign is not on PATH (https://docs.sigstore.dev/cosign/installation)"
-  else
-    verify_signature=no
-  fi
-
   os="$(uname -s)"
   arch="$(uname -m)"
   case "$os:$arch" in
@@ -532,6 +516,9 @@ Install from one explicitly, for example:
     exit 0
   fi
 
+  command -v cosign > /dev/null 2>&1 \
+    || fail "cosign is required to verify the release signature before installation (https://docs.sigstore.dev/cosign/installation)"
+
   log "installing $tag ($target)"
 
   # Release-asset URLs percent-encode the slash in the tag; a literal slash
@@ -549,22 +536,18 @@ Install from one explicitly, for example:
   actual="$(sha256_of "$work/$asset")"
   [ "$actual" = "$expected" ] || fail "sha256 mismatch for $asset (expected $expected, got $actual)"
 
-  if [ "$verify_signature" = yes ]; then
-    fetch "$DOWNLOAD_URL/$tag_path/$asset.sigstore.json" "$work/$asset.sigstore.json" \
-      || fail "$tag has no signature bundle for $asset"
-    # cosign narrates to stderr on success too; only a failure should speak.
-    if ! cosign_output="$(cosign verify-blob \
-      --bundle "$work/$asset.sigstore.json" \
-      --certificate-identity "$BUILD_IDENTITY" \
-      --certificate-oidc-issuer "$ISSUER" \
-      "$work/$asset" 2>&1)"; then
-      printf '%s\n' "$cosign_output" >&2
-      fail "signature verification failed for $asset"
-    fi
-    log "signature verified against $BUILD_IDENTITY"
-  else
-    log "cosign is not on PATH — checksum verified, signature not. Install cosign and rerun with --require-verification for the full chain."
+  fetch "$DOWNLOAD_URL/$tag_path/$asset.sigstore.json" "$work/$asset.sigstore.json" \
+    || fail "$tag has no signature bundle for $asset"
+  # cosign narrates to stderr on success too; only a failure should speak.
+  if ! cosign_output="$(cosign verify-blob \
+    --bundle "$work/$asset.sigstore.json" \
+    --certificate-identity "$BUILD_IDENTITY" \
+    --certificate-oidc-issuer "$ISSUER" \
+    "$work/$asset" 2>&1)"; then
+    printf '%s\n' "$cosign_output" >&2
+    fail "signature verification failed for $asset"
   fi
+  log "signature verified against $BUILD_IDENTITY"
 
   mkdir -p "$install_dir" || fail "could not create $install_dir"
   chmod 0755 "$work/$asset"

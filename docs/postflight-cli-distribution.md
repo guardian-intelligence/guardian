@@ -59,16 +59,15 @@ everything else. `postflight-cli/nightly-20260723`, the first release ever
 cut, predates the source tarball and the installer and carries only the
 binaries, the bundles and `checksums.txt`.
 
-The installer needs curl, sed, grep and either `sha256sum` or `shasum` —
-no jq, because the releases JSON is parsed with anchored `sed` expressions
-that key names smuggled into release notes cannot match. It always checks
-the sha256 from `checksums.txt`; it runs `cosign verify-blob` when cosign is
-on PATH and warns when it is not, and `--require-verification` turns that
-warning into an error. It installs to `~/.local/bin` (or
-`POSTFLIGHT_INSTALL_DIR`), so no step of the happy path needs sudo, and it
-stages the binary under a temporary name inside the destination directory
-and runs `postflight version` before giving it its final name — a download
-that cannot execute never shadows a working install.
+The installer needs curl, sed, grep, cosign, and either `sha256sum` or
+`shasum` — no jq, because the releases JSON is parsed with anchored `sed`
+expressions that key names smuggled into release notes cannot match. It checks
+the sha256 from `checksums.txt` and then requires `cosign verify-blob` against
+the pinned workflow identity before any downloaded binary can execute. It
+installs to `~/.local/bin` (or `POSTFLIGHT_INSTALL_DIR`), so no step of the
+happy path needs sudo, and it stages the binary under a temporary name inside
+the destination directory and runs `postflight version` before giving it its
+final name — a download that cannot execute never shadows a working install.
 
 Five properties exist because the intended delivery is a pipe into `sh`:
 

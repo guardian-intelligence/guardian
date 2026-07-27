@@ -37,9 +37,6 @@ rules:
     resources: ["imagerepositories/status", "imagepolicies/status"]
     verbs: ["get", "patch", "update"]
   - apiGroups: [""]
-    resources: ["secrets", "serviceaccounts"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
 ---

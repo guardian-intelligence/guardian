@@ -16,6 +16,7 @@ func (s *Service) RunReaper(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = time.Hour
 	}
+	s.SweepOnce()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -31,7 +32,9 @@ func (s *Service) RunReaper(ctx context.Context, interval time.Duration) {
 // SweepOnce applies bundle TTL + byte budget and mirror TTL, logging what it
 // dropped — silent truncation reads as "covered everything" when it didn't.
 func (s *Service) SweepOnce() {
+	s.bundleMu.Lock()
 	removedBundles, freedBytes := s.sweepBundles()
+	s.bundleMu.Unlock()
 	removedMirrors := s.sweepMirrors()
 	if removedBundles > 0 || removedMirrors > 0 {
 		s.cfg.Logger.Info("checkout store swept",
@@ -48,17 +51,33 @@ type bundleEntry struct {
 }
 
 func (s *Service) sweepBundles() (removed int, freed int64) {
+	removed, freed, _ = s.sweepBundlesToBudget(s.cfg.BundleBudgetBytes)
+	return removed, freed
+}
+
+func (s *Service) makeBundleRoom(reservation int64) error {
+	target := s.cfg.BundleBudgetBytes - s.bundleReserved - reservation
+	_, _, liveBytes := s.sweepBundlesToBudget(target)
+	if liveBytes > target {
+		return errTooLarge
+	}
+	return nil
+}
+
+func (s *Service) sweepBundlesToBudget(budget int64) (removed int, freed int64, liveBytes int64) {
 	root := filepath.Join(s.cfg.StoreDir, "bundles")
 	var entries []bundleEntry
 	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
-		// Temp packs left by a crash mid-createBundle are otherwise invisible
-		// to TTL and budget forever; count and reap the stale ones.
+		// Active writers register their temp paths under bundleMu. Any other
+		// temp pack is orphaned by a crashed process.
 		if info.Name() != bundleFilename {
-			if strings.HasPrefix(info.Name(), ".checkout-") &&
-				info.ModTime().Before(time.Now().Add(-s.cfg.BundleTTL)) {
+			if strings.HasPrefix(info.Name(), ".checkout-") {
+				if _, active := s.bundleTemps[path]; active {
+					return nil
+				}
 				if err := os.Remove(path); err == nil {
 					removed++
 					freed += info.Size()
@@ -72,9 +91,8 @@ func (s *Service) sweepBundles() (removed int, freed int64) {
 
 	cutoff := time.Now().Add(-s.cfg.BundleTTL)
 	var live []bundleEntry
-	var liveBytes int64
 	for _, entry := range entries {
-		if entry.modTime.Before(cutoff) {
+		if entry.modTime.Before(cutoff) && s.bundleReaders[entry.path] == 0 {
 			if s.removeBundle(entry.path) {
 				removed++
 				freed += entry.size
@@ -88,8 +106,11 @@ func (s *Service) sweepBundles() (removed int, freed int64) {
 	// Oldest-first eviction down to the byte budget.
 	sort.Slice(live, func(i, j int) bool { return live[i].modTime.Before(live[j].modTime) })
 	for _, entry := range live {
-		if liveBytes <= s.cfg.BundleBudgetBytes {
+		if liveBytes <= budget {
 			break
+		}
+		if s.bundleReaders[entry.path] > 0 {
+			continue
 		}
 		if s.removeBundle(entry.path) {
 			removed++
@@ -97,13 +118,12 @@ func (s *Service) sweepBundles() (removed int, freed int64) {
 			liveBytes -= entry.size
 		}
 	}
-	return removed, freed
+	return removed, freed, liveBytes
 }
 
-// removeBundle deletes a pack and its per-SHA directory. It needs no lock: a
-// request that already opened the pack keeps serving it (POSIX holds the bytes
-// until the descriptor closes), and one that has not yet opened it simply
-// misses and rebuilds under the repo lock.
+// removeBundle deletes a pack and its per-SHA directory. Callers hold
+// bundleMu and skip files with active readers so unlinked-but-open bytes never
+// escape the aggregate budget accounting.
 func (s *Service) removeBundle(path string) bool {
 	if err := os.Remove(path); err != nil {
 		return false

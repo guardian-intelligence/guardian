@@ -448,10 +448,6 @@ func (a *Agent) materialize(ctx context.Context, record *assignment) error {
 		}
 		a.logger.Info("postflight.hostd.volume.materialized", "assignment_id", spec.AssignmentID, "role", "tool", "duration_ns", time.Since(started).Nanoseconds())
 	}()
-	processGeneration := zvol.GenerationID("")
-	if spec.Process.ExpectedDigest != "" && !record.coldProcess {
-		processGeneration = zvol.GenerationID(spec.Process.Generation)
-	}
 	processSize := spec.Process.SizeBytes
 	if processSize == 0 {
 		processSize = defaultProcessVolumeSizeBytes
@@ -459,7 +455,7 @@ func (a *Agent) materialize(ctx context.Context, record *assignment) error {
 	go func() {
 		defer wait.Done()
 		started := time.Now()
-		process, errs[2] = a.zvols.EnsureProcess(materializeCtx, zvol.AssignmentID(spec.AssignmentID), processGeneration, processSize)
+		process, errs[2] = a.zvols.EnsureProcess(materializeCtx, zvol.AssignmentID(spec.AssignmentID), "", processSize)
 		if errs[2] != nil {
 			cancel()
 		}
@@ -482,10 +478,6 @@ func (a *Agent) rendezvous(record *assignment) vm.Rendezvous {
 		MemberID: record.spec.MemberID, AssignmentID: record.spec.AssignmentID,
 		WorkspaceDevice: record.device, WorkspaceMountpoint: workspaceMountpoint(record.spec.RepositoryFullName),
 		ToolDevice: record.toolDevice, ProcessDevice: record.processDevice,
-		CheckpointDigest: record.spec.Process.ExpectedDigest, CheckpointVersion: record.spec.Process.ExpectedVersion,
-	}
-	if record.coldProcess {
-		rendezvous.CheckpointDigest, rendezvous.CheckpointVersion = "", ""
 	}
 	return rendezvous
 }
@@ -533,17 +525,17 @@ func (a *Agent) finishAssignment(ctx context.Context, record *assignment, status
 		return
 	}
 	if status.ExitCode == 0 && record.device != "" && record.checkpoint == nil && record.reason == "" {
-		a.appendTrace(record.trace, record, "checkpoint_started", func(event *traceEvent) {
+		a.appendTrace(record.trace, record, "generation_quiesce_started", func(event *traceEvent) {
 			event.GenerationSet = generationSet(record)
 		})
 		artifact, err := a.vms.Quiesce(ctx, status.ID)
 		a.appendOriginTiming(record.trace, record, artifact.Timing)
 		record.timing = mergeTiming(record.timing, artifact.Timing)
 		if err == nil {
-			record.checkpoint = &syncproto.CheckpointArtifact{Digest: artifact.Digest, Version: artifact.Version}
-			a.appendTrace(record.trace, record, "checkpoint_completed", func(event *traceEvent) {
+			record.checkpoint = &syncproto.CheckpointArtifact{}
+			a.appendTrace(record.trace, record, "generation_quiesce_completed", func(event *traceEvent) {
 				event.GenerationSet = generationSet(record)
-				event.Checkpoint = &traceCheckpoint{Digest: artifact.Digest, Version: artifact.Version}
+				event.Checkpoint = &traceCheckpoint{}
 			})
 		} else {
 			record.reason = "snapshot skipped: " + err.Error()

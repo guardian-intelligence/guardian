@@ -29,7 +29,7 @@ import {
   type TempPack,
 } from "../src/domain.ts";
 import { HostRejected, HostUnavailable } from "../src/errors.ts";
-import { acquirePack, runCheckout } from "../src/program.ts";
+import { acquirePack, checkoutEndpoint, runCheckout } from "../src/program.ts";
 import { ActionRuntime } from "../src/services/action-runtime.ts";
 import { CheckoutHost } from "../src/services/checkout-host.ts";
 import { Git } from "../src/services/git.ts";
@@ -53,7 +53,7 @@ const runtime = (): RawRuntimeConfiguration => ({
   checkoutPath: "/internal/sandbox/v1/github-checkout",
   checkoutToken: Redacted.make("runner-token"),
   executionId: "execution-1",
-  hostOrigin: "http://127.0.0.1",
+  hostOrigin: "http://10.0.2.2:8480",
   sha: SHA,
   workspace: "/tmp",
 });
@@ -73,6 +73,26 @@ const actionHarness = () => {
     outputs,
   };
 };
+
+it("binds checkout credentials to a runner-owned host origin", async () => {
+  const legitimate = await Effect.runPromise(
+    checkoutEndpoint("http://10.0.2.2:8480", "/internal/sandbox/v1/github-checkout"),
+  );
+  expect(legitimate.toString()).toBe(
+    "http://10.0.2.2:8480/internal/sandbox/v1/github-checkout/bundle",
+  );
+
+  for (const [origin, path] of [
+    ["https://attacker.example", "/internal/sandbox/v1/github-checkout"],
+    ["http://127.0.0.1:8480", "/internal/sandbox/v1/github-checkout"],
+    ["http://10.0.2.2:8480", "//attacker.example/capture"],
+    ["http://10.0.2.2:8480", "/\\attacker.example/capture"],
+    ["http://10.0.2.2:8480", "/attacker-controlled-handler"],
+  ] as const) {
+    const result = await Effect.runPromise(checkoutEndpoint(origin, path).pipe(Effect.either));
+    expect(result._tag).toBe("Left");
+  }
+});
 
 it("retries only retryable pack acquisition failures", () =>
   Effect.runPromise(

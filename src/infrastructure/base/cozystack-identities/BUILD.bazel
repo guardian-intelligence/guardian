@@ -1,8 +1,5 @@
 filegroup(
     name = "manifests",
-    srcs = [
-        "kustomization.yaml",
-        "platform.yaml",
-    ],
+    srcs = glob(["*.yaml"]),
     visibility = ["//visibility:public"],
 )

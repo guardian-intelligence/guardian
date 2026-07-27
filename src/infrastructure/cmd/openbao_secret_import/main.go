@@ -338,7 +338,7 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 		},
 		// Platform Keycloak admin identities (cozy realm): per-identity
 		// login passwords for the KeycloakRealmUser CRs declared in
-		// base/cozystack/platform-admins.yaml. ESO projects them 1:1 into
+		// base/cozystack-identities/platform-admins.yaml. ESO projects them 1:1 into
 		// Secret/platform-admin-passwords in tenant-root, which the EDP
 		// keycloak-operator reads via each user's passwordSecret ref.
 		{

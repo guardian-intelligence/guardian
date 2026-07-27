@@ -669,13 +669,6 @@ func (q *QEMU) Quiesce(ctx context.Context, id ID) (CheckpointArtifact, error) {
 	defer cancel()
 	reply, err := q.cfg.Guest.Quiesce(quiesceCtx, id, record.CID, guestproto.Quiesce{
 		Mountpoints: []string{runnerStateMountpoint, record.WorkspaceMountpoint, processMountpoint},
-		Checkpoint: &guestproto.CheckpointDump{
-			ImagesDir: processImagesDir,
-			ExternalMounts: []guestproto.CheckpointMount{
-				{Key: workspaceNode, Path: record.WorkspaceMountpoint},
-				{Key: toolNode, Path: runnerStateMountpoint},
-			},
-		},
 	})
 	q.timingMu.Lock()
 	q.timings[id] = append(q.timings[id], timingPoints(reply.Timing)...)
@@ -688,13 +681,7 @@ func (q *QEMU) Quiesce(ctx context.Context, id ID) (CheckpointArtifact, error) {
 	q.recordTimingLocked(id, "quiesce_rpc_completed")
 	checkpointTiming := append([]TimingPoint(nil), q.timings[id]...)
 	q.timingMu.Unlock()
-	if reply.Checkpoint == nil {
-		return CheckpointArtifact{}, errors.New("vm: guest quiesced without a checkpoint artifact")
-	}
-	return CheckpointArtifact{
-		Digest: reply.Checkpoint.Digest, Version: reply.Checkpoint.Version,
-		Timing: checkpointTiming,
-	}, nil
+	return CheckpointArtifact{Timing: checkpointTiming}, nil
 }
 
 // attachVolume hot-attaches a device by stable serial,

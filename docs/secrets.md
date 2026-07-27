@@ -113,20 +113,22 @@ never leak the root of trust that rebuilds it.
   - `guardian-reader-<ns>` — SA `secrets-reader`, read-only, what ESO
     authenticates as (1h token TTL);
   - `guardian-writer-<ns>` — SA `secrets-writer`, write-only within the same
-    subtree, 10-minute token TTL. A session mints these tokens itself
-    through a TokenRequest grant scoped to the `secrets-writer` SAs, so a
-    secret is written headlessly while the management store stays
+    subtree, 10-minute token TTL. A `write-basic` session can mint these
+    tokens in non-root namespaces; `tenant-root` carries platform identity
+    credentials, so its writer requires `write-all`. A workload secret is
+    written headlessly while the management store stays
     unreadable: the writer policies grant no read capability, so the
     mint-token→login→read escalation is closed by the store's no-read
     classification itself, independent of any other grant.
 - **Sessions carry authority by persona, not by being an agent.** A session
   chooses a rung of the ladder when it authenticates — `read` (cluster-wide
   read plus port-forward, unattended), `write-basic` (delete pods and jobs,
-  scale workloads, mint secrets-writer tokens), `write-all` (cluster-admin
-  for emergencies), and `root`, the x509 breakglass that deliberately does
+  scale workloads, mint non-root secrets-writer tokens), `write-all`
+  (cluster-admin for tenant-root secret writes and emergencies), and `root`,
+  the x509 breakglass that deliberately does
   not depend on Keycloak. Each rung is a Keycloak group bound to its own
   ClusterRoles behind its own fail-closed ValidatingAdmissionPolicy:
-  `src/infrastructure/base/cozystack/platform-admins.yaml`, which also
+  `src/infrastructure/base/cozystack-identities/platform-admins.yaml`, which also
   documents how to add a rung. Only `read` holds the `offline_access` realm
   role, so only `read` refreshes unattended; every write persona expires
   with its Keycloak session and needs a fresh device approval from the

@@ -86,6 +86,7 @@ go_test(
     ],
     embed = [":controlplane_lib"],
     deps = [
+        "//src/services/postflight/hostd/syncproto",
         "@com_github_jackc_pgx_v5//:pgx",
         "@io_opentelemetry_go_otel_trace//noop",
     ],

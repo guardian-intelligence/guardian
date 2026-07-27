@@ -145,8 +145,9 @@ called out explicitly.
 - **Access is scoped per namespace subtree, not per secret path.** Each consumer namespace gets
   `guardian-reader-<ns>` (ESO, SA `secrets-reader`, read-only on
   `kv/guardian/guardian-mgmt/<ns>/*`) and `guardian-writer-<ns>` (SA `secrets-writer`,
-  short-TTL, write-only within the same subtree; a `write-basic` session mints its
-  token through a TokenRequest grant scoped to those SAs, so writes are headless while
+  short-TTL, write-only within the same subtree; a `write-basic` session mints
+  tokens only for non-root writers, while the `tenant-root` writer requires
+  `write-all`. Writes stay headless while
   the store stays no-read to every persona — it holds privilege-escalating and
   customer-integration material wholesale, the never-readable class under the
   read policy in `docs/secrets.md`). This makes OpenBao config O(1) in the number of integrations: a new secret in an

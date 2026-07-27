@@ -6,6 +6,31 @@ import (
 	"testing"
 )
 
+func TestMainRulesetRequiresIndependentReviewedPullRequest(t *testing.T) {
+	const path = "src/infrastructure/bootstrap/guardian-github/main.tf"
+	ruleset := readText(t, runfilePath(path))
+
+	for _, want := range []string{
+		`pull_request\s*\{`,
+		`required_approving_review_count\s*=\s*1`,
+		`require_last_push_approval\s*=\s*true`,
+		`dismiss_stale_reviews_on_push\s*=\s*true`,
+		`required_review_thread_resolution\s*=\s*true`,
+	} {
+		if !regexp.MustCompile(want).MatchString(ruleset) {
+			t.Fatalf("%s does not match %q", path, want)
+		}
+	}
+
+	for _, want := range []string{
+		"actor_id    = local.promotions_app_id",
+		`actor_type  = "Integration"`,
+		`bypass_mode = "always"`,
+	} {
+		assertTextContains(t, ruleset, want, path)
+	}
+}
+
 // main's ruleset requires a status check by *name*. GitHub reports that name
 // from the workflow job, so a rename on either side is a merge lock: the
 // required context can never report, and every PR cut afterwards sits BLOCKED

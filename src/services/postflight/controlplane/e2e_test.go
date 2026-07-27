@@ -376,7 +376,7 @@ func startE2EControlPlane(t *testing.T, reconfigure ...func(*config)) *e2eContro
 		workerInterval: time.Hour, workerBatchSize: 16, maxDeliveryTries: 8,
 		hostdSyncSecret: e2eSyncSecret, schedulerEnabled: true,
 		schedulerInterval: 10 * time.Millisecond, runnerPoolSize: 2, listenerFloor: 2,
-		sealTimeout: 10 * time.Second,
+		sealTimeout:    10 * time.Second,
 		verdictTimeout: time.Hour, hostOfflineTimeout: time.Minute,
 	}
 	for _, mutate := range reconfigure {
@@ -711,7 +711,7 @@ func TestInProgressAPIRefreshCreatesDemandWithoutQueuedWebhook(t *testing.T) {
 	}
 }
 
-func TestWarmPoolLocalAssignmentAndRecoverableRestoreEndToEnd(t *testing.T) {
+func TestWarmPoolLocalAssignmentAndWorkspaceGenerationEndToEnd(t *testing.T) {
 	control := startE2EControlPlane(t)
 	const sourceGeneration = "generation-source"
 	const sourceProcessDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -806,11 +806,11 @@ WHERE provider_job_id = $1`, e2eJobID); err != nil {
 	if !volumes.HasWorkspace(zvol.AssignmentID(rendezvous.AssignmentID)) {
 		t.Fatal("assignment did not materialize durable workspace")
 	}
-	if !vms.MarkBoundWithRestore(selected.ID, guestproto.RestoreStatus{
-		Outcome: guestproto.RestoreColdFallback, ProcessInvalidated: true,
-		FailureClass: "incompatible", FailureCode: "criu-rejected",
-	}) {
-		t.Fatal("recoverable restore did not reach cold capsule")
+	if rendezvous.CheckpointDigest != "" || rendezvous.CheckpointVersion != "" {
+		t.Fatalf("process checkpoint selected for a new job: %+v", rendezvous)
+	}
+	if !vms.MarkBound(selected.ID) {
+		t.Fatal("workspace generation did not bind")
 	}
 	waitFor(t, "exact authorization", func() bool {
 		authorization, found := vms.AuthorizationFor(selected.ID)
@@ -825,17 +825,11 @@ WHERE provider_job_id = $1`, e2eJobID); err != nil {
 	waitFor(t, "running assignment", func() bool {
 		return queryString(t, control.pool, `SELECT state FROM runner_job_assignments WHERE assignment_id::text = $1`, rendezvous.AssignmentID) == "running"
 	})
-	if host.Metrics().ColdFallbacks.Load() != 1 {
+	if host.Metrics().ColdFallbacks.Load() != 0 {
 		t.Fatalf("cold fallback metric = %d", host.Metrics().ColdFallbacks.Load())
 	}
-	if got := queryString(t, control.pool, `SELECT restore_outcome || ':' || process_invalidated::text FROM runner_job_assignments WHERE assignment_id::text = $1`, rendezvous.AssignmentID); got != "cold-fallback:true" {
-		t.Fatalf("restore telemetry = %q", got)
-	}
-	if got := queryString(t, control.pool, `SELECT process_valid::text || ':' || process_invalidation_class || ':' || process_invalidation_code FROM workspace_generations WHERE generation = $1`, sourceGeneration); got != "false:incompatible:criu-rejected" {
-		t.Fatalf("source process invalidation = %q", got)
-	}
-	if got := queryString(t, control.pool, `SELECT source_process_digest FROM runner_job_assignments WHERE assignment_id::text = $1`, rendezvous.AssignmentID); got != sourceProcessDigest {
-		t.Fatalf("immutable assignment lost selected process digest = %q", got)
+	if got := queryString(t, control.pool, `SELECT source_process_digest FROM runner_job_assignments WHERE assignment_id::text = $1`, rendezvous.AssignmentID); got != "" {
+		t.Fatalf("assignment persisted process checkpoint digest = %q", got)
 	}
 	if got := queryString(t, control.pool, `SELECT timing_json->0->>'event' FROM runner_job_assignments WHERE assignment_id::text = $1`, rendezvous.AssignmentID); got != "runner_assignment_received" {
 		t.Fatalf("assignment timing = %q", got)
@@ -1933,8 +1927,8 @@ func TestOffHostGenerationRoutesTransferSpecEndToEnd(t *testing.T) {
 		plan.Transfer.Generation != "gen-transfer" || plan.Transfer.Base != "gen-base" {
 		t.Fatalf("plan transfer = %+v", plan.Transfer)
 	}
-	if plan.Process.Generation != "gen-transfer" || plan.Process.ExpectedDigest == "" {
-		t.Fatalf("plan process = %+v", plan.Process)
+	if plan.Process.Generation != "" || plan.Process.ExpectedDigest != "" || plan.Process.ExpectedVersion != "" {
+		t.Fatalf("plan exposed process state = %+v", plan.Process)
 	}
 	// The owning host itself keeps the plain resident view.
 	ownSnapshot := getJobPlans(t, control.server.URL, "host-xfer-a")
@@ -1967,8 +1961,8 @@ func TestOffHostGenerationRoutesTransferSpecEndToEnd(t *testing.T) {
 		desired.Transfer.Base != "gen-base" {
 		t.Fatalf("desired assignment transfer = %+v", desired.Transfer)
 	}
-	if desired.Process.Generation != "gen-transfer" || desired.Process.ExpectedDigest == "" {
-		t.Fatalf("desired process = %+v", desired.Process)
+	if desired.Process.Generation != "" || desired.Process.ExpectedDigest != "" || desired.Process.ExpectedVersion != "" {
+		t.Fatalf("desired assignment exposed process state = %+v", desired.Process)
 	}
 
 	// The assigned host's transfer evidence lands beside restore evidence.

@@ -2,8 +2,8 @@
 // that talks to the host. It accepts the host's vsock connection, converges
 // the assignment's mounts (no customer step runs before every mount is up),
 // execs the actions runner as the runner user, streams the runner lifecycle
-// back, and checkpoints and flushes the attached generation ahead of the
-// host-side seal snapshot.
+// back, and flushes the attached generation ahead of the host-side seal
+// snapshot.
 // A dead guestd is a dead VM by design: the host's probe fails and the slot
 // is destroyed and refilled, so nothing here ever restarts itself.
 package guestd
@@ -50,8 +50,6 @@ type Config struct {
 	MountDeadline time.Duration
 	// RetryInterval paces mount convergence retries.
 	RetryInterval time.Duration
-	// QuiesceWindow bounds the process checkpoint operation.
-	QuiesceWindow time.Duration
 	// HookDeadline bounds a hook that GitHub itself would otherwise allow
 	// to block forever.
 	HookDeadline time.Duration
@@ -63,8 +61,8 @@ type Config struct {
 	// Encryption is the baked at-rest mode for workspace volumes; the zero
 	// value mounts plaintext. See LoadEncryptionMode.
 	Encryption EncryptionMode
-	// Checkpoints is the single generic process checkpoint implementation.
-	// Nil disables process restore while retaining workspace-only behavior.
+	// Checkpoints owns the isolated customer capsule lifecycle. Durable process
+	// publication and restoration are rejected at the guest protocol boundary.
 	Checkpoints *ProcessCheckpoints
 	// HostCID is the only vsock peer CID accepted as the host. Anything in
 	// the guest — the runner user included — can dial this listener, so a
@@ -87,9 +85,6 @@ func (c *Config) validate() error {
 	}
 	if c.RetryInterval <= 0 {
 		c.RetryInterval = 200 * time.Millisecond
-	}
-	if c.QuiesceWindow <= 0 {
-		c.QuiesceWindow = 5 * time.Minute
 	}
 	if c.HookDeadline <= 0 {
 		c.HookDeadline = 2 * time.Minute
@@ -383,41 +378,15 @@ func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 		return
 	}
 	emit("mount_convergence_completed")
-	restored := false
 	restoreStatus := &guestproto.RestoreStatus{Outcome: guestproto.RestoreNotRequested}
 	if rendezvous.Checkpoint != nil {
-		emit("criu_restore_started")
-		if s.cfg.Checkpoints == nil {
-			err := errors.New("process checkpoint requested but guest support is disabled")
-			recycle("checkpoint restore failed", err, &guestproto.RestoreStatus{
-				Outcome: guestproto.RestoreUnsafe, FailureClass: string(generation.RestoreCleanup),
-				FailureCode: "checkpoint-support-disabled",
-			})
-			return
-		}
-		checkpoint := rendezvous.Checkpoint
-		result, err := s.cfg.Checkpoints.RestoreOrCold(ctx, checkpoint.ImagesDir, checkpoint.ExpectedDigest, checkpoint.ExpectedVersion, checkpointMounts(checkpoint.ExternalMounts), func(event string) {
-			emit(event)
+		recycle("process restore rejected", errors.New("process checkpoint restoration is disabled"), &guestproto.RestoreStatus{
+			Outcome: guestproto.RestoreUnsafe, ProcessInvalidated: true,
+			FailureClass: string(generation.RestoreCleanup), FailureCode: "process-restore-disabled",
 		})
-		if err != nil {
-			class, code := generation.RestoreFailureDetails(err)
-			recycle("checkpoint restore failed", err, &guestproto.RestoreStatus{
-				Outcome: guestproto.RestoreUnsafe, ProcessInvalidated: true,
-				FailureClass: string(class), FailureCode: code,
-			})
-			return
-		}
-		restored = result.Restored
-		if result.Restored {
-			restoreStatus = &guestproto.RestoreStatus{Outcome: guestproto.RestoreSucceeded}
-			emit("criu_restore_completed")
-		} else {
-			restoreStatus = &guestproto.RestoreStatus{
-				Outcome: guestproto.RestoreColdFallback, ProcessInvalidated: result.ProcessInvalidated,
-				FailureClass: string(result.FailureClass), FailureCode: result.FailureCode,
-			}
-		}
-	} else if s.cfg.Checkpoints != nil {
+		return
+	}
+	if s.cfg.Checkpoints != nil {
 		emit("cold_capsule_start_started")
 		if err := s.cfg.Checkpoints.Capsules.Start(ctx); err != nil {
 			recycle("cold capsule start failed", err, &guestproto.RestoreStatus{
@@ -430,7 +399,7 @@ func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 	}
 	cancel()
 	clock := sampleClock()
-	clock.AfterRestore = restored
+	clock.AfterRestore = false
 	s.mu.Lock()
 	s.bound = true
 	s.clock = &clock
@@ -729,13 +698,15 @@ func (s *Server) openEncrypted(ctx context.Context, device, serial string) (stri
 }
 
 // handleQuiesce proves that every member of the selected generation is
-// mounted, checkpoints the capsule, flushes the filesystems, and reports the
-// artifact. The host destroys QEMU before sealing the zvols, which releases
-// the mounted devices without thawing the deliberately stopped capsule.
+// mounted and flushes the filesystems before the host seals the zvols.
 func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
 	points := []guestproto.TimingPoint{guestTiming(s.cfg.Timing.Point("quiesce_received"))}
 	if len(quiesce.Mountpoints) == 0 {
 		s.quiesceFailed(errors.New("quiesce requires at least one mounted volume"), points)
+		return
+	}
+	if quiesce.Checkpoint != nil {
+		s.quiesceFailed(errors.New("process checkpoint publication is disabled"), points)
 		return
 	}
 	for _, mountpoint := range quiesce.Mountpoints {
@@ -746,60 +717,14 @@ func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
 		}
 	}
 	points = append(points, guestTiming(s.cfg.Timing.Point("quiesce_mounts_checked")))
-	var artifact *guestproto.CheckpointArtifact
-	if quiesce.Checkpoint != nil {
-		if s.cfg.Checkpoints == nil {
-			s.quiesceFailed(errors.New("process checkpoint requested but guest support is disabled"), points)
-			return
-		}
-		checkpoint := quiesce.Checkpoint
-		if len(checkpoint.ExternalMounts) == 0 {
-			s.quiesceFailed(errors.New("checkpoint has no external mounts"), points)
-			return
-		}
-		for _, mount := range checkpoint.ExternalMounts {
-			if !slices.Contains(quiesce.Mountpoints, mount.Path) {
-				s.quiesceFailed(errors.New("checkpoint external mount is not in the generation tuple"), points)
-				return
-			}
-		}
-		if !slices.Contains(quiesce.Mountpoints, s.cfg.Checkpoints.ImagesRoot) {
-			s.quiesceFailed(errors.New("checkpoint process volume is not in the generation tuple"), points)
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), s.cfg.QuiesceWindow)
-		points = append(points, guestTiming(s.cfg.Timing.Point("checkpoint_dump_started")))
-		result, err := s.cfg.Checkpoints.dumpObserved(ctx, checkpoint.ImagesDir, checkpointMounts(checkpoint.ExternalMounts), func(event string) {
-			points = append(points, guestTiming(s.cfg.Timing.Point(event)))
-		})
-		cancel()
-		if err != nil {
-			s.quiesceFailed(fmt.Errorf("checkpoint dump: %w", err), points)
-			return
-		}
-		points = append(points, guestTiming(s.cfg.Timing.Point("checkpoint_dump_completed")))
-		artifact = &guestproto.CheckpointArtifact{Digest: result.Digest, Version: result.Version}
-	}
-	// CRIU has stopped every process in the capsule. Flush every mounted
-	// filesystems, then let the host destroy the VM before it snapshots the
-	// zvols. Keeping the mounts attached until QEMU exits avoids a busy
-	// unmount caused by the deliberately stopped process tree.
 	points = append(points, guestTiming(s.cfg.Timing.Point("filesystem_sync_started")))
 	s.cfg.System.Sync()
 	points = append(points, guestTiming(s.cfg.Timing.Point("filesystem_sync_completed")))
 	if err := s.send(guestproto.Message{Kind: guestproto.KindQuiesced, Quiesced: &guestproto.Quiesced{
-		Checkpoint: artifact, Timing: points,
+		Timing: points,
 	}}); err != nil {
 		s.cfg.Logger.Warn("quiesced not delivered", "err", err)
 	}
-}
-
-func checkpointMounts(mounts []guestproto.CheckpointMount) []ExternalMount {
-	external := make([]ExternalMount, 0, len(mounts))
-	for _, mount := range mounts {
-		external = append(external, ExternalMount{Key: mount.Key, Path: mount.Path})
-	}
-	return external
 }
 
 func (s *Server) quiesceFailed(reason error, points []guestproto.TimingPoint) {

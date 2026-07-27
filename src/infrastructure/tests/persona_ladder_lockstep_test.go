@@ -107,7 +107,7 @@ func TestPersonaLadderTaskLockstep(t *testing.T) {
 
 	// Every Keycloak-backed persona must resolve to an identity the manifest
 	// declares, or the device login succeeds against a user that does not exist.
-	docs := yamlDocs(t, runfilePath("src/infrastructure/base/cozystack/platform-admins.yaml"))
+	docs := yamlDocs(t, runfilePath("src/infrastructure/base/cozystack-identities/platform-admins.yaml"))
 	declared := map[string]bool{}
 	for _, doc := range docs {
 		if stringValue(doc["kind"]) == "KeycloakRealmUser" {

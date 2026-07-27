@@ -54,9 +54,7 @@ func validateAssignment(spec syncproto.DesiredAssignment) error {
 		return errors.New("assignment repository identity differs")
 	}
 	if spec.Process.ExpectedDigest != "" || spec.Process.ExpectedVersion != "" || spec.Process.Generation != "" {
-		if spec.Process.ExpectedDigest == "" || spec.Process.ExpectedVersion == "" || spec.Process.Generation == "" {
-			return errors.New("process snapshot identity is incomplete")
-		}
+		return errors.New("process restoration is disabled")
 	}
 	if spec.State == syncproto.DesiredAssignmentSeal && (spec.SealGeneration == "" || spec.SealCheckpoint == nil) {
 		return errors.New("seal assignment is incomplete")

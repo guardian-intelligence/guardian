@@ -1,6 +1,7 @@
 package checkoutbundle
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,7 +83,93 @@ func TestSweepBundleBudgetEvictsOldestFirst(t *testing.T) {
 	}
 }
 
-func TestSweepReapsStaleTempPacks(t *testing.T) {
+func TestBundleBudgetAccountsForActiveReaders(t *testing.T) {
+	service := New(Config{
+		StoreDir:          t.TempDir(),
+		HostSecret:        testSecret,
+		BundleBudgetBytes: 100,
+		MaxPackBytes:      100,
+	}, &StaticResolver{})
+	path := writeBundleFixture(t, service, "repoa", strings.Repeat("a", 40), 100, time.Hour)
+	file, _, ok := service.openBundle(path)
+	if !ok {
+		t.Fatal("open active bundle")
+	}
+
+	service.bundleMu.Lock()
+	err := service.makeBundleRoom(100)
+	service.bundleMu.Unlock()
+	if !errors.Is(err, errTooLarge) {
+		t.Fatalf("make room with active reader = %v, want %v", err, errTooLarge)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("active bundle was unlinked: %v", err)
+	}
+
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	service.bundleMu.Lock()
+	err = service.makeBundleRoom(100)
+	service.bundleMu.Unlock()
+	if err != nil {
+		t.Fatalf("make room after close: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("closed bundle survived budget eviction")
+	}
+}
+
+func TestBundleBudgetReservesConcurrentPackWriters(t *testing.T) {
+	service := New(Config{
+		StoreDir:          t.TempDir(),
+		HostSecret:        testSecret,
+		BundleBudgetBytes: 200,
+		MaxPackBytes:      100,
+	}, &StaticResolver{})
+	firstPath := service.bundlePath("repoa", strings.Repeat("a", 40), "", 1)
+	secondPath := service.bundlePath("repob", strings.Repeat("b", 40), "", 1)
+	thirdPath := service.bundlePath("repoc", strings.Repeat("c", 40), "", 1)
+
+	first, err := service.reserveBundle(firstPath, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.reserveBundle(secondPath, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Write(make([]byte, 100)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.Write(make([]byte, 100)); err != nil {
+		t.Fatal(err)
+	}
+	service.SweepOnce()
+	for _, path := range []string{first.Name(), second.Name()} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("active reserved temp was reaped: %v", err)
+		}
+	}
+	if _, err := service.reserveBundle(thirdPath, 100); !errors.Is(err, errTooLarge) {
+		t.Fatalf("third reservation = %v, want %v", err, errTooLarge)
+	}
+
+	firstTmp, secondTmp := first.Name(), second.Name()
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+	service.releaseBundleReservation(firstTmp, 100)
+	service.releaseBundleReservation(secondTmp, 100)
+	if service.bundleReserved != 0 {
+		t.Fatalf("reserved bytes = %d, want 0", service.bundleReserved)
+	}
+}
+
+func TestSweepReapsOrphanedTempPacks(t *testing.T) {
 	service := New(Config{
 		StoreDir:   t.TempDir(),
 		HostSecret: testSecret,
@@ -110,8 +197,8 @@ func TestSweepReapsStaleTempPacks(t *testing.T) {
 	if _, err := os.Stat(staleTmp); !os.IsNotExist(err) {
 		t.Fatal("stale temp pack survived the sweep")
 	}
-	if _, err := os.Stat(freshTmp); err != nil {
-		t.Fatal("fresh temp pack was reaped prematurely")
+	if _, err := os.Stat(freshTmp); !os.IsNotExist(err) {
+		t.Fatal("fresh orphaned temp pack survived the sweep")
 	}
 }
 

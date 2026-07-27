@@ -177,7 +177,10 @@ describe("Postflight OIDC BFF", () => {
 
     const logoutResponse = await endPostflightSession(
       new Request(`${publicURL}/postflight/auth/logout`, {
-        headers: { cookie: `${SESSION_COOKIE}=${session}` },
+        headers: {
+          cookie: `${SESSION_COOKIE}=${session}`,
+          referer: `${publicURL}/postflight/console`,
+        },
       }),
     );
     const logoutURL = new URL(logoutResponse.headers.get("location") || "");
@@ -223,10 +226,31 @@ describe("Postflight OIDC BFF", () => {
     expect(response.headers.get("location")).toBe(`${publicURL}/postflight`);
   });
 
+  it("refuses logout when no browser provenance header is present", async () => {
+    const response = await endPostflightSession(new Request(`${publicURL}/postflight/auth/logout`));
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it.each(["same-site", "none"])("refuses logout with sec-fetch-site=%s", async (fetchSite) => {
+    const response = await endPostflightSession(
+      new Request(`${publicURL}/postflight/auth/logout`, {
+        headers: { "sec-fetch-site": fetchSite },
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
   it("signs out locally without visiting Keycloak when no ID token is recoverable", async () => {
     const response = await endPostflightSession(
       new Request(`${publicURL}/postflight/auth/logout`, {
-        headers: { cookie: `${SESSION_COOKIE}=not-a-sealed-session` },
+        headers: {
+          cookie: `${SESSION_COOKIE}=not-a-sealed-session`,
+          referer: `${publicURL}/postflight/console`,
+        },
       }),
     );
 

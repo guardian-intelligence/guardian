@@ -81,3 +81,36 @@ func TestRenovateAppSecretStaysNamespaceScoped(t *testing.T) {
 		assertTextContains(t, source, want, secrets)
 	}
 }
+
+func TestImageReflectorHasNoRegistryCredentialAuthority(t *testing.T) {
+	const controllers = "src/infrastructure/deployments/guardian/imageops/controllers.yaml"
+	role := findDoc(t, yamlDocs(t, runfilePath(controllers)), "Role", "image-reflector-controller")
+	for _, item := range sliceValue(role["rules"]) {
+		rule := mapValue(item)
+		for _, resource := range sliceValue(rule["resources"]) {
+			switch stringValue(resource) {
+			case "secrets", "serviceaccounts", "serviceaccounts/token":
+				t.Fatalf("image reflector grants access to %s; every declared registry is public", stringValue(resource))
+			}
+		}
+	}
+
+	const repositories = "src/infrastructure/deployments/guardian/imageops/imagepolicies.yaml"
+	for _, doc := range yamlDocs(t, runfilePath(repositories)) {
+		if stringValue(doc["kind"]) != "ImageRepository" {
+			continue
+		}
+		name := stringValue(mapValue(doc["metadata"])["name"])
+		spec := mapValue(doc["spec"])
+		for _, field := range []string{
+			"certSecretRef",
+			"proxySecretRef",
+			"secretRef",
+			"serviceAccountName",
+		} {
+			if _, found := spec[field]; found {
+				t.Fatalf("public ImageRepository %s declares %s", name, field)
+			}
+		}
+	}
+}

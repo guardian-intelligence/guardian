@@ -434,8 +434,7 @@ INSERT INTO runner_job_assignments (
 SELECT d.plan_id, $1, i.provider_job_id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
        'observed', d.workspace_scope_id,
        COALESCE(CASE WHEN g.host_id = $2 OR owner.transfer_origin <> '' THEN d.source_generation END, ''),
-       COALESCE(CASE WHEN (g.host_id = $2 OR owner.transfer_origin <> '') AND g.process_valid THEN g.process_digest END, ''),
-       COALESCE(CASE WHEN (g.host_id = $2 OR owner.transfer_origin <> '') AND g.process_valid THEN g.criu_version END, ''),
+       '', '',
        COALESCE(CASE WHEN g.host_id <> $2 THEN owner.transfer_origin END, ''),
        COALESCE(CASE WHEN g.host_id <> $2 AND owner.transfer_origin <> '' THEN base_g.generation END, ''),
        $12::jsonb
@@ -481,6 +480,9 @@ func assignmentExists(ctx context.Context, tx pgx.Tx, memberID string) (bool, er
 func (s *pgStore) ApplyAssignmentReport(ctx context.Context, hostID string, liveCutoff time.Time, report syncproto.AssignmentReport, sealDeadline time.Time) error {
 	if report.AssignmentID == "" || report.MemberID == "" || report.RequestID == "" || report.JobID == "" {
 		return nil
+	}
+	if report.Checkpoint != nil && (report.Checkpoint.Digest != "" || report.Checkpoint.Version != "") {
+		return errors.New("process checkpoint publication is disabled")
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -583,19 +585,17 @@ WHERE generation = $1`, sourceGeneration, restore.FailureClass, restore.FailureC
 INSERT INTO workspace_generations (
     generation, host_id, runner_class, state, scope_id, source_generation,
     process_digest, criu_version
-) VALUES (gen_random_uuid()::text, $1, $2, 'candidate', $3::uuid, NULLIF($4,''), $5, $6)
-RETURNING generation`, hostID, class, scopeID, sourceGeneration,
-				report.Checkpoint.Digest, report.Checkpoint.Version).Scan(&generation)
+) VALUES (gen_random_uuid()::text, $1, $2, 'candidate', $3::uuid, NULLIF($4,''), '', '')
+RETURNING generation`, hostID, class, scopeID, sourceGeneration).Scan(&generation)
 			if err != nil {
 				return err
 			}
 			if _, err := tx.Exec(ctx, `
 UPDATE runner_job_assignments
 SET state = 'sealing', exit_code = 0, seal_generation = $2,
-    checkpoint_digest = $3, checkpoint_version = $4,
-    seal_deadline_at = $5, updated_at = now()
-WHERE assignment_id::text = $1`, report.AssignmentID, generation,
-				report.Checkpoint.Digest, report.Checkpoint.Version, sealDeadline); err != nil {
+    checkpoint_digest = '', checkpoint_version = '',
+    seal_deadline_at = $3, updated_at = now()
+WHERE assignment_id::text = $1`, report.AssignmentID, generation, sealDeadline); err != nil {
 				return err
 			}
 		} else {
@@ -610,9 +610,8 @@ WHERE assignment_id::text = $1`, report.AssignmentID, generation,
 		}
 		tag, err := tx.Exec(ctx, `
 UPDATE workspace_generations
-SET sealed_at = now(), process_digest = $2, criu_version = $3, updated_at = now()
-WHERE generation = $1 AND state = 'candidate'`, report.SealedGeneration,
-			report.Checkpoint.Digest, report.Checkpoint.Version)
+SET sealed_at = now(), process_digest = '', criu_version = '', updated_at = now()
+WHERE generation = $1 AND state = 'candidate'`, report.SealedGeneration)
 		if err != nil {
 			return err
 		}
@@ -699,7 +698,6 @@ type desiredAssignmentRow struct {
 	RunnerName, Repository, WorkflowJob                 string
 	RunnerClass, ScopeGeneration                        string
 	WorkspaceBytes, ToolBytes, ProcessBytes             int64
-	ProcessDigest, ProcessVersion                       string
 	TransferOrigin, TransferBase                        string
 	SealGeneration, CheckpointDigest, CheckpointVersion string
 }
@@ -712,7 +710,6 @@ type jobPlanRow struct {
 	RunAttempt                                        int
 	JobDisplayName                                    string
 	WorkspaceBytes, ToolBytes, ProcessBytes           int64
-	ProcessDigest, ProcessVersion                     string
 	TransferOrigin, TransferBase                      string
 }
 
@@ -728,8 +725,6 @@ SELECT d.plan_id::text, d.provider_job_id, d.provider_installation_id,
        j.name,
        CASE WHEN g.host_id = $1 OR owner.transfer_origin <> '' THEN d.source_generation ELSE '' END,
        c.disk_bytes, c.tool_disk_bytes, c.process_disk_bytes,
-       CASE WHEN (g.host_id = $1 OR owner.transfer_origin <> '') AND g.process_valid THEN g.process_digest ELSE '' END,
-       CASE WHEN (g.host_id = $1 OR owner.transfer_origin <> '') AND g.process_valid THEN g.criu_version ELSE '' END,
        COALESCE(owner.transfer_origin, ''),
        COALESCE(CASE WHEN owner.transfer_origin <> '' THEN base_g.generation END, '')
 FROM github_provider_demands d
@@ -756,7 +751,6 @@ LIMIT $2`, hostID, jobPlanBroadcastLimit, liveCutoff)
 			&row.RepositoryID, &row.Repository, &row.RunnerClass,
 			&row.CheckRunID, &row.RunID, &row.RunAttempt, &row.JobDisplayName,
 			&row.SourceGeneration, &row.WorkspaceBytes, &row.ToolBytes, &row.ProcessBytes,
-			&row.ProcessDigest, &row.ProcessVersion,
 			&row.TransferOrigin, &row.TransferBase,
 		); err != nil {
 			return nil, err
@@ -773,7 +767,6 @@ SELECT a.assignment_id::text, a.member_id, a.request_id, a.protocol_job_id, a.ch
        a.run_id, a.run_attempt, a.runner_name, a.repository, a.workflow_job,
        m.runner_class, a.source_generation,
        c.disk_bytes, c.tool_disk_bytes, c.process_disk_bytes,
-       a.source_process_digest, a.source_process_version,
        a.transfer_origin, a.transfer_base,
        a.seal_generation, a.checkpoint_digest, a.checkpoint_version
 FROM runner_job_assignments a
@@ -796,7 +789,6 @@ ORDER BY a.created_at`, hostID)
 			&row.RunID, &row.RunAttempt, &row.RunnerName, &row.Repository, &row.WorkflowJob,
 			&row.RunnerClass, &row.ScopeGeneration,
 			&row.WorkspaceBytes, &row.ToolBytes, &row.ProcessBytes,
-			&row.ProcessDigest, &row.ProcessVersion,
 			&row.TransferOrigin, &row.TransferBase,
 			&row.SealGeneration, &row.CheckpointDigest, &row.CheckpointVersion,
 		); err != nil {

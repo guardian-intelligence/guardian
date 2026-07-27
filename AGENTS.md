@@ -59,7 +59,7 @@ Common post-merge issues:
 
 House rules:
 - Do not use administration CLIs as a second control plane, use them for reads. Rely on Flux to converge the cluster after merge.
-- Sessions carry authority by persona: `aspect infra auth --persona=<rung>`. The default `read` gives cluster-wide read plus port-forward and stays logged in unattended. Repair verbs (delete a wedged pod, scale a workload, mint a secrets-writer token) need `write-basic`, and emergencies need `write-all`; neither holds `offline_access`, so each costs the operator a device approval and expires with its Keycloak session. Ask for the rung you need rather than assuming you have it. The ladder and how to extend it: `src/infrastructure/base/cozystack/platform-admins.yaml`.
+- Sessions carry authority by persona: `aspect infra auth --persona=<rung>`. The default `read` gives cluster-wide read plus port-forward and stays logged in unattended. Repair verbs (delete a wedged pod, scale a workload, mint a non-root secrets-writer token) need `write-basic`; tenant-root secret writes and emergencies need `write-all`. Neither write rung holds `offline_access`, so each costs the operator a device approval and expires with its Keycloak session. Ask for the rung you need rather than assuming you have it. The ladder and how to extend it: `src/infrastructure/base/cozystack-identities/platform-admins.yaml`.
 - If relevant to your task, clean up any hanging resources post-merge. `--persona=root --reason "<why>"` is the x509 breakglass minted from the custody bundle; it is audit logged, pages a human, and is only for when Keycloak itself is unavailable.
 </development_loop>
 

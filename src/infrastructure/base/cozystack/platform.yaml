@@ -31,12 +31,11 @@ spec:
           # cluster-admin access: kubectl authenticates via OIDC against the
           # cozy realm (the apiserver oidc-issuer-url flags baked into the
           # talm node configs are load-bearing again — do NOT strip them),
-          # and the custody x509 kubeconfig becomes breakglass-only. The
-          # 2026-07-05 disable (f82b8e2) was about the admin console being
-          # publicly routed; that surface is now shadowed off the public
-          # host — see keycloak-admin-guard.yaml. The per-stage Postflight
-          # Keycloaks under deployments/iam/ are a separate product-facing
-          # system and stay headless.
+          # and the custody x509 kubeconfig becomes breakglass-only. The public
+          # admin surface is shadowed by
+          # ../cozystack-identities/keycloak-admin-guard.yaml. The per-stage
+          # Postflight Keycloaks under deployments/iam/ are a separate
+          # product-facing system and stay headless.
           oidc:
             enabled: true
             keycloakInternalUrl: http://keycloak-http.cozy-keycloak.svc:8080/realms/cozy

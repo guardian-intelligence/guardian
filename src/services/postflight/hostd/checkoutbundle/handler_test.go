@@ -518,6 +518,34 @@ func TestBundleTooLarge(t *testing.T) {
 	assertServedPack(t, requestBundle(t, follow, nil, validBody(sha)), sha, false)
 }
 
+func TestBundlePublicationHonorsAggregateBudget(t *testing.T) {
+	requireGit(t)
+	upstreamRoot, sha := makeUpstream(t)
+	store := t.TempDir()
+	service := newTestService(t, upstreamRoot, func(cfg *Config) {
+		cfg.StoreDir = store
+		cfg.BundleBudgetBytes = 1
+	})
+
+	response := requestBundle(t, service, nil, validBody(sha))
+	if response.status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status %d, want 413 (body %s)", response.status, response.body)
+	}
+	assertJSONError(t, response)
+	var published []string
+	if err := filepath.Walk(filepath.Join(store, "bundles"), func(path string, info os.FileInfo, err error) error {
+		if err == nil && info.Name() == bundleFilename {
+			published = append(published, path)
+		}
+		return nil
+	}); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(published) != 0 {
+		t.Fatalf("published bundles beyond aggregate budget: %v", published)
+	}
+}
+
 func TestBundleThrottled(t *testing.T) {
 	requireGit(t)
 	upstreamRoot, sha := makeUpstream(t)

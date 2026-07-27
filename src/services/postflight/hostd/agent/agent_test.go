@@ -741,6 +741,9 @@ func TestExitedRunnerCheckpointsBeforeVMTeardownAndSeals(t *testing.T) {
 	if assignmentReport.State != syncproto.AssignmentExited || assignmentReport.Checkpoint == nil {
 		t.Fatalf("checkpoint report = %+v", assignmentReport)
 	}
+	if assignmentReport.Checkpoint.Digest != "" || assignmentReport.Checkpoint.Version != "" {
+		t.Fatalf("process checkpoint escaped in assignment report: %+v", assignmentReport.Checkpoint)
+	}
 	quiesce, destroy := -1, -1
 	for index, entry := range vms.Journal {
 		if strings.HasPrefix(entry, "quiesce ") {
@@ -796,15 +799,10 @@ func tickUntil(t *testing.T, a *Agent, what string, condition func() bool) {
 	t.Fatalf("%s did not happen in time", what)
 }
 
-const testTransferProcessDigest = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-
 func transferAssignmentSpec(member syncproto.DesiredPoolMember, origin, generation string) syncproto.DesiredAssignment {
 	spec := assignmentSpec(0, member)
 	spec.Workspace.Generation = generation
 	spec.Tool.Generation = generation
-	spec.Process.Generation = generation
-	spec.Process.ExpectedDigest = testTransferProcessDigest
-	spec.Process.ExpectedVersion = "Version: 4.2"
 	spec.Transfer = &syncproto.TransferSpec{Origin: origin, Generation: generation}
 	return spec
 }
@@ -833,8 +831,9 @@ func TestTransferSpecPullsRemoteGenerationAndMaterializesWarm(t *testing.T) {
 	if len(snapshot) != 1 || snapshot[0].State != syncproto.AssignmentBinding {
 		t.Fatalf("assignment after transfer = %+v", snapshot)
 	}
-	if rendezvous, found := vms.RendezvousFor(vm.ID(members[0].VMID)); !found || rendezvous.CheckpointDigest != testTransferProcessDigest {
-		t.Fatalf("warm rendezvous checkpoint = %+v found=%t", rendezvous, found)
+	if rendezvous, found := vms.RendezvousFor(vm.ID(members[0].VMID)); !found ||
+		rendezvous.CheckpointDigest != "" || rendezvous.CheckpointVersion != "" {
+		t.Fatalf("rendezvous process checkpoint = %+v found=%t", rendezvous, found)
 	}
 	report, err := a.Report(context.Background())
 	if err != nil {

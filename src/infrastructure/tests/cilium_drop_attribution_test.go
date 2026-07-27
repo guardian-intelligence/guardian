@@ -96,7 +96,7 @@ func TestCiliumDropAlertThresholdIsStatedInNotifications(t *testing.T) {
 // ClusterRole does not cover cilium.io, so without this the agent can page on
 // a denial it is structurally unable to explain.
 func TestPlatformAgentCanReadCiliumPolicies(t *testing.T) {
-	path := runfilePath("src/infrastructure/base/cozystack/platform-admins.yaml")
+	path := runfilePath("src/infrastructure/base/cozystack-identities/platform-admins.yaml")
 	raw := readText(t, path)
 	start := strings.Index(raw, "name: guardian-persona-cluster-view")
 	if start < 0 {
