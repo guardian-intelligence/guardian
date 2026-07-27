@@ -39,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: events
-          image: ghcr.io/guardian-intelligence/cockpit:edge@sha256:639eaa5eda21254f899748c75867a9e8b52f88bd900349c6d709b3bd31a1391e # {"$imagepolicy": "guardian-imageops:cockpit"}
+          image: ghcr.io/guardian-intelligence/cockpit:edge@sha256:f2475d43d73549002a1253375b584a9b8f9c9098ecf04335376b0424aaf316aa # {"$imagepolicy": "guardian-imageops:cockpit"}
           args:
             - events
             - --repo=guardian-intelligence/guardian
