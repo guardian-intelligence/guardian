@@ -3,7 +3,7 @@ data "latitudesh_region" "ash" {
 }
 
 data "latitudesh_plan" "f4_metal_small" {
-  name = "f4.metal.small"
+  name = "f4-metal-small"
 }
 
 locals {
