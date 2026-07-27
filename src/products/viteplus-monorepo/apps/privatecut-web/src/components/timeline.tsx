@@ -18,7 +18,7 @@ type DragTarget = "start" | "end" | "window" | null;
 const MIN_SELECTION_S = 0.5;
 
 // The selection strip: filmstrip thumbnails, keyframe ticks, two drag
-// handles clamped to the 60s cap, and a draggable window between them.
+// handles clamped to the product duration cap, and a draggable window between them.
 export function Timeline({
   summary,
   tiles,

@@ -37,6 +37,7 @@ export interface FramePlan {
   readonly label: string;
   // True when the plan simply keeps the source frame untouched.
   readonly isSource: boolean;
+  readonly meetsQualityFloor: boolean;
 }
 
 function even(n: number): number {
@@ -57,7 +58,7 @@ export function planFrame(input: FramePlanInput): FramePlan {
   const aspect = sourceWidth / sourceHeight;
   const shortSide = Math.min(sourceWidth, sourceHeight);
 
-  const candidates: FramePlan[] = [];
+  const candidates: Omit<FramePlan, "meetsQualityFloor">[] = [];
   for (const rung of RUNGS) {
     if (rung.height > shortSide) continue;
     const height =
@@ -79,29 +80,32 @@ export function planFrame(input: FramePlanInput): FramePlan {
     }
   }
   if (candidates.length === 0) {
-    return {
+    const plan = {
       width: sourceWidth,
       height: sourceHeight,
       frameRate: sourceFrameRate,
       label: `${Math.min(sourceWidth, sourceHeight)}p`,
       isSource: true,
     };
+    return {
+      ...plan,
+      meetsQualityFloor: videoBitsPerSecond / (plan.width * plan.height * plan.frameRate) >= floor,
+    };
   }
 
   for (const plan of candidates) {
     const bpp = videoBitsPerSecond / (plan.width * plan.height * plan.frameRate);
-    if (bpp >= floor) return plan;
+    if (bpp >= floor) return { ...plan, meetsQualityFloor: true };
   }
   // Nothing meets the floor: take the smallest, slowest candidate — the
   // best legibility the budget can buy.
   const last = candidates[candidates.length - 1];
-  return (
-    last ?? {
-      width: sourceWidth,
-      height: sourceHeight,
-      frameRate: sourceFrameRate,
-      label: `${Math.min(sourceWidth, sourceHeight)}p`,
-      isSource: true,
-    }
-  );
+  const fallback = last ?? {
+    width: sourceWidth,
+    height: sourceHeight,
+    frameRate: sourceFrameRate,
+    label: `${Math.min(sourceWidth, sourceHeight)}p`,
+    isSource: true,
+  };
+  return { ...fallback, meetsQualityFloor: false };
 }

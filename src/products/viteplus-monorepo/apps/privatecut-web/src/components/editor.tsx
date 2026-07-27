@@ -253,6 +253,17 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
             </div>
           </fieldset>
         </div>
+        {estimate.lowQuality && (
+          <div
+            role="status"
+            className="mt-4 rounded-xl border border-glow-warm/30 bg-glow-warm/[0.08] px-4 py-3"
+          >
+            <p className="text-sm font-medium text-glow-warm">Low-quality output likely</p>
+            <p className="mt-1 text-sm text-mist-dim">
+              Try increasing maximum size or splitting into shorter clips.
+            </p>
+          </div>
+        )}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
           <div className="font-mono text-xs text-mist-dim sm:text-sm">
             <span className="text-mist">{formatSeconds(estimate.durationS)}</span> selected
