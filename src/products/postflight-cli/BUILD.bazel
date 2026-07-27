@@ -30,6 +30,12 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+filegroup(
+    name = "installer",
+    srcs = ["dist/install.sh"],
+    visibility = ["//visibility:public"],
+)
+
 rust_test(
     name = "postflight_test",
     crate = ":postflight",

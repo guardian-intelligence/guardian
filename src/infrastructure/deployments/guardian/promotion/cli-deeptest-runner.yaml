@@ -262,7 +262,9 @@ data:
 
     # Three of the four targets can only be inspected, never run here: the
     # object magic plus the machine/cputype word is what proves the lane
-    # cross-compiled what its directory name claims.
+    # cross-compiled what its directory name claims. This table and the edge
+    # lane's are one table, held together by
+    # TestPostflightCliObjectShapeTablesAgree.
     field() {
       od -An -tx1 -N"$2" -j"$3" "$1" | tr -d ' \n'
     }
@@ -273,6 +275,11 @@ data:
         aarch64-unknown-linux-musl) magic=7f454c46; arch=b700; at=18; len=2 ;;
         x86_64-apple-darwin)        magic=cffaedfe; arch=07000001; at=4; len=4 ;;
         aarch64-apple-darwin)       magic=cffaedfe; arch=0c000001; at=4; len=4 ;;
+        *)
+          echo "no object shape is declared for $target"
+          structure=0
+          continue
+          ;;
       esac
       got_magic="$(field "stage/$target/postflight" 4 0)"
       got_arch="$(field "stage/$target/postflight" "$len" "$at")"
