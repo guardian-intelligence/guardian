@@ -60,6 +60,7 @@ function freezeCssAnimationsAt(seekMs: number): number {
       // skipping them beats aborting the whole freeze.
     }
   }
+  document.documentElement.dataset.visualHarnessSeekMs = String(seekMs);
   window.dispatchEvent(
     new CustomEvent("visual-harness:seek", {
       detail: { seekMs },

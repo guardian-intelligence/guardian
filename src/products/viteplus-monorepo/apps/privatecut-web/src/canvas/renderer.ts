@@ -123,17 +123,24 @@ float radial(vec2 point, vec2 center, vec2 scale) {
   return exp(-dot(delta, delta) * 2.1);
 }
 
-float beam(vec2 point, vec2 origin, float angle, float spread, float phase) {
-  float motion = sin(uTime * 0.46 + phase) * 0.052;
+float beam(
+  vec2 point,
+  vec2 origin,
+  float angle,
+  float spread,
+  float phase,
+  float period
+) {
+  float motion = sin(uTime * 6.2831853 / period + phase) * 0.061;
   vec2 direction = normalize(vec2(sin(angle + motion), cos(angle + motion)));
   vec2 delta = point - origin;
   float along = dot(delta, direction);
   float across = abs(direction.x * delta.y - direction.y * delta.x);
   float width = 12.0 + max(along, 0.0) * spread;
-  float core = exp(-pow(across / max(width, 1.0), 2.0) * 2.4);
+  float core = exp(-pow(across / max(width, 1.0), 2.0) * 2.0);
   float enter = smoothstep(-12.0, 80.0, along);
   float leave = 1.0 - smoothstep(uResolution.y * 0.54, uResolution.y * 1.02, along);
-  float pulse = 0.78 + 0.22 * sin(uTime * 0.72 + phase * 2.0);
+  float pulse = 0.82 + 0.18 * sin(uTime * 6.2831853 / (period * 0.72) + phase * 2.0);
   return core * enter * leave * pulse;
 }
 
@@ -149,12 +156,12 @@ void main() {
     radial(point, vec2(uResolution.x * 0.5, uResolution.y * 0.32),
       vec2(uResolution.x * 0.43, uResolution.y * 0.60)) * 0.033;
 
-  float reveal = smoothstep(0.45, 2.0, uTime);
+  float reveal = smoothstep(0.42, 1.92, uTime);
   vec2 origin = vec2(uResolution.x * 0.5, min(100.0, uResolution.y * 0.13));
   float beams =
-    beam(point, origin, radians(20.0), 0.17, 0.0) * 0.045 +
-    beam(point, origin, 0.0, 0.20, 2.1) * 0.058 +
-    beam(point, origin, radians(-20.0), 0.17, 4.2) * 0.045;
+    beam(point, origin, radians(20.0), 0.17, 0.0, 8.5) * 0.19 +
+    beam(point, origin, 0.0, 0.20, 2.1, 13.6) * 0.24 +
+    beam(point, origin, radians(-20.0), 0.17, 4.2, 6.8) * 0.19;
   color += vec3(124.0, 145.0, 182.0) / 255.0 * beams * reveal;
 
   float lineFade = (1.0 - smoothstep(uResolution.y * 0.68, uResolution.y, point.y)) *
@@ -246,8 +253,9 @@ void main() {
 const surfaceVertexShader = `#version 300 es
 precision highp float;
 
-layout(location = 0) in vec4 aRect;
-layout(location = 1) in vec4 aAppearance;
+layout(location = 0) in vec2 aCorner;
+layout(location = 1) in vec4 aRect;
+layout(location = 2) in vec4 aAppearance;
 
 uniform vec2 uResolution;
 
@@ -257,17 +265,8 @@ flat out float vKind;
 out float vActivity;
 out float vOpacity;
 
-const vec2 CORNERS[6] = vec2[6](
-  vec2(0.0, 0.0),
-  vec2(1.0, 0.0),
-  vec2(0.0, 1.0),
-  vec2(0.0, 1.0),
-  vec2(1.0, 0.0),
-  vec2(1.0, 1.0)
-);
-
 void main() {
-  vec2 point = aRect.xy - 14.0 + CORNERS[gl_VertexID] * (aRect.zw + 28.0);
+  vec2 point = aRect.xy - 14.0 + aCorner * (aRect.zw + 28.0);
   vec2 clip = point / uResolution * 2.0 - 1.0;
   gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
   vRect = aRect;
@@ -483,6 +482,7 @@ class WebGLCanvasRenderer implements CanvasRenderer {
   readonly #scheduler: WakeScheduler;
   readonly #source: PaintableCanvas;
   readonly #sourceContext: ElementImageContext | null;
+  readonly #surfaceCornerBuffer: WebGLBuffer;
   readonly #surfaceBuffer: WebGLBuffer;
   readonly #surfaceVertexArray: WebGLVertexArrayObject;
   readonly #uniforms: readonly [SceneUniforms, ParticleUniforms, SurfaceUniforms];
@@ -530,12 +530,14 @@ class WebGLCanvasRenderer implements CanvasRenderer {
 
     const particleBuffer = context.createBuffer();
     const particleVertexArray = context.createVertexArray();
+    const surfaceCornerBuffer = context.createBuffer();
     const surfaceBuffer = context.createBuffer();
     const surfaceVertexArray = context.createVertexArray();
     const contentTexture = context.createTexture();
     if (
       !particleBuffer ||
       !particleVertexArray ||
+      !surfaceCornerBuffer ||
       !surfaceBuffer ||
       !surfaceVertexArray ||
       !contentTexture
@@ -544,6 +546,7 @@ class WebGLCanvasRenderer implements CanvasRenderer {
     }
     this.#particleBuffer = particleBuffer;
     this.#particleVertexArray = particleVertexArray;
+    this.#surfaceCornerBuffer = surfaceCornerBuffer;
     this.#surfaceBuffer = surfaceBuffer;
     this.#surfaceVertexArray = surfaceVertexArray;
     this.#contentTexture = contentTexture;
@@ -575,17 +578,15 @@ class WebGLCanvasRenderer implements CanvasRenderer {
     context.bindVertexArray(null);
 
     context.bindVertexArray(this.#surfaceVertexArray);
-    context.bindBuffer(context.ARRAY_BUFFER, this.#surfaceBuffer);
-    context.enableVertexAttribArray(0);
-    context.vertexAttribPointer(
-      0,
-      4,
-      context.FLOAT,
-      false,
-      FLOATS_PER_SURFACE * Float32Array.BYTES_PER_ELEMENT,
-      0,
+    context.bindBuffer(context.ARRAY_BUFFER, this.#surfaceCornerBuffer);
+    context.bufferData(
+      context.ARRAY_BUFFER,
+      new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]),
+      context.STATIC_DRAW,
     );
-    context.vertexAttribDivisor(0, 1);
+    context.enableVertexAttribArray(0);
+    context.vertexAttribPointer(0, 2, context.FLOAT, false, 2 * Float32Array.BYTES_PER_ELEMENT, 0);
+    context.bindBuffer(context.ARRAY_BUFFER, this.#surfaceBuffer);
     context.enableVertexAttribArray(1);
     context.vertexAttribPointer(
       1,
@@ -593,9 +594,19 @@ class WebGLCanvasRenderer implements CanvasRenderer {
       context.FLOAT,
       false,
       FLOATS_PER_SURFACE * Float32Array.BYTES_PER_ELEMENT,
-      4 * Float32Array.BYTES_PER_ELEMENT,
+      0,
     );
     context.vertexAttribDivisor(1, 1);
+    context.enableVertexAttribArray(2);
+    context.vertexAttribPointer(
+      2,
+      4,
+      context.FLOAT,
+      false,
+      FLOATS_PER_SURFACE * Float32Array.BYTES_PER_ELEMENT,
+      4 * Float32Array.BYTES_PER_ELEMENT,
+    );
+    context.vertexAttribDivisor(2, 1);
     context.bindVertexArray(null);
 
     context.bindTexture(context.TEXTURE_2D, this.#contentTexture);
@@ -863,7 +874,14 @@ class WebGLCanvasRenderer implements CanvasRenderer {
 
     const now = performance.now();
     this.#startTime ??= now;
-    const elapsedSeconds = this.#reducedMotion.matches ? 0 : (now - this.#startTime) / 1000;
+    const visualSeekMs = Number.parseFloat(
+      document.documentElement.dataset.visualHarnessSeekMs ?? "",
+    );
+    const elapsedSeconds = this.#reducedMotion.matches
+      ? 0
+      : Number.isFinite(visualSeekMs)
+        ? visualSeekMs / 1000
+        : (now - this.#startTime) / 1000;
     const animationTime = this.#geometryAnimations.reduce((total, animation) => {
       const current = animation.currentTime;
       return total + (typeof current === "number" ? current : 0);
@@ -955,6 +973,7 @@ class WebGLCanvasRenderer implements CanvasRenderer {
     if (this.#htmlInCanvas) this.#source.onpaint = null;
     this.#context.deleteTexture(this.#contentTexture);
     this.#context.deleteBuffer(this.#particleBuffer);
+    this.#context.deleteBuffer(this.#surfaceCornerBuffer);
     this.#context.deleteBuffer(this.#surfaceBuffer);
     this.#context.deleteVertexArray(this.#particleVertexArray);
     this.#context.deleteVertexArray(this.#surfaceVertexArray);
