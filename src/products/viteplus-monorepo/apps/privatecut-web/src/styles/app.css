@@ -764,6 +764,53 @@ body {
   }
 }
 
+.privatecut-guide {
+  display: grid;
+  width: min(100%, 46rem);
+  margin-inline: auto;
+  padding: 4.5rem max(1.25rem, env(safe-area-inset-right)) 6rem
+    max(1.25rem, env(safe-area-inset-left));
+  gap: 3rem;
+}
+
+.privatecut-guide__section h2 {
+  margin: 0 0 0.85rem;
+  color: rgb(199 211 234 / 88%);
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.privatecut-guide__section p {
+  margin: 0;
+  color: rgb(199 211 234 / 62%);
+  font-size: 0.92rem;
+  line-height: 1.7;
+}
+
+.privatecut-guide__faq details {
+  padding-block: 0.85rem;
+  border-top: 1px solid var(--color-line);
+}
+
+.privatecut-guide__faq details:last-child {
+  border-bottom: 1px solid var(--color-line);
+}
+
+.privatecut-guide__faq summary {
+  color: rgb(199 211 234 / 76%);
+  cursor: pointer;
+  font-size: 0.92rem;
+}
+
+.privatecut-guide__faq summary:hover {
+  color: var(--color-mist);
+}
+
+.privatecut-guide__faq details p {
+  margin-top: 0.6rem;
+}
+
 @media (max-width: 64rem) {
   .privatecut-hero__cross {
     display: none;

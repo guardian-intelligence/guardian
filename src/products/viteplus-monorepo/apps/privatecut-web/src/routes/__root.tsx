@@ -1,5 +1,6 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { CanvasDocument } from "~/components/canvas-document";
+import { SITE_DESCRIPTION, SITE_TITLE, SITE_URL } from "~/lib/site";
 import { TelemetryProbe } from "~/lib/telemetry/page-view";
 import { deployMetaTags } from "~/lib/telemetry/server-deploy-meta";
 import "~/styles/app.css";
@@ -22,16 +23,30 @@ export const Route = createRootRoute({
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-title", content: "PrivateCut" },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
-      { title: "PrivateCut — private video clipping, on your device" },
-      {
-        name: "description",
-        content:
-          "Trim and compress any video right in your browser. Nothing is uploaded — your footage never leaves your device. No account, no cloud; export a clip under the size cap you pick, from 4 MB to 100 MB.",
-      },
+      { title: SITE_TITLE },
+      { name: "description", content: SITE_DESCRIPTION },
       { property: "og:site_name", content: "PrivateCut" },
+      { property: "og:type", content: "website" },
+      { property: "og:url", content: `${SITE_URL}/` },
+      { property: "og:title", content: SITE_TITLE },
+      { property: "og:description", content: SITE_DESCRIPTION },
+      // Absolute URL: Facebook, LinkedIn, and some aggregators silently drop
+      // relative og:image values. PNG because X/Twitter and Facebook do not
+      // render SVG card images.
+      { property: "og:image", content: `${SITE_URL}/og.png` },
+      { property: "og:image:type", content: "image/png" },
+      { property: "og:image:width", content: "1200" },
+      { property: "og:image:height", content: "630" },
+      { property: "og:image:alt", content: "PrivateCut — Private Cutting Room Floor" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: SITE_TITLE },
+      { name: "twitter:description", content: SITE_DESCRIPTION },
+      { name: "twitter:image", content: `${SITE_URL}/og.png` },
+      { name: "twitter:image:alt", content: "PrivateCut — Private Cutting Room Floor" },
       ...deployMetaTags(),
     ],
     links: [
+      { rel: "canonical", href: `${SITE_URL}/` },
       {
         rel: "icon",
         type: "image/svg+xml",

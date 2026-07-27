@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Dropzone } from "~/components/dropzone";
 import { Editor } from "~/components/editor";
 import { Header } from "~/components/header";
+import { LandingGuide, landingJsonLd } from "~/components/landing-guide";
 import { LinkInput } from "~/components/link-input";
 import type { PrivateCutEngine } from "~/engine/client";
 import type { MediaSource, ProbeSummary } from "~/engine/types";
@@ -31,6 +32,7 @@ const getDeviceKind = createServerFn({ method: "GET" }).handler((): DeviceKind =
 export const Route = createFileRoute("/")({
   component: Home,
   loader: () => getDeviceKind(),
+  head: () => ({ scripts: landingJsonLd() }),
 });
 
 type Session =
@@ -117,57 +119,64 @@ function Home() {
   }, []);
 
   return (
-    <div className="privatecut-shell">
-      <Header />
-      <main id="main" className="privatecut-main">
-        {session.kind === "ready" && engineRef.current ? (
-          <Editor
-            engine={engineRef.current}
-            source={session.source}
-            summary={session.summary}
-            onReset={reset}
-          />
-        ) : (
-          <section className="privatecut-hero" aria-labelledby="privatecut-title">
-            <div className="privatecut-hero__eyebrow">
-              <span>Browser-native video clipping</span>
-            </div>
-            <div className="privatecut-hero__copy-frame">
-              <span
-                className="privatecut-hero__cross privatecut-hero__cross--left"
-                aria-hidden="true"
-              />
-              <span
-                className="privatecut-hero__cross privatecut-hero__cross--right"
-                aria-hidden="true"
-              />
-              <h1
-                id="privatecut-title"
-                className="privatecut-title"
-                data-copy="Private Cutting Room Floor"
-                aria-label="Private Cutting Room Floor"
-              >
-                Private Cutting Room Floor
-              </h1>
-              <p className="privatecut-hero__lede">
-                Videos stay on your {device} — never uploaded to the cloud.
-              </p>
-            </div>
-            <div className="privatecut-hero__drop-frame">
-              <Dropzone onFile={onSource} onWarm={warm} disabled={session.kind === "probing"} />
-              <LinkInput onSource={onSource} onWarm={warm} disabled={session.kind === "probing"} />
-            </div>
-            {session.kind === "probing" && (
-              <p className="privatecut-hero__message font-mono">Reading {session.name}…</p>
-            )}
-            {session.kind === "rejected" && (
-              <p className="privatecut-hero__message privatecut-hero__message--error">
-                {session.message}
-              </p>
-            )}
-          </section>
-        )}
-      </main>
-    </div>
+    <>
+      <div className="privatecut-shell">
+        <Header />
+        <main id="main" className="privatecut-main">
+          {session.kind === "ready" && engineRef.current ? (
+            <Editor
+              engine={engineRef.current}
+              source={session.source}
+              summary={session.summary}
+              onReset={reset}
+            />
+          ) : (
+            <section className="privatecut-hero" aria-labelledby="privatecut-title">
+              <div className="privatecut-hero__eyebrow">
+                <span>Browser-native video clipping</span>
+              </div>
+              <div className="privatecut-hero__copy-frame">
+                <span
+                  className="privatecut-hero__cross privatecut-hero__cross--left"
+                  aria-hidden="true"
+                />
+                <span
+                  className="privatecut-hero__cross privatecut-hero__cross--right"
+                  aria-hidden="true"
+                />
+                <h1
+                  id="privatecut-title"
+                  className="privatecut-title"
+                  data-copy="Private Cutting Room Floor"
+                  aria-label="Private Cutting Room Floor"
+                >
+                  Private Cutting Room Floor
+                </h1>
+                <p className="privatecut-hero__lede">
+                  Videos stay on your {device} — never uploaded to the cloud.
+                </p>
+              </div>
+              <div className="privatecut-hero__drop-frame">
+                <Dropzone onFile={onSource} onWarm={warm} disabled={session.kind === "probing"} />
+                <LinkInput
+                  onSource={onSource}
+                  onWarm={warm}
+                  disabled={session.kind === "probing"}
+                />
+              </div>
+              {session.kind === "probing" && (
+                <p className="privatecut-hero__message font-mono">Reading {session.name}…</p>
+              )}
+              {session.kind === "rejected" && (
+                <p className="privatecut-hero__message privatecut-hero__message--error">
+                  {session.message}
+                </p>
+              )}
+            </section>
+          )}
+        </main>
+      </div>
+      {session.kind !== "ready" && <LandingGuide />}
+    </>
   );
 }

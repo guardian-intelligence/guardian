@@ -647,6 +647,10 @@ class WebGLCanvasRenderer implements CanvasRenderer {
 
     this.#content.addEventListener("pointermove", this.#onPointerMove, { passive: true });
     this.#content.addEventListener("pointerleave", this.#onPointerLeave, { passive: true });
+    // The content div is the page's only scroller and scrolling repaints
+    // nothing the MutationObserver can see, so the composited frame would
+    // freeze at the pre-scroll pose without an explicit wake.
+    this.#content.addEventListener("scroll", this.#onScroll, { passive: true });
     this.#content.addEventListener("focusin", this.#onFocusChange);
     this.#content.addEventListener("focusout", this.#onFocusChange);
     window.addEventListener("visual-harness:seek", this.#onVisualSeek);
@@ -680,6 +684,12 @@ class WebGLCanvasRenderer implements CanvasRenderer {
   };
 
   readonly #onFocusChange = () => {
+    this.#scheduler.wake();
+  };
+
+  readonly #onScroll = () => {
+    this.#layoutDirty = true;
+    if (this.#htmlInCanvas) this.#source.requestPaint?.();
     this.#scheduler.wake();
   };
 
@@ -934,6 +944,7 @@ class WebGLCanvasRenderer implements CanvasRenderer {
     this.#scheduler.dispose();
     this.#content.removeEventListener("pointermove", this.#onPointerMove);
     this.#content.removeEventListener("pointerleave", this.#onPointerLeave);
+    this.#content.removeEventListener("scroll", this.#onScroll);
     this.#content.removeEventListener("focusin", this.#onFocusChange);
     this.#content.removeEventListener("focusout", this.#onFocusChange);
     window.removeEventListener("visual-harness:seek", this.#onVisualSeek);

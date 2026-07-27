@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as HealthzRouteImport } from './routes/healthz'
 import { Route as LivezRouteImport } from './routes/livez'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as ApiResolveRouteImport } from './routes/api/resolve'
 
 const IndexRoute = IndexRouteImport.update({
@@ -29,6 +30,11 @@ const LivezRoute = LivezRouteImport.update({
   path: '/livez',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiResolveRoute = ApiResolveRouteImport.update({
   id: '/api/resolve',
   path: '/api/resolve',
@@ -39,12 +45,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/resolve': typeof ApiResolveRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/resolve': typeof ApiResolveRoute
 }
 export interface FileRoutesById {
@@ -52,20 +60,22 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/api/resolve': typeof ApiResolveRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/healthz' | '/livez' | '/api/resolve'
+  fullPaths: '/' | '/healthz' | '/livez' | '/sitemap.xml' | '/api/resolve'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/healthz' | '/livez' | '/api/resolve'
-  id: '__root__' | '/' | '/healthz' | '/livez' | '/api/resolve'
+  to: '/' | '/healthz' | '/livez' | '/sitemap.xml' | '/api/resolve'
+  id: '__root__' | '/' | '/healthz' | '/livez' | '/sitemap.xml' | '/api/resolve'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   HealthzRoute: typeof HealthzRoute
   LivezRoute: typeof LivezRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   ApiResolveRoute: typeof ApiResolveRoute
 }
 
@@ -92,6 +102,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LivezRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/resolve': {
       id: '/api/resolve'
       path: '/api/resolve'
@@ -106,6 +123,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   HealthzRoute: HealthzRoute,
   LivezRoute: LivezRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
   ApiResolveRoute: ApiResolveRoute,
 }
 export const routeTree = rootRouteImport
