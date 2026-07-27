@@ -37,7 +37,7 @@
 # Talos installer (machine.install.image)
 factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:c3df0484a3f5f3bb68c77d04998fb977a9df6a5268b93bafdb23f668e6f4ed84
 # Cozystack installer Helm chart (OCI)
-ghcr.io/cozystack/cozystack/cozy-installer:1.5.2@sha256:6fab302b90f3a49fb4e5783d14bd696b1308b0f216b7de606e99e021535f1eac
+ghcr.io/cozystack/cozystack/cozy-installer:1.6.0@sha256:1a51bf1a58a4850a8f8c04ab2cfdb0c0b84a777fac7b1d83b3ef249e566559d2
 # Cozystack platform packages Flux artifact (pulled by source-controller, NOT containerd)
 ghcr.io/cozystack/cozystack/cozystack-packages@sha256:bf68208730860fa8e47f378a0260e79a0262e0783fa63ba4f7f97f57a48b2d23
 
