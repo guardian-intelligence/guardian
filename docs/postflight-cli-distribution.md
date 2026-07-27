@@ -1,9 +1,8 @@
 # Postflight CLI distribution: channels, signatures, and the cut ceremony
 
-Status: active as of 2026-07-25. One release exists —
-`postflight-cli/nightly-20260723` — and only the nightly channel is pinned.
-The npm, crates.io and Homebrew lanes are written and inert: they fire on
-stable tags only, and no stable tag exists.
+Status: active as of 2026-07-27. Every user-facing channel has published:
+stable is `postflight-cli/v0.2.0`, and the npm, crates.io and Homebrew lanes
+all mirrored it.
 Complements `supply-chain-design.md` (trust model, canonical identities),
 `registry-design.md` (countersigner, release projector, the release
 manifest) and `canaries.md` (canary principles).
@@ -23,42 +22,31 @@ Four targets are built and released every time: `x86_64-unknown-linux-musl`,
 | curl installer | `curl -fsSL https://guardianintelligence.org/postflight/install.sh \| sh -s -- --channel nightly` | stable (default), `--channel rc\|nightly` | live |
 | release asset | download `postflight-<target>` from the release, `cosign verify-blob`, `chmod +x` | all | live |
 | make | `make && sudo make install` in `src/products/postflight-cli` of a clone, or in an unpacked release source tarball | all | live |
-| cargo | `cargo install postflight` | stable | live at 0.1.0 |
-| cargo-binstall | `cargo binstall postflight` | stable | falls back to a source build until a `v` tag exists |
-| npm/bun | `npm i -g @guardian-intelligence/postflight` | stable | lane wired, inert |
-| brew | `brew install guardian-intelligence/tap/postflight` | stable | lane wired, inert |
+| cargo | `cargo install postflight` | stable | live |
+| cargo-binstall | `cargo binstall postflight` | stable | live |
+| npm/bun | `npm i -g @guardian-intelligence/postflight` | stable | live |
+| brew | `brew install guardian-intelligence/tap/postflight` | stable | live |
 | mise | tool `ubi:guardian-intelligence/guardian` with `exe=postflight` and `tag_regex=^postflight-cli/v` | stable | untested |
 
-`cargo install postflight` works today because 0.1.0 was published by hand to
-claim the name; the automated lane has still never run, and crates.io versions
-are immutable, so the first stable must carry a version above 0.1.0.
-`cargo binstall` resolves its asset URL from a `postflight-cli/v<version>` tag
-that does not exist yet, so it degrades to a source build until one does.
-
-"Lane wired, inert" means the publishing
-machinery is on main and correct but has never run: all three ecosystem
-lanes are filtered to non-prerelease `postflight-cli/v*` tags, no stable
-release exists, and each is additionally waiting on a registry-side or
-repository-side ceremony (see below). Because nightly is the only channel
-with a release, the installer's default (`stable`) currently exits with the
-channel-enumeration message rather than installing:
-
-```
-postflight: no release on the 'stable' channel yet. Available channels: nightly
-```
+All three ecosystem mirrors hold 0.2.0, published from the
+`postflight-cli/v0.2.0` release. crates.io additionally carries 0.1.0, hand
+published to claim the name before the lane existed; versions there are
+immutable, so both numbers are spent and every stable must climb past them.
 
 Removal is `postflight self uninstall` for every method that leaves an
 install receipt, which today means the curl installer; each package manager
 owns removal of the copy it placed, and the CLI declines those rather than
 desyncing it. See [Uninstall](#uninstall).
 
-The `mise` row is a recipe declared in the crate README; nothing in the
-repository or the canary estate exercises it. Its `tag_regex` matches `v`
-tags only, so it will not see nightlies. `cargo binstall` resolves
+The `mise` row is a recipe this document declares and nothing exercises —
+not the repository, not the canary estate. Its `tag_regex` keeps `ubi` off
+the nightlies, but `^postflight-cli/v` is looser than "stable": the listing
+holds one candidate spelled that way, `postflight-cli/v0.2.0-rc.1`, from
+before the `rc-` prefix existed. `^postflight-cli/v[0-9.]+$` is the pattern
+that means what the row intends. `cargo binstall` resolves
 `{repo}/releases/download/postflight-cli%2Fv{version}/postflight-{target}`
-from `[package.metadata.binstall]`, which likewise only exists for `v` tags
-— but binstall still needs crates.io to resolve the version, so it lands
-with `cargo install`, not before.
+from `[package.metadata.binstall]` and takes the version from crates.io, so
+it lands exactly where `cargo install` does.
 
 ### What a release carries
 
@@ -67,9 +55,9 @@ their four `postflight-<target>.sigstore.json` bundles, a
 `postflight-<version>-src.tar.gz` source tarball cut from the build commit
 with `LICENSE.md` spliced in at the archive prefix, `install.sh` with its own
 `install.sh.sigstore.json`, and a `checksums.txt` generated last so it covers
-everything else. The one release published so far predates the source tarball
-and the installer, and carries only the binaries, the bundles and
-`checksums.txt`.
+everything else. `postflight-cli/nightly-20260723`, the first release ever
+cut, predates the source tarball and the installer and carries only the
+binaries, the bundles and `checksums.txt`.
 
 The installer needs curl, sed, grep and either `sha256sum` or `shasum` —
 no jq, because the releases JSON is parsed with anchored `sed` expressions
@@ -128,12 +116,39 @@ edge (OCI, never user-facing) -> nightly -> rc -> stable
 |---|---|---|---|
 | edge | none (OCI tags `:edge` and `:sha-<commit>`) | n/a | the `postflight-cli-image` workflow, on every main push touching the crate |
 | nightly | `postflight-cli/nightly-YYYYMMDD` | yes | Kargo promotion PR, fired by `cli-nightly-promoter` at its next departure (see Cadence) |
-| rc | `postflight-cli/v<version>-rc.<n>` | yes | a human PR |
+| rc | `postflight-cli/rc-YYYYMMDD` | yes | a human PR |
 | stable | `postflight-cli/v<version>` | no (`--latest`) | a human PR |
 
-Nightly tags take a `-HHMM` suffix if the day's tag already exists at a
-different commit; for rc and stable a tag that already points elsewhere
-fails the cut instead.
+Nightly and rc tags take a `-HHMM` suffix if the day's tag already exists at
+a different commit; for stable a tag that already points elsewhere fails the
+cut instead.
+
+**The tag is the channel.** Nothing inside a release records which channel it
+was cut on, so the three prefixes — `nightly-`, `rc-`, `v` — have to
+partition the release space, and every consumer resolves a channel by them:
+the cutter dedups and walks lineage with them, `install.sh` resolves
+`--channel` with them, and the install canary picks each channel's newest
+release with them. One tag in the listing predates the grammar —
+`postflight-cli/v0.2.0-rc.1`, the candidate 0.2.0 was promoted from — and
+registry history is permanent, so all three read that shape as a candidate
+too, and none of them lets it into the stable channel. No later cut can
+produce another.
+`TestPostflightCliChannelGrammarMovesTogether`
+(`src/infrastructure/tests/postflight_cli_channel_grammar_test.go`) evaluates
+each consumer's own matcher against one table of tag shapes; it is the only
+thing keeping the three from drifting apart quietly, each still reporting
+success against a release the others would not have picked.
+
+**Three of the four rungs are the same bytes.** edge → nightly → rc is a
+pointer move: the artifact that soaked is the artifact that promotes, and
+nothing about it changes on the way up. Only the stable cut builds something
+new, because dropping the prerelease suffix from the crate version changes
+`CARGO_PKG_VERSION` and therefore the bytes. main names the *next* stable
+with a `-pre` suffix, so a nightly or a candidate reports `0.3.0-pre` — the
+version 0.3.0 would be cut from — and a bare `0.3.0` exists only on the one
+commit a stable is built from. Which channel a binary came down, and which
+day it was promoted, live in the release tag and the install receipt, never
+in the binary.
 
 **edge** is the OCI substrate and is never a user-facing channel. The lane
 cross-compiles all four targets from one Linux runner (zig supplies the C
@@ -167,10 +182,9 @@ a second promotion while one is Pending or Running.
 **rc** and **stable** have no Kargo stage. Their pins land by hand-authored
 PR, which is why the cutter reads `channels.yaml` with a real YAML parser: a
 trailing comment, a quoted value or a typo'd channel key must fail the cut,
-not silently resolve to "no pin". A channel with no pin is skipped, so the
-`rc` and `stable` keys can appear the day the first candidate is cut.
+not silently resolve to "no pin". A channel with no pin is skipped.
 
-The cutter dedups per channel by tag prefix against the digests recorded in
+The cutter dedups per channel by tag grammar against the digests recorded in
 existing release bodies, so an rc-only pin edit cannot re-cut nightly.
 
 ## The sign-once contract
@@ -269,11 +283,12 @@ CLI user verifies.
 ## The install receipt
 
 Sign-once has a cost that lands on the user: because the same bytes ride edge
-→ nightly → rc → stable, the binary cannot name the release it was published
-as. Its version is the crate version at the build commit, identical across
-every channel and, between version bumps, identical across every nightly. A
-binary that stamped its channel or its tag would fork per channel, and the
-artifact that promoted would no longer be the artifact that was tested.
+→ nightly → rc, the binary cannot name the release it was published as. Its
+version is the crate version at the build commit — the next stable with a
+`-pre` suffix — identical across every prerelease channel and, between
+version bumps, identical across every nightly. A binary that stamped its
+channel or its tag would fork per channel, and the artifact that promoted
+would no longer be the artifact that was tested.
 
 So provenance is recorded beside the binary rather than inside it.
 `install.sh` writes `install-receipt.json` into the CLI's config directory
@@ -293,7 +308,7 @@ describes the release before it.
   "binary_path": "/home/you/.local/bin/postflight",
   "channel": "nightly",
   "tag": "postflight-cli/nightly-20260726",
-  "version": "0.2.0-nightly",
+  "version": "0.3.0-pre",
   "target": "x86_64-unknown-linux-musl",
   "binary_sha256": "a5211ec7…",
   "installed_at": "2026-07-26T05:24:16Z"
@@ -481,7 +496,11 @@ every `optionalDependencies` pin to the release version. Platform packages
 publish before the meta package, because an install that won the race
 between the two would resolve nothing to run; a re-run after a partial
 publish converges past `EPUBLISHCONFLICT` and still fails on anything else,
-since npm versions are immutable.
+since npm versions are immutable. Trusted publishing is registered *per
+package*, so all five carry their own registration against
+`postflight-cli-publish-npm.yml`, and the lane asserts npm ≥ 11.5.1 before
+it tries: older npm cannot publish without a token, and the point of this
+lane is that it holds none.
 
 Two guards worth knowing. The packaging sources are checked out from the
 **default branch**, not the release tag: the cutter tags at the image's
@@ -503,6 +522,15 @@ and runs `cargo publish --locked -p postflight`.
 
 The lane's first act is to refuse a crate the manifest marks unpublishable,
 because cargo's own refusal names neither the key nor the ceremony behind it.
+If that guard ever fires again, the remediation is registry-side: claim the
+crate name on crates.io, register a trusted publisher against
+`postflight-cli-publish-crates.yml` in this repository (the environment
+field left empty — the job declares none, and a scoped registration 403s
+the token exchange), then drop `publish = false` from the manifest. The
+action behind the token mint, `rust-lang/crates-io-auth-action`, is pinned
+in `.github/actions-allowlist.json`, whose enforcing half is a repository
+setting outside Git — unapplied, the whole workflow dies as a
+`startup_failure` (`docs/dependency-management.md`).
 
 ### Homebrew
 
@@ -523,7 +551,10 @@ an installation token to the current repository by default, so the token
 that cuts the Release 404s against the tap; the tap token names
 `repositories: homebrew-tap` explicitly. It is minted *before* the cut, so a
 tap that is unreachable fails the release rather than stranding it
-half-published.
+half-published. The tap repository and the `guardian-promotions`
+App-installation grant on it are declared in the `guardian-github` tofu root
+(`runbooks/github-as-code.md`), which is also where a formula that failed to
+mirror is re-rendered and PUT by hand.
 
 ### One target set, six surfaces
 
@@ -716,50 +747,28 @@ verbatim, so a step added to the template is a step the next promotion runs.
 Only the install canary pages critical, and deliberately: it is the only
 loop watching what a user actually hits.
 
-## Cutting an rc, then a stable
+## Cutting a candidate
 
-Both cuts are the same shape. Steps 1–3 and 5 are identical; step 4 is
-required only for an rc, step 6 differs in the assertions the cutter runs,
-and step 7 happens only for a stable.
+A candidate is a pointer move. There is no version to bump and nothing to
+rebuild: the bytes exist, they have already soaked a rung down, and they
+already report the version they carry.
 
-1. **Bump the version.** Edit `version` in
-   `src/products/postflight-cli/Cargo.toml` *and* `CARGO_PKG_VERSION` in
-   `src/products/postflight-cli/BUILD.bazel` in the same PR — three files
-   independently name and version this binary, and
-   `//src/products/postflight-cli:packaging_lockstep_test` fails if the two
-   disagree. For a candidate the version is `0.2.0-rc.1`; for the stable
-   that follows it, `0.2.0`. Nothing else carries a version to bump — the
-   npm package templates hold `0.0.0-dev` and the formula template holds
-   `@VERSION@`, both injected at publish time from the tag. Merge.
+1. **Pick a digest nightly has released.** rc's lineage assert is a digest
+   grep against nightly release bodies, so only an artifact published as a
+   nightly can be promoted. That is also what makes the deep-test verdict
+   transitive: nightly's Kargo promotion gates on `guardian_cli_deeptest_pass`
+   at that exact digest, so a candidate inherits an adjudicated verdict
+   instead of needing a fresh one.
 
-2. **Let edge rebuild.** The merge touches the crate, so
-   `postflight-cli-image` runs. The version change alters
-   `CARGO_PKG_VERSION`, therefore the bytes, therefore the binaries digest,
-   so the dedup does not skip and `:edge` moves to a new digest.
-
-3. **Wait for a deep-test verdict.** The runner picks the new `:edge` up
-   within the hour. Only nightly's Kargo promotion gates on that verdict —
-   a hand-authored rc or stable pin does not — so read it before writing the
-   pin: it is the check that would have caught a broken cross-compile before
-   anyone published it.
-
-4. **Wait for the channel** — required for an rc, optional for a stable.
-   The promoter's next departure opens the pin PR (within the soak plus the
-   departure interval, worst case); once it merges, the cutter publishes
-   `postflight-cli/nightly-<YYYYMMDD>` from that digest. An rc's lineage
-   assert requires the digest to appear in a nightly release body, so an rc
-   cannot be cut before its nightly exists. A stable's lineage is a version
-   assert (step 6), so it does not need one.
-
-5. **Open the pin PR, editing both files in one commit.**
+2. **Open the pin PR, editing both files in one commit.**
 
    `src/products/postflight-cli/release/channels.yaml`:
 
    ```yaml
    channels:
      rc:
-       image: ghcr.io/guardian-intelligence/postflight-cli@sha256:<edge digest>
-       version: 0.2.0-rc.1
+       image: ghcr.io/guardian-intelligence/postflight-cli@sha256:<nightly digest>
+       version: 0.3.0-pre
    ```
 
    `src/infrastructure/deployments/guardian/system/release-manifest.yaml`:
@@ -771,7 +780,12 @@ and step 7 happens only for a stable.
          image: ghcr.io/guardian-intelligence/postflight-cli@sha256:<same digest>
    ```
 
-   Both, in one commit, for two reasons. Mechanically,
+   The `version` is whatever the pinned bytes report — read it off the
+   nightly release's `Version` line, not off main, which may have bumped
+   since that artifact was built. The cutter refuses a pin that claims
+   anything else.
+
+   Both files, in one commit, for two reasons. Mechanically,
    `TestReleaseManifestCoversReleaseChannels` fails the PR if a channel pins
    a digest the manifest does not list, or if the manifest lists one no
    channel pins. Substantively, the manifest is what puts the digest under
@@ -781,108 +795,140 @@ and step 7 happens only for a stable.
    holds. Kargo's nightly promotion template carries the second
    `yaml-update` for exactly this reason; a hand cut has to do it by hand.
 
-6. **Merge, and the cutter fires.** `postflight-cli-release` runs on any
-   main push touching `channels.yaml`. Per newly-pinned channel it asserts,
-   in order:
+3. **Merge.** The cutter publishes `postflight-cli/rc-<YYYYMMDD>` as a
+   prerelease, from the same assets and the same signatures the nightly
+   carried. Nothing downstream fires.
 
-   - the pin parses and names a known channel;
-   - the digest has not already been released on this channel;
-   - **lineage.** For rc: the digest must already appear in a nightly
-     release body — the same bytes, one rung down. For stable: a release
-     tagged `postflight-cli/v<version>-rc.*` must already exist, and
-     `compare(<that tag's commit>...<build commit>)` must be `ahead` or
-     `identical`;
-   - the artifact's `cosign verify` and all four `verify-blob`s pass;
-   - **version match.** The pinned native binary's `postflight version …`
-     output must equal the `version` in the pin. That output is what names
-     the tag, so a pin claiming a version the bytes do not carry cannot mint
-     a misnamed release.
+## Cutting a stable
 
-   It then stages assets, mints a short-lived `guardian-promotions` App
-   token, creates the tag ref, and cuts the release. The App token is minted
-   *after* the dedup check and is not `GITHUB_TOKEN` on purpose:
-   App-authored releases fire `release:` workflows, which is what the npm
-   and crates.io lanes ride. The tag ref is created before the release
-   because the releases API 403s integration tokens when
-   `target_commitish` is a bare SHA (cli/cli#9514).
+The stable cut is the only one that changes bytes, so it is the only one that
+needs a build. It is three merges: the version bump, the pin, and the bump
+back.
 
-7. **A stable cut keeps going.** Publishing the release fires
+1. **Check the soak.** A candidate published within the last `RC_SOAK_DAYS`
+   (7) days must exist whose `Source commit` main descends from. That is the
+   whole of stable's lineage, and the cutter asserts it — starting a cut
+   without one produces a pin that will not publish.
+
+2. **Bump the version to the bare number.** `0.3.0-pre` becomes `0.3.0` in
+   `src/products/postflight-cli/Cargo.toml`, in `CARGO_PKG_VERSION` in
+   `src/products/postflight-cli/BUILD.bazel`, and in the `postflight` package
+   entry of `src/products/postflight-cli/Cargo.lock`, all in one PR: cargo
+   builds from the first, the release lane ships the second, and the third is
+   what `cargo publish --locked` resolves against, so a stale lock fails the
+   crates.io publish after the release is already out.
+   `//src/products/postflight-cli:packaging_lockstep_test` holds the first
+   two together and to the Makefile's binary name; `aspect tidy` refreshes
+   the manifest hashes `MODULE.bazel.lock` carries for the crate, which
+   belong in the same commit. Nothing else carries a version to bump — the
+   npm package templates hold `0.0.0-dev` and the formula template holds
+   `@VERSION@`, both injected at publish time from the tag. Merge.
+
+3. **Let edge rebuild, and read the verdict.** The merge touches the crate,
+   so `postflight-cli-image` runs; the version change alters
+   `CARGO_PKG_VERSION`, therefore the bytes, therefore the binaries digest,
+   so the dedup does not skip and `:edge` moves to a digest that has never
+   been on nightly or rc and never will be. The deep-test runner picks it up
+   within the hour. Only nightly's Kargo promotion gates on that verdict — a
+   hand-authored pin does not — so read it before writing the pin. It is the
+   check that would have caught a broken cross-compile before anyone
+   published it, and it is the only thing that covers the commits between the
+   candidate's build commit and this one.
+
+4. **Open the pin PR**, the same two files in one commit, with the bare
+   version:
+
+   ```yaml
+   channels:
+     stable:
+       image: ghcr.io/guardian-intelligence/postflight-cli@sha256:<new edge digest>
+       version: 0.3.0
+   ```
+
+5. **Merge.** The cutter publishes `postflight-cli/v0.3.0` as `--latest`.
+
+6. **Watch what publishing sets off.** The release fires
    `postflight-cli-publish-npm` and `postflight-cli-publish-crates`, and the
    cutter's own stable path renders the Homebrew formula and mirrors it to
-   the tap. An rc cut fires none of them. Watch all three: they are the
-   first thing users touch, and none of them is covered by the install
-   canary, whose methods are the release assets and the curl installer.
+   the tap. They are the first thing users touch, and none of them is covered
+   by the install canary, whose methods are the release assets and the curl
+   installer.
 
-### Why stable's lineage is a version assert, not a digest match
+7. **Bump main to the next `-pre` immediately.** A bare `0.3.0` on main is a
+   loaded gun: the next commit that changes the binary produces edge bytes
+   that report `0.3.0` and are not the `0.3.0` anyone can download, and the
+   next nightly hands that to users. The follow-up PR to `0.4.0-pre` is part
+   of the cut, not a chore after it.
+
+### What the cutter asserts
+
+`postflight-cli-release` runs on any main push touching `channels.yaml`. Per
+newly-pinned channel, in order:
+
+- the pin parses and names a known channel;
+- the digest has not already been released on this channel;
+- **lineage.** For rc: the digest must already appear in a nightly release
+  body — the same bytes, one rung down. For stable: some candidate published
+  inside the soak window must record a `Source commit` for which
+  `compare(<that commit>...<build commit>)` is `ahead` or `identical`;
+- the artifact's `cosign verify` and all four `verify-blob`s pass;
+- **version match.** The pinned native binary's `postflight version …` output
+  must equal the `version` in the pin, and for stable that version must be
+  bare. The pin is what the tag, the release notes, the source tarball name
+  and the Homebrew formula all take their version from, so a pin claiming a
+  version the bytes do not carry cannot mint a misnamed release.
+
+It then stages assets, mints a short-lived `guardian-promotions` App token,
+creates the tag ref, and cuts the release. The App token is minted *after*
+the dedup check and is not `GITHUB_TOKEN` on purpose: App-authored releases
+fire `release:` workflows, which is what the npm and crates.io lanes ride.
+The tag ref is created before the release because the releases API 403s
+integration tokens when `target_commitish` is a bare SHA (cli/cli#9514).
+
+Release bodies are read back by machine, which is why their fields are
+stable: the install canary greps a body for the pinned digest, a stable cut
+walks the candidates' `Source commit` lines out of theirs, and the author of
+the next pin reads its `version` off the `Version` line.
+
+### Why stable's lineage is a soak, not a digest match
 
 An rc promotes nightly's exact bytes, so "has this digest been released on
 nightly" is a real question with a real answer, and rc's lineage is a digest
-grep.
+grep — one that a same-bytes ladder makes load-bearing rather than
+ceremonial.
 
-Stable cannot work that way. Dropping the `-rc.N` suffix changes
-`CARGO_PKG_VERSION`, which changes the binary's bytes, which changes the
-binaries digest, which changes the OCI digest. **Stable can never share a
-digest with the candidate it promotes.** A symmetric digest-lineage rule
-would make a stable cut unsatisfiable.
+Stable cannot work that way, and no amount of care makes it able to. The cut
+*is* a version change; a version change changes `CARGO_PKG_VERSION`, hence
+the bytes, hence the binaries digest, hence the OCI digest. **Stable can
+never share a digest with the candidate it promotes.** Any rule that asks for
+digest equality across the cut — a symmetric lineage grep, an assert that the
+stable artifact was released on rc, a canary that expects one digest on both
+channels — is not strict, it is unsatisfiable: no pair of inputs passes it,
+so it cannot be met, only removed. Every assert written about a stable cut
+has to be checked against that.
 
-So stable asserts the two things that remain checkable: that a candidate for
-this exact version was actually released, and that the commit which built
-the stable bytes descends from the commit that built the candidate. What is
-given up is honest to state — the stable binary is not the artifact that
-soaked as an rc, only a rebuild of the same sources with the suffix removed.
+So stable asserts the two things that stay checkable across a byte change:
 
-## Ceremonies still owed before first stable
+- **the version is bare and the bytes carry it.** The pin says `0.3.0` and
+  the artifact says `postflight version 0.3.0`.
+- **the soak.** Some candidate whose `Source commit` this build descends from
+  was published within the last seven days.
 
-The lanes are written. What is missing is on the other side of each
-registry: an account, a repository, or a trust registration that only a
-human with those credentials can create. Every one of them fails the lane
-loudly rather than silently publishing nothing, so none of them can be
-discovered late by a user.
+What that buys, exactly, is worth stating flatly, because it is less than the
+word "soak" suggests. The ancestry check proves the candidate is *behind* the
+stable build rather than beside it — not a fork, not a revert. The window
+proves the candidate was *published* recently. It does not bound how much
+main history separates the two: publication recency is a property of the
+release, not of the commit it was built from, so a candidate published
+yesterday from a commit three weeks old satisfies the window exactly as well
+as one published yesterday from a commit an hour old.
 
-- **crates.io.** The name is owned: `postflight` 0.1.0 was published by hand
-  on 2026-07-26, which is what makes `cargo install postflight` work today.
-  What remains is registering a trusted publisher against
-  `postflight-cli-publish-crates.yml` in this repository so the lane can mint
-  its own token, and dropping `publish = false` from the manifest so cargo
-  will let it. Note that 0.1.0 is spent — versions are immutable and yanking
-  does not free one — so the first stable must be numbered above it.
-
-- **npm.** Trusted publishing is registered *per package*, so that is five
-  registrations against `postflight-cli-publish-npm.yml`: the meta package
-  and each of the four platform packages. The lane asserts npm ≥ 11.5.1
-  before it tries, because older npm cannot publish without a token and the
-  point of this lane is that it holds none.
-
-- **Homebrew.** The `<owner>/homebrew-tap` repository and the
-  `guardian-promotions` App-installation grant on it are both declared in
-  the `guardian-github` tofu root (`runbooks/github-as-code.md`); the
-  ceremony is applying that root with a custody token, not clicking anything.
-  The cutter mints its tap token by name (`repositories: homebrew-tap`), so
-  an unapplied root fails the token step before the release is cut rather
-  than after.
-
-- **The Actions allowlist.** `rust-lang/crates-io-auth-action` is new
-  third-party surface and is pinned in `.github/actions-allowlist.json`. The
-  repository setting is the enforcing half and lives outside Git: it needs
-  re-applying, or every workflow using the action dies as a
-  `startup_failure` (`docs/dependency-management.md`).
-
-- **The `cli_canary` OpenBao relay.** The ClickHouse user is declared on the
-  app CR and the chart generates its password into
-  `tenant-root/clickhouse-analytics-credentials`; the operator relays that
-  value once into
-  `kv/guardian/guardian-mgmt/guardian-analytics/clickhouse` property
-  `cli_canary`, from where ESO materializes
-  `guardian-analytics/cli-release-canary`. A kv write replaces the whole
-  secret, so `ingest`, `payments_canary` and `cli_canary` go in one write.
-  The procedure is in `runbooks/analytics-clickhouse.md`; it must be re-run
-  for every user after any DR rebuild of the app.
-
-  Until it is done the two loops fail differently, which is worth knowing
-  before reading a red dashboard: both loops keep producing verdicts and
-  metrics and only lose their event history —
-  `GuardianCliDeeptestEventWriteFailing` and
-  `GuardianCliInstallCanaryEventWriteFailing` warn.
+Everything in that gap — every commit between the candidate's build commit
+and the stable's — reaches users having never ridden a candidate. What covers
+it is not the soak but the deep-test verdict on the stable artifact's own
+digest, read by hand before the pin is written (step 3 above). Narrowing
+`RC_SOAK_DAYS` shortens how long a cut may be prepared; it does not shorten
+that gap, and nothing in the cutter does.
 
 ## Known gaps
 
@@ -911,11 +957,9 @@ through the public path.
 
 **Nothing canaries the ecosystem mirrors.** The install canary's methods are
 the release assets and the curl installer. A published npm version that
-resolves nothing to run, a crate that stopped building on a fresh
-toolchain, or a tap formula whose checksums drifted would be found by a
-user, not by us. The lanes cannot be exercised at all until a stable
-release exists, so this is deliberately unbuilt rather than deferred — but
-it is the first thing to add once one does.
+resolves nothing to run, a crate that stopped building on a fresh toolchain,
+or a tap formula whose checksums drifted would be found by a user, not by us.
+All three now hold a published version, so this is the next method to add.
 
 **`cli_canary` holds estate-wide ClickHouse rights.** The release canaries
 write their own `cli.*` events, so the account cannot be `readonly` like the

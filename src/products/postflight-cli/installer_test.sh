@@ -82,6 +82,13 @@ write_stable_page() { # <file> <version>
     "$2" > "$1"
 }
 
+# The one candidate cut before the `rc-` prefix existed. It is registry history
+# and cannot be recut, so the rc channel has to keep resolving its shape.
+legacy_rc="$tmp/legacy-rc"
+mkdir -p "$legacy_rc"
+printf '[{"tag_name":"postflight-cli/v0.2.0-rc.1","draft":false,"prerelease":true,"body":"release candidate"}]\n' \
+  > "$legacy_rc/page-1.json"
+
 # A stable release that has fallen off page 1 behind a hundred nightlies.
 paged="$tmp/paged"
 mkdir -p "$paged"
@@ -152,7 +159,7 @@ run_uninstall() { # <shell> <home>
 # path that does not exist, and reporting success for having removed nothing.
 write_receipt() { # <home> <binary>
   mkdir -p "$1/.config/postflight"
-  printf '{"schema":1,"method":"install.sh","binary_path":"%s","channel":"nightly","tag":"postflight-cli/nightly-20260726","version":"0.2.0-nightly"}\n' \
+  printf '{"schema":1,"method":"install.sh","binary_path":"%s","channel":"nightly","tag":"postflight-cli/nightly-20260726","version":"0.3.0-pre"}\n' \
     "$2" > "$1/.config/postflight/install-receipt.json"
 }
 
@@ -292,10 +299,18 @@ assert_sudo_receipt_follows_the_invoking_user() { # <shell>
 
 for shell in "${shells[@]}"; do
   expect_tag "$shell" "$mixed" nightly "postflight-cli/nightly-20260724"
-  expect_tag "$shell" "$mixed" rc "postflight-cli/v0.3.0-rc.1"
-  # v9.9.9 is smuggled into the newest release's notes, and the data drop that
-  # follows it is the release whose "prerelease": false would be borrowed.
+  expect_tag "$shell" "$mixed" rc "postflight-cli/rc-20260722"
+  # Three traps sit above v0.2.0 in this listing: v9.9.9 smuggled into the
+  # newest release's notes, a data drop whose "prerelease": false would be
+  # borrowed by a scan that lost track of which release it was reading, and
+  # v0.4.0-rc.9 — a candidate whose prerelease flag was hand-flipped, which
+  # only its tag shape rules out.
   expect_tag "$shell" "$mixed" stable "postflight-cli/v0.2.0"
+
+  # The candidate spelled in the grammar that preceded `rc-` is permanent
+  # registry history, so rc still resolves it and stable still refuses it.
+  expect_tag "$shell" "$legacy_rc" rc "postflight-cli/v0.2.0-rc.1"
+  expect_missing "$shell" "$legacy_rc" stable "rc" "rc"
 
   expect_missing "$shell" "$nightly_only" stable "nightly" "nightly"
   expect_missing "$shell" "$nightly_only" rc "nightly" "nightly"

@@ -347,9 +347,15 @@ data:
       tag=""
       release=""
       release_version=""
+      # The tag grammar partitions the release space, one channel each — the
+      # same grammar the cutter composes tags with and the installer resolves
+      # --channel with. One candidate in the listing is spelled in the grammar
+      # that preceded `rc-`, so rc admits that shape too; stable refuses it by
+      # shape rather than by the prerelease flag, which is mutable in the
+      # GitHub UI.
       case "$channel" in
         nightly) include='^postflight-cli/nightly-'; exclude='' ;;
-        rc) include='^postflight-cli/v[0-9].*-rc\.'; exclude='' ;;
+        rc) include='^postflight-cli/(rc-|v[0-9].*-rc\.)'; exclude='' ;;
         stable) include='^postflight-cli/v[0-9]'; exclude='-rc\.' ;;
         *) include=''; exclude='' ;;
       esac

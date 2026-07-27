@@ -34,6 +34,7 @@ go_test(
         "persona_secrets_writer_invariants_test.go",
         "payments_conformance_test.go",
         "postflight_cli_auth_session_test.go",
+        "postflight_cli_channel_grammar_test.go",
         "postflight_cli_targets_lockstep_test.go",
         "release_manifest_test.go",
         "renovate_conformance_test.go",

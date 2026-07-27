@@ -59,7 +59,7 @@ jobs:
           if [[ "$(jq -r '.packages[0].publish' <<<"$meta")" != "null" ]]; then
             echo "Cargo.toml still carries publish = false: claim the crates.io name and" >&2
             echo "register the trusted publisher, then drop the key. See" >&2
-            echo "docs/postflight-cli-distribution.md, ceremonies." >&2
+            echo "docs/postflight-cli-distribution.md, the crates.io section." >&2
             exit 1
           fi
 

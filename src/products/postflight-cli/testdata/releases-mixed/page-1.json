@@ -34,6 +34,21 @@
     "body": "unrelated data drop"
   },
   {
+    "html_url": "https://github.com/guardian-intelligence/guardian/releases/tag/postflight-cli%2Frc-20260722",
+    "id": 900000008,
+    "tag_name": "postflight-cli/rc-20260722",
+    "name": "postflight CLI release candidate 20260722",
+    "draft": false,
+    "prerelease": true,
+    "assets": [
+      {
+        "name": "postflight-aarch64-apple-darwin",
+        "size": 4194304
+      }
+    ],
+    "body": "release candidate"
+  },
+  {
     "html_url": "https://github.com/guardian-intelligence/guardian/releases/tag/postflight-cli%2Fv0.3.0-rc.1",
     "id": 900000004,
     "tag_name": "postflight-cli/v0.3.0-rc.1",

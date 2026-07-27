@@ -102,9 +102,10 @@ json_escape() {
 }
 
 # The binary carries its crate version and nothing else — that is what lets one
-# signed artifact ride every channel — so the release tag, the channel and the
-# install method are recorded beside it. `postflight version` reads this back,
-# and `postflight self uninstall` uses it to know the file is its to remove.
+# signed artifact ride edge, nightly and rc unrebuilt — so the release tag, the
+# channel and the install method are recorded beside it. `postflight version`
+# reads this back, and `postflight self uninstall` uses it to know the file is
+# its to remove.
 write_receipt() { # <binary> <channel> <tag> <version> <target> <sha256>
   receipt_dir=""
   if ! receipt_dir="$(config_dir)"; then
@@ -306,12 +307,15 @@ matches_channel() {
       ;;
     rc)
       case "$2" in
+        "$TAG_PREFIX/rc-"*) return 0 ;;
+        # One candidate in the listing is spelled in the grammar that preceded
+        # `rc-`; it is permanent registry history, so rc still resolves it.
         "$TAG_PREFIX/v"*"-rc."*) return 0 ;;
       esac
       ;;
     stable)
       # Tag shape and the prerelease flag must agree: the flag is mutable in
-      # the GitHub UI, and an rc hand-flipped to non-prerelease must not
+      # the GitHub UI, and a candidate hand-flipped to non-prerelease must not
       # become what a default install serves.
       case "$2" in
         "$TAG_PREFIX/v"*"-rc."*) ;;
