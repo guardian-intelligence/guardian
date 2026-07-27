@@ -5,6 +5,13 @@
 # which sits exactly on the chart's five-minute hold, so each deploy paged major
 # and closed a minute later. Fifteen minutes is the duration every one of these
 # rules already promises in its own description; only the hold moves.
+#
+# The expressions aggregate away ready/revision and scrape-identity labels
+# because they are part of the series identity: a Kustomization stuck in a
+# reconcile loop cycles Ready Unknown -> False -> Unknown, and each flip (or a
+# new revision landing mid-failure, or kube-state-metrics rescheduling) ends
+# the series, auto-resolves the alert, and re-arms the fifteen-minute hold —
+# paging as a metronomic flap instead of one sustained alert.
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMRule
 metadata:
@@ -17,7 +24,7 @@ spec:
     - name: flux-resources-alerts
       rules:
         - alert: HelmReleaseNotReady
-          expr: gotk_resource_info{customresource_kind="HelmRelease", ready!="True"} > 0
+          expr: max without (ready, revision, instance, pod, node) (gotk_resource_info{customresource_kind="HelmRelease", ready!="True"}) > 0
           for: 15m
           labels:
             severity: major
@@ -27,7 +34,7 @@ spec:
             summary: "HelmRelease {{ $labels.name }} in namespace {{ $labels.exported_namespace }} is not ready"
             description: "HelmRelease {{ $labels.name }} in namespace {{ $labels.exported_namespace }} is in an unready state for more than 15 minutes."
         - alert: GitRepositorySyncFailed
-          expr: gotk_resource_info{customresource_kind="GitRepository", ready!="True"} > 0
+          expr: max without (ready, revision, instance, pod, node) (gotk_resource_info{customresource_kind="GitRepository", ready!="True"}) > 0
           for: 15m
           labels:
             severity: major
@@ -37,7 +44,7 @@ spec:
             summary: "GitRepository {{ $labels.name }} in namespace {{ $labels.exported_namespace }} sync failed"
             description: "GitRepository {{ $labels.name }} in namespace {{ $labels.exported_namespace }} has not been successfully synced for more than 15 minutes."
         - alert: KustomizationNotApplied
-          expr: gotk_resource_info{customresource_kind="Kustomization", ready!="True"} > 0
+          expr: max without (ready, revision, instance, pod, node) (gotk_resource_info{customresource_kind="Kustomization", ready!="True"}) > 0
           for: 15m
           labels:
             severity: major
@@ -47,7 +54,7 @@ spec:
             summary: "Kustomization {{ $labels.name }} in namespace {{ $labels.exported_namespace }} is not applied"
             description: "Kustomization {{ $labels.name }} in namespace {{ $labels.exported_namespace }} is not successfully applied for more than 15 minutes."
         - alert: ImageRepositorySyncFailed
-          expr: gotk_resource_info{customresource_kind="ImageRepository", ready!="True"} > 0
+          expr: max without (ready, revision, instance, pod, node) (gotk_resource_info{customresource_kind="ImageRepository", ready!="True"}) > 0
           for: 15m
           labels:
             severity: major
@@ -57,7 +64,7 @@ spec:
             summary: "ImageRepository {{ $labels.name }} in namespace {{ $labels.exported_namespace }} sync failed"
             description: "ImageRepository {{ $labels.name }} in namespace {{ $labels.exported_namespace }} has not been successfully synced for more than 15 minutes."
         - alert: HelmChartFailed
-          expr: gotk_resource_info{customresource_kind="HelmChart", ready!="True"} > 0
+          expr: max without (ready, revision, instance, pod, node) (gotk_resource_info{customresource_kind="HelmChart", ready!="True"}) > 0
           for: 15m
           labels:
             severity: major
@@ -67,7 +74,7 @@ spec:
             summary: "HelmChart {{ $labels.name }} in namespace {{ $labels.exported_namespace }} has failed"
             description: "HelmChart {{ $labels.name }} in namespace {{ $labels.exported_namespace }} is not ready for more than 15 minutes."
         - alert: HelmReleaseSuspended
-          expr: gotk_resource_info{customresource_kind="HelmRelease", suspended="true"} > 0
+          expr: max without (ready, revision, instance, pod, node) (gotk_resource_info{customresource_kind="HelmRelease", suspended="true"}) > 0
           for: 5m
           labels:
             severity: warning
@@ -77,7 +84,7 @@ spec:
             summary: "HelmRelease {{ $labels.name }} in namespace {{ $labels.exported_namespace }} is suspended"
             description: "HelmRelease {{ $labels.name }} in namespace {{ $labels.exported_namespace }} has been suspended."
         - alert: GitRepositorySuspended
-          expr: gotk_resource_info{customresource_kind="GitRepository", suspended="true"} > 0
+          expr: max without (ready, revision, instance, pod, node) (gotk_resource_info{customresource_kind="GitRepository", suspended="true"}) > 0
           for: 5m
           labels:
             severity: warning
@@ -87,7 +94,7 @@ spec:
             summary: "GitRepository {{ $labels.name }} in namespace {{ $labels.exported_namespace }} is suspended"
             description: "GitRepository {{ $labels.name }} in namespace {{ $labels.exported_namespace }} has been suspended."
         - alert: KustomizationSuspended
-          expr: gotk_resource_info{customresource_kind="Kustomization", suspended="true"} > 0
+          expr: max without (ready, revision, instance, pod, node) (gotk_resource_info{customresource_kind="Kustomization", suspended="true"}) > 0
           for: 5m
           labels:
             severity: warning
@@ -97,7 +104,7 @@ spec:
             summary: "Kustomization {{ $labels.name }} in namespace {{ $labels.exported_namespace }} is suspended"
             description: "Kustomization {{ $labels.name }} in namespace {{ $labels.exported_namespace }} has been suspended."
         - alert: ImageRepositorySuspended
-          expr: gotk_resource_info{customresource_kind="ImageRepository", suspended="true"} > 0
+          expr: max without (ready, revision, instance, pod, node) (gotk_resource_info{customresource_kind="ImageRepository", suspended="true"}) > 0
           for: 5m
           labels:
             severity: warning
@@ -107,7 +114,7 @@ spec:
             summary: "ImageRepository {{ $labels.name }} in namespace {{ $labels.exported_namespace }} is suspended"
             description: "ImageRepository {{ $labels.name }} in namespace {{ $labels.exported_namespace }} has been suspended."
         - alert: HelmChartSuspended
-          expr: gotk_resource_info{customresource_kind="HelmChart", suspended="true"} > 0
+          expr: max without (ready, revision, instance, pod, node) (gotk_resource_info{customresource_kind="HelmChart", suspended="true"}) > 0
           for: 5m
           labels:
             severity: warning
