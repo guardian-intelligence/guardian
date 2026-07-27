@@ -122,6 +122,18 @@
       groupName: "keycloak",
     },
 
+    // The in-cluster image is detected by the kubernetes manager while the
+    // config validator is a regex-managed GitHub release. Group the two
+    // datasources so every Renovate version bump keeps runtime and gate in
+    // lockstep; digest-only image refreshes may still move independently.
+    {
+      matchDepNames: [
+        "docker.io/renovate/renovate",
+        "renovatebot/renovate",
+      ],
+      groupName: "Renovate self-update",
+    },
+
     // First-party actions: no cooldown.
     {
       matchManagers: ["github-actions"],
@@ -166,7 +178,7 @@
     // recomputes the sha256 pairs, and refuses hash changes for unbumped
     // URLs — all in the renovate sandbox, so the PR lands green instead of
     // sitting red awaiting a hand step. The command must stay listed in
-    // RENOVATE_ALLOWED_COMMANDS (renovate.yml).
+    // RENOVATE_ALLOWED_COMMANDS (the in-cluster CronJob manifest).
     {
       matchFileNames: ["src/tools/multitool.lock.json"],
       postUpgradeTasks: {
@@ -393,17 +405,13 @@
       datasourceTemplate: "docker",
     },
 
-    // Renovate updates itself: the runner tag in renovate.yml and the
-    // validator pin in the config gate carry the same version and must
-    // move together (the -full suffix stays in the file, outside the match).
+    // The kubernetes manager owns the in-cluster image tag and digest. This
+    // manager owns the validator pin; the package rule above groups version
+    // updates from both datasources into one self-update PR.
     {
       customType: "regex",
-      managerFilePatterns: [
-        "/^\\.github/workflows/renovate\\.yml$/",
-        "/^\\.github/scripts/check-renovate-config\\.sh$/",
-      ],
+      managerFilePatterns: ["/^\\.github/scripts/check-renovate-config\\.sh$/"],
       matchStrings: [
-        "renovate-version: (?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)",
         "-p renovate@(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)",
       ],
       depNameTemplate: "renovatebot/renovate",

@@ -48,6 +48,7 @@ go_test(
     ],
     data = glob(["fixtures/**"]) + [
         "//:.aspect/tasks/infra.axl",
+        "//:.github/scripts/check-renovate-config.sh",
         "//:AGENTS.md",
         "//:MODULE.bazel",
         "//docs:markdown",

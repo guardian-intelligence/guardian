@@ -67,12 +67,15 @@ can be dropped at the next owner pass over App permissions.
 
 ## guardian-renovate
 
-The scheduled workflow mints a short-lived installation token and runs
-Renovate. `renovate.json5` is the dependency policy; the workflow only owns
-scheduling and execution.
+The `guardian-imageops` CronJob mints a short-lived installation token from
+the App private key synchronized by External Secrets, then runs Renovate every
+six hours. `renovate.json5` is the dependency policy; the CronJob owns only
+scheduling, execution, and the success heartbeat that backs its dead-man
+alert.
 
 - [Renovate policy](../renovate.json5)
-- [Scheduled Renovate workflow](../.github/workflows/renovate.yml)
+- [In-cluster Renovate scheduler](../src/infrastructure/deployments/guardian/imageops/renovate.yaml)
+- [OpenBao-backed App credential](../src/infrastructure/deployments/guardian/imageops/secrets.yaml)
 - [Dependency-management policy](dependency-management.md)
 - [Configuration validation](../.github/scripts/check-renovate-config.sh)
 
