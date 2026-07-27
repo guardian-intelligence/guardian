@@ -23,7 +23,6 @@ export function Header() {
           className="privatecut-header__glow-control privatecut-header__github"
           data-illumination-glass="control"
         >
-          <span className="privatecut-header__glow-effect" aria-hidden="true" />
           <span className="privatecut-header__glow-text">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path
@@ -38,7 +37,6 @@ export function Header() {
           data-illumination-glass="control"
           data-illumination-source="status"
         >
-          <span className="privatecut-header__glow-effect" aria-hidden="true" />
           <span className="privatecut-header__glow-text">
             <span className="privatecut-header__status-dot" aria-hidden="true" />
             Local only

@@ -38,8 +38,12 @@ export interface CaptureSession {
 export async function createCaptureSession(
   engine: EngineName = "chromium",
 ): Promise<CaptureSession> {
+  const chromiumArgs =
+    process.env.VISUAL_HTML_IN_CANVAS === "1"
+      ? [...CHROMIUM_ARGS, "--enable-features=CanvasDrawElement"]
+      : CHROMIUM_ARGS;
   const browser: Browser = await ENGINES[engine].launch({
-    args: engine === "chromium" ? CHROMIUM_ARGS : [],
+    args: engine === "chromium" ? chromiumArgs : [],
   });
 
   return {

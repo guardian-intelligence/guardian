@@ -1,5 +1,5 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
-import { IlluminationScene } from "~/components/illumination-scene";
+import { CanvasDocument } from "~/components/canvas-document";
 import { TelemetryProbe } from "~/lib/telemetry/page-view";
 import { deployMetaTags } from "~/lib/telemetry/server-deploy-meta";
 import "~/styles/app.css";
@@ -63,24 +63,9 @@ function RootComponent() {
         <HeadContent />
       </head>
       <body className="font-sans antialiased text-mist min-h-screen">
-        <IlluminationScene />
-        <div className="stage-light" aria-hidden="true">
-          <div className="stage-spotlights">
-            <span className="stage-spotlight stage-spotlight--left" />
-            <span className="stage-spotlight stage-spotlight--center" />
-            <span className="stage-spotlight stage-spotlight--right" />
-          </div>
-        </div>
-        <div className="stage-lines" aria-hidden="true">
-          <span className="stage-line stage-line--vertical stage-line--outer-left" />
-          <span className="stage-line stage-line--vertical stage-line--inner-left" />
-          <span className="stage-line stage-line--vertical stage-line--center" />
-          <span className="stage-line stage-line--vertical stage-line--inner-right" />
-          <span className="stage-line stage-line--vertical stage-line--outer-right" />
-          <span className="stage-line stage-line--horizontal stage-line--header" />
-        </div>
-        <div className="stage-grain" aria-hidden="true" />
-        <Outlet />
+        <CanvasDocument>
+          <Outlet />
+        </CanvasDocument>
         <TelemetryProbe />
         <Scripts />
       </body>

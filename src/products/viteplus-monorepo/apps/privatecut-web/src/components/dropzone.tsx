@@ -47,9 +47,9 @@ export function Dropzone({ onFile, onWarm, disabled }: DropzoneProps) {
           disabled ? "dropzone--disabled" : ""
         }`}
         data-illumination-glass="panel"
+        data-illumination-active={dragging ? "true" : "false"}
         data-illumination-source="dropzone"
       >
-        <span className="dropzone__light" aria-hidden="true" />
         <span className="dropzone__corners" aria-hidden="true" />
         <span className="dropzone__content">
           <span className="dropzone__icon">
