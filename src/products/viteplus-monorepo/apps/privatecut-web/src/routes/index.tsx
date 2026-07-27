@@ -147,10 +147,10 @@ function Home() {
                 <h1
                   id="privatecut-title"
                   className="privatecut-title"
-                  data-copy="Private Cutting Room Floor"
-                  aria-label="Private Cutting Room Floor"
+                  data-copy="PrivateCut"
+                  aria-label="PrivateCut"
                 >
-                  Private Cutting Room Floor
+                  <span className="privatecut-title__base">PrivateCut</span>
                 </h1>
                 <p className="privatecut-hero__lede">
                   Videos stay on your {device} — never uploaded to the cloud.

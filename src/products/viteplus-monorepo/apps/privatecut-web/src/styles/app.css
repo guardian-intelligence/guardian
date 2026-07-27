@@ -38,6 +38,12 @@
   --font-mono: "Geist Mono", ui-monospace, monospace;
 }
 
+@property --materialize-x {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 50%;
+}
+
 html {
   background: var(--color-night);
   color: var(--color-mist);
@@ -353,38 +359,66 @@ body {
 
 .privatecut-title {
   position: relative;
-  color: transparent;
-  background: linear-gradient(#98c0ef 0%, #d8ecf8 100%);
-  background-clip: text;
-  font-size: clamp(2.65rem, 7vw, 5.4rem);
+  isolation: isolate;
+  font-size: clamp(3.2rem, 9vw, 7.25rem);
   font-weight: 580;
   letter-spacing: -0.055em;
   line-height: 0.98;
   text-align: center;
-  text-shadow: 0 2px 1rem rgb(174 207 242 / 24%);
-  /* Keep the heading paint-eligible for LCP without changing its delayed reveal. */
-  opacity: 0.001;
-  animation: title-base-in 2s 0.1s ease forwards;
 }
 
+.privatecut-title__base {
+  display: block;
+  color: transparent;
+  background: linear-gradient(#98c0ef 0%, #d8ecf8 100%);
+  background-clip: text;
+  text-shadow: 0 2px 1rem rgb(174 207 242 / 24%);
+  -webkit-text-fill-color: transparent;
+  /* Keep the title paint-eligible for LCP while preserving its reveal. */
+  opacity: 0.001;
+  animation: title-base-in 2s 0.1s ease-out forwards;
+}
+
+.privatecut-title::before,
 .privatecut-title::after {
+  --materialize-x: 50%;
   position: absolute;
   inset: 0;
   content: attr(data-copy);
   color: transparent;
-  background: repeating-linear-gradient(
-    0deg,
-    rgb(216 236 248 / 95%) 0,
-    rgb(216 236 248 / 95%) 2px,
-    rgb(152 192 239 / 12%) 2px,
-    rgb(152 192 239 / 12%) 4px
+  background-image: radial-gradient(
+    circle,
+    rgb(226 241 252 / 98%) 0 0.0625rem,
+    rgb(152 192 239 / 82%) 0.075rem,
+    transparent 0.1rem
   );
+  background-size: 0.25rem 0.25rem;
   background-clip: text;
+  -webkit-text-fill-color: transparent;
   mix-blend-mode: color-dodge;
-  filter: saturate(0.7) drop-shadow(0 0 0.8rem rgb(174 207 242 / 72%));
+  filter: saturate(0.7) drop-shadow(0 0 0.9rem rgb(174 207 242 / 78%));
+  -webkit-mask-image: radial-gradient(
+    ellipse 18% 82% at var(--materialize-x) 52%,
+    #000 0 36%,
+    rgb(0 0 0 / 78%) 58%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    ellipse 18% 82% at var(--materialize-x) 52%,
+    #000 0 36%,
+    rgb(0 0 0 / 78%) 58%,
+    transparent 100%
+  );
   opacity: 0;
-  clip-path: inset(0 100% 0 0);
-  animation: title-scan 2.65s 0.05s cubic-bezier(0.33, 1, 0.68, 1) forwards;
+  pointer-events: none;
+}
+
+.privatecut-title::before {
+  animation: title-materialize-left 2.669s linear forwards;
+}
+
+.privatecut-title::after {
+  animation: title-materialize-right 2.669s linear forwards;
 }
 
 .privatecut-hero__lede {
@@ -435,7 +469,8 @@ body {
   width: min(100%, 46rem);
   margin-top: 2.5rem;
   perspective: 1000px;
-  opacity: 0;
+  /* Keep the dropzone copy paint-eligible while its delayed entrance remains imperceptible. */
+  opacity: 0.001;
   transform: translateY(3rem) rotateX(2deg);
   animation: dropzone-in 2.5s 1.35s cubic-bezier(0.33, 1, 0.68, 1) forwards;
 }
@@ -724,23 +759,53 @@ body {
   }
 }
 
-@keyframes title-scan {
+@keyframes title-materialize-left {
   0% {
     opacity: 0;
-    clip-path: inset(0 100% 0 0);
+    --materialize-x: 52%;
   }
-  15% {
-    opacity: 0.35;
+
+  10% {
+    opacity: 0.95;
   }
-  42% {
+
+  38% {
     opacity: 1;
+    --materialize-x: 16%;
   }
-  82% {
-    opacity: 0.8;
+
+  72% {
+    opacity: 0.9;
   }
+
   100% {
     opacity: 0;
-    clip-path: inset(0 0 0 100%);
+    --materialize-x: -14%;
+  }
+}
+
+@keyframes title-materialize-right {
+  0% {
+    opacity: 0;
+    --materialize-x: 48%;
+  }
+
+  10% {
+    opacity: 0.95;
+  }
+
+  38% {
+    opacity: 1;
+    --materialize-x: 84%;
+  }
+
+  72% {
+    opacity: 0.9;
+  }
+
+  100% {
+    opacity: 0;
+    --materialize-x: 114%;
   }
 }
 
@@ -867,7 +932,7 @@ body {
   }
 
   .privatecut-title {
-    font-size: clamp(2.25rem, 12vw, 3.4rem);
+    font-size: clamp(2.8rem, 15vw, 4.35rem);
   }
 
   .privatecut-hero__drop-frame {
@@ -910,6 +975,8 @@ body {
   .privatecut-hero__eyebrow,
   .privatecut-hero__copy-frame::before,
   .privatecut-title,
+  .privatecut-title__base,
+  .privatecut-title::before,
   .privatecut-title::after,
   .privatecut-hero__lede,
   .privatecut-hero__cross,
@@ -921,6 +988,7 @@ body {
   .privatecut-hero__eyebrow,
   .privatecut-hero__copy-frame::before,
   .privatecut-title,
+  .privatecut-title__base,
   .privatecut-hero__lede,
   .privatecut-hero__drop-frame {
     opacity: 1;
@@ -932,6 +1000,7 @@ body {
     transform: translateY(-50%) scale(1);
   }
 
+  .privatecut-title::before,
   .privatecut-title::after {
     display: none;
   }
@@ -995,13 +1064,15 @@ html[data-canvas-mode="css"] .glass-strong {
   box-shadow: none;
 }
 
-.canvas-document[data-html-in-canvas="active"] .privatecut-title::after {
-  display: none;
+.canvas-document[data-html-in-canvas="active"] .privatecut-title {
+  color: transparent;
+  background: none;
 }
 
-.canvas-document[data-html-in-canvas="active"] .privatecut-title {
+.canvas-document[data-html-in-canvas="active"] .privatecut-title__base {
   color: #b8d8fb;
   background: none;
+  -webkit-text-fill-color: currentColor;
 }
 
 .canvas-document[data-html-in-canvas="active"] .privatecut-header__glow-text {
