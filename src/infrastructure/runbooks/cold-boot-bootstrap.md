@@ -453,7 +453,7 @@ aspect infra bootstrap --kubeconfig <off-vlan-kubeconfig-copy> \
 
 The endpoint/node overrides are REQUIRED off-VLAN (defaults dial the VIP's
 Talos API). This runs tofu against the R2 backend, the full validate suite,
-kubeconfig refresh, the Talos L2 gate, and the Cozystack 1.5.0 installer.
+kubeconfig refresh, the Talos L2 gate, and the Cozystack 1.6.0 installer.
 If the installer's pre-install hook times out, check for scheduling blockers
 first — the drill found a latent all-nodes NoSchedule taint this way. If a
 helm release fails terminally, `helm uninstall` it before rerunning

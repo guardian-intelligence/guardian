@@ -222,7 +222,7 @@ pool, while the underlying LVM metadata was wiped. Reconcile in this order:
 
 Use the Piraeus custom-resource troubleshooting procedure if the operator
 does not recreate the pool:
-<https://cozystack.io/docs/v1.5/operations/troubleshooting/piraeus-custom-resources/>.
+<https://cozystack.io/docs/v1.6/operations/troubleshooting/piraeus-custom-resources/>.
 
 ## Restore the OpenBao member
 

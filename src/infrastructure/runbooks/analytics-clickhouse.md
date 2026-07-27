@@ -52,7 +52,7 @@ reads bucket coordinates from `Secret/guardian-backups-creds` directly
 2 below. Restores go through `backups.cozystack.io/RestoreJob` like
 Postgres (see runbooks/postgres-backup-restore.md for the drill pattern).
 
-## Cozystack v1.5.0 chart bugs (both hit live; drop workarounds when fixed)
+## Cozystack chart bugs (hit live; drop workarounds when fixed)
 
 1. **Keeper DNS**: the CHI template's zookeeper block reads
    `.Values.clusterDomain` (undefined; everything else uses the injected

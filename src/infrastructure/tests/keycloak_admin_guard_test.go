@@ -8,9 +8,10 @@ import (
 )
 
 // The platform Keycloak's admin console must never be publicly routable.
-// Upstream Cozystack renders a single Ingress routing path / on
-// keycloak.<root-host> — admin console included — with no values knob to
-// restrict it. Platform OIDC relies on
+// Cozystack can move the admin route to a separate ingress, but that requires
+// a private ingress or Gateway that Guardian has not provisioned. With the
+// admin host unset, the public Keycloak Ingress still routes / and includes
+// the admin console. Platform OIDC therefore relies on
 // base/cozystack-identities/keycloak-admin-guard.yaml shadowing /admin and
 // /realms/master to an endpointless Service, and on edge probes gating both
 // prefixes on 503. Nothing at runtime ties the guard to the oidc.enabled

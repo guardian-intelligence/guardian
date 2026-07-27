@@ -15,7 +15,7 @@
 #   before cutover.
 # - Data PVCs land on the DEFAULT StorageClass (DRBD + LINSTOR LUKS
 #   `replicated-encrypted`): the
-#   chart's storageClass value is dead code in v1.5.0 — neither template
+#   chart's storageClass value is dead code — neither template
 #   consumes it (verified against the rendered CHI).
 #   Three-way DRBD under ReplicatedMergeTree(2 replicas) = 6x raw
 #   NVMe per byte. Fine at today's volume; REVISIT AT SCALE — when upstream
@@ -28,7 +28,7 @@ metadata:
   name: analytics
   namespace: tenant-root
 spec:
-  # Chart bug workaround (v1.5.0): the CHI template's zookeeper block reads
+  # Chart bug workaround: the CHI template's zookeeper block reads
   # `.Values.clusterDomain` (undefined — every other reference uses the
   # injected `._cluster "cluster-domain"`), rendering keeper hosts as
   # absolute FQDNs ending in `.svc.` that never resolve, which breaks ALL
@@ -66,7 +66,7 @@ spec:
     cli_canary: {}
     payments_canary:
       readonly: true
-  # Chart bug workaround #2 (v1.5.0): backup.useSystemBucket is broken for
+  # Chart bug workaround #2: backup.useSystemBucket is broken for
   # any https external S3 — the platform credentials projector strips the
   # scheme off the projected `endpoint` key (SeaweedFS-era assumption) and
   # clickhouse-backup's AWS SDK rejects the schemeless URI outright

@@ -97,7 +97,7 @@ to keep the exception visible:
   unless the PVC has the same synthetic-data label.
 
 Reference:
-[Cozystack disk encryption](https://cozystack.io/docs/v1.5/storage/disk-encryption/).
+[Cozystack disk encryption](https://cozystack.io/docs/v1.6/storage/disk-encryption/).
 
 ## Backup boundary
 

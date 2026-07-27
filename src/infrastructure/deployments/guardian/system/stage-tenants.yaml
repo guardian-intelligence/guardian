@@ -8,7 +8,9 @@ metadata:
     guardian.dev/stage: prod
     guardian.dev/tenant-id: gi-guardian-prod
 spec:
-  host: prod.guardianintelligence.org
+  # Prod publishes Guardian's first-party apex and subdomains. Owning the
+  # platform apex keeps Cozystack's hostname admission boundary authoritative.
+  host: guardianintelligence.org
   etcd: false
   ingress: false
   monitoring: false
