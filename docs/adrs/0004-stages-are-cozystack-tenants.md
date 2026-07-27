@@ -35,11 +35,10 @@ nesting deepens into the ancestor-label regime and the 63-char namespace limit, 
 every cell would need hand-written peering to shared services. Intra-stage app
 tightening is pod-selector CiliumNetworkPolicies (the `deployments/iam` pattern).
 
-Stage tenants are **static and long-lived**. Tenant deletion is a known-fragile
-operation on the 1.5.x line (unpinned deletion-hook image, multiple upstream wedge
-modes), so no flow may delete/recreate tenants — ephemeral per-PR workloads, if
-they ever return, are Deployments inside an existing tenant, never tenants
-themselves.
+Stage tenants are **static and long-lived**. Tenant deletion is destructive and
+stage identity is durable infrastructure, so no flow may delete/recreate tenants —
+ephemeral per-PR workloads, if they ever return, are Deployments inside an existing
+tenant, never tenants themselves.
 
 ## Consequences
 

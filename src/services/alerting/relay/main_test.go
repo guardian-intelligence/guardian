@@ -17,7 +17,7 @@ import (
 )
 
 // alertaPayload mirrors what Alerta's slack plugin (alerta-contrib
-// alerta_slack.py) actually posts under the Cozystack v1.5.0 chart, where
+// alerta_slack.py) actually posts under the bundled Alerta chart, where
 // only SLACK_WEBHOOK_URL is set and SLACK_ATTACHMENTS defaults to False: a
 // TEXT-ONLY message rendered from SLACK_DEFAULT_SUMMARY_FMT — no
 // attachments, no fields, no color.

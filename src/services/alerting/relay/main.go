@@ -152,7 +152,7 @@ type alertaSummary struct {
 }
 
 // The primary producer — Alerta's slack plugin (alerta-contrib
-// plugins/slack/alerta_slack.py) as rendered by the Cozystack v1.5.0 chart,
+// plugins/slack/alerta_slack.py) as rendered by the bundled Alerta chart,
 // where only SLACK_WEBHOOK_URL is set and SLACK_ATTACHMENTS defaults to
 // False — posts TEXT-ONLY payloads: {"username", "channel", "text"} with no
 // attachments. The text is SLACK_DEFAULT_SUMMARY_FMT, which is the parsing

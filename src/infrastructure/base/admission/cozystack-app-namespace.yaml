@@ -15,7 +15,7 @@
 #
 # Rollout: Warn + Audit first (surfaces violations to the client and the audit
 # log without blocking), then flip validationActions to [Deny] once the audit
-# stream is confirmed clean and the Cozystack 1.5.2 tenant upgrade has settled.
+# stream is confirmed clean.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:

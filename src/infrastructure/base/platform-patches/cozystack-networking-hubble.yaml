@@ -1,4 +1,4 @@
-# Cozystack 1.5 exposes Hubble through the generated cozystack.networking
+# Cozystack exposes Hubble through the generated cozystack.networking
 # Package. The platform chart owns the base Cilium/KubeOVN values; this partial
 # Package owns only the Hubble observability fields.
 #

@@ -18,8 +18,7 @@ time.
   `https://guardianintelligence.org/`, backed by the 3-replica company-site
   Deployment behind the 3-replica tenant-root ingress. Do not use the Cozystack
   dashboard as the default failover probe unless its chart exposes a durable HA
-  setting; Cozystack 1.5.0 and 1.5.1 hard-code the dashboard console and
-  gatekeeper to one replica.
+  setting; the dashboard console and gatekeeper are single-replica workloads.
 
 ## Commands
 

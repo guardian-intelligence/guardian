@@ -1,5 +1,5 @@
-# Scrape the Cozystack Fluent Bit DaemonSet directly. Cozystack v1.5.2 exposes
-# a Service selected by app.kubernetes.io/name=fluent-bit, with named port
+# Scrape the Cozystack Fluent Bit DaemonSet directly. Cozystack exposes a
+# Service selected by app.kubernetes.io/name=fluent-bit, with named port
 # http -> 2020, while leaving its Prometheus ServiceMonitor disabled. This
 # Guardian-owned scrape avoids a second controller dialect and duplicate
 # samples. The Talos receiver has its own VMPodScrape in base/observability.
