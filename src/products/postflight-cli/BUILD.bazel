@@ -8,8 +8,10 @@ rust_binary(
     rustc_env = {
         # Binaries carry only the crate version: commit provenance lives in the
         # OCI annotations and Fulcio certificate so identical sources rebuild
-        # byte-identically and the edge lane can dedup by content.
-        "CARGO_PKG_VERSION": "0.2.0",
+        # byte-identically and the edge lane can dedup by content. main names
+        # the next stable with a `-pre` suffix; a bare version exists only on
+        # the one commit a stable is cut from.
+        "CARGO_PKG_VERSION": "0.3.0-pre",
     },
     visibility = ["//visibility:public"],
     deps = [
@@ -110,4 +112,10 @@ alias(
     name = "format",
     actual = "@rules_rust//tools/rustfmt",
     tags = ["guardian-format"],
+)
+
+filegroup(
+    name = "installer",
+    srcs = ["dist/install.sh"],
+    visibility = ["//visibility:public"],
 )

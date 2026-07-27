@@ -3,6 +3,14 @@
 # chain and publishes a GitHub Release reusing the signatures minted at build
 # time (ghcr.io/guardian-intelligence/postflight-cli).
 #
+# A channel is a pointer at bytes, not a build of its own: edge -> nightly ->
+# rc is one artifact moving up. Only a stable cut changes the bytes, because
+# dropping the prerelease suffix from the crate version changes what the binary
+# reports. So a pin's `version` is whatever the pinned bytes already report —
+# read it off the release that published that digest, never off main, which may
+# have moved since — and the cutter refuses a pin that claims anything else.
+# Only a stable pin's version is bare.
+#
 # nightly is advanced by Kargo promotion PRs — never edit it by hand. rc and
 # stable have no Kargo stage: a human PR advances them, and the same commit
 # must mirror the digest into the matching releases.postflight-cli lane in

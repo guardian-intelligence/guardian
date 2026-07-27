@@ -3,8 +3,9 @@
 //!
 //! Nothing inside the binary can answer that. It carries its crate version and
 //! nothing else, deliberately, so identical sources rebuild byte-identically
-//! and one signed artifact rides every channel — which means the release tag,
-//! the channel, and the install method have to be recorded beside it.
+//! and one signed artifact rides edge, nightly and rc unrebuilt — which means
+//! the release tag, the channel, and the install method have to be recorded
+//! beside it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -132,7 +133,7 @@ mod tests {
             &dir,
             r#"{"schema":1,"method":"install.sh","binary_path":"/opt/postflight",
                 "channel":"nightly","tag":"postflight-cli/nightly-20260726",
-                "version":"0.2.0-nightly","target":"x86_64-unknown-linux-musl",
+                "version":"0.3.0-pre","target":"x86_64-unknown-linux-musl",
                 "binary_sha256":"abc","installed_at":"2026-07-26T05:00:00Z"}"#,
         );
         let receipt = load(&dir).unwrap().expect("receipt should load");

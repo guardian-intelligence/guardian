@@ -40,6 +40,9 @@ env:
   BUILD_IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main
   RELEASE_IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-release.yml@refs/heads/main
   ISSUER: https://token.actions.githubusercontent.com
+  # How recently a release candidate must have been published to still count as
+  # the soak a stable cut descends from.
+  RC_SOAK_DAYS: 7
   CRANE_VERSION: v0.21.7
   CRANE_SHA256: 1a57bc98207fa1c0d04bf760699099e26f8383499bfd55b99c1b919a928a7230
 
@@ -91,24 +94,39 @@ jobs:
               print(name, pin.get("image", ""), pin.get("version", ""))
           PY
 
-          # Every dedup and rc lineage question is "has this digest been
-          # released on channel X", and the tag prefixes partition the release
-          # space. The cache path comes back in a variable rather than on
-          # stdout because bash suppresses `set -e` inside the command
-          # substitution of an assignment, which would turn a failed listing
-          # into an empty file and a duplicate cut.
-          release_field() {
-            RELEASE_FIELD="releases-$1-$2.txt"
-            local filter
+          # Every dedup and lineage question is "what has this channel already
+          # released", and the tag grammar partitions the release space:
+          # `nightly-`, `rc-` and `v` are a channel each. One tag in the
+          # listing, `postflight-cli/v0.2.0-rc.1`, is spelled in the grammar
+          # that preceded `rc-`, so the rc set admits that shape as well and
+          # the stable set refuses it — the same two rules the installer and
+          # the install canary carry, held to this file by
+          # TestPostflightCliChannelGrammarMovesTogether.
+          #
+          # Bodies ride along because they carry the digest a dedup greps for
+          # and the source commit a stable's lineage walks; @tsv keeps a
+          # multi-line body on one row. The cache path comes back in a variable
+          # rather than on stdout because bash suppresses `set -e` inside the
+          # command substitution of an assignment, which would turn a failed
+          # listing into an empty file and a duplicate cut.
+          releases() {
+            RELEASES="releases-$1.tsv"
+            local match
             case "$1" in
-              nightly) filter='select(.tag_name | startswith("postflight-cli/nightly-"))' ;;
-              rc) filter='select(.tag_name | startswith("postflight-cli/v") and contains("-rc."))' ;;
-              stable) filter='select(.tag_name | startswith("postflight-cli/v") and (contains("-rc.") | not))' ;;
+              nightly) match='startswith("postflight-cli/nightly-")' ;;
+              rc) match='startswith("postflight-cli/rc-") or (startswith("postflight-cli/v") and contains("-rc."))' ;;
+              stable) match='startswith("postflight-cli/v") and (contains("-rc.") | not)' ;;
+              *)
+                echo "no release tag grammar for channel $1" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+                ;;
             esac
-            if [[ ! -f "$RELEASE_FIELD" ]]; then
+            if [[ ! -f "$RELEASES" ]]; then
               gh api "repos/${{ github.repository }}/releases" --paginate \
-                --jq ".[] | $filter | .$2" > "$RELEASE_FIELD.part"
-              mv "$RELEASE_FIELD.part" "$RELEASE_FIELD"
+                --jq ".[] | select(.tag_name | $match)
+                  | [.tag_name, .published_at, (.body // \"\")] | @tsv" \
+                > "$RELEASES.part"
+              mv "$RELEASES.part" "$RELEASES"
             fi
           }
 
@@ -122,50 +140,54 @@ jobs:
             fi
             digest="${image##*@}"
 
-            release_field "$channel" body
-            if grep -q "$digest" "$RELEASE_FIELD"; then
+            releases "$channel"
+            if grep -q "$digest" "$RELEASES"; then
               echo "$channel: $digest is already released — skipping" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
 
             case "$channel" in
               rc)
-                if [[ "$version" != *-rc.* ]]; then
-                  echo "$channel: version '$version' is not a release candidate" >> "$GITHUB_STEP_SUMMARY"
+                if [[ -z "$version" ]]; then
+                  echo "$channel: the pin claims no version, so nothing holds the bytes to it" >> "$GITHUB_STEP_SUMMARY"
                   exit 1
                 fi
                 # rc promotes nightly's exact bytes, so its lineage is the digest.
-                release_field nightly body
-                if ! grep -q "$digest" "$RELEASE_FIELD"; then
+                releases nightly
+                if ! grep -q "$digest" "$RELEASES"; then
                   echo "$channel: $digest was never released on nightly — lineage broken, refusing to cut" >> "$GITHUB_STEP_SUMMARY"
                   exit 1
                 fi
                 ;;
               stable)
-                if [[ -z "$version" || "$version" == *-rc.* ]]; then
+                if [[ -z "$version" || "$version" == *-* ]]; then
                   echo "$channel: version '$version' is not a stable version" >> "$GITHUB_STEP_SUMMARY"
                   exit 1
                 fi
-                # Dropping the -rc suffix changes CARGO_PKG_VERSION, hence the
-                # bytes, hence the digest: stable can never share a digest with
-                # the candidate it promotes. Its lineage is the version line —
-                # a candidate for this exact version must already be released,
-                # and the build commit must descend from it (asserted once the
-                # revision is known).
-                release_field rc tag_name
-                rc_tag=
-                while read -r tag; do
-                  if [[ "$tag" == "postflight-cli/v$version-rc."* ]]; then
-                    rc_tag="$tag"
-                    break
-                  fi
-                done < "$RELEASE_FIELD"
-                if [[ -z "$rc_tag" ]]; then
-                  echo "$channel: no release candidate was ever cut for $version — lineage broken, refusing to cut" >> "$GITHUB_STEP_SUMMARY"
+                # A stable cut drops the prerelease suffix, which changes
+                # CARGO_PKG_VERSION, hence the bytes, hence the digest: stable
+                # can never share a digest with the candidate it promotes, so
+                # its lineage cannot be a digest match. What stays checkable is
+                # that a candidate published inside the soak window was built
+                # from a commit this build descends from; the ancestry half is
+                # asserted once the revision is known, against every candidate
+                # still in the window.
+                releases rc
+                cutoff=$(( $(date -u +%s) - RC_SOAK_DAYS * 86400 ))
+                : > "lineage-$channel.rev"
+                while IFS=$'\t' read -r tag published body <&4; do
+                  # A draft candidate has no publication date and has soaked
+                  # nowhere; it cannot be what a stable descends from.
+                  [[ -n "$published" ]] || continue
+                  (( $(date -u -d "$published" +%s) >= cutoff )) || continue
+                  source_commit="$(sed -n 's/.*Source commit: \([0-9a-f]\{40\}\).*/\1/p' <<<"$body")"
+                  [[ -n "$source_commit" ]] || continue
+                  printf '%s %s\n' "$tag" "$source_commit" >> "lineage-$channel.rev"
+                done 4< "$RELEASES"
+                if [[ ! -s "lineage-$channel.rev" ]]; then
+                  echo "$channel: no release candidate published in the last $RC_SOAK_DAYS days — nothing soaked, refusing to cut" >> "$GITHUB_STEP_SUMMARY"
                   exit 1
                 fi
-                gh api "repos/${{ github.repository }}/git/ref/tags/$rc_tag" \
-                  --jq .object.sha > "lineage-$channel.rev"
                 ;;
             esac
 
@@ -198,15 +220,23 @@ jobs:
             binaries_digest="$(jq -r '.annotations["org.guardian.binaries-digest"]' <<<"$manifest")"
 
             if [[ -f "lineage-$channel.rev" ]]; then
-              base="$(cat "lineage-$channel.rev")"
-              status="$(gh api "repos/${{ github.repository }}/compare/$base...$revision" --jq .status)"
-              case "$status" in
-                ahead | identical) ;;
-                *)
-                  echo "$channel: build commit $revision does not descend from its release candidate at $base ($status)" >> "$GITHUB_STEP_SUMMARY"
-                  exit 1
-                  ;;
-              esac
+              soaked=
+              while read -r tag base <&4; do
+                # A candidate built from a commit the repository no longer has
+                # answers nothing; the next candidate still can, and a window
+                # in which none of them answers fails below.
+                if status="$(gh api "repos/${{ github.repository }}/compare/$base...$revision" \
+                    --jq .status 2>/dev/null)"; then
+                  case "$status" in
+                    ahead | identical) soaked="$tag"; break ;;
+                  esac
+                fi
+              done 4< "lineage-$channel.rev"
+              if [[ -z "$soaked" ]]; then
+                echo "$channel: build commit $revision descends from no candidate published in the last $RC_SOAK_DAYS days ($(cut -d' ' -f1 "lineage-$channel.rev" | tr '\n' ' '))" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+              echo "$channel: soaked as $soaked" >> "$GITHUB_STEP_SUMMARY"
             fi
 
             mkdir -p "stage/$channel" "work/$channel" "assets/$channel"
@@ -321,10 +351,15 @@ jobs:
                 summary="Automated nightly release of the postflight CLI."
                 ;;
               rc)
-                tag="postflight-cli/v$version"
-                title="postflight CLI v$version"
+                # A candidate is a pointer at bytes that already shipped on
+                # nightly, so it is named for the day it was promoted: the
+                # version it reports is the one main carries, and several
+                # candidates wear it before a stable is cut from it.
+                day="$(date -u +%Y%m%d -d "@$(git log -1 --format=%ct)")"
+                tag="postflight-cli/rc-$day"
+                title="postflight CLI release candidate $day"
                 flags=(--prerelease)
-                summary="Release candidate $version of the postflight CLI."
+                summary="Release candidate $day of the postflight CLI."
                 ;;
               stable)
                 tag="postflight-cli/v$version"
@@ -336,12 +371,16 @@ jobs:
 
             existing="$(tag_sha "$tag")"
             if [[ -n "$existing" && "$existing" != "$revision" ]]; then
-              if [[ "$channel" != nightly ]]; then
+              if [[ "$channel" == stable ]]; then
                 echo "$channel: tag $tag already points at $existing, not $revision" >> "$GITHUB_STEP_SUMMARY"
                 exit 1
               fi
               tag="$tag-$(date -u +%H%M -d "@$(git log -1 --format=%ct)")"
               existing="$(tag_sha "$tag")"
+              if [[ -n "$existing" && "$existing" != "$revision" ]]; then
+                echo "$channel: tag $tag already points at $existing, not $revision" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
             fi
             # Create the tag ref first: the releases API 403s integration tokens
             # when target_commitish is a bare SHA (cli/cli#9514), while plain
@@ -355,9 +394,14 @@ jobs:
             if [[ "$sources_make" == 1 ]]; then
               sources="$sources (\`make && sudo make install\`)"
             fi
+            # The body is read back by machine: the install canary greps it for
+            # the pinned digest, and a stable cut walks the candidates' source
+            # commits out of it. The version line is what the author of the
+            # next pin reads the pin's `version` off.
             notes="$(printf '%s\n' \
               "$summary" \
               "" \
+              "- Version: \`$version\`" \
               "- Artifact: \`$image\`" \
               "- Source commit: $revision" \
               "- Binaries digest: \`$binaries_digest\`" \
