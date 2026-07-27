@@ -1,6 +1,5 @@
 import { useEffect, useMemo } from "react";
 import type { EncodeResult } from "~/engine/client";
-import { SIZE_LIMIT_BYTES } from "~/engine/limits";
 import { formatBytes } from "~/lib/format";
 
 export interface ResultCardProps {
@@ -24,7 +23,7 @@ export function ResultCard({ result, sourceName, onBack }: ResultCardProps) {
       <div className="space-y-5 p-6">
         <div className="flex flex-wrap items-center gap-3">
           <span className="rounded-full border border-glow-teal/40 bg-glow-teal/10 px-3 py-1 font-mono text-sm text-glow-teal">
-            {formatBytes(outcome.bytes)} — under the limit, guaranteed
+            {formatBytes(outcome.bytes)} — under the cap, guaranteed
           </span>
           {outcome.mode === "remux" ? (
             <span className="rounded-full border border-glow-warm/40 bg-glow-warm/10 px-3 py-1 text-sm text-glow-warm">
@@ -37,7 +36,7 @@ export function ResultCard({ result, sourceName, onBack }: ResultCardProps) {
             </span>
           )}
         </div>
-        <UtilizationMeter utilization={outcome.utilization} />
+        <UtilizationMeter utilization={outcome.utilization} limitBytes={outcome.limitBytes} />
         <div className="flex flex-wrap gap-3">
           <a
             href={url}
@@ -59,14 +58,20 @@ export function ResultCard({ result, sourceName, onBack }: ResultCardProps) {
   );
 }
 
-function UtilizationMeter({ utilization }: { utilization: number }) {
+function UtilizationMeter({
+  utilization,
+  limitBytes,
+}: {
+  utilization: number;
+  limitBytes: number;
+}) {
   const pct = Math.min(utilization * 100, 100);
   return (
     <div>
       <div className="mb-1 flex justify-between font-mono text-xs text-mist-faint">
         <span>budget used</span>
         <span>
-          {pct.toFixed(1)}% of {formatBytes(SIZE_LIMIT_BYTES)}
+          {pct.toFixed(1)}% of {formatBytes(limitBytes)}
         </span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">

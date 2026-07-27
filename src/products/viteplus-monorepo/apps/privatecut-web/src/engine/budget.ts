@@ -1,5 +1,3 @@
-import { SIZE_LIMIT_BYTES } from "./limits";
-
 // Byte budget for a selection: what the video track may spend after the
 // container and audio take their cut. All estimates here steer the FIRST
 // encode pass only — acceptance is decided by measuring the finalized file
@@ -56,11 +54,11 @@ export interface BudgetInput {
   // Source video bitrate, if known: the video budget never exceeds it — we
   // will not spend more bits than the source carries.
   readonly sourceVideoBitsPerSecond?: number | undefined;
-  readonly limitBytes?: number;
+  readonly limitBytes: number;
 }
 
 export function planBudget(input: BudgetInput): BudgetPlan {
-  const limitBytes = input.limitBytes ?? SIZE_LIMIT_BYTES;
+  const { limitBytes } = input;
   const durationS = Math.max(input.durationS, 0.1);
   const audio = planAudio(durationS, limitBytes, input.sourceHasAudio);
   const containerBytes = estimateContainerBytes(durationS, input.frameRate, audio !== null);

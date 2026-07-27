@@ -1,7 +1,18 @@
-// The product's one promise: no output ever exceeds this many bytes. 4 MB in
-// the sense upload validators use (SI, not MiB) — the stricter reading, so a
-// file that passes our gate passes theirs regardless of which one they meant.
-export const SIZE_LIMIT_BYTES = 4_000_000;
+// The product's one promise: no output ever exceeds the size cap the user
+// picked. Caps are SI megabytes in the sense upload validators use (not MiB)
+// — the stricter reading, so a file that passes our gate passes theirs
+// regardless of which one they meant.
+export const SIZE_LIMIT_PRESETS_BYTES = [4_000_000, 10_000_000, 25_000_000, 100_000_000] as const;
+
+export type SizeLimitBytes = (typeof SIZE_LIMIT_PRESETS_BYTES)[number];
+
+export const DEFAULT_SIZE_LIMIT_BYTES: SizeLimitBytes = 4_000_000;
+
+// Worker requests are structured-clone data, so the cap is re-validated at
+// the trust boundary rather than assumed from the type.
+export function isSizeLimit(bytes: number): bytes is SizeLimitBytes {
+  return (SIZE_LIMIT_PRESETS_BYTES as readonly number[]).includes(bytes);
+}
 
 export const MAX_SELECTION_SECONDS = 60;
 

@@ -9,7 +9,7 @@ import { planBudget } from "./budget";
 import { calibratedMargin, recordCalibration } from "./calibration";
 import { converge, firstPassBitrate } from "./convergence";
 import { planFrame } from "./ladder";
-import { MAX_SELECTION_SECONDS, SIZE_LIMIT_BYTES } from "./limits";
+import { isSizeLimit, MAX_SELECTION_SECONDS } from "./limits";
 import type { OpenedInput } from "./probe";
 import { openInput } from "./probe";
 import { executeRemux, planRemux } from "./remux";
@@ -41,7 +41,7 @@ async function dispatch(request: WorkerRequest): Promise<void> {
       }
       case "encode": {
         if (opened === null) throw new Error("No open file.");
-        await encode(request.id, request.selection);
+        await encode(request.id, request.selection, request.limitBytes);
         break;
       }
     }
@@ -70,8 +70,9 @@ async function streamThumbnails(id: number, count: number, height: number): Prom
   post({ kind: "thumbnails-done", id });
 }
 
-async function encode(id: number, selection: SelectionRange): Promise<void> {
+async function encode(id: number, selection: SelectionRange, limitBytes: number): Promise<void> {
   if (opened === null) return;
+  if (!isSizeLimit(limitBytes)) throw new Error("Unsupported size cap.");
   const startedAt = performance.now();
   const clamped: SelectionRange = {
     startS: Math.max(selection.startS, 0),
@@ -84,15 +85,16 @@ async function encode(id: number, selection: SelectionRange): Promise<void> {
   }
 
   // Fast path: lossless stream copy when the selection allows it.
-  const remuxPlan = await planRemux(opened, clamped);
+  const remuxPlan = await planRemux(opened, clamped, limitBytes);
   if (remuxPlan !== null) {
     const remuxed = await executeRemux(opened, remuxPlan);
-    if (remuxed !== null && remuxed.bytes <= SIZE_LIMIT_BYTES) {
+    if (remuxed !== null && remuxed.bytes <= limitBytes) {
       const { summary } = opened;
       finish(id, remuxed.buffer, {
         mode: "remux",
         bytes: remuxed.bytes,
-        utilization: remuxed.bytes / SIZE_LIMIT_BYTES,
+        limitBytes,
+        utilization: remuxed.bytes / limitBytes,
         durationS,
         width: summary.video.width,
         height: summary.video.height,
@@ -111,6 +113,7 @@ async function encode(id: number, selection: SelectionRange): Promise<void> {
     frameRate: summary.video.frameRate,
     sourceHasAudio: opened.audioTrack !== null,
     sourceVideoBitsPerSecond: summary.video.bitsPerSecond,
+    limitBytes,
   });
   const frame = planFrame({
     sourceWidth: summary.video.width,
@@ -123,7 +126,7 @@ async function encode(id: number, selection: SelectionRange): Promise<void> {
   const openedInput = opened;
 
   const result = await converge<ArrayBuffer>({
-    limitBytes: SIZE_LIMIT_BYTES,
+    limitBytes,
     reservedBytes: budget.containerBytes + budget.audioBytes,
     initialVideoBitsPerSecond: budget.videoBitsPerSecond,
     maxVideoBitsPerSecond: summary.video.bitsPerSecond,
@@ -158,6 +161,7 @@ async function encode(id: number, selection: SelectionRange): Promise<void> {
   finish(id, result.artifact, {
     mode: "transcode",
     bytes: result.bytes,
+    limitBytes,
     utilization: result.utilization,
     durationS,
     width: frame.width,
@@ -170,10 +174,10 @@ async function encode(id: number, selection: SelectionRange): Promise<void> {
 }
 
 function finish(id: number, buffer: ArrayBuffer, outcome: EncodeOutcome): void {
-  // The gate, restated at the last exit: nothing over the limit leaves the
+  // The gate, restated at the last exit: nothing over the cap leaves the
   // worker, whatever path produced it.
-  if (outcome.bytes > SIZE_LIMIT_BYTES) {
-    post({ kind: "error", id, message: "Internal error: output exceeded the size limit." });
+  if (outcome.bytes > outcome.limitBytes) {
+    post({ kind: "error", id, message: "Internal error: output exceeded the size cap." });
     return;
   }
   const blob = new Blob([buffer], { type: "video/mp4" });
