@@ -60,6 +60,11 @@ function freezeCssAnimationsAt(seekMs: number): number {
       // skipping them beats aborting the whole freeze.
     }
   }
+  window.dispatchEvent(
+    new CustomEvent("visual-harness:seek", {
+      detail: { seekMs },
+    }),
+  );
   return frozen;
 }
 
@@ -122,5 +127,9 @@ export async function seekTo(
   if (seekMs > 0) {
     await page.clock.fastForward(seekMs);
   }
-  return await page.evaluate(freezeCssAnimationsAt, seekMs);
+  const frozen = await page.evaluate(freezeCssAnimationsAt, seekMs);
+  // One deterministic post-freeze frame lets paint-driven canvases capture
+  // the compositor state that was just pinned.
+  await page.clock.fastForward(1);
+  return frozen;
 }

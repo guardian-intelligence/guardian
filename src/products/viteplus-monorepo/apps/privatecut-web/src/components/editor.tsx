@@ -115,6 +115,7 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
   return (
     <div
       className="glass-strong mx-auto w-full space-y-6 p-6"
+      data-illumination-glass="strong"
       style={{ maxWidth: portrait ? "30rem" : "52rem" }}
     >
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}

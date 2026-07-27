@@ -26,7 +26,9 @@ A frame is only reproducible when two independent clocks are pinned
 2. **CSS/compositor time** — `page.clock` does not touch the CSS animation
    timeline, so after settle every `Animation` (keyframes, `@property`
    gradients, pseudo-element animations) is paused and seeked to the same
-   `currentTime` via the Web Animations API.
+   `currentTime` via the Web Animations API. The harness then emits
+   `visual-harness:seek` so a canvas that mirrors animated DOM geometry can
+   redraw synchronously against that exact compositor pose.
 
 No cooperation from the page under capture is required.
 
@@ -39,6 +41,9 @@ pnpm --filter @guardian/visual-harness run capture -- \
   --url http://127.0.0.1:4253 --out /tmp/shots \
   --form-factor 4k-desktop,mobile --seek 0,1500,3600
 ```
+
+Set `VISUAL_HTML_IN_CANVAS=1` to run Chromium with its
+`CanvasDrawElement` feature enabled and exercise the origin-trial path locally.
 
 `--help` documents all flags. Every run writes PNGs plus a `manifest.json`
 recording viewport, scale factor, seed, seek, and sha256 per shot. The

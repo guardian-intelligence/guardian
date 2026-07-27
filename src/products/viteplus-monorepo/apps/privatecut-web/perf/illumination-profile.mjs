@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { chromium } from "@playwright/test";
+import { chromium, firefox } from "@playwright/test";
 
 const base = process.env.BASE ?? "http://127.0.0.1:4253";
 const targetHz = Number(process.env.TARGET_HZ ?? "165");
@@ -9,10 +9,15 @@ const attempts = Number(process.env.ATTEMPTS ?? "3");
 const headless = process.env.HEADLESS !== "0";
 const shouldGate = process.env.GATE === "1";
 const outputPath = process.env.OUTPUT;
+const engine = process.env.ENGINE ?? "chrome";
+const htmlInCanvas = process.env.HTML_IN_CANVAS === "1";
 
 if (!Number.isFinite(targetHz) || targetHz <= 0) throw new Error("TARGET_HZ must be positive");
 if (!Number.isInteger(sampleMs) || sampleMs < 1_000) throw new Error("SAMPLE_MS must be >= 1000");
 if (!Number.isInteger(attempts) || attempts < 1) throw new Error("ATTEMPTS must be >= 1");
+if (!["chrome", "chromium", "firefox"].includes(engine)) {
+  throw new Error("ENGINE must be chrome, chromium, or firefox");
+}
 
 const targetFrameMs = 1_000 / targetHz;
 const droppedFrameMs = targetFrameMs * 2;
@@ -163,7 +168,14 @@ function summarizeRuns(runs) {
   );
 }
 
-const browser = await chromium.launch({ channel: "chrome", headless });
+const browser =
+  engine === "firefox"
+    ? await firefox.launch({ headless })
+    : await chromium.launch({
+        ...(engine === "chrome" ? { channel: "chrome" } : {}),
+        ...(htmlInCanvas ? { args: ["--enable-features=CanvasDrawElement"] } : {}),
+        headless,
+      });
 const context = await browser.newContext({
   deviceScaleFactor: 2,
   reducedMotion: "no-preference",
@@ -172,13 +184,13 @@ const context = await browser.newContext({
 const page = await context.newPage();
 await installObservers(page);
 await page.bringToFront();
-const cdp = await context.newCDPSession(page);
-await cdp.send("Performance.enable");
+const cdp = engine === "firefox" ? null : await context.newCDPSession(page);
+await cdp?.send("Performance.enable");
 
-const beforeNavigation = metricMap(await cdp.send("Performance.getMetrics"));
+const beforeNavigation = cdp ? metricMap(await cdp.send("Performance.getMetrics")) : {};
 await page.goto(base, { waitUntil: "networkidle" });
 await page.waitForTimeout(4_000);
-const afterNavigation = metricMap(await cdp.send("Performance.getMetrics"));
+const afterNavigation = cdp ? metricMap(await cdp.send("Performance.getMetrics")) : {};
 
 const idleRuns = [];
 const pointerRuns = [];
@@ -188,12 +200,12 @@ for (let attempt = 0; attempt < attempts; attempt += 1) {
 }
 
 const motionFrameStart = await page
-  .locator(".illumination-scene")
+  .locator(".privatecut-canvas")
   .evaluate((element) => Number(element.dataset.frameCount ?? "0"))
   .catch(() => null);
 await page.waitForTimeout(1_000);
 const motionFrameEnd = await page
-  .locator(".illumination-scene")
+  .locator(".privatecut-canvas")
   .evaluate((element) => Number(element.dataset.frameCount ?? "0"))
   .catch(() => null);
 
@@ -215,7 +227,8 @@ const pageMetrics = await page.evaluate(() => {
     interactionGroups.set(event.interactionId, Math.max(current, event.duration));
   }
   const interactionDurations = [...interactionGroups.values()];
-  const illumination = document.querySelector(".illumination-scene");
+  const canvas = document.querySelector(".privatecut-canvas");
+  const documentSurface = document.querySelector(".canvas-document");
   return {
     animations: {
       infinite: document
@@ -235,13 +248,16 @@ const pageMetrics = await page.evaluate(() => {
     cls: profile.cls,
     domElements: document.querySelectorAll("*").length,
     fcp: paints["first-contentful-paint"] ?? null,
-    illumination: illumination
+    canvas: canvas
       ? {
-          frameCount: Number(illumination.dataset.frameCount ?? "0"),
-          mode: illumination.dataset.mode ?? "unknown",
-          state: illumination.dataset.state ?? "unknown",
+          frameCount: Number(canvas.dataset.frameCount ?? "0"),
+          mode: canvas.dataset.mode ?? "unknown",
+          pixelRatio: Number(canvas.dataset.pixelRatio ?? "0"),
+          state: canvas.dataset.state ?? "unknown",
+          surfaceCount: Number(canvas.dataset.surfaceCount ?? "0"),
         }
       : null,
+    htmlInCanvas: documentSurface?.dataset.htmlInCanvas ?? "unknown",
     inp: interactionDurations.length > 0 ? Math.max(...interactionDurations) : null,
     lcp: profile.lcp,
     longAnimationFrames: {
@@ -280,25 +296,28 @@ const pageMetrics = await page.evaluate(() => {
   };
 });
 
-const afterProfile = metricMap(await cdp.send("Performance.getMetrics"));
+const afterProfile = cdp ? metricMap(await cdp.send("Performance.getMetrics")) : {};
 const report = {
   axes: {
-    cdp: {
-      heapMb: round((afterProfile.JSHeapUsedSize ?? 0) / 1024 / 1024),
-      layoutMs: round(
-        ((afterProfile.LayoutDuration ?? 0) - (beforeNavigation.LayoutDuration ?? 0)) * 1_000,
-      ),
-      scriptMs: round(
-        ((afterProfile.ScriptDuration ?? 0) - (beforeNavigation.ScriptDuration ?? 0)) * 1_000,
-      ),
-      styleMs: round(
-        ((afterProfile.RecalcStyleDuration ?? 0) - (beforeNavigation.RecalcStyleDuration ?? 0)) *
-          1_000,
-      ),
-      taskMs: round(
-        ((afterProfile.TaskDuration ?? 0) - (beforeNavigation.TaskDuration ?? 0)) * 1_000,
-      ),
-    },
+    cdp: cdp
+      ? {
+          heapMb: round((afterProfile.JSHeapUsedSize ?? 0) / 1024 / 1024),
+          layoutMs: round(
+            ((afterProfile.LayoutDuration ?? 0) - (beforeNavigation.LayoutDuration ?? 0)) * 1_000,
+          ),
+          scriptMs: round(
+            ((afterProfile.ScriptDuration ?? 0) - (beforeNavigation.ScriptDuration ?? 0)) * 1_000,
+          ),
+          styleMs: round(
+            ((afterProfile.RecalcStyleDuration ?? 0) -
+              (beforeNavigation.RecalcStyleDuration ?? 0)) *
+              1_000,
+          ),
+          taskMs: round(
+            ((afterProfile.TaskDuration ?? 0) - (beforeNavigation.TaskDuration ?? 0)) * 1_000,
+          ),
+        }
+      : null,
     idle: summarizeRuns(idleRuns),
     page: pageMetrics,
     pointer: summarizeRuns(pointerRuns),
@@ -306,11 +325,13 @@ const report = {
       motionFrameStart === null || motionFrameEnd === null
         ? null
         : motionFrameEnd - motionFrameStart,
-    startupCdp: {
-      taskMs: round(
-        ((afterNavigation.TaskDuration ?? 0) - (beforeNavigation.TaskDuration ?? 0)) * 1_000,
-      ),
-    },
+    startupCdp: cdp
+      ? {
+          taskMs: round(
+            ((afterNavigation.TaskDuration ?? 0) - (beforeNavigation.TaskDuration ?? 0)) * 1_000,
+          ),
+        }
+      : null,
   },
   budgets: {
     cls: 0.1,
@@ -326,7 +347,9 @@ const report = {
     attempts,
     base,
     capturedAt: new Date().toISOString(),
+    engine,
     headless,
+    htmlInCanvas,
     sampleMs,
     userAgent: await page.evaluate(() => navigator.userAgent),
   },
@@ -354,8 +377,11 @@ if (shouldGate) {
   if (measuredPage.totalBlockingTime > 200) {
     failures.push(`TBT ${round(measuredPage.totalBlockingTime)}ms > 200ms`);
   }
-  if (measuredPage.illumination && measuredPage.illumination.state !== "scheduled") {
-    failures.push(`illumination motion loop is not active: ${measuredPage.illumination.state}`);
+  if (measuredPage.animations.infinite > 0) {
+    failures.push(`${measuredPage.animations.infinite} infinite CSS animations remain`);
+  }
+  if (measuredPage.canvas && measuredPage.canvas.state !== "scheduled") {
+    failures.push(`canvas motion loop is not active: ${measuredPage.canvas.state}`);
   }
   if (motionFrameDelta !== null && motionFrameDelta < targetHz * 0.8) {
     failures.push(

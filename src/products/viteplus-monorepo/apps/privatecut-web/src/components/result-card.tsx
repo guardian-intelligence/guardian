@@ -17,7 +17,7 @@ export function ResultCard({ result, sourceName, onBack }: ResultCardProps) {
   const downloadName = `${sourceName.replace(/\.[^.]+$/, "") || "clip"}-privatecut.mp4`;
 
   return (
-    <div className="glass-strong overflow-hidden">
+    <div className="glass-strong overflow-hidden" data-illumination-glass="strong">
       {/* Result preview plays the exact bytes the user will download. */}
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <video src={url} controls playsInline className="max-h-[48vh] w-full bg-black" />
