@@ -3,6 +3,7 @@ filegroup(
     srcs = [
         "cozystack-monitoring-agents.yaml",
         "cozystack-networking-hubble.yaml",
+        "cozystack-vpa-for-vpa.yaml",
         "kustomization.yaml",
     ],
     visibility = ["//visibility:public"],

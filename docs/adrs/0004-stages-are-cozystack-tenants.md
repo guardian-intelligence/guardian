@@ -15,9 +15,11 @@ or per-application tenants.
 
 Stages are child Tenants of `tenant-guardian` — prod and previews, since beta and
 gamma were cut for prod-first delivery behind Flagger canaries (#704) —
-declared in `src/infrastructure/deployments/guardian/system/stage-tenants.yaml`, each
-with `spec.host: <stage>.guardianintelligence.org`; staged workloads deploy into the
-derived `tenant-guardian-<stage>` namespaces. All service flags stay false: stages
+declared in `src/infrastructure/deployments/guardian/system/stage-tenants.yaml`.
+Prod owns the platform apex `guardianintelligence.org`, which contains its
+first-party public hosts; previews owns `previews.guardianintelligence.org`.
+Staged workloads deploy into the derived `tenant-guardian-<stage>` namespaces.
+All service flags stay false: stages
 inherit etcd/ingress/monitoring from `tenant-root` (a bare tenant is near-free; a
 monitoring-enabled one is ~20 pods/10 PVCs, prohibitive per extra stage on a
 3-node cluster).
@@ -27,7 +29,8 @@ What the tenant boundary buys over namespaces:
 - **Sibling default-deny for free**: Cozystack's generated sender-egress
   CiliumClusterwideNetworkPolicies make sibling tenants unreachable in both
   directions with zero policy authoring.
-- **Domain hierarchy**: `spec.host` propagates to every app in the stage.
+- **Domain ownership**: `spec.host` is the admission-enforced hostname apex for
+  every app in the stage.
 - **Per-stage quotas, scheduling class, and RBAC groups** as first-class knobs.
 
 Never model stages as per-application tenants: tenant names ban dashes, app×stage

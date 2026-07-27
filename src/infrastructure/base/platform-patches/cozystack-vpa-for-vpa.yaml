@@ -1,0 +1,16 @@
+# The self-recommender loads eight days of Prometheus history during startup.
+# Its first recommendation can predate that bootstrap peak and admit its own
+# replacement below the chart's 512Mi request, leaving it in an OOM loop.
+# Keep Initial-mode self-sizing, but never size the recommender below the
+# memory the chart reserves for a successful bootstrap.
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: vpa-for-vpa
+  namespace: cozy-vpa-for-vpa
+spec:
+  resourcePolicy:
+    containerPolicies:
+      - containerName: recommender
+        minAllowed:
+          memory: 512Mi

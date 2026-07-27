@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
   - cozystack-monitoring-agents.yaml
   - cozystack-networking-hubble.yaml
+  - cozystack-vpa-for-vpa.yaml
