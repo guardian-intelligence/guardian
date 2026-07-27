@@ -4,8 +4,9 @@
 // governed by the measured acceptance gate.
 
 import { planBudget } from "./budget";
+import { canRemuxCodecs } from "./formats";
 import { planFrame } from "./ladder";
-import type { ProbeSummary, SelectionRange } from "./types";
+import type { OutputProfile, ProbeSummary, SelectionRange } from "./types";
 
 export interface SelectionEstimate {
   readonly durationS: number;
@@ -18,6 +19,7 @@ export interface SelectionEstimate {
 export function estimateSelection(
   summary: ProbeSummary,
   selection: SelectionRange,
+  profile: OutputProfile,
   limitBytes: number,
 ): SelectionEstimate {
   const durationS = Math.max(selection.endS - selection.startS, 0.1);
@@ -33,11 +35,15 @@ export function estimateSelection(
     sourceHeight: summary.video.height,
     sourceFrameRate: summary.video.frameRate,
     videoBitsPerSecond: budget.videoBitsPerSecond,
-    codec: "avc",
+    codec: profile.videoCodec,
   });
   const sourceBps = summary.video.bitsPerSecond ?? Number.POSITIVE_INFINITY;
   const onKeyframe = summary.keyframesS.some((t) => Math.abs(t - selection.startS) <= 0.05);
-  const likelyRemux = onKeyframe && (sourceBps / 8) * durationS < limitBytes * 0.9;
+  const remuxCompatible =
+    (!summary.hasAudio || summary.audioCodec !== null) &&
+    canRemuxCodecs(profile.format, summary.video.codec, summary.audioCodec);
+  const likelyRemux =
+    remuxCompatible && onKeyframe && (sourceBps / 8) * durationS < limitBytes * 0.9;
   return {
     durationS,
     videoBitsPerSecond: budget.videoBitsPerSecond,

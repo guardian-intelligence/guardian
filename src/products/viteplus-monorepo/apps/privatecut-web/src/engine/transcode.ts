@@ -1,14 +1,16 @@
-import { BufferTarget, Conversion, Mp4OutputFormat, Output } from "mediabunny";
+import { BufferTarget, Conversion, Output } from "mediabunny";
 import type { BudgetPlan } from "./budget";
 import type { FramePlan } from "./ladder";
+import { createOutputFormat } from "./output";
 import type { OpenedInput } from "./probe";
-import type { SelectionRange } from "./types";
+import type { OutputProfile, SelectionRange } from "./types";
 
 export interface TranscodePassInput {
   readonly opened: OpenedInput;
   readonly selection: SelectionRange;
   readonly frame: FramePlan;
   readonly budget: BudgetPlan;
+  readonly profile: OutputProfile;
   readonly videoBitsPerSecond: number;
   readonly onProgress?: ((fraction: number) => void) | undefined;
 }
@@ -18,15 +20,14 @@ export interface TranscodePassOutcome {
   readonly bytes: number;
 }
 
-// One encode pass at an exact requested video bitrate. H.264 only: outputs
-// exist to be uploaded to third-party platforms, and universal ingest
-// compatibility is part of the product promise — a better codec that a
-// platform rejects is a worse product.
+// One encode pass at an exact requested video bitrate. MP4 uses H.264/AAC for
+// broad ingest compatibility; WebM uses the best browser-encodable WebM
+// video/audio profile resolved during probing.
 export async function transcodePass(input: TranscodePassInput): Promise<TranscodePassOutcome> {
-  const { opened, selection, frame, budget, videoBitsPerSecond, onProgress } = input;
+  const { opened, selection, frame, budget, profile, videoBitsPerSecond, onProgress } = input;
   const target = new BufferTarget();
   const output = new Output({
-    format: new Mp4OutputFormat({ fastStart: "in-memory" }),
+    format: createOutputFormat(profile.format),
     target,
   });
   const conversion = await Conversion.init({
@@ -35,7 +36,7 @@ export async function transcodePass(input: TranscodePassInput): Promise<Transcod
     tracks: "primary",
     trim: { start: selection.startS, end: selection.endS },
     video: {
-      codec: "avc",
+      codec: profile.videoCodec,
       width: frame.width,
       height: frame.height,
       fit: "fill",
@@ -47,7 +48,7 @@ export async function transcodePass(input: TranscodePassInput): Promise<Transcod
       budget.audio === null
         ? { discard: true }
         : {
-            codec: "aac",
+            codec: profile.audioCodec ?? "aac",
             bitrate: budget.audio.bitrate,
             numberOfChannels: budget.audio.numberOfChannels,
             forceTranscode: true,

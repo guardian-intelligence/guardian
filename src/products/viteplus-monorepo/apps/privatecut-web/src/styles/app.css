@@ -598,6 +598,14 @@ body {
   font-size: 0.82rem;
 }
 
+.dropzone__hint--codec {
+  max-width: 34rem;
+  margin-top: 0.3rem;
+  color: rgb(101 115 138 / 70%);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
 .link-input {
   width: min(100%, 37rem);
   margin-inline: auto;

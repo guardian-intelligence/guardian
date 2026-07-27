@@ -23,10 +23,12 @@ const BPP_FLOOR = 0.026;
 export const CODEC_EFFICIENCY: Record<VideoCodecChoice, number> = {
   avc: 1.0,
   hevc: 0.72,
+  vp8: 0.9,
+  vp9: 0.7,
   av1: 0.62,
 };
 
-export type VideoCodecChoice = "avc" | "hevc" | "av1";
+export type VideoCodecChoice = "avc" | "hevc" | "vp8" | "vp9" | "av1";
 
 export interface FramePlan {
   readonly width: number;

@@ -1,6 +1,15 @@
 import type { PassRecord } from "./convergence";
 import type { VideoCodecChoice } from "./ladder";
 
+export type OutputContainer = "mp4" | "webm";
+export type AudioCodecChoice = "aac" | "opus" | "vorbis";
+
+export interface OutputProfile {
+  readonly format: OutputContainer;
+  readonly videoCodec: VideoCodecChoice;
+  readonly audioCodec: AudioCodecChoice | null;
+}
+
 // A session source: a local file from the dropzone, or a remote mp4 (an X
 // post's CDN URL) that the engine reads with HTTP range requests.
 export type MediaSource =
@@ -23,8 +32,11 @@ export interface VideoTrackSummary {
 
 export interface ProbeSummary {
   readonly durationS: number;
+  readonly container: string;
   readonly video: VideoTrackSummary;
   readonly hasAudio: boolean;
+  readonly audioCodec: string | null;
+  readonly outputProfiles: readonly OutputProfile[];
   // Presentation timestamps (seconds) of video keyframes, ascending.
   readonly keyframesS: readonly number[];
 }
@@ -38,6 +50,7 @@ export type EncodeMode = "remux" | "transcode";
 
 export interface EncodeOutcome {
   readonly mode: EncodeMode;
+  readonly outputFormat: OutputContainer;
   readonly bytes: number;
   readonly limitBytes: number;
   readonly utilization: number;
@@ -63,6 +76,7 @@ export type WorkerRequest =
       readonly id: number;
       readonly selection: SelectionRange;
       readonly limitBytes: number;
+      readonly outputFormat: OutputContainer;
     };
 
 export type WorkerResponse =

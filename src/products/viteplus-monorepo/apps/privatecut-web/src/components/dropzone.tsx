@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { INPUT_CODEC_LABEL, INPUT_CONTAINER_LABEL, INPUT_FILE_ACCEPT } from "~/engine/formats";
 
 export interface DropzoneProps {
   readonly onFile: (file: File) => void;
@@ -23,7 +24,7 @@ export function Dropzone({ onFile, onWarm, disabled }: DropzoneProps) {
       <input
         ref={inputRef}
         type="file"
-        accept="video/mp4,video/quicktime,video/webm,video/*"
+        accept={INPUT_FILE_ACCEPT}
         className="hidden"
         onChange={(e) => accept(e.currentTarget.files)}
       />
@@ -68,7 +69,10 @@ export function Dropzone({ onFile, onWarm, disabled }: DropzoneProps) {
             </svg>
           </span>
           <span className="dropzone__title">Drop a video</span>
-          <span className="dropzone__hint">MP4, MOV, or WebM — it never leaves your device</span>
+          <span className="dropzone__hint">{INPUT_CONTAINER_LABEL}</span>
+          <span className="dropzone__hint dropzone__hint--codec">
+            {INPUT_CODEC_LABEL}, when your browser can decode it — never uploaded
+          </span>
         </span>
       </button>
     </>

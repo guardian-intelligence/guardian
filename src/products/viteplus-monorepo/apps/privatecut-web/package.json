@@ -25,6 +25,7 @@
     "nitro": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "sonner": "catalog:",
     "web-vitals": "catalog:"
   },
   "devDependencies": {

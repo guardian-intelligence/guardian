@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import type { EncodeResult } from "~/engine/client";
+import { OUTPUT_CONTAINER_INFO } from "~/engine/formats";
 import { formatBytes } from "~/lib/format";
 
 export interface ResultCardProps {
@@ -13,7 +14,10 @@ export function ResultCard({ result, sourceName, onBack }: ResultCardProps) {
   useEffect(() => () => URL.revokeObjectURL(url), [url]);
 
   const { outcome } = result;
-  const downloadName = `${sourceName.replace(/\.[^.]+$/, "") || "clip"}-privatecut.mp4`;
+  const outputInfo = OUTPUT_CONTAINER_INFO[outcome.outputFormat];
+  const downloadName = `${sourceName.replace(/\.[^.]+$/, "") || "clip"}-privatecut${
+    outputInfo.extension
+  }`;
 
   return (
     <div className="glass-strong overflow-hidden" data-illumination-glass="strong">
@@ -24,6 +28,9 @@ export function ResultCard({ result, sourceName, onBack }: ResultCardProps) {
         <div className="flex flex-wrap items-center gap-3">
           <span className="rounded-full border border-glow-teal/40 bg-glow-teal/10 px-3 py-1 font-mono text-sm text-glow-teal">
             {formatBytes(outcome.bytes)} — under the cap, guaranteed
+          </span>
+          <span className="rounded-full border border-line-strong px-3 py-1 font-mono text-sm text-mist-dim">
+            {outputInfo.label}
           </span>
           {outcome.mode === "remux" ? (
             <span className="rounded-full border border-glow-warm/40 bg-glow-warm/10 px-3 py-1 text-sm text-glow-warm">

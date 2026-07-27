@@ -8,8 +8,10 @@ import { CanvasSink } from "mediabunny";
 import { planBudget } from "./budget";
 import { calibratedMargin, recordCalibration } from "./calibration";
 import { converge, firstPassBitrate } from "./convergence";
+import { OUTPUT_CONTAINER_INFO } from "./formats";
 import { planFrame } from "./ladder";
 import { isSizeLimit, MAX_SELECTION_SECONDS } from "./limits";
+import { resolveOutputProfile } from "./output";
 import type { OpenedInput } from "./probe";
 import { openInput } from "./probe";
 import { executeRemux, planRemux } from "./remux";
@@ -41,7 +43,7 @@ async function dispatch(request: WorkerRequest): Promise<void> {
       }
       case "encode": {
         if (opened === null) throw new Error("No open file.");
-        await encode(request.id, request.selection, request.limitBytes);
+        await encode(request.id, request.selection, request.limitBytes, request.outputFormat);
         break;
       }
     }
@@ -70,9 +72,18 @@ async function streamThumbnails(id: number, count: number, height: number): Prom
   post({ kind: "thumbnails-done", id });
 }
 
-async function encode(id: number, selection: SelectionRange, limitBytes: number): Promise<void> {
+async function encode(
+  id: number,
+  selection: SelectionRange,
+  limitBytes: number,
+  outputFormat: EncodeOutcome["outputFormat"],
+): Promise<void> {
   if (opened === null) return;
   if (!isSizeLimit(limitBytes)) throw new Error("Unsupported size cap.");
+  const profile = await resolveOutputProfile(outputFormat, opened.audioTrack !== null);
+  if (profile === null) {
+    throw new Error(`This browser cannot encode ${OUTPUT_CONTAINER_INFO[outputFormat].label}.`);
+  }
   const startedAt = performance.now();
   const clamped: SelectionRange = {
     startS: Math.max(selection.startS, 0),
@@ -85,13 +96,14 @@ async function encode(id: number, selection: SelectionRange, limitBytes: number)
   }
 
   // Fast path: lossless stream copy when the selection allows it.
-  const remuxPlan = await planRemux(opened, clamped, limitBytes);
+  const remuxPlan = await planRemux(opened, clamped, limitBytes, outputFormat);
   if (remuxPlan !== null) {
-    const remuxed = await executeRemux(opened, remuxPlan);
+    const remuxed = await executeRemux(opened, remuxPlan, outputFormat);
     if (remuxed !== null && remuxed.bytes <= limitBytes) {
       const { summary } = opened;
       finish(id, remuxed.buffer, {
         mode: "remux",
+        outputFormat,
         bytes: remuxed.bytes,
         limitBytes,
         utilization: remuxed.bytes / limitBytes,
@@ -120,9 +132,9 @@ async function encode(id: number, selection: SelectionRange, limitBytes: number)
     sourceHeight: summary.video.height,
     sourceFrameRate: summary.video.frameRate,
     videoBitsPerSecond: budget.videoBitsPerSecond,
-    codec: "avc",
+    codec: profile.videoCodec,
   });
-  const margin = calibratedMargin("avc", frame.height);
+  const margin = calibratedMargin(profile.videoCodec, frame.height);
   const openedInput = opened;
 
   const result = await converge<ArrayBuffer>({
@@ -137,6 +149,7 @@ async function encode(id: number, selection: SelectionRange, limitBytes: number)
         selection: clamped,
         frame,
         budget,
+        profile,
         videoBitsPerSecond,
         onProgress: (fraction) => post({ kind: "progress", id, pass, fraction }),
       });
@@ -155,11 +168,18 @@ async function encode(id: number, selection: SelectionRange, limitBytes: number)
       (firstPass.bytes - budget.containerBytes - budget.audioBytes) * 8,
       1,
     );
-    recordCalibration("avc", frame.height, margin, requestedBits * durationS, actualVideoBits);
+    recordCalibration(
+      profile.videoCodec,
+      frame.height,
+      margin,
+      requestedBits * durationS,
+      actualVideoBits,
+    );
   }
 
   finish(id, result.artifact, {
     mode: "transcode",
+    outputFormat,
     bytes: result.bytes,
     limitBytes,
     utilization: result.utilization,
@@ -167,7 +187,7 @@ async function encode(id: number, selection: SelectionRange, limitBytes: number)
     width: frame.width,
     height: frame.height,
     frameRate: frame.frameRate,
-    codec: "avc",
+    codec: profile.videoCodec,
     passes: result.passes,
     wallMs: performance.now() - startedAt,
   });
@@ -180,6 +200,8 @@ function finish(id: number, buffer: ArrayBuffer, outcome: EncodeOutcome): void {
     post({ kind: "error", id, message: "Internal error: output exceeded the size cap." });
     return;
   }
-  const blob = new Blob([buffer], { type: "video/mp4" });
+  const blob = new Blob([buffer], {
+    type: OUTPUT_CONTAINER_INFO[outcome.outputFormat].mimeType,
+  });
   post({ kind: "encoded", id, blob, outcome });
 }

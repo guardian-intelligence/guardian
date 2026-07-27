@@ -20,9 +20,9 @@ const FAQ_ITEMS: readonly FaqItem[] = [
       "Keeping quality means spending every byte you're allowed. PrivateCut encodes a pass, measures the actual file it produced against the byte budget, and re-encodes until the output sits just under the cap instead of far below it. And when your selection can be cut without re-encoding at all, the original bytes are copied through untouched — no re-encode, no quality loss.",
   },
   {
-    question: "How do I convert a MOV or WebM file to MP4?",
+    question: "How do I convert a video to MP4 or WebM?",
     answer:
-      "Drop the file in and export — the output is an MP4, and there is nothing to configure. Re-encoded clips come out as H.264 video and AAC audio, the combination every platform, player, and phone accepts; a lossless trim keeps your original tracks in the MP4 container.",
+      "Drop the file in, choose MP4 or WebM, and export. MP4 uses H.264 video and AAC audio for the broadest upload compatibility. WebM uses the best compatible VP9, VP8, or AV1 video and Opus or Vorbis audio encoders available in your browser.",
   },
   {
     question: "Is my video really not uploaded anywhere?",
@@ -95,12 +95,11 @@ export function LandingGuide() {
         </p>
       </div>
       <div className="privatecut-guide__section">
-        <h2>MOV, WebM, or MP4 in. MP4 out, everywhere.</h2>
+        <h2>Modern video in. MP4 or WebM out.</h2>
         <p>
-          Drop an iPhone recording, a WebM screen capture, or anything else your browser can play.
-          Clips export as MP4, and re-encoded clips come out as H.264 video and AAC audio — because
-          a clip exists to be posted, and a format some platform rejects is a worse product than a
-          format every platform accepts.
+          Drop MP4, M4V, MOV, MKV, WebM, Ogg, or MPEG-TS containing H.264, H.265, VP8, VP9, or AV1
+          video your browser can decode. Export H.264/AAC MP4 for broad compatibility, or WebM when
+          you want its modern VP9, VP8, or AV1 and Opus or Vorbis codec family.
         </p>
       </div>
       <div className="privatecut-guide__section">
