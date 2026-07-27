@@ -1,8 +1,7 @@
 # The self-recommender loads eight days of Prometheus history during startup.
 # Its first recommendation can predate that bootstrap peak and admit its own
-# replacement below the chart's 512Mi request, leaving it in an OOM loop.
-# Keep Initial-mode self-sizing, but never size the recommender below the
-# memory the chart reserves for a successful bootstrap.
+# replacement below the history-loading peak, leaving it in an OOM loop.
+# Keep Initial-mode self-sizing, but reserve enough memory for that bootstrap.
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
 metadata:
@@ -13,4 +12,4 @@ spec:
     containerPolicies:
       - containerName: recommender
         minAllowed:
-          memory: 512Mi
+          memory: 1Gi

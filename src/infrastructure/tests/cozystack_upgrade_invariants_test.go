@@ -23,5 +23,5 @@ func TestVPAForVPABootstrapMemoryFloor(t *testing.T) {
 	}
 	recommender := mapValue(policies[0])
 	assertNestedString(t, recommender, "recommender", "containerName")
-	assertNestedString(t, recommender, "512Mi", "minAllowed", "memory")
+	assertNestedString(t, recommender, "1Gi", "minAllowed", "memory")
 }
