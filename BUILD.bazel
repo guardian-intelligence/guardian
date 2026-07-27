@@ -2,6 +2,7 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 exports_files([
     ".aspect/tasks/infra.axl",
+    ".github/scripts/check-renovate-config.sh",
     "MODULE.bazel",
     ".bazelignore",
     "AGENTS.md",

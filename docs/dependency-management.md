@@ -20,7 +20,13 @@ ruleset decide every merge:
   (`src/products/postflight-cli/release/channels.yaml` plus the release
   manifest's CLI lane). Never hand-roll or duplicate its promotion PRs.
 
-Renovate configuration errors do not fail scheduled runs, so
+Renovate runs as a `guardian-imageops` CronJob every six hours using a
+short-lived installation token for the `guardian-renovate` App. Its private
+key is synchronized from OpenBao by External Secrets; a heartbeat is emitted
+only after a successful run, and a dead-man alert fires when scheduled runs
+stop succeeding.
+
+Renovate configuration errors do not necessarily fail scheduled runs, so
 `//:renovate_config_test` validates the config in the universal Bazel gate.
 
 ## Trust tiers

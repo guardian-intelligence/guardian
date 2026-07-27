@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -14,7 +15,6 @@ func TestRenovateClusterSchedulerContract(t *testing.T) {
 	source := readText(t, runfilePath(manifest))
 
 	for _, want := range []string{
-		`image: docker.io/renovate/renovate:43.270.0-full@sha256:a3633423e9837f936db53068b7ab07e7b2dc74bbc0aaa5657a9fa6d89d63c162`,
 		`schedule: "17 */6 * * *"`,
 		"concurrencyPolicy: Forbid",
 		"activeDeadlineSeconds: 2700",
@@ -30,6 +30,27 @@ func TestRenovateClusterSchedulerContract(t *testing.T) {
 		assertTextContains(t, source, want, manifest)
 	}
 	assertTextNotContains(t, source, "ghcr.io/guardian-intelligence/", manifest)
+
+	imageMatch := regexp.MustCompile(
+		`image: docker\.io/renovate/renovate:([0-9]+\.[0-9]+\.[0-9]+)-full@sha256:[a-f0-9]{64}`,
+	).FindStringSubmatch(source)
+	if len(imageMatch) != 2 {
+		t.Fatalf("%s must pin a versioned -full Renovate image by sha256 digest", manifest)
+	}
+	validator := readText(t, runfilePath(".github/scripts/check-renovate-config.sh"))
+	validatorMatch := regexp.MustCompile(
+		`-p renovate@([0-9]+\.[0-9]+\.[0-9]+)`,
+	).FindStringSubmatch(validator)
+	if len(validatorMatch) != 2 {
+		t.Fatal("Renovate config validator must carry an explicit Renovate version")
+	}
+	if imageMatch[1] != validatorMatch[1] {
+		t.Fatalf(
+			"Renovate runtime version %s does not match validator version %s",
+			imageMatch[1],
+			validatorMatch[1],
+		)
+	}
 
 	config := findDoc(t, yamlDocs(t, runfilePath(manifest)), "ConfigMap", "renovate")
 	script := stringValue(mapValue(config["data"])["run.sh"])

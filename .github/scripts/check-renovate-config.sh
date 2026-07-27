@@ -2,8 +2,8 @@
 # A broken renovate.json5 does not fail the scheduled run — Renovate files a
 # config-error issue, skips the repo, and exits 0: a silently dead proposer.
 # So this gate fails the PR instead. The validator ships inside the renovate
-# distribution, fetched here at the same pinned release the runner in
-# renovate.yml uses (the customManagers rule in renovate.json5 moves both).
+# distribution, fetched here at the same release as the in-cluster image
+# (the grouping rule in renovate.json5 moves both pins together).
 set -euo pipefail
 
 node_dir="$(cd "$(dirname "$1")" && pwd -P)"
