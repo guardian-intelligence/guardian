@@ -68,15 +68,15 @@
     "binaries": [
       {
         "kind": "file",
-        "url": "https://github.com/sigstore/cosign/releases/download/v3.1.1/cosign-linux-amd64",
-        "sha256": "ae1ecd212663f3693ad9edf8b1a183900c9a52d3155ba6e354237f9a0f6463fc",
+        "url": "https://github.com/sigstore/cosign/releases/download/v3.1.2/cosign-linux-amd64",
+        "sha256": "f7622ed3cf22e55e1ae6377c080979ff77a22da9981c11df222a2e444991e7cf",
         "os": "linux",
         "cpu": "x86_64"
       },
       {
         "kind": "file",
-        "url": "https://github.com/sigstore/cosign/releases/download/v3.1.1/cosign-darwin-arm64",
-        "sha256": "94b42a9e697be95675f6160ab031a9a5f1ec1e646d6f648d7b2f5cd59ececbc5",
+        "url": "https://github.com/sigstore/cosign/releases/download/v3.1.2/cosign-darwin-arm64",
+        "sha256": "dec1c3f802320b19c2fbcf2dc7bcfb3f258e1c181a046c23a1a074bdf932f10a",
         "os": "macos",
         "cpu": "arm64"
       }
