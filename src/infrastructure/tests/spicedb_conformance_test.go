@@ -325,7 +325,6 @@ func TestSpiceDBOperationalQualificationIsGitOpsOnly(t *testing.T) {
 		"path: ./src/infrastructure/deployments/authorization/prod",
 		"- name: guardian-authorization-operator",
 		"- name: guardian-authorization-data",
-		"name: postgres-spicedb-init-job",
 		"name: spicedb-postgres-archive-activation",
 		"name: spicedb-postgres-restore-baseline-20260718",
 		"name: spicedb-schema-v4",
