@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { converge, firstPassBitrate, repricedBitrate } from "./convergence";
-import { DEFAULT_SAFETY_MARGIN, MAX_PASSES, SIZE_LIMIT_BYTES } from "./limits";
+import { DEFAULT_SAFETY_MARGIN, DEFAULT_SIZE_LIMIT_BYTES, MAX_PASSES } from "./limits";
 
 // A fake encoder with a hidden linear rate model: bytes = overhead + bits×k/8.
 // `bias` models an encoder that systematically over- or under-shoots the
@@ -36,15 +36,15 @@ describe("converge", () => {
     const reserved = 120_000;
     const duration = 15;
     const encoder = fakeEncoder(reserved, duration, 1.0);
-    const initial = ((SIZE_LIMIT_BYTES - reserved) * 8) / duration;
+    const initial = ((DEFAULT_SIZE_LIMIT_BYTES - reserved) * 8) / duration;
     const result = await converge({
-      limitBytes: SIZE_LIMIT_BYTES,
+      limitBytes: DEFAULT_SIZE_LIMIT_BYTES,
       reservedBytes: reserved,
       initialVideoBitsPerSecond: initial,
       encode: encoder.encode,
     });
     expect(result.passes).toHaveLength(1);
-    expect(result.bytes).toBeLessThanOrEqual(SIZE_LIMIT_BYTES);
+    expect(result.bytes).toBeLessThanOrEqual(DEFAULT_SIZE_LIMIT_BYTES);
     expect(result.utilization).toBeGreaterThan(0.88);
   });
 
@@ -53,16 +53,16 @@ describe("converge", () => {
     const duration = 30;
     // 15% overshoot: the first (margined) pass lands over the limit.
     const encoder = fakeEncoder(reserved, duration, 1.15);
-    const initial = ((SIZE_LIMIT_BYTES - reserved) * 8) / duration;
+    const initial = ((DEFAULT_SIZE_LIMIT_BYTES - reserved) * 8) / duration;
     const result = await converge({
-      limitBytes: SIZE_LIMIT_BYTES,
+      limitBytes: DEFAULT_SIZE_LIMIT_BYTES,
       reservedBytes: reserved,
       initialVideoBitsPerSecond: initial,
       safetyMargin: 0.99,
       encode: encoder.encode,
     });
     expect(result.passes.length).toBeGreaterThan(1);
-    expect(result.bytes).toBeLessThanOrEqual(SIZE_LIMIT_BYTES);
+    expect(result.bytes).toBeLessThanOrEqual(DEFAULT_SIZE_LIMIT_BYTES);
     expect(result.utilization).toBeGreaterThan(0.88);
   });
 
@@ -71,14 +71,14 @@ describe("converge", () => {
     const duration = 10;
     // Encoder produces 40% fewer bits than asked.
     const encoder = fakeEncoder(reserved, duration, 0.6);
-    const initial = ((SIZE_LIMIT_BYTES - reserved) * 8) / duration;
+    const initial = ((DEFAULT_SIZE_LIMIT_BYTES - reserved) * 8) / duration;
     const result = await converge({
-      limitBytes: SIZE_LIMIT_BYTES,
+      limitBytes: DEFAULT_SIZE_LIMIT_BYTES,
       reservedBytes: reserved,
       initialVideoBitsPerSecond: initial,
       encode: encoder.encode,
     });
-    expect(result.bytes).toBeLessThanOrEqual(SIZE_LIMIT_BYTES);
+    expect(result.bytes).toBeLessThanOrEqual(DEFAULT_SIZE_LIMIT_BYTES);
     expect(result.utilization).toBeGreaterThan(0.88);
   });
 
@@ -93,22 +93,23 @@ describe("converge", () => {
       const bytes = Math.round(reserved + (videoBitsPerSecond * bias * duration) / 8);
       return Promise.resolve({ bytes, artifact: { bytes } });
     };
-    const initial = ((SIZE_LIMIT_BYTES - reserved) * 8) / duration;
+    const initial = ((DEFAULT_SIZE_LIMIT_BYTES - reserved) * 8) / duration;
     const result = await converge({
-      limitBytes: SIZE_LIMIT_BYTES,
+      limitBytes: DEFAULT_SIZE_LIMIT_BYTES,
       reservedBytes: reserved,
       initialVideoBitsPerSecond: initial,
       encode,
     });
     expect(result.passes.length).toBeLessThanOrEqual(MAX_PASSES);
-    expect(result.bytes).toBeLessThanOrEqual(SIZE_LIMIT_BYTES);
+    expect(result.bytes).toBeLessThanOrEqual(DEFAULT_SIZE_LIMIT_BYTES);
   });
 
   it("throws rather than accept when every pass lands over the limit", async () => {
-    const encode = () => Promise.resolve({ bytes: SIZE_LIMIT_BYTES + 1, artifact: { bytes: 0 } });
+    const encode = () =>
+      Promise.resolve({ bytes: DEFAULT_SIZE_LIMIT_BYTES + 1, artifact: { bytes: 0 } });
     await expect(
       converge({
-        limitBytes: SIZE_LIMIT_BYTES,
+        limitBytes: DEFAULT_SIZE_LIMIT_BYTES,
         reservedBytes: 0,
         initialVideoBitsPerSecond: 1_000_000,
         encode,
@@ -122,7 +123,7 @@ describe("converge", () => {
     const ceiling = 800_000;
     const encoder = fakeEncoder(reserved, duration, 1.0);
     const result = await converge({
-      limitBytes: SIZE_LIMIT_BYTES,
+      limitBytes: DEFAULT_SIZE_LIMIT_BYTES,
       reservedBytes: reserved,
       initialVideoBitsPerSecond: ceiling,
       maxVideoBitsPerSecond: ceiling,
@@ -130,15 +131,15 @@ describe("converge", () => {
     });
     // A tiny source can't fill 4MB in 5s; the loop must not burn passes.
     expect(result.passes.length).toBeLessThanOrEqual(2);
-    expect(result.bytes).toBeLessThanOrEqual(SIZE_LIMIT_BYTES);
+    expect(result.bytes).toBeLessThanOrEqual(DEFAULT_SIZE_LIMIT_BYTES);
   });
 });
 
 describe("repricedBitrate", () => {
   it("scales down after an overshoot", () => {
     const next = repricedBitrate(
-      { videoBitsPerSecond: 2_000_000, bytes: SIZE_LIMIT_BYTES + 200_000 },
-      SIZE_LIMIT_BYTES,
+      { videoBitsPerSecond: 2_000_000, bytes: DEFAULT_SIZE_LIMIT_BYTES + 200_000 },
+      DEFAULT_SIZE_LIMIT_BYTES,
       100_000,
     );
     expect(next).toBeLessThan(2_000_000);
@@ -147,7 +148,7 @@ describe("repricedBitrate", () => {
   it("scales up after an undershoot, capped by the ceiling", () => {
     const next = repricedBitrate(
       { videoBitsPerSecond: 1_000_000, bytes: 2_000_000 },
-      SIZE_LIMIT_BYTES,
+      DEFAULT_SIZE_LIMIT_BYTES,
       100_000,
       1_400_000,
     );

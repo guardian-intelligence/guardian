@@ -26,7 +26,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "Trim and compress any video right in your browser. Nothing is uploaded — your footage never leaves your device. No account, no cloud; export a clip under 4 MB.",
+          "Trim and compress any video right in your browser. Nothing is uploaded — your footage never leaves your device. No account, no cloud; export a clip under the size cap you pick, from 4 MB to 100 MB.",
       },
       { property: "og:site_name", content: "PrivateCut" },
       ...deployMetaTags(),

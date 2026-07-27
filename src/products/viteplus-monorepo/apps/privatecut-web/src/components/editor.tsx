@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EncodeResult, PrivateCutEngine, ThumbnailTile } from "~/engine/client";
 import { estimateSelection } from "~/engine/estimate";
-import { MAX_SELECTION_SECONDS } from "~/engine/limits";
+import type { SizeLimitBytes } from "~/engine/limits";
+import {
+  DEFAULT_SIZE_LIMIT_BYTES,
+  MAX_SELECTION_SECONDS,
+  SIZE_LIMIT_PRESETS_BYTES,
+} from "~/engine/limits";
 import type { MediaSource, ProbeSummary, SelectionRange } from "~/engine/types";
 import { emitSpan } from "~/lib/telemetry/browser";
 import { formatBitrate, formatSeconds } from "~/lib/format";
@@ -29,6 +34,7 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
     endS: Math.min(summary.durationS, MAX_SELECTION_SECONDS),
   }));
   const [snapToKeyframes, setSnapToKeyframes] = useState(true);
+  const [limitBytes, setLimitBytes] = useState<SizeLimitBytes>(DEFAULT_SIZE_LIMIT_BYTES);
   const [tiles, setTiles] = useState<readonly ThumbnailTile[]>([]);
   const [phase, setPhase] = useState<Phase>({ kind: "selecting" });
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -60,7 +66,10 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
     }
   }, [selection.startS]);
 
-  const estimate = useMemo(() => estimateSelection(summary, selection), [summary, selection]);
+  const estimate = useMemo(
+    () => estimateSelection(summary, selection, limitBytes),
+    [summary, selection, limitBytes],
+  );
 
   // Portrait footage should hug a narrow column so the media, timeline, and
   // controls read as one stack — never a sliver of video floating in black.
@@ -71,15 +80,19 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
     emitSpan("privatecut.encode_started", {
       duration_s: estimate.durationS.toFixed(2),
       video_bps: String(Math.round(estimate.videoBitsPerSecond)),
+      limit_bytes: String(limitBytes),
     });
     const startedAt = performance.now();
     engine
-      .encode(selection, (pass, fraction) => setPhase({ kind: "encoding", pass, fraction }))
+      .encode(selection, limitBytes, (pass, fraction) =>
+        setPhase({ kind: "encoding", pass, fraction }),
+      )
       .then((result) => {
         const { outcome } = result;
         emitSpan("privatecut.encode_completed", {
           mode: outcome.mode,
           bytes: String(outcome.bytes),
+          limit_bytes: String(outcome.limitBytes),
           utilization: outcome.utilization.toFixed(4),
           passes: String(outcome.passes.length),
           duration_s: outcome.durationS.toFixed(2),
@@ -100,7 +113,7 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
           message: error instanceof Error ? error.message : "Encoding failed.",
         });
       });
-  }, [engine, selection, estimate, summary.video.codec]);
+  }, [engine, selection, limitBytes, estimate, summary.video.codec]);
 
   if (phase.kind === "done") {
     return (
@@ -136,6 +149,25 @@ export function Editor({ engine, source, summary, onReset }: EditorProps) {
           if (phase.kind === "selecting") setSelection(next);
         }}
       />
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Size cap">
+        <span className="font-mono text-sm text-mist-faint">size cap</span>
+        {SIZE_LIMIT_PRESETS_BYTES.map((preset) => (
+          <button
+            key={preset}
+            type="button"
+            aria-pressed={preset === limitBytes}
+            disabled={phase.kind === "encoding"}
+            onClick={() => setLimitBytes(preset)}
+            className={
+              preset === limitBytes
+                ? "rounded-full bg-mist px-3 py-1 font-mono text-sm text-night disabled:opacity-60"
+                : "rounded-full border border-line-strong px-3 py-1 font-mono text-sm text-mist-dim transition-colors hover:text-mist disabled:opacity-60"
+            }
+          >
+            {preset / 1_000_000} MB
+          </button>
+        ))}
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="font-mono text-sm text-mist-dim">
           <span className="text-mist">{formatSeconds(estimate.durationS)}</span> selected

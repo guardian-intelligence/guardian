@@ -1,6 +1,7 @@
 // Main-thread handle on the encode worker. UI components talk to this class
 // only; mediabunny itself never loads on the main thread.
 
+import type { SizeLimitBytes } from "./limits";
 import type {
   EncodeOutcome,
   MediaSource,
@@ -62,9 +63,10 @@ export class PrivateCutEngine {
 
   encode(
     selection: SelectionRange,
+    limitBytes: SizeLimitBytes,
     onProgress: (pass: number, fraction: number) => void,
   ): Promise<EncodeResult> {
-    return this.call({ kind: "encode", selection }, { onProgress });
+    return this.call({ kind: "encode", selection, limitBytes }, { onProgress });
   }
 
   private call<T>(

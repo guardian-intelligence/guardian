@@ -7,7 +7,6 @@ import {
   Output,
 } from "mediabunny";
 import { estimateContainerBytes } from "./budget";
-import { SIZE_LIMIT_BYTES } from "./limits";
 import type { OpenedInput } from "./probe";
 import { measureAudioBytes, measureVideoBytes } from "./probe";
 import type { SelectionRange } from "./types";
@@ -26,6 +25,7 @@ export interface RemuxPlan {
 export async function planRemux(
   opened: OpenedInput,
   selection: SelectionRange,
+  limitBytes: number,
 ): Promise<RemuxPlan | null> {
   const { summary } = opened;
   const onKeyframe = summary.keyframesS.some(
@@ -46,7 +46,7 @@ export async function planRemux(
   const estimatedBytes = videoBytes + audioBytes + containerBytes;
   // The estimate gates only whether to ATTEMPT the copy; acceptance is the
   // measured finalized size below, like every other path.
-  if (estimatedBytes > SIZE_LIMIT_BYTES * 0.98) return null;
+  if (estimatedBytes > limitBytes * 0.98) return null;
   return { startS: selection.startS, endS: selection.endS, estimatedBytes };
 }
 

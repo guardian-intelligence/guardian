@@ -39,6 +39,7 @@ export type EncodeMode = "remux" | "transcode";
 export interface EncodeOutcome {
   readonly mode: EncodeMode;
   readonly bytes: number;
+  readonly limitBytes: number;
   readonly utilization: number;
   readonly durationS: number;
   readonly width: number;
@@ -57,7 +58,12 @@ export type WorkerRequest =
       readonly count: number;
       readonly height: number;
     }
-  | { readonly kind: "encode"; readonly id: number; readonly selection: SelectionRange };
+  | {
+      readonly kind: "encode";
+      readonly id: number;
+      readonly selection: SelectionRange;
+      readonly limitBytes: number;
+    };
 
 export type WorkerResponse =
   | { readonly kind: "probed"; readonly id: number; readonly summary: ProbeSummary }
