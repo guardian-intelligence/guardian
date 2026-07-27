@@ -54,7 +54,7 @@ export function canRemuxCodecs(
   audioCodec: string | null,
 ): boolean {
   if (format === "mp4") {
-    return videoCodec === "avc" && (audioCodec === null || audioCodec === "aac");
+    return ["avc", "hevc"].includes(videoCodec) && (audioCodec === null || audioCodec === "aac");
   }
   return (
     ["vp8", "vp9", "av1"].includes(videoCodec) &&

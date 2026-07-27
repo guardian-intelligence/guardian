@@ -38,7 +38,7 @@ export function ResultCard({ result, sourceName, onBack }: ResultCardProps) {
             </span>
           ) : (
             <span className="rounded-full border border-line-strong px-3 py-1 text-sm text-mist-dim">
-              {outcome.height}p · {Math.round(outcome.frameRate)} fps
+              {Math.min(outcome.width, outcome.height)}p · {Math.round(outcome.frameRate)} fps
               {outcome.passes.length > 1 ? ` · ${outcome.passes.length} passes` : ""}
             </span>
           )}

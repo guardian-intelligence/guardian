@@ -11,6 +11,7 @@ const MP4_PROFILE: OutputProfile = {
 const SUMMARY: ProbeSummary = {
   durationS: 180,
   container: "webm",
+  videoDecodeMode: "webcodecs",
   video: {
     width: 1920,
     height: 1080,

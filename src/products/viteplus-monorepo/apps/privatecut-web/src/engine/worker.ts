@@ -16,7 +16,13 @@ import type { OpenedInput } from "./probe";
 import { openInput } from "./probe";
 import { executeRemux, planRemux } from "./remux";
 import { transcodePass } from "./transcode";
-import type { EncodeOutcome, SelectionRange, WorkerRequest, WorkerResponse } from "./types";
+import {
+  NATIVE_TRANSCODE_REQUIRED,
+  type EncodeOutcome,
+  type SelectionRange,
+  type WorkerRequest,
+  type WorkerResponse,
+} from "./types";
 
 let opened: OpenedInput | null = null;
 
@@ -38,6 +44,9 @@ async function dispatch(request: WorkerRequest): Promise<void> {
       }
       case "thumbnails": {
         if (opened === null) throw new Error("No open file.");
+        if (opened.summary.videoDecodeMode === "media-element") {
+          throw new Error("Native thumbnails must be created on the main thread.");
+        }
         await streamThumbnails(request.id, request.count, request.height);
         break;
       }
@@ -117,6 +126,9 @@ async function encode(
       });
       return;
     }
+  }
+  if (opened.summary.videoDecodeMode === "media-element") {
+    throw new Error(NATIVE_TRANSCODE_REQUIRED);
   }
 
   const { summary } = opened;
