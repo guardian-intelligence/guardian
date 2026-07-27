@@ -51,7 +51,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: visual
-              image: ghcr.io/guardian-intelligence/visual-harness:edge@sha256:9b47626123ef5caf2bd4252f03cad1394d83d5117457472e920b47288e355ce9 # {"$imagepolicy": "guardian-imageops:visual-harness"}
+              image: ghcr.io/guardian-intelligence/visual-harness:edge@sha256:b5250b0ee6da800f6b4ff4bdfc4b96a59f8bcbc330197ac208bad6cdce461e60 # {"$imagepolicy": "guardian-imageops:visual-harness"}
               imagePullPolicy: IfNotPresent
               env:
                 - name: VISUAL_TARGET_URL
