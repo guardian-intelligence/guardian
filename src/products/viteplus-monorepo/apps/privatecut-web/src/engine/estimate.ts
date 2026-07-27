@@ -14,6 +14,7 @@ export interface SelectionEstimate {
   readonly label: string;
   readonly frameRate: number;
   readonly likelyRemux: boolean;
+  readonly lowQuality: boolean;
 }
 
 export function estimateSelection(
@@ -44,11 +45,17 @@ export function estimateSelection(
     canRemuxCodecs(profile.format, summary.video.codec, summary.audioCodec);
   const likelyRemux =
     remuxCompatible && onKeyframe && (sourceBps / 8) * durationS < limitBytes * 0.9;
+  const sourceShortSide = Math.min(summary.video.width, summary.video.height);
+  const outputShortSide = Math.min(frame.width, frame.height);
+  const lowQuality =
+    !likelyRemux &&
+    (!frame.meetsQualityFloor || (outputShortSide <= 360 && outputShortSide < sourceShortSide));
   return {
     durationS,
     videoBitsPerSecond: budget.videoBitsPerSecond,
     label: frame.isSource ? "original size" : frame.label,
     frameRate: frame.frameRate,
     likelyRemux,
+    lowQuality,
   };
 }

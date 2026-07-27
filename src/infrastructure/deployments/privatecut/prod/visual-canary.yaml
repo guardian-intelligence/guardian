@@ -1,9 +1,10 @@
 # Steady-state browser canary for privatecut: the visual-harness journey suite
 # runs against the production site every 30 minutes, failing on visual drift,
-# a critical element dropping below the fold, or a WebM-input MP4/WebM export
-# failure. Baselines ship inside the image (journeys/** is part of the image
-# sources), so the comparison and the bytes it compares against move together
-# and a refresh is an ordinary reviewed PR.
+# a critical element dropping below the fold, a three-minute/quality-warning
+# regression, or a WebM-input MP4/WebM export failure. Baselines ship inside
+# the image (journeys/** is part of the image sources), so the comparison and
+# the bytes it compares against move together and a refresh is an ordinary
+# reviewed PR.
 #
 # It runs against https://rumi.engineering, not an in-cluster Service: the
 # thing customers see includes the edge, so a regression introduced by cache
