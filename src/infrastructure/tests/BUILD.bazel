@@ -102,6 +102,7 @@ go_test(
         "//src/infrastructure/load:http_load_scripts",
         "//src/infrastructure/runbooks:docs",
         "//src/infrastructure/talm:chart",
+        "//src/products/postflight-cli:installer",
         "//src/products/postflight-cli:sources",
         "//src/products/viteplus-monorepo/packages/canary-journeys:sources",
         "//src/products/postflight-cli/dist/homebrew:formula",

@@ -137,9 +137,11 @@ fails the cut instead.
 
 **edge** is the OCI substrate and is never a user-facing channel. The lane
 cross-compiles all four targets from one Linux runner (zig supplies the C
-toolchain that `ring` needs on every target), signs each binary, and pushes
-a single OCI artifact to `ghcr.io/guardian-intelligence/postflight-cli`.
-Binaries are byte-reproducible — `--remap-path-prefix` erases build-machine
+toolchain that `ring` needs on every target), smoke-tests what it built (see
+[the edge smoke gate](#in-lane-the-edge-smoke-gate)), signs each binary, and
+pushes a single OCI artifact to
+`ghcr.io/guardian-intelligence/postflight-cli`. Binaries are
+byte-reproducible — `--remap-path-prefix` erases build-machine
 paths, and no commit is stamped into the binary, which is why
 `CARGO_PKG_VERSION` is the only thing that varies — so the lane hashes the
 four binaries into an `org.guardian.binaries-digest` annotation and skips
@@ -411,11 +413,18 @@ install path, delegates to `postflight self uninstall --yes` when the binary
 runs, and only removes files directly when it does not — saying plainly that
 the session was not ended, because a shell script has no good way to do it.
 
-The install canary's `uninstall` method exercises all of this every six hours
-against the live release: install via the public installer, assert the refusal
-without a terminal, remove, then assert the binary, the receipt and the config
-directory are all gone by name. Asserting the home directory is empty would
-pass for a run that installed nothing.
+Two things exercise removal on a schedule, and they exercise different halves
+of it. The install canary's `uninstall` method drives `postflight self
+uninstall` every six hours against the live release: install via the public
+installer, assert the refusal without a terminal, assert a second copy ahead
+on `PATH` is reported and left alone, remove, then assert the binary, the
+receipt and the config directory are all gone by name — asserting the home
+directory is empty would pass for a run that installed nothing. The handoff
+above it — `install.sh --uninstall` reaching a real binary that then honours
+`self uninstall --yes` rather than the installer sweeping up by hand — is
+asserted by the edge lane's smoke gate on every run of the build lane.
+`installer_test.sh` drives install.sh against a stub, which proves the
+invocation and nothing about what happens on the other end of it.
 
 ## Ecosystem mirrors
 
@@ -530,7 +539,39 @@ the formula template's per-arch download URLs.
 
 ## Verification estate
 
-Three loops, all labelled `guardian_component: cli-release-train`.
+A gate inside the build lane, then three scheduled loops, all labelled
+`guardian_component: cli-release-train`.
+
+### In-lane: the edge smoke gate
+
+Between the build and the dedup that decides whether to push,
+`postflight-cli-image` exercises what it just built. A failure ends the job
+with nothing signed and nothing pushed, so `:edge` stays on the last artifact
+that passed.
+
+All four targets get the structural check — object magic plus the machine
+word or cputype, at the offset the format puts it — which for the three the
+runner cannot execute is the only proof available that zig cross-compiled
+what the directory name claims. It is the same table the deep-test runner
+reads, and `TestPostflightCliObjectShapeTablesAgree` is what keeps the two
+from drifting apart.
+
+The native target is additionally run, twice:
+
+- `version` must exit zero and lead with `postflight version <version>`, the
+  version read out of `Cargo.toml`'s `[package]` table. install.sh takes the
+  last field of that line as the version it records in the receipt.
+- `install.sh --uninstall` must reach the binary. The gate stages the
+  installation an install would have left — binary, receipt, credentials —
+  runs the installer's removal against it, and fails if the output shows the
+  fallback that removes files directly or if any of the three files survives.
+  The staged credential carries no refresh token on purpose, so sign-out takes
+  its local-only branch and the gate needs no network.
+
+The gate does not sit behind the byte-dedup, because the change most likely to
+break the handoff is the one dedup would skip: a commit touching only
+`dist/install.sh` rebuilds byte-identical binaries and still ships that
+installer to the website and the release assets.
 
 ### Pre-promotion: `cli-deeptest-runner`
 
@@ -856,10 +897,10 @@ working binaries and that two undocumented properties currently hold:
 all, and `curl | sh` sets no `com.apple.quarantine` attribute, so Gatekeeper
 never adjudicates. Neither is asserted anywhere, and the first would break
 silently on a toolchain change. Nothing runs a darwin binary on a schedule.
-The deep-test runner checks Mach-O magic plus the cputype word;
-the install canary checks magic only; every version assert in the estate
-runs the linux-x64 binary because it is the only one the runner can
-execute. A cross-compile that produced a correct-looking Mach-O that faults
+The edge smoke gate and the deep-test runner check Mach-O magic plus the
+cputype word; the install canary checks magic only; every version assert in
+the estate runs the linux-x64 binary because it is the only one any of them
+can execute. A cross-compile that produced a correct-looking Mach-O that faults
 on first instruction would pass every gate we have, and the formula's own
 `test do` block would be the first thing to notice — on a user's machine.
 The honest closer is a satellite canary on real Apple hardware reporting

@@ -2,6 +2,7 @@ package tests
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -52,6 +53,155 @@ func TestPostflightCliReleaseTargetsMoveTogether(t *testing.T) {
 	for target, suffix := range platforms {
 		assertPlatformPackageDeclaresItsPlatform(t, target, suffix)
 	}
+}
+
+// Two places prove a cross-compiled binary is the object its directory name
+// claims by reading the same two header fields out of it: the edge lane, before
+// it signs anything, and the deep-test runner, before a promotion can pick the
+// artifact up. Neither can run three of the four targets, so the table of magic
+// and machine words IS the check — a wrong offset on either side turns it into
+// one that passes on anything, and a target added to TARGETS with no row of its
+// own falls out of the check wherever the row is missing. Nothing at runtime
+// compares the two tables. This does.
+func TestPostflightCliObjectShapeTablesAgree(t *testing.T) {
+	const (
+		imageWorkflow  = ".github/workflows/postflight-cli-image.yml"
+		deeptestRunner = "src/infrastructure/deployments/guardian/promotion/cli-deeptest-runner.yaml"
+	)
+
+	targets := workflowTargetList(t, imageWorkflow, "TARGETS")
+	lane := objectShapeTable(t, imageWorkflow)
+	runner := objectShapeTable(t, deeptestRunner)
+
+	assertSameSet(t, imageWorkflow+" declares object shapes for", targets, shapedTargets(lane))
+	assertSameSet(t, deeptestRunner+" declares object shapes for", targets, shapedTargets(runner))
+
+	for _, target := range targets {
+		if lane[target] != runner[target] {
+			t.Errorf("%s reads %s as %s but %s reads it as %s; one target, one object shape",
+				imageWorkflow, target, lane[target], deeptestRunner, runner[target])
+		}
+	}
+}
+
+// The install canary inspects the targets it cannot execute too, but by object
+// class rather than per target, so its arms stay correct as targets are added
+// within a class and go silent the moment one arrives from a class it has never
+// seen: the `for` loop keeps iterating, `case` matches nothing, and the target
+// is waved through with no check and no message.
+func TestInstallCanaryStructuralCheckCoversEveryTarget(t *testing.T) {
+	const canary = "src/infrastructure/deployments/guardian/promotion/cli-install-canary.yaml"
+
+	targets := workflowTargetList(t, ".github/workflows/postflight-cli-image.yml", "TARGETS")
+	assertSameSet(t, canary+" sweeps", targets, strings.Fields(containerEnvValue(t, canary, "TARGETS")))
+
+	arms := targetCaseArms(t, canary)
+	for _, target := range targets {
+		matched := false
+		for _, arm := range arms {
+			if ok, err := filepath.Match(arm, target); err == nil && ok {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Errorf("%s checks the object format of [%s] and none of them matches %s",
+				canary, strings.Join(arms, " "), target)
+		}
+	}
+}
+
+// The labels of the one `case` that dispatches on a release target, in file
+// order, `*` arms included.
+func targetCaseArms(t *testing.T, file string) []string {
+	t.Helper()
+
+	text := readText(t, runfilePath(file))
+	start := strings.Index(text, `case "$target" in`)
+	if start < 0 {
+		t.Fatalf("%s no longer dispatches on a release target", file)
+	}
+	block := text[start:]
+	if end := strings.Index(block, "esac"); end >= 0 {
+		block = block[:end]
+	}
+
+	var arms []string
+	for _, match := range regexp.MustCompile(`(?m)^[ \t]*([^\s()|]+)\)`).FindAllStringSubmatch(block, -1) {
+		arms = append(arms, match[1])
+	}
+	if len(arms) == 0 {
+		t.Fatalf("%s dispatches on a release target with no arms", file)
+	}
+	return arms
+}
+
+func containerEnvValue(t *testing.T, file, name string) string {
+	t.Helper()
+
+	for _, doc := range yamlDocs(t, runfilePath(file)) {
+		if stringValue(doc["kind"]) != "CronJob" {
+			continue
+		}
+		podSpec := mapValue(mapValue(mapValue(mapValue(mapValue(doc["spec"])["jobTemplate"])["spec"])["template"])["spec"])
+		for _, container := range sliceValue(podSpec["containers"]) {
+			for _, env := range sliceValue(mapValue(container)["env"]) {
+				if stringValue(mapValue(env)["name"]) == name {
+					return stringValue(mapValue(env)["value"])
+				}
+			}
+		}
+	}
+	t.Fatalf("%s declares no %s on any CronJob container", file, name)
+	return ""
+}
+
+// magic and arch are the header bytes expected at offset 0 and at `at` for
+// `size` bytes, hex as `od -tx1` prints it.
+type objectShape struct {
+	magic string
+	arch  string
+	at    string
+	size  string
+}
+
+func (s objectShape) String() string {
+	return "magic " + s.magic + " arch " + s.arch + " at " + s.at + " over " + s.size + " bytes"
+}
+
+// Both tables are `case` arms over $TARGETS embedded in YAML, one arm per
+// target, so they are read the same way from either file.
+func objectShapeTable(t *testing.T, file string) map[string]objectShape {
+	t.Helper()
+
+	arm := regexp.MustCompile(`(?m)^[ \t]*([a-z0-9_]+-[a-z0-9-]+)\)[ \t]+((?:[a-z]+=[0-9a-fx]+;?[ \t]*)+);;`)
+	assignment := regexp.MustCompile(`([a-z]+)=([0-9a-fx]+)`)
+
+	table := make(map[string]objectShape)
+	for _, match := range arm.FindAllStringSubmatch(readText(t, runfilePath(file)), -1) {
+		fields := make(map[string]string)
+		for _, pair := range assignment.FindAllStringSubmatch(match[2], -1) {
+			fields[pair[1]] = pair[2]
+		}
+		shape := objectShape{magic: fields["magic"], arch: fields["arch"], at: fields["at"], size: fields["len"]}
+		if shape.magic == "" || shape.arch == "" || shape.at == "" || shape.size == "" {
+			t.Fatalf("%s reads %s with an incomplete object shape (%q); magic, arch, at and len are all load-bearing",
+				file, match[1], match[2])
+		}
+		table[match[1]] = shape
+	}
+	if len(table) == 0 {
+		t.Fatalf("%s declares no per-target object shapes; the structural check is what stands in for running the binary", file)
+	}
+	return table
+}
+
+func shapedTargets(table map[string]objectShape) []string {
+	targets := make([]string, 0, len(table))
+	for target := range table {
+		targets = append(targets, target)
+	}
+	return targets
 }
 
 func workflowEnv(t *testing.T, path string) map[string]string {
@@ -197,5 +347,27 @@ func assertSameSet(t *testing.T, context string, want, got []string) {
 
 	if strings.Join(wantSorted, " ") != strings.Join(gotSorted, " ") {
 		t.Fatalf("%s [%s]; the release target set is [%s]", context, strings.Join(gotSorted, " "), strings.Join(wantSorted, " "))
+	}
+}
+
+// The smoke gate proves delegation by the absence of install.sh's
+// removal-fallback log line, so the grepped sentinel and the logged line must
+// stay one string: reworded independently, the gate goes vacuous instead of
+// red for a binary whose `self uninstall` is broken.
+func TestSmokeGateUninstallSentinelIsBound(t *testing.T) {
+	const (
+		imageWorkflow = ".github/workflows/postflight-cli-image.yml"
+		installer     = "src/products/postflight-cli/dist/install.sh"
+	)
+
+	workflow := readText(t, runfilePath(imageWorkflow))
+	match := regexp.MustCompile(`!= \*"([^"]+)"\*`).FindStringSubmatch(workflow)
+	if match == nil {
+		t.Fatalf("%s no longer greps a delegation sentinel; the uninstall leg of the smoke gate has lost its teeth", imageWorkflow)
+	}
+	sentinel := match[1]
+
+	if !strings.Contains(readText(t, runfilePath(installer)), sentinel) {
+		t.Fatalf("%s greps for %q but %s never logs that line; the delegation assert is vacuous", imageWorkflow, sentinel, installer)
 	}
 }

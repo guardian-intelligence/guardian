@@ -2,13 +2,17 @@ name: postflight-cli-image
 
 # Edge lane for the postflight CLI: cross-compiles all release targets from a
 # single Linux runner (zig provides the C toolchain for ring on every target),
-# signs each binary keylessly, and publishes one OCI artifact to
-# ghcr.io/guardian-intelligence/postflight-cli:edge for Kargo to promote
-# through nightly/rc/stable. Binaries are byte-reproducible (paths remapped,
-# no commit stamped into them), so the lane skips the push entirely when the
-# built bytes match what :edge already holds — every Kargo Freight therefore
-# represents a real change. Commit provenance lives in the manifest annotations
-# and the Fulcio certificate, not in the binary.
+# smoke-tests what it built, signs each binary keylessly, and publishes one OCI
+# artifact to ghcr.io/guardian-intelligence/postflight-cli:edge for Kargo to
+# promote through nightly/rc/stable. The smoke certifies every target
+# structurally and, on the one target this runner can execute, that `version`
+# speaks the crate's version and that `install.sh --uninstall` hands removal to
+# the binary it laid down; a red smoke ends the job with nothing signed and
+# nothing pushed. Binaries are byte-reproducible (paths remapped, no commit
+# stamped into them), so the lane skips the push entirely when the built bytes
+# match what :edge already holds — every Kargo Freight therefore represents a
+# real change. Commit provenance lives in the manifest annotations and the
+# Fulcio certificate, not in the binary.
 
 on:
   push:
@@ -84,6 +88,110 @@ jobs:
           for target in $TARGETS; do
             cargo zigbuild --release --locked --target "$target"
           done
+
+      - name: Smoke-test what was built
+        working-directory: src/products/postflight-cli
+        run: |
+          native=x86_64-unknown-linux-musl
+          crate_version="$(awk -F'"' '
+            /^\[/ { package = ($0 == "[package]") }
+            package && /^version[[:space:]]*=/ { print $2; exit }
+          ' Cargo.toml)"
+          [[ -n "$crate_version" ]] \
+            || { echo "::error::smoke: Cargo.toml [package] names no version"; exit 1; }
+
+          failed=0
+          reject() { # <target> <check> <detail>
+            # A workflow command is one line and captured output is not, so the
+            # detail is escaped rather than truncated into the annotation.
+            echo "::error::smoke $1 $2: ${3//$'\n'/%0A}"
+            failed=1
+          }
+
+          field() { # <file> <bytes> <offset>
+            od -An -tx1 -N"$2" -j"$3" "$1" | tr -d ' \n'
+          }
+
+          # Only the native target can run here, so for every target the object
+          # magic plus the machine word or cputype is the proof that zig
+          # cross-compiled what the directory name claims. This table and the
+          # deep-test runner's are one table, held together by
+          # TestPostflightCliObjectShapeTablesAgree.
+          for target in $TARGETS; do
+            case "$target" in
+              x86_64-unknown-linux-musl)  magic=7f454c46; arch=3e00; at=18; len=2 ;;
+              aarch64-unknown-linux-musl) magic=7f454c46; arch=b700; at=18; len=2 ;;
+              x86_64-apple-darwin)        magic=cffaedfe; arch=07000001; at=4; len=4 ;;
+              aarch64-apple-darwin)       magic=cffaedfe; arch=0c000001; at=4; len=4 ;;
+              *)
+                reject "$target" structure "no object shape is declared for this target"
+                continue
+                ;;
+            esac
+            binary="target/$target/release/postflight"
+            if [[ ! -s "$binary" ]]; then
+              reject "$target" built "nothing at $binary"
+              continue
+            fi
+            got_magic="$(field "$binary" 4 0)"
+            [[ "$got_magic" == "$magic" ]] \
+              || reject "$target" magic "want $magic, got $got_magic"
+            got_arch="$(field "$binary" "$len" "$at")"
+            [[ "$got_arch" == "$arch" ]] \
+              || reject "$target" architecture "want $arch, got $got_arch"
+          done
+
+          native_binary="target/$native/release/postflight"
+          if [[ -x "$native_binary" ]]; then
+            # The first line is the whole contract: install.sh takes its last
+            # field as the version it records in the receipt, and `version`
+            # prints where a copy came from underneath it when a receipt sits
+            # beside the binary.
+            if version_out="$(timeout 30 "$native_binary" version 2>&1)"; then
+              first_line="${version_out%%$'\n'*}"
+              [[ "$first_line" == "postflight version $crate_version" ]] \
+                || reject "$native" version \
+                  "first line is '$first_line', want 'postflight version $crate_version'"
+            else
+              reject "$native" version "exited nonzero: $version_out"
+            fi
+
+            # installer_test.sh proves the installer invokes `self uninstall
+            # --yes`, against a stub that does nothing with it. That the binary
+            # on the other end honours it — recognises the receipt's path as its
+            # own and takes the files with it — is exercised only here. The
+            # staged credential deliberately carries no refresh_token: sign-out
+            # then takes its local-only branch and the smoke stays offline.
+            home="$RUNNER_TEMP/cli-smoke-home"
+            rm -rf "$home"
+            mkdir -p "$home/.local/bin" "$home/.config/postflight"
+            cp "$native_binary" "$home/.local/bin/postflight"
+            printf '{"schema":1,"method":"install.sh","binary_path":"%s","channel":"edge","version":"%s"}\n' \
+              "$home/.local/bin/postflight" "$crate_version" \
+              > "$home/.config/postflight/install-receipt.json"
+            printf '{"access_token":"never-minted"}\n' \
+              > "$home/.config/postflight/credentials.json"
+            if uninstall_out="$(env -u POSTFLIGHT_INSTALL_DIR -u XDG_CONFIG_HOME \
+              -u SUDO_USER HOME="$home" timeout 60 sh dist/install.sh --uninstall 2>&1)"; then
+              [[ "$uninstall_out" != *"removing files directly"* ]] \
+                || reject "$native" uninstall \
+                  "the installer swept up by hand, so \`self uninstall\` never ran: $uninstall_out"
+              for leftover in .local/bin/postflight .config/postflight/install-receipt.json \
+                .config/postflight/credentials.json; do
+                [[ ! -e "$home/$leftover" ]] \
+                  || reject "$native" uninstall "$leftover survived: $uninstall_out"
+              done
+            else
+              reject "$native" uninstall "install.sh --uninstall exited nonzero: $uninstall_out"
+            fi
+            rm -rf "$home"
+          else
+            reject "$native" built \
+              "nothing executable at $native_binary, so neither version nor the installer handoff could run"
+          fi
+
+          [[ "$failed" -eq 0 ]] || exit 1
+          echo "smoke passed for postflight $crate_version on every target" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Compute content digest and compare against the current edge
         id: dedup
