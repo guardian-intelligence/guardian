@@ -7,8 +7,14 @@
     "draft": false,
     "prerelease": true,
     "assets": [
-      {"name": "postflight-x86_64-unknown-linux-musl", "size": 4194304},
-      {"name": "checksums.txt", "size": 512}
+      {
+        "name": "postflight-x86_64-unknown-linux-musl",
+        "size": 4194304
+      },
+      {
+        "name": "checksums.txt",
+        "size": 512
+      }
     ],
     "body": "edge digest sha256:aaaa, \"tag_name\": \"postflight-cli/v9.9.9\", pasted from a template"
   },
@@ -19,7 +25,12 @@
     "name": "letters corpus 2026-07-20",
     "draft": false,
     "prerelease": false,
-    "assets": [{"name": "letters.tar.zst", "size": 8388608}],
+    "assets": [
+      {
+        "name": "letters.tar.zst",
+        "size": 8388608
+      }
+    ],
     "body": "unrelated data drop"
   },
   {
@@ -29,8 +40,28 @@
     "name": "postflight CLI v0.3.0-rc.1",
     "draft": false,
     "prerelease": true,
-    "assets": [{"name": "postflight-aarch64-apple-darwin", "size": 4194304}],
+    "assets": [
+      {
+        "name": "postflight-aarch64-apple-darwin",
+        "size": 4194304
+      }
+    ],
     "body": "release candidate, \"prerelease\": false once promoted"
+  },
+  {
+    "html_url": "https://github.com/guardian-intelligence/guardian/releases/tag/postflight-cli%2Fv0.4.0-rc.9",
+    "id": 900000007,
+    "tag_name": "postflight-cli/v0.4.0-rc.9",
+    "name": "postflight CLI v0.4.0-rc.9",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "postflight-x86_64-unknown-linux-musl",
+        "size": 4194304
+      }
+    ],
+    "body": "an rc whose prerelease flag was hand-flipped in the UI; stable must skip it by tag shape"
   },
   {
     "html_url": "https://github.com/guardian-intelligence/guardian/releases/tag/postflight-cli%2Fnightly-20260720",
@@ -39,7 +70,12 @@
     "name": "postflight CLI nightly-20260720",
     "draft": false,
     "prerelease": true,
-    "assets": [{"name": "postflight-x86_64-unknown-linux-musl", "size": 4194304}],
+    "assets": [
+      {
+        "name": "postflight-x86_64-unknown-linux-musl",
+        "size": 4194304
+      }
+    ],
     "body": "nightly"
   },
   {
@@ -49,7 +85,12 @@
     "name": "postflight CLI v0.2.0",
     "draft": false,
     "prerelease": false,
-    "assets": [{"name": "postflight-x86_64-unknown-linux-musl", "size": 4194304}],
+    "assets": [
+      {
+        "name": "postflight-x86_64-unknown-linux-musl",
+        "size": 4194304
+      }
+    ],
     "body": "stable"
   },
   {
@@ -59,7 +100,12 @@
     "name": "postflight CLI v0.1.0",
     "draft": false,
     "prerelease": false,
-    "assets": [{"name": "postflight-x86_64-unknown-linux-musl", "size": 4194304}],
+    "assets": [
+      {
+        "name": "postflight-x86_64-unknown-linux-musl",
+        "size": 4194304
+      }
+    ],
     "body": "stable"
   }
 ]

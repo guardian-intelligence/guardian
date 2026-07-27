@@ -93,8 +93,21 @@ repository is named `homebrew-tap`; the release cutter's stable path writes
 Both halves live in this root: the repository and the App-installation grant
 that makes the token mintable. If a stable cut fails at its
 `create-github-app-token` step naming `homebrew-tap`, this root has not been
-applied — apply it, then re-run the cutter with `workflow_dispatch`. The
-formula is machine-written: to change what it says, change
+applied — apply it. Do not expect a cutter re-run to heal the tap: the
+release already exists, so the re-run dedups to nothing and exits green with
+the tap still unwritten. Recover by hand instead — render the formula from
+the published release's own checksums and PUT it with an operator token:
+
+```sh
+gh release download 'postflight-cli/v<version>' -p checksums.txt -O checksums.txt
+src/products/postflight-cli/dist/homebrew/render-formula.sh \
+  src/products/postflight-cli/dist/homebrew/postflight.rb.tmpl \
+  '<version>' checksums.txt > postflight.rb
+gh api -X PUT repos/guardian-intelligence/homebrew-tap/contents/Formula/postflight.rb \
+  -f message="postflight <version>" -f content="$(base64 -w0 postflight.rb)"
+```
+
+The formula is machine-written: to change what it says, change
 `dist/homebrew/postflight.rb.tmpl` and cut a release, never the tap.
 
 If an organization owner had to add `homebrew-tap` in the GitHub UI because

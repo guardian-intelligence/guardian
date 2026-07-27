@@ -310,7 +310,11 @@ matches_channel() {
       esac
       ;;
     stable)
+      # Tag shape and the prerelease flag must agree: the flag is mutable in
+      # the GitHub UI, and an rc hand-flipped to non-prerelease must not
+      # become what a default install serves.
       case "$2" in
+        "$TAG_PREFIX/v"*"-rc."*) ;;
         "$TAG_PREFIX/v"*) [ "$3" = "false" ] && return 0 ;;
       esac
       ;;
