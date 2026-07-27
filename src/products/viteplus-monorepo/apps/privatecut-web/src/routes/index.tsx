@@ -95,6 +95,7 @@ function Home() {
             width: String(summary.video.width),
             height: String(summary.video.height),
             source_codec: summary.video.codec,
+            video_decode_mode: summary.videoDecodeMode,
             keyframes: String(summary.keyframesS.length),
           });
           setSession({ kind: "ready", source, summary });

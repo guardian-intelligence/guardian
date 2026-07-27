@@ -1,7 +1,9 @@
 // Main-thread handle on the encode worker. UI components talk to this class
-// only; mediabunny itself never loads on the main thread.
+// only. HEVC MOV files that the media element can play but WebCodecs cannot
+// decode use the main thread's native video pipeline for frames.
 
 import type { SizeLimitBytes } from "./limits";
+import { assertNativePlayback, createNativeThumbnails, nativeTranscode } from "./native-media";
 import type {
   EncodeOutcome,
   MediaSource,
@@ -11,6 +13,7 @@ import type {
   WorkerRequest,
   WorkerResponse,
 } from "./types";
+import { NATIVE_TRANSCODE_REQUIRED } from "./types";
 
 export interface ThumbnailTile {
   readonly index: number;
@@ -36,6 +39,8 @@ export class PrivateCutEngine {
   private readonly worker: Worker;
   private nextId = 1;
   private readonly pending = new Map<number, PendingCall>();
+  private source: MediaSource | null = null;
+  private summary: ProbeSummary | null = null;
 
   constructor() {
     this.worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
@@ -50,8 +55,17 @@ export class PrivateCutEngine {
     this.pending.clear();
   }
 
-  probe(source: MediaSource): Promise<ProbeSummary> {
-    return this.call({ kind: "probe", source });
+  async probe(source: MediaSource): Promise<ProbeSummary> {
+    const summary = await this.call<ProbeSummary>({ kind: "probe", source });
+    if (summary.videoDecodeMode === "media-element") {
+      if (!(source instanceof File)) {
+        throw new Error("Native HEVC decoding is only available for local files.");
+      }
+      await assertNativePlayback(source);
+    }
+    this.source = source;
+    this.summary = summary;
+    return summary;
   }
 
   thumbnails(
@@ -59,16 +73,50 @@ export class PrivateCutEngine {
     height: number,
     onThumbnail: (tile: ThumbnailTile) => void,
   ): Promise<void> {
+    if (this.summary?.videoDecodeMode === "media-element") {
+      if (!(this.source instanceof File)) {
+        return Promise.reject(new Error("Native HEVC decoding is only available for local files."));
+      }
+      return createNativeThumbnails(
+        this.source,
+        this.summary.durationS,
+        count,
+        height,
+        onThumbnail,
+      );
+    }
     return this.call({ kind: "thumbnails", count, height }, { onThumbnail });
   }
 
-  encode(
+  async encode(
     selection: SelectionRange,
     limitBytes: SizeLimitBytes,
     outputFormat: OutputContainer,
     onProgress: (pass: number, fraction: number) => void,
   ): Promise<EncodeResult> {
-    return this.call({ kind: "encode", selection, limitBytes, outputFormat }, { onProgress });
+    try {
+      return await this.call(
+        { kind: "encode", selection, limitBytes, outputFormat },
+        { onProgress },
+      );
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        error.message !== NATIVE_TRANSCODE_REQUIRED ||
+        !(this.source instanceof File) ||
+        this.summary?.videoDecodeMode !== "media-element"
+      ) {
+        throw error;
+      }
+      return nativeTranscode({
+        file: this.source,
+        summary: this.summary,
+        selection,
+        limitBytes,
+        outputFormat,
+        onProgress,
+      });
+    }
   }
 
   private call<T>(

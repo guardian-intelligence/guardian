@@ -34,8 +34,9 @@ describe("output formats", () => {
     });
   });
 
-  it("only remuxes codec combinations with broad container compatibility", () => {
+  it("remuxes native MP4 video codecs and WebM codec combinations", () => {
     expect(canRemuxCodecs("mp4", "avc", "aac")).toBe(true);
+    expect(canRemuxCodecs("mp4", "hevc", "aac")).toBe(true);
     expect(canRemuxCodecs("mp4", "vp9", "opus")).toBe(false);
     expect(canRemuxCodecs("webm", "vp9", "opus")).toBe(true);
     expect(canRemuxCodecs("webm", "av1", null)).toBe(true);

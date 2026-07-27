@@ -30,9 +30,12 @@ export interface VideoTrackSummary {
   readonly bitsPerSecond: number | undefined;
 }
 
+export type VideoDecodeMode = "webcodecs" | "media-element";
+
 export interface ProbeSummary {
   readonly durationS: number;
   readonly container: string;
+  readonly videoDecodeMode: VideoDecodeMode;
   readonly video: VideoTrackSummary;
   readonly hasAudio: boolean;
   readonly audioCodec: string | null;
@@ -40,6 +43,8 @@ export interface ProbeSummary {
   // Presentation timestamps (seconds) of video keyframes, ascending.
   readonly keyframesS: readonly number[];
 }
+
+export const NATIVE_TRANSCODE_REQUIRED = "privatecut: native media-element transcode required";
 
 export interface SelectionRange {
   readonly startS: number;

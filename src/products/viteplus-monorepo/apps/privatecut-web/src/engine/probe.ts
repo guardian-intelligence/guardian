@@ -9,6 +9,7 @@ import {
 } from "mediabunny";
 import { resolveOutputProfiles } from "./output";
 import type { MediaSource, ProbeSummary } from "./types";
+import { resolveVideoDecodeMode } from "./video-decode";
 
 export interface OpenedInput {
   readonly input: Input;
@@ -38,7 +39,10 @@ export async function openInput(source: MediaSource): Promise<OpenedInput> {
   if (videoTrack === null) {
     throw new Error("This file has no video track we can read.");
   }
-  if (!(await videoTrack.canDecode())) {
+  const videoCodec = await videoTrack.getCodec();
+  const canDecode = await videoTrack.canDecode();
+  const videoDecodeMode = resolveVideoDecodeMode(canDecode, videoCodec, source instanceof File);
+  if (videoDecodeMode === null) {
     throw new Error("This browser cannot decode this video's codec.");
   }
   const audioTrack = await input.getPrimaryAudioTrack();
@@ -52,11 +56,12 @@ export async function openInput(source: MediaSource): Promise<OpenedInput> {
   const summary: ProbeSummary = {
     durationS,
     container: (await input.getFormat()).name,
+    videoDecodeMode,
     video: {
       width: await videoTrack.getDisplayWidth(),
       height: await videoTrack.getDisplayHeight(),
       frameRate: stats.averagePacketRate,
-      codec: (await videoTrack.getCodec()) ?? "unknown",
+      codec: videoCodec ?? "unknown",
       bitsPerSecond: stats.averageBitrate,
     },
     hasAudio: audioTrack !== null,
