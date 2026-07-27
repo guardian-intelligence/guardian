@@ -14,7 +14,7 @@ export function isSizeLimit(bytes: number): bytes is SizeLimitBytes {
   return (SIZE_LIMIT_PRESETS_BYTES as readonly number[]).includes(bytes);
 }
 
-export const MAX_SELECTION_SECONDS = 60;
+export const MAX_SELECTION_SECONDS = 3 * 60;
 
 // First encode pass targets margin × the byte budget. Conservative on
 // purpose: undershoot costs a little quality, overshoot costs a re-encode

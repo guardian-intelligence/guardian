@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import { loadCanaryConfig } from "../src/config.ts";
 
 const cfg = loadCanaryConfig(process.env);
@@ -10,7 +11,36 @@ const WEBM_FIXTURE = Buffer.from(
   "base64",
 );
 
+// Three minutes of sparse 1280x720 VP8. The long timeline is real container
+// time, while six static frames keep the fixture small.
+const LONG_WEBM_FIXTURE = Buffer.from(
+  readFileSync(new URL("./fixtures/privatecut-180s.webm.base64", import.meta.url), "utf8"),
+  "base64",
+);
+
 if (cfg.target.name === "privatecut") {
+  test("three-minute selections show a reactive quality warning", async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.goto(cfg.targetUrl, { waitUntil: "load" });
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "privatecut-three-minutes.webm",
+      mimeType: "video/webm",
+      buffer: LONG_WEBM_FIXTURE,
+    });
+
+    await expect(page.getByText("0:00 – 3:00", { exact: true })).toBeVisible();
+    const warning = page.getByRole("status").filter({ hasText: "Low-quality output likely" });
+    await expect(warning).toContainText(
+      "Try increasing maximum size or splitting into shorter clips.",
+    );
+
+    const outputGroup = page.getByRole("group", { name: "Output format" });
+    await outputGroup.getByRole("button", { name: "WebM" }).click();
+    await expect(warning).toBeHidden();
+    await outputGroup.getByRole("button", { name: "MP4" }).click();
+    await expect(warning).toBeVisible();
+  });
+
   test("WebM input exports measured MP4 and WebM artifacts", async ({ page }) => {
     test.setTimeout(60_000);
     await page.goto(cfg.targetUrl, { waitUntil: "load" });

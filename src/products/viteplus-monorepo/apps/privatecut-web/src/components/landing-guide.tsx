@@ -12,7 +12,7 @@ const FAQ_ITEMS: readonly FaqItem[] = [
   {
     question: "How do I send a video that's over the size limit?",
     answer:
-      "Drop it into PrivateCut, drag the selection to the moment that matters — up to 60 seconds — and export. The clip is guaranteed to fit the cap you picked: the default 4 MB clears the upload limit on Discord, email, and effectively every chat app and forum, and 10, 25, or 100 MB are there when the ceiling is higher.",
+      "Drop it into PrivateCut, drag the selection to the moment that matters — up to 3 minutes — and export. The clip is guaranteed to fit the cap you picked: the default 4 MB clears the upload limit on Discord, email, and effectively every chat app and forum, and 10, 25, or 100 MB are there when the ceiling is higher.",
   },
   {
     question: "How do I compress an MP4 at the best possible quality?",
@@ -37,7 +37,7 @@ const FAQ_ITEMS: readonly FaqItem[] = [
   {
     question: "What are the exact limits?",
     answer:
-      "Up to 60 seconds of selection, and a size cap you choose: 4, 10, 25, or 100 MB. Caps are SI megabytes — the strict sense upload validators use — so a file that passes PrivateCut's gate passes theirs. No watermark, no account, free.",
+      "Up to 3 minutes of selection, and a size cap you choose: 4, 10, 25, or 100 MB. Caps are SI megabytes — the strict sense upload validators use — so a file that passes PrivateCut's gate passes theirs. No watermark, no account, free.",
   },
 ];
 
@@ -79,9 +79,9 @@ export function LandingGuide() {
         <p>
           Every place you share a video has a ceiling — Discord, email, chat apps, forums — and the
           message telling you the file is too big never says what to do about it. PrivateCut is what
-          to do about it: keep the moment that matters, up to a minute of it, pick a cap — 4&nbsp;MB
-          by default, or 10, 25, 100 — and export the best-looking clip that fits under it,
-          guaranteed.
+          to do about it: keep the moment that matters, up to three minutes of it, pick a cap —
+          4&nbsp;MB by default, or 10, 25, 100 — and export the best-looking clip that fits under
+          it, guaranteed.
         </p>
       </div>
       <div className="privatecut-guide__section">
