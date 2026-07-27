@@ -210,11 +210,6 @@ func (s *syncServer) desiredState(ctx context.Context, request syncproto.SyncReq
 			Tool:      syncproto.WorkspaceSpec{Generation: row.ScopeGeneration, SizeBytes: row.ToolBytes},
 			Process:   syncproto.ProcessSpec{SizeBytes: row.ProcessBytes},
 		}
-		if row.ScopeGeneration != "" && row.ProcessDigest != "" && row.ProcessVersion != "" {
-			desired.Process.Generation = row.ScopeGeneration
-			desired.Process.ExpectedDigest = row.ProcessDigest
-			desired.Process.ExpectedVersion = row.ProcessVersion
-		}
 		if row.ScopeGeneration != "" && row.TransferOrigin != "" {
 			desired.Transfer = &syncproto.TransferSpec{
 				Origin: row.TransferOrigin, Generation: row.ScopeGeneration, Base: row.TransferBase,

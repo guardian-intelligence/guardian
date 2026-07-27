@@ -77,6 +77,13 @@ resource "github_repository_ruleset" "guardian_main" {
     deletion         = true
     non_fast_forward = true
 
+    pull_request {
+      dismiss_stale_reviews_on_push     = true
+      require_last_push_approval        = true
+      required_approving_review_count   = 1
+      required_review_thread_resolution = true
+    }
+
     required_status_checks {
       strict_required_status_checks_policy = false
       do_not_enforce_on_create             = false

@@ -151,11 +151,6 @@ func (s *syncServer) jobPlanSnapshot(ctx context.Context, hostID string) (syncpr
 			Tool:      syncproto.WorkspaceSpec{Generation: row.SourceGeneration, SizeBytes: row.ToolBytes},
 			Process:   syncproto.ProcessSpec{SizeBytes: row.ProcessBytes},
 		}
-		if row.SourceGeneration != "" && row.ProcessDigest != "" && row.ProcessVersion != "" {
-			plan.Process.Generation = row.SourceGeneration
-			plan.Process.ExpectedDigest = row.ProcessDigest
-			plan.Process.ExpectedVersion = row.ProcessVersion
-		}
 		if row.SourceGeneration != "" && row.TransferOrigin != "" {
 			plan.Transfer = &syncproto.TransferSpec{
 				Origin: row.TransferOrigin, Generation: row.SourceGeneration, Base: row.TransferBase,

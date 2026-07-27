@@ -36,4 +36,4 @@ automated as `aspect infra openbao-reinit`
 
 Related source: `src/infrastructure/deployments/guardian/system/openbao-helmrelease.yaml`,
 `src/infrastructure/runbooks/openbao-static-seal-self-init.md`,
-`src/infrastructure/base/cozystack/platform-admins.yaml`
+`src/infrastructure/base/cozystack-identities/platform-admins.yaml`

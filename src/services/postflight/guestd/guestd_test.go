@@ -315,7 +315,6 @@ func newWorld(t *testing.T, configure func(*Config), runner RunRunner) *world {
 		RunRunner:     runner,
 		MountDeadline: 2 * time.Second,
 		RetryInterval: time.Millisecond,
-		QuiesceWindow: 20 * time.Millisecond,
 		HookDeadline:  2 * time.Second,
 		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
@@ -721,10 +720,6 @@ func TestCheckpointRefusesAnIncompleteGenerationTuple(t *testing.T) {
 	host.expect(guestproto.KindHello)
 	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{
 		Mountpoints: []string{"/work", ProcessMountpoint},
-		Checkpoint: &guestproto.CheckpointDump{
-			ImagesDir:      ProcessImagesDir,
-			ExternalMounts: []guestproto.CheckpointMount{{Key: "workspace", Path: "/work"}},
-		},
 	}})
 	message := host.expect(guestproto.KindQuiesceFailed)
 	if !strings.Contains(message.QuiesceFailed.Reason, "required volume is not mounted at "+ProcessMountpoint) {
@@ -732,6 +727,29 @@ func TestCheckpointRefusesAnIncompleteGenerationTuple(t *testing.T) {
 	}
 	if w.system.syncs != 0 {
 		t.Fatal("incomplete generation was flushed as sealable")
+	}
+}
+
+func TestQuiesceRefusesProcessCheckpointPublication(t *testing.T) {
+	w := newWorld(t, nil, nil)
+	w.system.mounted["/work"] = "/dev/sdb"
+	w.system.mounted[ProcessMountpoint] = "/dev/sdc"
+
+	host := w.listener.dial(t)
+	host.expect(guestproto.KindHello)
+	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{
+		Mountpoints: []string{"/work", ProcessMountpoint},
+		Checkpoint: &guestproto.CheckpointDump{
+			ImagesDir:      ProcessImagesDir,
+			ExternalMounts: []guestproto.CheckpointMount{{Key: "workspace", Path: "/work"}},
+		},
+	}})
+	message := host.expect(guestproto.KindQuiesceFailed)
+	if !strings.Contains(message.QuiesceFailed.Reason, "process checkpoint publication is disabled") {
+		t.Fatalf("reason %q", message.QuiesceFailed.Reason)
+	}
+	if w.system.syncs != 0 {
+		t.Fatal("process checkpoint request was flushed as sealable")
 	}
 }
 

@@ -159,14 +159,8 @@ func TestWebhookBadSignature(t *testing.T) {
 	if len(f.recorded) != 0 {
 		t.Fatalf("recorded %d deliveries, want 0", len(f.recorded))
 	}
-	if len(f.rejected) != 1 {
-		t.Fatalf("rejected %d deliveries, want 1", len(f.rejected))
-	}
-	if f.rejected[0].PayloadJSON != nil {
-		t.Fatal("rejected delivery must not carry the raw body")
-	}
-	if got := f.rejectedProblems[0][0].Code; got != "provider_webhook.signature_invalid" {
-		t.Fatalf("problem code = %q, want provider_webhook.signature_invalid", got)
+	if len(f.rejected) != 0 {
+		t.Fatalf("unauthenticated request wrote %d durable rejection rows, want 0", len(f.rejected))
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
 		t.Fatalf("Content-Type = %q, want application/problem+json", ct)
@@ -215,6 +209,9 @@ func TestWebhookMethodNotAllowed(t *testing.T) {
 	if len(f.recorded) != 0 {
 		t.Fatal("delivery must not be recorded on non-POST")
 	}
+	if len(f.rejected) != 0 {
+		t.Fatalf("unauthenticated request wrote %d durable rejection rows, want 0", len(f.rejected))
+	}
 }
 
 func TestWebhookBodyTooLarge(t *testing.T) {
@@ -227,11 +224,8 @@ func TestWebhookBodyTooLarge(t *testing.T) {
 	if len(f.recorded) != 0 {
 		t.Fatal("oversized delivery must not be recorded")
 	}
-	if len(f.rejected) != 1 {
-		t.Fatalf("rejected %d deliveries, want 1", len(f.rejected))
-	}
-	if got := f.rejectedProblems[0][0].Code; got != "provider_webhook.body_invalid" {
-		t.Fatalf("problem code = %q, want provider_webhook.body_invalid", got)
+	if len(f.rejected) != 0 {
+		t.Fatalf("unverifiable oversized request wrote %d durable rejection rows, want 0", len(f.rejected))
 	}
 }
 

@@ -429,10 +429,9 @@ export async function postflightSessionResponse(request: Request): Promise<Respo
 
 function isCrossSiteLogout(request: Request, publicOrigin: string): boolean {
   const fetchSite = request.headers.get("sec-fetch-site");
-  if (fetchSite) return fetchSite === "cross-site";
-  // Clients without Fetch Metadata (e.g. Safari before 16.4) still send
-  // Origin or Referer on the navigations that carry the SameSite=Lax
-  // session cookie, so a present value must be same-origin.
+  if (fetchSite) return fetchSite !== "same-origin";
+  // Clients without Fetch Metadata must supply positive same-origin evidence.
+  // Absence is not evidence: a cross-site navigation can suppress Referer.
   for (const header of ["origin", "referer"]) {
     const value = request.headers.get(header);
     if (!value) continue;
@@ -442,7 +441,7 @@ function isCrossSiteLogout(request: Request, publicOrigin: string): boolean {
       return true;
     }
   }
-  return false;
+  return true;
 }
 
 export async function endPostflightSession(request: Request): Promise<Response> {

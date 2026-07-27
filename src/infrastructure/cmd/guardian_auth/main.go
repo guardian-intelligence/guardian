@@ -30,7 +30,7 @@ const (
 )
 
 // personas is the whole authentication surface: a rung of the ladder in
-// src/infrastructure/base/cozystack/platform-admins.yaml selects both the
+// src/infrastructure/base/cozystack-identities/platform-admins.yaml selects both the
 // identity and the credential mechanism, so there is no second axis to keep
 // consistent with it.
 //

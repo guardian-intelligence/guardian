@@ -52,6 +52,40 @@ func TestCheckForwardsConsistencyAndDecision(t *testing.T) {
 	}
 }
 
+func TestCheckWithoutTokenUsesFullyConsistentSnapshot(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		consistency := body["consistency"].(map[string]any)
+		if consistency["fullyConsistent"] != true {
+			t.Errorf("consistency = %#v, want fullyConsistent", consistency)
+		}
+		if _, present := consistency["minimizeLatency"]; present {
+			t.Errorf("consistency = %#v, minimizeLatency permits stale revocation reads", consistency)
+		}
+		_, _ = w.Write([]byte(`{"permissionship":"PERMISSIONSHIP_NO_PERMISSION","checkedAt":{"token":"current-token"}}`))
+	}))
+	defer server.Close()
+
+	client := &spiceDBClient{baseURL: server.URL, token: "test-token", http: server.Client()}
+	result, err := client.check(context.Background(), checkInput{
+		Resource:   objectRef{Type: "postflight_order", ID: "order-1"},
+		Permission: "view",
+		Subject: subjectRef{
+			Object: objectRef{Type: "guardian_account", ID: "account-1"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Allowed || result.Token != "current-token" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
 func TestRelationshipContractRejectsProviderIdentity(t *testing.T) {
 	t.Parallel()
 	_, err := checkedRelationship(&authorizationv1.RelationshipUpdate{

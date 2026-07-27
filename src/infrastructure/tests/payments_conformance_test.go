@@ -60,6 +60,34 @@ func TestPaymentsRuntimeConformance(t *testing.T) {
 	}
 }
 
+func TestPaymentsJournalIsolationProvisioning(t *testing.T) {
+	const tokens = "src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens/main.tf"
+	source := readText(t, runfilePath(tokens))
+	for _, want := range []string{
+		`payments_journal_bucket_resource = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-payments-journal"`,
+		`resource "cloudflare_r2_bucket" "payments_journal"`,
+		`resource "cloudflare_account_token" "payments_journal_isolated"`,
+		`name       = "guardian-payments-journal"`,
+		`name       = "guardian-payments-journal-isolated"`,
+		"prevent_destroy = true",
+		`resources = jsonencode({ (local.payments_journal_bucket_resource) = "*" })`,
+		"depends_on = [cloudflare_r2_bucket.payments_journal]",
+	} {
+		assertTextContains(t, source, want, tokens)
+	}
+
+	start := strings.Index(source, `resource "cloudflare_account_token" "payments_journal_isolated"`)
+	if start < 0 {
+		t.Fatalf("%s has no isolated payments journal token", tokens)
+	}
+	end := strings.Index(source[start:], `resource "cloudflare_account_token" "r2_state"`)
+	if end < 0 {
+		t.Fatalf("%s has no end marker after isolated payments journal token", tokens)
+	}
+	token := source[start : start+end]
+	assertTextNotContains(t, token, "backups_bucket_resource", "isolated payments journal token")
+}
+
 func TestPaymentsRolloutAndCanaryConformance(t *testing.T) {
 	const root = "src/infrastructure/deployments/payments/prod/"
 

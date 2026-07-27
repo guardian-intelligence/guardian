@@ -163,9 +163,9 @@ spec:
 			t.Fatalf("CollectRendered() missing %q; got %v", want, got)
 		}
 	}
-	// templated + placeholder scalars and the digest-less dark-mode
-	// OCIRepository and the watch-only ImageRepository are excluded; the
-	// base-tree anchor adds one.
+	// Templated and placeholder scalars, the digest-less OCIRepository, and
+	// the watch-only ImageRepository are excluded; the base-tree anchor adds
+	// one.
 	if len(refs) != 5 {
 		t.Fatalf("CollectRendered() = %d refs, want 5: %v", len(refs), got)
 	}

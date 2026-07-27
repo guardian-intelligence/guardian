@@ -385,16 +385,31 @@ func TestFluxSourceParameterizationConformance(t *testing.T) {
 	}
 
 	configMap := singleYAMLDoc(t, runfilePath("src/infrastructure/bootstrap/sync-dark/guardian-source-configmap.yaml"))
-	ociRepo := singleYAMLDoc(t, runfilePath("src/infrastructure/bootstrap/sync-dark/oci-repository.yaml"))
 	data := mapValue(configMap["data"])
-	if stringValue(data["GUARDIAN_SOURCE_KIND"]) != "OCIRepository" || stringValue(data["GUARDIAN_SOURCE_NAME"]) != stringValue(mapValue(ociRepo["metadata"])["name"]) {
-		t.Fatalf("dark guardian-source ConfigMap %v does not point at the declared OCIRepository %v", data, mapValue(ociRepo["metadata"])["name"])
+	if stringValue(data["GUARDIAN_SOURCE_KIND"]) != "OCIRepository" || stringValue(data["GUARDIAN_SOURCE_NAME"]) != "guardian-oci" {
+		t.Fatalf("dark guardian-source ConfigMap = %v, want OCIRepository/guardian-oci", data)
 	}
-	if nestedValue(t, ociRepo, "spec", "insecure") != true {
-		t.Fatalf("dark OCIRepository must set insecure: true (the haul mirror is plain HTTP)")
+
+	darkKustomizationPath := "src/infrastructure/bootstrap/sync-dark/kustomization.yaml"
+	darkKustomization := readText(t, runfilePath(darkKustomizationPath))
+	assertTextNotContains(t, darkKustomization, "oci-repository.yaml", darkKustomizationPath)
+
+	runbookPath := "src/infrastructure/runbooks/cold-boot-bootstrap.md"
+	runbook := readText(t, runfilePath(runbookPath))
+	for _, want := range []string{
+		"--output json",
+		`dark_source_digest=`,
+		"flux create source oci guardian-oci",
+		`--digest "$dark_source_digest"`,
+		"--insecure",
+		"--export",
+	} {
+		assertTextContains(t, runbook, want, runbookPath)
 	}
-	if !strings.HasPrefix(stringValue(nestedValue(t, ociRepo, "spec", "url")), "oci://148.113.198.223:5000/") {
-		t.Fatalf("dark OCIRepository url = %v, want the haul mirror endpoint", nestedValue(t, ociRepo, "spec", "url"))
+	createSource := strings.Index(runbook, "flux create source oci guardian-oci")
+	applySync := strings.Index(runbook, "kubectl apply -k src/infrastructure/bootstrap/sync-dark")
+	if createSource < 0 || applySync < 0 || createSource >= applySync {
+		t.Fatalf("%s must create the digest-pinned OCIRepository before applying Kustomizations that reference it", runbookPath)
 	}
 
 	for path, wantValue := range map[string]string{

@@ -21,7 +21,7 @@ export type ResolveResponse =
     }
   | {
       readonly kind: "error";
-      readonly code: "bad_url" | "not_found" | "no_video" | "broadcast" | "upstream";
+      readonly code: "bad_url" | "not_found" | "no_video" | "broadcast" | "upstream" | "busy";
       readonly message: string;
     };
 

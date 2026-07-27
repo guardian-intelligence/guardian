@@ -14,8 +14,9 @@ cluster it exists to resurrect.
 ## Decision
 
 All object storage is Cloudflare R2, one bucket per purpose: `guardian-backups`
-shared by every backup consumer under per-consumer prefixes, `guardian-vault` for
-state. SeaweedFS is out.
+shared by backup consumers under per-consumer prefixes, `guardian-vault` for
+state, and `guardian-payments-journal` for payment-ledger recovery evidence.
+SeaweedFS is out.
 
 Rejected alongside, with their re-entry conditions:
 

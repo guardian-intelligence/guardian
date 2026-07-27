@@ -297,6 +297,29 @@ assert_sudo_receipt_follows_the_invoking_user() { # <shell>
     || fail "$shell: a crafted SUDO_USER reached the shell"
 }
 
+assert_install_requires_cosign() { # <shell>
+  local shell="$1" shell_path tool tool_path
+  local bin="$tmp/no-cosign-bin" home="$tmp/no-cosign-home"
+  shell_path="$(command -v "$shell")"
+  rm -rf "$bin" "$home" "$tmp/no-cosign-install"
+  mkdir -p "$bin" "$home"
+  for tool in cat curl grep head mktemp mkdir rm sed tr uname; do
+    tool_path="$(command -v "$tool")"
+    ln -s "$tool_path" "$bin/$tool"
+  done
+
+  if env PATH="$bin" POSTFLIGHT_RELEASES_DIR="$mixed" \
+    POSTFLIGHT_INSTALL_DIR="$tmp/no-cosign-install" HOME="$home" \
+    "$shell_path" "$installer" --channel nightly > "$tmp/out" 2> "$tmp/err"; then
+    fail "$shell: installation succeeded without an independent signature verifier"
+    return
+  fi
+  grep -q "cosign is required to verify the release signature" "$tmp/err" \
+    || fail "$shell: missing cosign failed for the wrong reason: $(cat "$tmp/err")"
+  [[ ! -e "$tmp/no-cosign-install/postflight" ]] \
+    || fail "$shell: missing cosign still installed a binary"
+}
+
 for shell in "${shells[@]}"; do
   expect_tag "$shell" "$mixed" nightly "postflight-cli/nightly-20260724"
   expect_tag "$shell" "$mixed" rc "postflight-cli/rc-20260722"
@@ -363,6 +386,7 @@ for shell in "${shells[@]}"; do
   assert_uninstall_paths "$shell"
   assert_rerun_upgrades_in_place "$shell"
   assert_sudo_receipt_follows_the_invoking_user "$shell"
+  assert_install_requires_cosign "$shell"
   assert_truncation_inert "$shell"
 done
 

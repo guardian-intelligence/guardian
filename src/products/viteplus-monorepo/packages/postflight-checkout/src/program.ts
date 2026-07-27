@@ -64,21 +64,35 @@ const decodeInput = <A, I>(
 ): Effect.Effect<A, InputError> =>
   Schema.decodeUnknown(schema)(value).pipe(Effect.mapError(() => error));
 
-const endpoint = (
+const trustedHostOrigins = new Set(["http://10.0.2.2:8480", "http://10.77.0.1:8480"]);
+const trustedCheckoutPath = "/internal/sandbox/v1/github-checkout";
+
+export const checkoutEndpoint = (
   originInput: string,
   pathInput: string,
 ): Effect.Effect<URL, InvalidRuntimeConfiguration> =>
   Effect.try({
     try: () => {
-      const origin = new URL(originInput);
-      if (origin.protocol !== "http:" && origin.protocol !== "https:") {
+      const origin = new URL(originInput.trim());
+      if (
+        !trustedHostOrigins.has(origin.origin) ||
+        origin.pathname !== "/" ||
+        origin.search !== "" ||
+        origin.hash !== "" ||
+        origin.username !== "" ||
+        origin.password !== ""
+      ) {
         throw new TypeError("unsupported protocol");
       }
       const path = pathInput.trim().replace(/\/+$/u, "");
-      if (!path.startsWith("/") || path.includes("?") || path.includes("#")) {
+      if (path !== trustedCheckoutPath) {
         throw new TypeError("invalid checkout path");
       }
-      return new URL(`${path}/bundle`, origin);
+      const resolved = new URL(`${path}/bundle`, origin);
+      if (resolved.origin !== origin.origin) {
+        throw new TypeError("checkout path changed origin");
+      }
+      return resolved;
     },
     catch: () =>
       new InvalidRuntimeConfiguration({
@@ -140,7 +154,7 @@ export const validate = Effect.fn("postflight.checkout.validate")(function* (rec
       }),
     );
   }
-  const checkoutEndpoint = yield* endpoint(
+  const resolvedCheckoutEndpoint = yield* checkoutEndpoint(
     received.runtime.hostOrigin,
     received.runtime.checkoutPath,
   );
@@ -151,7 +165,7 @@ export const validate = Effect.fn("postflight.checkout.validate")(function* (rec
       attemptId,
       checkoutPath: received.runtime.checkoutPath,
       checkoutToken: received.runtime.checkoutToken,
-      endpoint: checkoutEndpoint,
+      endpoint: resolvedCheckoutEndpoint,
       executionId,
       githubToken: received.inputs.githubToken,
       workspace: received.runtime.workspace.trim(),

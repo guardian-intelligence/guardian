@@ -10,9 +10,8 @@ import (
 // The platform Keycloak's admin console must never be publicly routable.
 // Upstream Cozystack renders a single Ingress routing path / on
 // keycloak.<root-host> — admin console included — with no values knob to
-// restrict it; publicly serving /admin is exactly why platform OIDC was
-// disabled on 2026-07-05 (f82b8e2). The re-enable relies on
-// base/cozystack/keycloak-admin-guard.yaml shadowing /admin and
+// restrict it. Platform OIDC relies on
+// base/cozystack-identities/keycloak-admin-guard.yaml shadowing /admin and
 // /realms/master to an endpointless Service, and on edge probes gating both
 // prefixes on 503. Nothing at runtime ties the guard to the oidc.enabled
 // flag, so a refactor could drop the guard while Keycloak stays up and CI
@@ -41,7 +40,7 @@ func TestPlatformKeycloakAdminGuardConformance(t *testing.T) {
 		return
 	}
 
-	kustomization := yamlDocs(t, runfilePath("src/infrastructure/base/cozystack/kustomization.yaml"))
+	kustomization := yamlDocs(t, runfilePath("src/infrastructure/base/cozystack-identities/kustomization.yaml"))
 	guardListed := false
 	for _, doc := range kustomization {
 		for _, res := range sliceValue(doc["resources"]) {
@@ -51,12 +50,12 @@ func TestPlatformKeycloakAdminGuardConformance(t *testing.T) {
 		}
 	}
 	if !guardListed {
-		t.Fatalf("platform.yaml enables OIDC but base/cozystack/kustomization.yaml does not apply keycloak-admin-guard.yaml; the chart's / Ingress would serve the Keycloak admin console publicly")
+		t.Fatalf("platform.yaml enables OIDC but base/cozystack-identities/kustomization.yaml does not apply keycloak-admin-guard.yaml; the chart's / Ingress would serve the Keycloak admin console publicly")
 	}
 
 	var haveNamespace, haveService bool
 	guarded := map[string]bool{}
-	for _, doc := range yamlDocs(t, runfilePath("src/infrastructure/base/cozystack/keycloak-admin-guard.yaml")) {
+	for _, doc := range yamlDocs(t, runfilePath("src/infrastructure/base/cozystack-identities/keycloak-admin-guard.yaml")) {
 		metadata := mapValue(doc["metadata"])
 		switch stringValue(doc["kind"]) {
 		case "Namespace":

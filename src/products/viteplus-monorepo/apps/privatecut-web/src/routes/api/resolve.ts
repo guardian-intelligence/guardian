@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { SpanKind, SpanStatusCode, type Span } from "@opentelemetry/api";
+import { BoundedGate } from "~/lib/bounded-gate";
 import { childContext, exportedTraceId, ready, tracer } from "~/lib/telemetry/otel-node";
 import {
   parseStatusId,
@@ -19,6 +20,7 @@ import {
 // guardian_analytics.otel_traces.
 
 const headers = { "cache-control": "no-store", "content-type": "application/json" } as const;
+const syndicationGate = new BoundedGate(32);
 
 function json(body: ResolveResponse, status: number): Response {
   return new Response(JSON.stringify(body), { status, headers });
@@ -57,69 +59,87 @@ async function resolve(request: Request, span: Span): Promise<Resolved> {
   }
   span.setAttribute("x.status_id", id);
 
-  const fetchSpan = tracer().startSpan(
-    "x.syndication.fetch",
-    { kind: SpanKind.CLIENT, attributes: { "server.address": "cdn.syndication.twimg.com" } },
-    childContext(span),
-  );
-  let upstream: Response;
-  try {
-    upstream = await fetch(syndicationUrl(id), {
-      headers: { "user-agent": "Mozilla/5.0 (compatible; privatecut/1.0)" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    fetchSpan.setAttribute("http.response.status_code", upstream.status);
-  } catch (error) {
-    fetchSpan.setStatus({
-      code: SpanStatusCode.ERROR,
-      message: error instanceof Error ? error.message : "fetch failed",
-    });
-    return fail("upstream", "Couldn't reach X to look up that post. Try again.", 502);
-  } finally {
-    fetchSpan.end();
-  }
-  if (upstream.status === 404) {
-    return fail("not_found", "That post doesn't exist or isn't public.", 404);
-  }
-  if (!upstream.ok) {
-    return fail("upstream", "X returned an error looking up that post. Try again.", 502);
+  const release = syndicationGate.tryEnter();
+  if (release === null) {
+    const overloaded = fail("busy", "The resolver is busy. Wait a moment and try again.", 429);
+    overloaded.response.headers.set("retry-after", "1");
+    return overloaded;
   }
 
-  let tweet: SyndicationTweet;
   try {
-    tweet = (await upstream.json()) as SyndicationTweet;
-  } catch {
-    return fail("upstream", "X returned an unreadable response. Try again.", 502);
-  }
-  if (tweet.__typename === "TweetTombstone") {
-    // The syndication API tombstones more than deletions: X also hides
-    // age-restricted and sensitive-flagged posts from logged-out viewers,
-    // so a post the user can see in their own session may still land here.
-    return fail(
-      "not_found",
-      "X won't show that post to logged-out viewers — it may be age-restricted, protected, or deleted.",
-      404,
+    const fetchSpan = tracer().startSpan(
+      "x.syndication.fetch",
+      { kind: SpanKind.CLIENT, attributes: { "server.address": "cdn.syndication.twimg.com" } },
+      childContext(span),
     );
-  }
-
-  const variants: XVideoVariant[] = [];
-  for (const media of tweet.mediaDetails ?? []) {
-    if (media.type !== "video" && media.type !== "animated_gif") continue;
-    for (const v of media.video_info?.variants ?? []) {
-      const variant = toVariant(v);
-      if (variant) variants.push(variant);
+    let upstream: Response;
+    try {
+      upstream = await fetch(syndicationUrl(id), {
+        headers: { "user-agent": "Mozilla/5.0 (compatible; privatecut/1.0)" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      fetchSpan.setAttribute("http.response.status_code", upstream.status);
+    } catch (error) {
+      fetchSpan.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: error instanceof Error ? error.message : "fetch failed",
+      });
+      return fail("upstream", "Couldn't reach X to look up that post. Try again.", 502);
+    } finally {
+      fetchSpan.end();
     }
-    if (variants.length > 0) break;
-  }
-
-  if (variants.length === 0) {
-    if (tweet.card?.name?.endsWith(":broadcast")) {
-      return fail("broadcast", "That's a live broadcast — those have no downloadable video.", 422);
+    if (upstream.status === 404) {
+      return fail("not_found", "That post doesn't exist or isn't public.", 404);
     }
-    return fail("no_video", "That post doesn't have a video.", 422);
-  }
+    if (!upstream.ok) {
+      return fail("upstream", "X returned an error looking up that post. Try again.", 502);
+    }
 
-  return { response: json({ kind: "ok", id, text: tweet.text ?? "", variants }, 200), code: "ok" };
+    let tweet: SyndicationTweet;
+    try {
+      tweet = (await upstream.json()) as SyndicationTweet;
+    } catch {
+      return fail("upstream", "X returned an unreadable response. Try again.", 502);
+    }
+    if (tweet.__typename === "TweetTombstone") {
+      // The syndication API tombstones more than deletions: X also hides
+      // age-restricted and sensitive-flagged posts from logged-out viewers,
+      // so a post the user can see in their own session may still land here.
+      return fail(
+        "not_found",
+        "X won't show that post to logged-out viewers — it may be age-restricted, protected, or deleted.",
+        404,
+      );
+    }
+
+    const variants: XVideoVariant[] = [];
+    for (const media of tweet.mediaDetails ?? []) {
+      if (media.type !== "video" && media.type !== "animated_gif") continue;
+      for (const v of media.video_info?.variants ?? []) {
+        const variant = toVariant(v);
+        if (variant) variants.push(variant);
+      }
+      if (variants.length > 0) break;
+    }
+
+    if (variants.length === 0) {
+      if (tweet.card?.name?.endsWith(":broadcast")) {
+        return fail(
+          "broadcast",
+          "That's a live broadcast — those have no downloadable video.",
+          422,
+        );
+      }
+      return fail("no_video", "That post doesn't have a video.", 422);
+    }
+
+    return {
+      response: json({ kind: "ok", id, text: tweet.text ?? "", variants }, 200),
+      code: "ok",
+    };
+  } finally {
+    release();
+  }
 }
 
 export const Route = createFileRoute("/api/resolve")({

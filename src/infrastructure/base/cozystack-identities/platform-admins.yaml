@@ -1,4 +1,4 @@
-# Named operator identities for the platform Keycloak (cozy realm). Each human
+# Guardian-owned operator identities for the platform Keycloak (cozy realm). Each human
 # and each agent persona gets its own user so access is attributable and
 # individually revocable. The apiserver maps preferred_username to the user
 # and Keycloak groups to Kubernetes RBAC groups.
@@ -12,7 +12,7 @@
 #               for agent sessions and for subagents that only need to observe.
 #               Holds offline_access, so it runs unattended indefinitely.
 #   write-basic read plus the routine repair verbs: delete pods and jobs, scale
-#               workloads, and mint namespace-scoped secrets-writer tokens.
+#               workloads, and mint non-root secrets-writer tokens.
 #   write-all   cluster-admin, for emergencies on sensitive systems.
 #   root        the x509 breakglass minted from the custody bundle
 #               (`aspect infra auth --persona=root --reason`). Deliberately
@@ -676,10 +676,11 @@ spec:
         (request.operation == "CREATE" && request.resource.group == "" &&
           request.resource.resource == "serviceaccounts" &&
           has(request.subResource) && request.subResource == "token" &&
-          has(request.name) && request.name == "secrets-writer")
+          has(request.name) && request.name == "secrets-writer" &&
+          request.namespace != "tenant-root")
       message: >-
         the write-basic persona may only delete pods and jobs, scale workloads,
-        open pod port-forwards, and mint secrets-writer ServiceAccount tokens
+        open pod port-forwards, and mint non-root secrets-writer ServiceAccount tokens
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

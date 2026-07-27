@@ -1,4 +1,4 @@
-# The OIDC client behind every OIDC persona of `aspect infra auth`. kubectl logins
+# Guardian's OIDC client behind every OIDC persona of `aspect infra auth`. kubectl logins
 # use the OAuth 2.0 Device Authorization Grant, which has no localhost
 # callback: kubelogin prints a verification URL, the login completes in a
 # browser on any device, and kubelogin polls the token endpoint. The same

@@ -71,7 +71,7 @@ func secretsWriterTokenGrantPresent(t *testing.T, docs []map[string]interface{})
 // write-only writer policies land. It goes green only once those policies drop
 // read and this lane rebases onto them. Do not weaken it to pass early.
 func TestSecretsWriterGrantImpliesWriteOnlyPolicies(t *testing.T) {
-	grantPath := runfilePath("src/infrastructure/base/cozystack/platform-admins.yaml")
+	grantPath := runfilePath("src/infrastructure/base/cozystack-identities/platform-admins.yaml")
 	if !secretsWriterTokenGrantPresent(t, yamlDocs(t, grantPath)) {
 		// The invariant is conditional on the grant: with no token-mint lane
 		// there is no standing write credential to constrain.

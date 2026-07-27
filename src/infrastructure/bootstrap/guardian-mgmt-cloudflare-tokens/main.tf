@@ -31,8 +31,9 @@ locals {
     r2_bucket_item_write    = "2efd5506f9c8494dacb1fa10a3e7d5b6" # Workers R2 Storage Bucket Item Write (bucket)
   }
 
-  backups_bucket_resource = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-backups"
-  vault_bucket_resource   = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-vault"
+  backups_bucket_resource          = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-backups"
+  payments_journal_bucket_resource = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-payments-journal"
+  vault_bucket_resource            = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-vault"
 
   expires = {
     dns_lb_provisioner    = "2026-10-06T00:00:00Z"
@@ -148,11 +149,9 @@ resource "cloudflare_account_token" "r2_backups" {
   ]
 }
 
-# Payment-ledger recovery journal credential. It can read and append objects
-# only in guardian-backups; the payments workload never receives the backup
-# controller's credential or access to the credential-bearing guardian-vault
-# state bucket. Journal object keys are further isolated under
-# tenant-guardian-prod/payments-journal.
+# Current payment-ledger recovery journal credential. Its object-key prefix is
+# a naming convention, not an authorization boundary, so this token remains
+# only to keep existing replicas healthy during the isolated-bucket rollout.
 resource "cloudflare_account_token" "payments_journal" {
   account_id = var.cloudflare_account_id
   name       = "guardian-payments-journal"
@@ -168,6 +167,39 @@ resource "cloudflare_account_token" "payments_journal" {
       resources = jsonencode({ (local.backups_bucket_resource) = "*" })
     },
   ]
+}
+
+# The isolated bucket and successor credential land before the workload switch.
+# Keeping the current credential alive lets the existing replicas continue
+# journaling while the successor is applied and relayed through OpenBao.
+resource "cloudflare_r2_bucket" "payments_journal" {
+  account_id    = var.cloudflare_account_id
+  name          = "guardian-payments-journal"
+  location      = "enam"
+  storage_class = "Standard"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "cloudflare_account_token" "payments_journal_isolated" {
+  account_id = var.cloudflare_account_id
+  name       = "guardian-payments-journal-isolated"
+  expires_on = local.expires.payments_journal
+
+  policies = [
+    {
+      effect = "allow"
+      permission_groups = [
+        { id = local.permission_groups.r2_bucket_item_read },
+        { id = local.permission_groups.r2_bucket_item_write },
+      ]
+      resources = jsonencode({ (local.payments_journal_bucket_resource) = "*" })
+    },
+  ]
+
+  depends_on = [cloudflare_r2_bucket.payments_journal]
 }
 
 # Tofu state-backend credential (guardian-vault bucket only — tighter than

@@ -143,18 +143,40 @@ $TODO -- move image signing to a dual-signing model, move images-lock-sign.yaml 
    ```sh
    hauler store load --filename=haul.tar.zst --store=store
    hauler store serve registry --store=store --readonly=false &
-   flux push artifact oci://148.113.198.223:5000/guardian/source:dark \
-     --path . --source "$(git remote get-url origin)" \
-     --revision "$(git rev-parse HEAD)"
+   dark_source_push="$(
+     flux push artifact oci://148.113.198.223:5000/guardian/source:dark \
+       --path . --source "$(git remote get-url origin)" \
+       --revision "$(git rev-parse HEAD)" \
+       --output json
+   )"
+   dark_source_digest="$(
+     printf '%s\n' "$dark_source_push" |
+       sed -n 's/.*"digest"[[:space:]]*:[[:space:]]*"\(sha256:[0-9a-f]\{64\}\)".*/\1/p'
+   )"
+   if [ "${#dark_source_digest}" -ne 71 ]; then
+     echo "flux push did not return a sha256 manifest digest" >&2
+     exit 1
+   fi
+   flux create source oci guardian-oci \
+     --url=oci://148.113.198.223:5000/guardian/source \
+     --digest "$dark_source_digest" \
+     --insecure \
+     --interval=1m \
+     --namespace=cozy-fluxcd \
+     --export |
+     kubectl apply -f -
    ```
 
    The writable serve is what lets the repo checkout become the cluster's
    Flux source with no Git server; a serve restart re-copies the store into
    the backend without deleting the pushed artifact, but re-push after any
-   backend wipe.
+   backend wipe. The generated OCIRepository is bound to the manifest digest
+   returned by that push before any Kustomization can consume it; the mirror
+   remains plain HTTP because the digest supplies content addressing.
 3. **Dark GitOps entrypoint**: `kubectl apply -k
    src/infrastructure/bootstrap/sync-dark` — sync.yaml with every
-   Kustomization's source resolved to the `guardian-oci` OCIRepository, plus
+   Kustomization's source resolved to the digest-bound `guardian-oci`
+   OCIRepository, plus
    the `guardian-source` ConfigMap that keeps Flux's own re-application of
    sync.yaml resolving the same way. `aspect infra converged
    --expected-revision <sha>` gates as in steady state — pass the same git

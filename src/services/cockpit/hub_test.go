@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,7 +32,10 @@ func TestBurstOnSubscribe(t *testing.T) {
 		h.flush(time.UnixMilli(series[i+ticksPerFrame-1].tsMs))
 	}
 
-	sub, burst := h.addSubscriber()
+	sub, burst, err := h.addSubscriber()
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer h.removeSubscriber(sub)
 
 	if len(burst.GetNodes()) != 1 {
@@ -87,7 +91,10 @@ func TestBurstOnSubscribe(t *testing.T) {
 // between is delta-coded.
 func TestKeyframeCadence(t *testing.T) {
 	h := newHub(1, &hubMetrics{})
-	sub, _ := h.addSubscriber()
+	sub, _, err := h.addSubscriber()
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer h.removeSubscriber(sub)
 	base := int64(1_700_000_000_000)
 	series := synthSeries(4, base, (keyframeEvery+1)*ticksPerFrame)
@@ -108,9 +115,18 @@ func TestKeyframeCadence(t *testing.T) {
 func TestFanOutIdenticalAndStalledDropped(t *testing.T) {
 	m := &hubMetrics{}
 	h := newHub(1, m)
-	stalled, _ := h.addSubscriber()
-	healthy1, _ := h.addSubscriber()
-	healthy2, _ := h.addSubscriber()
+	stalled, _, err := h.addSubscriber()
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthy1, _, err := h.addSubscriber()
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthy2, _, err := h.addSubscriber()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	base := int64(1_700_000_000_000)
 	series := synthSeries(5, base, (subscriberBuffer+2)*ticksPerFrame)
@@ -139,6 +155,58 @@ func TestFanOutIdenticalAndStalledDropped(t *testing.T) {
 	}
 	if got := m.subscribers.Load(); got != 2 {
 		t.Fatalf("subscribers gauge = %d, want 2", got)
+	}
+}
+
+func TestSubscriberLimitRejectsAndReleasesSlots(t *testing.T) {
+	m := &hubMetrics{}
+	h := newHub(1, m)
+	h.maxSubscribers = 2
+
+	first, _, err := h.addSubscriber()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := h.addSubscriber()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.addSubscriber(); !errors.Is(err, errSubscriberLimit) {
+		t.Fatalf("third subscriber error = %v, want %v", err, errSubscriberLimit)
+	}
+
+	h.removeSubscriber(first)
+	replacement, _, err := h.addSubscriber()
+	if err != nil {
+		t.Fatalf("replacement subscriber: %v", err)
+	}
+	h.removeSubscriber(second)
+	h.removeSubscriber(replacement)
+}
+
+func TestSubscribeLimitReturnsResourceExhausted(t *testing.T) {
+	h := newHub(1, &hubMetrics{})
+	h.maxSubscribers = 1
+	occupied, _, err := h.addSubscriber()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.removeSubscriber(occupied)
+
+	mux := http.NewServeMux()
+	path, handler := cockpitv1connect.NewCockpitStreamServiceHandler(&hubService{hub: h})
+	mux.Handle(path, handler)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := cockpitv1connect.NewCockpitStreamServiceClient(srv.Client(), srv.URL)
+	stream, err := client.Subscribe(context.Background(), connect.NewRequest(&cockpitv1.SubscribeRequest{}))
+	if err == nil {
+		stream.Receive()
+		err = stream.Err()
+	}
+	if connect.CodeOf(err) != connect.CodeResourceExhausted {
+		t.Fatalf("Subscribe error = %v, want resource exhausted", err)
 	}
 }
 

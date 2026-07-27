@@ -48,7 +48,7 @@ type spiceDBClient struct {
 }
 
 func (c *spiceDBClient) check(ctx context.Context, input checkInput) (checkResult, error) {
-	consistency := map[string]any{"minimizeLatency": true}
+	consistency := map[string]any{"fullyConsistent": true}
 	if input.AtLeastAsFreshToken != "" {
 		consistency = map[string]any{
 			"atLeastAsFresh": map[string]string{"token": input.AtLeastAsFreshToken},

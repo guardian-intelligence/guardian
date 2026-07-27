@@ -172,7 +172,7 @@ var ErrNotFound = errors.New("vm: not found")
 type Driver interface {
 	// Launch boots a warm VM of a class under the given ID.
 	Launch(ctx context.Context, id ID, class Class) error
-	// Rendezvous binds and restores the exact generation selected after the
+	// Rendezvous binds the exact filesystem generation selected after the
 	// local listener received GitHub's assignment.
 	Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) error
 	// Prepare starts a fresh listener on the generic warm VM.
@@ -183,7 +183,7 @@ type Driver interface {
 	Status(ctx context.Context, id ID) (Status, error)
 	// List reports every VM the driver knows on this host.
 	List(ctx context.Context) ([]Status, error)
-	// Quiesce asks the guest to checkpoint and flush the durable generation.
+	// Quiesce asks the guest to flush the durable generation before sealing.
 	// The VM must be destroyed successfully before the generation is sealed;
 	// any ambiguous outcome skips the seal.
 	Quiesce(ctx context.Context, id ID) (CheckpointArtifact, error)

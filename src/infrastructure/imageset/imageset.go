@@ -390,9 +390,9 @@ func isImageRepository(doc interface{}) bool {
 
 // ociRepositoryRef extracts the pinned artifact reference from a Flux
 // OCIRepository document (spec.url oci://host/repo + spec.ref.tag/digest).
-// These are pulled by source-controller, not containerd, but the dark
-// mirror must serve them all the same. Digest-less OCIRepositories (the
-// dark-mode branch-tip source) are not pinned artifacts and are skipped.
+// These are pulled by source-controller, not containerd, but the mirror must
+// serve them all the same. Digest-less OCIRepositories are not pinned
+// artifacts and are skipped.
 func ociRepositoryRef(doc interface{}) (string, bool) {
 	m, ok := asStringMap(doc)
 	if !ok || stringValue(m["kind"]) != "OCIRepository" {

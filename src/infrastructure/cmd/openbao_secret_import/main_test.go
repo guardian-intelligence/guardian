@@ -115,7 +115,7 @@ func TestImportPlan(t *testing.T) {
 		t.Fatal("platform-admins write missing")
 	}
 	// Key names are the platform-admin-passwords ExternalSecret's remoteRef
-	// properties (base/cozystack/platform-admins.yaml maps them 1:1 to the
+	// properties (base/cozystack-identities/platform-admins.yaml maps them 1:1 to the
 	// KeycloakRealmUser passwordSecret keys).
 	if admins.Data["platform-admin"] != "admin-pass" || admins.Data["platform-agent"] != "agent-pass" {
 		t.Fatalf("platform-admins data = %#v", admins.Data)

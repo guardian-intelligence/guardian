@@ -94,6 +94,11 @@ type Service struct {
 	repoLocksMu sync.Mutex
 	repoLocks   map[string]*sync.Mutex
 
+	bundleMu       sync.Mutex
+	bundleReaders  map[string]int
+	bundleTemps    map[string]struct{}
+	bundleReserved int64
+
 	Metrics Metrics
 }
 
@@ -124,12 +129,16 @@ func New(cfg Config, resolver IdentityResolver) *Service {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	return &Service{
-		cfg:       cfg,
-		resolver:  resolver,
-		slots:     make(chan struct{}, cfg.MaxConcurrent),
-		repoLocks: map[string]*sync.Mutex{},
+	service := &Service{
+		cfg:           cfg,
+		resolver:      resolver,
+		slots:         make(chan struct{}, cfg.MaxConcurrent),
+		repoLocks:     map[string]*sync.Mutex{},
+		bundleReaders: map[string]int{},
+		bundleTemps:   map[string]struct{}{},
 	}
+	service.SweepOnce()
+	return service
 }
 
 // lockRepo serializes mirror and cache mutation per repository. The lock map

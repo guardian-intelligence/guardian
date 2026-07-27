@@ -90,13 +90,13 @@ func (s *webhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	defer span.End()
 	receivedAt := s.now().UTC()
 
-	// Best-effort delivery id up front: even rejected requests are ledgered
-	// when GitHub identified them.
+	// The delivery id is trusted for persistence only after the request body
+	// has passed GitHub signature verification.
 	deliveryID, _ := singleHeader(r.Header, "X-GitHub-Delivery")
 
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		s.reject(ctx, w, deliveryID, "", sha256Hex(nil), receivedAt, []problem{problemMethodNotAllowed()})
+		s.reject(ctx, w, false, deliveryID, "", sha256Hex(nil), receivedAt, []problem{problemMethodNotAllowed()})
 		return
 	}
 
@@ -123,20 +123,21 @@ func (s *webhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		problems = append(problems, problemBodyInvalid("request body unreadable or too large", status))
 	}
 	payloadSHA := sha256Hex(body) // always computed, even for rejected deliveries
+	signatureVerified := err == nil && sigOK && verifyGitHubSignature(s.secret, body, sigHeader)
 
 	emitEvent(ctx, evWebhookReceived, eventAttrs{DeliveryID: deliveryID, Result: "received"})
 
 	if len(problems) > 0 {
-		s.reject(ctx, w, deliveryID, eventName, payloadSHA, receivedAt, problems)
+		s.reject(ctx, w, signatureVerified, deliveryID, eventName, payloadSHA, receivedAt, problems)
 		return
 	}
-	if !verifyGitHubSignature(s.secret, body, sigHeader) {
-		s.reject(ctx, w, deliveryID, eventName, payloadSHA, receivedAt, []problem{problemSignatureInvalid()})
+	if !signatureVerified {
+		s.reject(ctx, w, false, deliveryID, eventName, payloadSHA, receivedAt, []problem{problemSignatureInvalid()})
 		return
 	}
 	var env webhookEnvelope
 	if err := json.Unmarshal(body, &env); err != nil {
-		s.reject(ctx, w, deliveryID, eventName, payloadSHA, receivedAt, []problem{problemPayloadInvalid(err.Error())})
+		s.reject(ctx, w, true, deliveryID, eventName, payloadSHA, receivedAt, []problem{problemPayloadInvalid(err.Error())})
 		return
 	}
 
@@ -204,11 +205,12 @@ func (s *webhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// reject records the rejected delivery (hash + problems, never the raw body)
-// when a delivery id exists — so GitHub's manual redelivery can resurrect and
-// self-heal it — then writes the RFC-7807 response.
-func (s *webhookServer) reject(ctx context.Context, w http.ResponseWriter, deliveryID, eventName, payloadSHA string, receivedAt time.Time, problems []problem) {
-	if deliveryID != "" {
+// reject records an authenticated rejected delivery (hash + problems, never
+// the raw body) so GitHub's manual redelivery can resurrect and self-heal it.
+// Unauthenticated failures remain telemetry-only and cannot allocate durable
+// ledger rows.
+func (s *webhookServer) reject(ctx context.Context, w http.ResponseWriter, authenticated bool, deliveryID, eventName, payloadSHA string, receivedAt time.Time, problems []problem) {
+	if authenticated && deliveryID != "" {
 		err := s.inbox.RecordRejectedDelivery(ctx, deliveryEnvelope{
 			DeliveryID:    deliveryID,
 			EventName:     eventName,

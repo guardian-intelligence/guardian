@@ -57,6 +57,17 @@ output "payments_journal_secret_access_key" {
   sensitive   = true
 }
 
+output "payments_journal_isolated_access_key_id" {
+  description = "Successor S3 access key id for the guardian-payments-journal bucket."
+  value       = cloudflare_account_token.payments_journal_isolated.id
+}
+
+output "payments_journal_isolated_secret_access_key" {
+  description = "Successor S3 secret access key for the guardian-payments-journal bucket."
+  value       = sha256(cloudflare_account_token.payments_journal_isolated.value)
+  sensitive   = true
+}
+
 output "r2_state_access_key_id" {
   description = "S3 access key id for the guardian-vault state bucket (custody-mirrored: cloudflare_r2_access_key_id)."
   value       = cloudflare_account_token.r2_state.id

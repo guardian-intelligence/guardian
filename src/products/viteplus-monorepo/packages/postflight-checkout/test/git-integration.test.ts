@@ -36,7 +36,7 @@ const runtime = (workspace: string, sha: CommitSha): RawRuntimeConfiguration => 
   checkoutPath: "/internal/sandbox/v1/github-checkout",
   checkoutToken: Redacted.make("runner-token"),
   executionId: "execution-1",
-  hostOrigin: "http://127.0.0.1",
+  hostOrigin: "http://10.0.2.2:8480",
   sha,
   workspace,
 });
