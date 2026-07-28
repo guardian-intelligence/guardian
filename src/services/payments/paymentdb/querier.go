@@ -18,6 +18,8 @@ type Querier interface {
 	CountJournalIncomplete(ctx context.Context) (int64, error)
 	CountPendingProviderEvents(ctx context.Context) (int64, error)
 	CountStaleOrders(ctx context.Context, olderThan pgtype.Interval) (int64, error)
+	// Payout-family transactions move funds to the bank account and never
+	// correspond to an order, so they are not counted as unmatched.
 	CountUnmatchedBalanceTransactions(ctx context.Context) (int64, error)
 	CreateOrder(ctx context.Context, arg CreateOrderParams) (PaymentOrder, error)
 	EnsureLedgerAccount(ctx context.Context, arg EnsureLedgerAccountParams) (LedgerAccount, error)

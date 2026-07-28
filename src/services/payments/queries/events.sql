@@ -75,7 +75,10 @@ SET source_id = EXCLUDED.source_id,
 RETURNING *;
 
 -- name: CountUnmatchedBalanceTransactions :one
+-- Payout-family transactions move funds to the bank account and never
+-- correspond to an order, so they are not counted as unmatched.
 SELECT count(*)::bigint
 FROM provider_balance_transactions
 WHERE (order_id IS NULL OR ledger_projected_at IS NULL)
+  AND reporting_category NOT IN ('payout', 'payout_reversal')
   AND first_seen_at < now() - interval '15 minutes';
