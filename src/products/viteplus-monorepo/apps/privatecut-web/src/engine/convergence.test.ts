@@ -4,7 +4,7 @@ import { DEFAULT_SAFETY_MARGIN, DEFAULT_SIZE_LIMIT_BYTES, MAX_PASSES } from "./l
 
 // A fake encoder with a hidden linear rate model: bytes = overhead + bits×k/8.
 // `bias` models an encoder that systematically over- or under-shoots the
-// requested bitrate, which is exactly what real encoders do.
+// requested bitrate.
 function fakeEncoder(overheadBytes: number, durationS: number, bias: number) {
   const calls: number[] = [];
   return {

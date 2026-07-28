@@ -18,8 +18,7 @@ export const MAX_SELECTION_SECONDS = 3 * 60;
 
 // First encode pass targets margin × the byte budget. Conservative on
 // purpose: undershoot costs a little quality, overshoot costs a re-encode
-// pass. Tuned over time from privatecut.encode_completed telemetry
-// (utilization + pass-count distributions per encoder stratum).
+// pass.
 export const DEFAULT_SAFETY_MARGIN = 0.93;
 
 // Accept a pass only when it lands in this utilization band. Below the floor
