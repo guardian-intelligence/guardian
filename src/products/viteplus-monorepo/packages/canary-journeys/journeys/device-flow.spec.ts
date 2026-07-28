@@ -232,8 +232,11 @@ test("device approval signs the CLI in end to end", async ({ page, request }) =>
   expect((await replayed.json()).error).toBe("invalid_grant");
 
   step("logout");
-  await page.goto(`${cfg.pageUrl.replace(/\/$/, "")}/auth/logout`);
-  await awaitPostflightLanding(page, "/postflight", SELECTORS.oobeReady, "logout landing");
+  // Logout must be a same-origin navigation: a direct address-bar visit
+  // carries sec-fetch-site: none, which the CSRF guard refuses.
+  await page.goto(cfg.pageUrl);
+  await page.locator(SELECTORS.signOut).click();
+  await page.locator(SELECTORS.signIn).waitFor({ timeout: 20_000 });
   const loggedOutStatus = await page.evaluate(async () => {
     const response = await fetch("/postflight/auth/session", {
       credentials: "same-origin",
