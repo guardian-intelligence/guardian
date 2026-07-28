@@ -160,7 +160,7 @@ spec:
               memory: 64Mi
             limits:
               cpu: 500m
-              memory: 256Mi
+              memory: 512Mi
           volumeMounts:
             # The tag/digest database; rebuilt by rescan on restart, so an
             # ephemeral volume is deliberate.
