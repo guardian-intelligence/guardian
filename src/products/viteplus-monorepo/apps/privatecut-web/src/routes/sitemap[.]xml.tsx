@@ -1,10 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { SITE_URL } from "~/lib/site";
 
-// One page, one URL. Hand-rolled XML for the same reason as the company
-// site's sitemap: the format is a few lines and a sitemap library is more
-// surface than a single-URL product should import.
-
 const SITEMAP_HEADERS = {
   "content-type": "application/xml; charset=utf-8",
   "cache-control": "public, max-age=600, s-maxage=600",

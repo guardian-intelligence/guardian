@@ -33,8 +33,8 @@ describe("parseStatusId", () => {
 });
 
 describe("syndicationToken", () => {
-  // Captured live from working requests on 2026-07-22; the derivation must
-  // keep producing exactly these or the syndication endpoint 404s.
+  // The derivation must keep producing exactly these tokens or the
+  // syndication endpoint 404s.
   it("matches known-good tokens", () => {
     expect(syndicationToken("20")).toBe("6dq1a2xwd93");
     expect(syndicationToken("1936903309425619013")).toBe("4pylq3o8ep");

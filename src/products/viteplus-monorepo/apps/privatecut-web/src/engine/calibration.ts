@@ -2,7 +2,7 @@
 // machine's hardware H.264 overshoots requested bitrate by 6% at 1080p, it
 // will tomorrow too. Remember the measured actual/requested ratio per
 // (codec, rung) and pre-correct the next first pass, so returning users
-// converge in one pass before any fleet-level margin tuning ships.
+// converge in one pass.
 
 import { DEFAULT_SAFETY_MARGIN } from "./limits";
 
