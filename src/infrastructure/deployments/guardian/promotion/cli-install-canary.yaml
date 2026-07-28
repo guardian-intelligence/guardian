@@ -238,8 +238,10 @@ data:
       local channel="$1" home="$2" out
       rm -rf "$home"
       mkdir -p "$home" || { detail="cannot create $home"; return 1; }
+      # The installer requires cosign on PATH (a documented prerequisite),
+      # so the cell runs it the way a prepared user would.
       out="$(curl -fsSL --max-time 60 "$INSTALLER_URL" \
-        | env HOME="$home" sh -s -- --channel "$channel" 2>&1)" \
+        | env HOME="$home" PATH="/cosign-bin:$PATH" sh -s -- --channel "$channel" 2>&1)" \
         || { detail="fetching or running $INSTALLER_URL failed: $out"; return 1; }
       [ -x "$home/.local/bin/postflight" ] \
         || { detail="installer left no executable at ~/.local/bin/postflight"; return 1; }
