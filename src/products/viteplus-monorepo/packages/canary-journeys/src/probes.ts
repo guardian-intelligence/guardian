@@ -2,6 +2,7 @@ import type { OAuthPageState } from "./classify.ts";
 
 export const SELECTORS = {
   signIn: "#postflight-sign-in",
+  signOut: "#postflight-logout",
   githubLogin: "input[name=login]",
   githubPassword: "input[name=password]",
   githubSubmit: "input[type=submit], button[type=submit]",
