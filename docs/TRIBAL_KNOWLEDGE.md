@@ -19,7 +19,8 @@ User must pay $10/mo to enable CloudFlare LB with 3 endpoints (1 for each ingres
   standing identity is the `read` persona (the `platform-agent` OIDC context,
   set up with `aspect infra auth`): cluster-wide read plus port-forward, and the
   only rung that refreshes unattended. Repair verbs come from
-  `--persona=write-basic` and emergencies from `--persona=write-all`; neither
+  `--persona=write-basic` (non-root secret writes only) and tenant-root secret
+  writes or emergencies from `--persona=write-all`; neither write persona
   holds `offline_access`, so each costs an operator device approval and expires
   with its Keycloak session. There is no standing admin kubeconfig anywhere on
   disk; breakglass x509 is minted on demand with
@@ -85,12 +86,11 @@ Every node arms its AMD SP5100 TCO chipset watchdog (`/dev/watchdog0`, 1m timeou
 * Never download unpinned versions of software or set an unpinned version as a dependency. Binaries are versioned, built, packaged, and installed by Bazel declarations. This includes tools in src/tools.
 * Container images are digest-pinned wherever this repo renders them, with the registry named explicitly (never `grafana/k6`-style default-registry refs). The cold-bootstrap inventory is the GENERATED union of those rendered refs and `images.declared.lock`; the infra conformance tests enforce digest pinning, declared/rendered disjointness, and dark-mirror host coverage. A rendered image change needs no lock edit; only images nothing renders (operator-spawned, bootstrap artifacts) are declared by hand.
 * Cold-bootstrap trust model: the local checkout, its Bazel-built artifacts, the operator vault (Cloudflare account login, custody passphrase, age identity), and the R2-replicated custody artifacts (custody bundle, age-encrypted bootstrap set, OpenBao raft snapshots) are everything a from-nothing bring-up may require — see `docs/secrets.md`. Bootstrap-only compromises are allowed, but the cluster must converge to the declared steady state afterward.
-* Dev tools: `aspect`. Run `aspect tidy` to format the codebase.
 * Avoid custom schemas, protocols, shell scripts, contracts.
 * Protobuf governance uses the repo-pinned Buf toolchain through Bazel: linting, formatting, and breaking-change checks run from `rules_buf`; code generation uses local pinned generators only. Do not use Buf remote plugins in build/test/release paths.
 * The goal is to make operations run unattended, no human-in-the-loop.
 * Invent nothing. If we write our own code, it should be glue code over existing libraries and apeing reference implementations of solutions to problems only. Prefer the boring industry-standard thing. Component choices are made by bake-off: candidates researched, losers rejected with recorded reasons, the winner pinned (the Hauler decision is the template). Months spent recreating an existing tool poorly is the cardinal failure mode.
-* Use SQLC for Go service PG queries.
+* Use SQLC+pgx for Go service PG queries.
 * To safely configure secrets per-environment, read `docs/secrets.md`. Adding, rotating, or wiring a secret never opens the custody bundle: it is a Git PR plus one `bao kv put` through a namespace-scoped writer token. Custody is sealed for disaster recovery, cold boot, and CA/seal-key rotation, and `TestCustodyCeremonyConfinedToRecoveryRunbooks` fails the build if any other document teaches the restore ceremony. The one remaining routine opener is a bootstrap-root `tofu apply`, which is a known defect with a designed cutover in `docs/tofu-gitops-design.md`.
 * You are not alone in this repo. Expect parallel changes by the user or other agents and work around them to avoid destructive action.
 * No need to be precious with git hygiene. If you see a doc update, it's fine to fold it into your worktree or branch, even if it's unrelated.
