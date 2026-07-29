@@ -1,0 +1,59 @@
+# Base backups must not race statement_timeout. Without immediateCheckpoint,
+# pg_backup_start waits for the in-progress spread checkpoint (a restartpoint
+# on standby targets), whose write phase is paced by
+# checkpoint_completion_target and routinely runs as long as the platform's
+# 120s statement_timeout — so whether a nightly base backup starts is a coin
+# flip on checkpoint phase. An immediate checkpoint bounds the wait at the
+# cost of one unpaced buffer flush.
+#
+# The backupstrategy-controller's CNPG strategy template cannot express this
+# (its data schema carries only compression/encryption/jobs), so the default
+# is applied at admission on the driver's nightly barmanObjectStore apply.
+# A manifest that sets the field explicitly keeps its choice.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: guardian-postgres-backup-checkpoint
+spec:
+  failurePolicy: Fail
+  reinvocationPolicy: IfNeeded
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - postgresql.cnpg.io
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - clusters
+  matchConditions:
+    - name: barman-configured-without-explicit-choice
+      expression: >-
+        has(object.spec.backup) &&
+        has(object.spec.backup.barmanObjectStore) &&
+        (!has(object.spec.backup.barmanObjectStore.data) ||
+        !has(object.spec.backup.barmanObjectStore.data.immediateCheckpoint))
+  mutations:
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{
+            spec: Object.spec{
+              backup: Object.spec.backup{
+                barmanObjectStore: Object.spec.backup.barmanObjectStore{
+                  data: Object.spec.backup.barmanObjectStore.data{
+                    immediateCheckpoint: true
+                  }
+                }
+              }
+            }
+          }
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: guardian-postgres-backup-checkpoint
+spec:
+  policyName: guardian-postgres-backup-checkpoint

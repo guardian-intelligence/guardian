@@ -5,6 +5,7 @@ filegroup(
         "image-provenance.yaml",
         "kustomization.yaml",
         "openbao-static-seal.yaml",
+        "postgres-backup-checkpoint.yaml",
         "registry-prefixes.txt",
         "synthetic-storage-classification.yaml",
         "tigerbeetle-host-network.yaml",
