@@ -21,6 +21,22 @@ cases:
               compression: gzip
     expect: mutate
     expectField: {path: spec.backup.barmanObjectStore.data.immediateCheckpoint, value: true}
+  - name: barman-configured cluster without a data block gets an immediate checkpoint
+    resource: {group: postgresql.cnpg.io, version: v1, resource: clusters}
+    object:
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      metadata: {name: postgres-nodata, namespace: tenant-guardian-prod}
+      spec:
+        instances: 3
+        backup:
+          barmanObjectStore:
+            destinationPath: s3://guardian-backups/tenant-guardian-prod/nodata/
+            s3Credentials:
+              secretRef:
+                name: cozy-backups-creds
+    expect: mutate
+    expectField: {path: spec.backup.barmanObjectStore.data.immediateCheckpoint, value: true}
   - name: cluster without object-store backup is untouched
     resource: {group: postgresql.cnpg.io, version: v1, resource: clusters}
     object:
