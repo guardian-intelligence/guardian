@@ -1,0 +1,65 @@
+# The mutation's behavior is pinned here: barman-configured clusters get an
+# immediate backup checkpoint, clusters without object-store backup are
+# untouched, and an explicit choice in the manifest wins.
+policy: guardian-postgres-backup-checkpoint
+cases:
+  - name: barman-configured cluster gets an immediate checkpoint
+    resource: {group: postgresql.cnpg.io, version: v1, resource: clusters}
+    object:
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      metadata: {name: postgres-app, namespace: tenant-guardian-prod}
+      spec:
+        instances: 3
+        backup:
+          barmanObjectStore:
+            destinationPath: s3://guardian-backups/tenant-guardian-prod/app/
+            s3Credentials:
+              secretRef:
+                name: cozy-backups-creds
+            data:
+              compression: gzip
+    expect: mutate
+    expectField: {path: spec.backup.barmanObjectStore.data.immediateCheckpoint, value: true}
+  - name: barman-configured cluster without a data block gets an immediate checkpoint
+    resource: {group: postgresql.cnpg.io, version: v1, resource: clusters}
+    object:
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      metadata: {name: postgres-nodata, namespace: tenant-guardian-prod}
+      spec:
+        instances: 3
+        backup:
+          barmanObjectStore:
+            destinationPath: s3://guardian-backups/tenant-guardian-prod/nodata/
+            s3Credentials:
+              secretRef:
+                name: cozy-backups-creds
+    expect: mutate
+    expectField: {path: spec.backup.barmanObjectStore.data.immediateCheckpoint, value: true}
+  - name: cluster without object-store backup is untouched
+    resource: {group: postgresql.cnpg.io, version: v1, resource: clusters}
+    object:
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      metadata: {name: postgres-plain, namespace: tenant-guardian-prod}
+      spec:
+        instances: 3
+    expect: no-match
+  - name: explicit immediateCheckpoint is preserved
+    resource: {group: postgresql.cnpg.io, version: v1, resource: clusters}
+    object:
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Cluster
+      metadata: {name: postgres-explicit, namespace: tenant-guardian-prod}
+      spec:
+        instances: 3
+        backup:
+          barmanObjectStore:
+            destinationPath: s3://guardian-backups/tenant-guardian-prod/explicit/
+            s3Credentials:
+              secretRef:
+                name: cozy-backups-creds
+            data:
+              immediateCheckpoint: false
+    expect: no-match

@@ -14,6 +14,7 @@ resources:
   - cozystack-app-namespace.yaml
   - image-provenance.yaml
   - openbao-static-seal.yaml
+  - postgres-backup-checkpoint.yaml
   - synthetic-storage-classification.yaml
   - tigerbeetle-host-network.yaml
   - vlogs-patcher-update-only.yaml
