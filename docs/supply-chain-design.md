@@ -4,10 +4,8 @@ Status: active as of 2026-07-03; reshaped 2026-07-22 — signing follows the
 publication boundary, so only what Guardian releases to users (the
 postflight CLI) is signed; cluster-internal images are governed by the
 merge gate and the admission backstop, not signatures. Complements
-`adrs/0003-validate-rendered-manifests.md` (Git-time invariants),
-`adrs/0010-two-release-signatures-one-format-per-lane.md` (the release
-signing model), `postflight-cli-distribution.md` (how the signed CLI
-artifact reaches users) and the cold-boot runbook (offline consumption).
+`postflight-cli-distribution.md` (how the signed CLI artifact reaches
+users) and the cold-boot runbook (offline consumption).
 
 ## The trust model in one paragraph
 

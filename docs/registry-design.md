@@ -3,9 +3,7 @@
 Status: active as of 2026-07-12 (slices R1 zot tier + mirror flip, R2
 countersigner write path, and R3 release projector; next: the inversion,
 gated on in-cluster CI).
-Complements `supply-chain-design.md` (trust model, signing) and
-`adrs/0005-no-in-cluster-object-storage.md` (why the registry stores on a
-PVC, not an object store).
+Complements `supply-chain-design.md` (trust model, signing).
 
 ## Role and invariant
 

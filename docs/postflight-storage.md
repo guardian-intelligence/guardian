@@ -16,7 +16,7 @@ complicate that is a cold build.
   size; measurements in the benchmark records). Guests get volumes by stable
   device serial via virtio-scsi hot-attach.
 - No network storage on any hot path, no Ceph, no durable object tier for
-  customer state (ADR 0005, ADR 0009). A future cold-offload component would
+  customer state. A future cold-offload component would
   be an optimization, not a dependency.
 - TRIM passes end to end (guest discard → zvol); accounting measures the
   working set, not garbage retention. Per-generation size and use metrics

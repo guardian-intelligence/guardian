@@ -33,7 +33,7 @@ Three layers, strongest last:
    authoritative refresh that constructs missing intent or corrects state.
 3. **The guest's observed assignment is final.** The binding reported from
    inside the selected guest at the `acquirejob` commit point outranks
-   anything GitHub's eventing implies (ADR 0013). On Confidential it
+   anything GitHub's eventing implies. On Confidential it
    arrives over the attested session, so it is also host-tamper-proof.
 
 ## Modules
@@ -176,5 +176,4 @@ generation  candidate → authenticated → current
 
 Related: [architecture](postflight-architecture.md) ·
 [storage](postflight-storage.md) ·
-[runner lifecycle](postflight-runner-lifecycle.md) ·
-[ADR 0013](adrs/0013-bind-jobs-after-local-runner-assignment.md)
+[runner lifecycle](postflight-runner-lifecycle.md)
