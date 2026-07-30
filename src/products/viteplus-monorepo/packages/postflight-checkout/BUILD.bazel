@@ -1,6 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@npm//:defs.bzl", "npm_link_all_packages")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 npm_link_all_packages()
 
@@ -47,6 +46,7 @@ genrule(
         "//src/products/viteplus-monorepo:workspace_sources",
     ],
     outs = ["generated/index.js"],
+    visibility = ["//actions/checkout:__pkg__"],
     cmd = """
 set -euo pipefail
 execroot="$$(pwd)"
@@ -81,18 +81,4 @@ POSTFLIGHT_ACTION_OUT_DIR="$$work/dist" "$$node" "$$vp" build
 test -s "$$work/dist/index.js"
 cp "$$work/dist/index.js" "$$execroot/$@"
 """,
-)
-
-sh_test(
-    name = "bundle_drift_test",
-    size = "small",
-    srcs = ["test/bundle-drift.sh"],
-    args = [
-        "$(rootpath :generated_bundle)",
-        "$(rootpath //actions/checkout:bundle)",
-    ],
-    data = [
-        ":generated_bundle",
-        "//actions/checkout:bundle",
-    ],
 )
