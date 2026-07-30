@@ -86,13 +86,9 @@ granting `secrets`; no live/test payment credentials or private-key material
 in manifests; every PVC uses an encrypted StorageClass; ExternalSecrets read
 only their own namespace subtree.
 
-Phase 3 — omnibus surgery: `openbao_conformance_test.go`,
-`spicedb_conformance_test.go`, `tigerbeetle_conformance_test.go`,
-`payments_conformance_test.go`, `edge_hardening_test.go`,
+Phase 3 — omnibus surgery: `edge_hardening_test.go`,
 `vlogs_hardening_test.go`, `log_*_test.go`, `alert_tuning_test.go` each
 shrink to their combination-invariant core; everything else converts or dies.
-Shared YAML helpers move to a neutral file before `openbao_conformance_test.go`
-shrinks.
 
 Phase 4 — widen the workload-priority binding beyond previews in strict
 order: first set explicit priorityClassName on every stateful data plane
