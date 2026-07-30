@@ -1,0 +1,68 @@
+# Trusted publisher for the Bazel repository-cache bundle: an OCI artifact
+# on ghcr holding every sha256-pinned external archive reachable from //...
+# (the manual //src/tools:pins archive set stays lazy). The gate restores
+# the bundle when the Actions cache has been evicted, making upstream
+# dependency hosts load-bearing only for archives newer than main's last
+# bundle. Bazel re-verifies every repository-cache hit against its pinned
+# sha256, so this lane carries availability, not trust.
+name: bazel-repo-cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "MODULE.bazel"
+      - "MODULE.bazel.lock"
+      - "**/*.MODULE.bazel"
+      - ".bazelversion"
+      - "go.mod"
+      - "go.sum"
+      - "**/pnpm-lock.yaml"
+      - "**/Cargo.lock"
+      - "src/tools/multitool.lock.json"
+      - ".github/workflows/bazel-repo-cache.yml"
+      - "tools/ci/bazel-repo-cache"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: bazel-repo-cache
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Bootstrap toolchain
+        run: scripts/bootstrap.sh
+
+      - name: Install tool shims
+        run: aspect tools install
+
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | ./.guardian/tools/bin/oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Publish bundle
+        run: |
+          export PATH="$PWD/.guardian/tools/bin:$PATH"
+          if tools/ci/bazel-repo-cache exists; then
+            echo "bundle for dependency fingerprint $(tools/ci/bazel-repo-cache fingerprint) already published"
+            exit 0
+          fi
+          bazelisk fetch --config=ci //...
+          tools/ci/bazel-repo-cache publish

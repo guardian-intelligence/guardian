@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Publishes and restores the Bazel repository cache as an OCI artifact on
+# ghcr, keyed by a fingerprint of every dependency-defining file. The gate
+# restores it when the Actions cache is cold, so upstream dependency hosts
+# are load-bearing only for archives newer than main's last bundle. Bazel
+# verifies each repository-cache hit against the sha256 declared in the
+# module files, so the bundle carries availability, never trust.
+set -euo pipefail
+
+image="${BAZEL_REPO_CACHE_IMAGE:-ghcr.io/guardian-intelligence/guardian/bazel-repo-cache}"
+repo_cache_dir="${BAZEL_REPO_CACHE_DIR:-$HOME/.cache/bazel-ci/repo}"
+
+fingerprint() {
+  git ls-files -z -- \
+    MODULE.bazel MODULE.bazel.lock .bazelversion go.mod go.sum \
+    '*.MODULE.bazel' '**/pnpm-lock.yaml' '**/Cargo.lock' \
+    src/tools/multitool.lock.json |
+    sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16
+}
+
+case "${1:?usage: bazel-repo-cache fingerprint|exists|publish|restore}" in
+  fingerprint)
+    fingerprint
+    ;;
+  exists)
+    oras manifest fetch "${image}:dep-$(fingerprint)" >/dev/null 2>&1
+    ;;
+  publish)
+    tag="dep-$(fingerprint)"
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+    tar -C "$repo_cache_dir" --zstd -cf "$work/repo-cache.tar.zst" .
+    (cd "$work" && oras push "${image}:${tag},latest" repo-cache.tar.zst)
+    ;;
+  restore)
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+    if ! (cd "$work" && oras pull "${image}:latest"); then
+      echo "no published bundle; falling back to upstream fetches" >&2
+      exit 0
+    fi
+    mkdir -p "$repo_cache_dir"
+    tar -C "$repo_cache_dir" --zstd -xf "$work/repo-cache.tar.zst"
+    ;;
+  *)
+    echo "usage: bazel-repo-cache fingerprint|exists|publish|restore" >&2
+    exit 64
+    ;;
+esac
