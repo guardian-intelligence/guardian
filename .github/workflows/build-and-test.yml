@@ -14,7 +14,6 @@ on:
 
 permissions:
   contents: read
-  packages: read
 
 defaults:
   run:
@@ -52,23 +51,6 @@ jobs:
           key: bazel-ci-${{ github.sha }}
           restore-keys: |
             bazel-ci-
-
-      # The durable floor under the Actions cache: on eviction, main's last
-      # published bundle refills the repository cache from ghcr instead of
-      # every upstream dependency host. Bazel verifies each cache hit
-      # against its pinned sha256, so the bundle carries availability, not
-      # trust — and PR runs still only read it (writes live in the
-      # bazel-repo-cache publisher lane).
-      - name: Restore repository-cache bundle
-        run: |
-          if [ -d ~/.cache/bazel-ci/repo ]; then
-            echo "Actions cache present; skipping bundle restore"
-            exit 0
-          fi
-          aspect tools install
-          export PATH="$PWD/.guardian/tools/bin:$PATH"
-          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
-          tools/ci/bazel-repo-cache restore
 
       - name: Build
         run: bazelisk build --config=ci //...
