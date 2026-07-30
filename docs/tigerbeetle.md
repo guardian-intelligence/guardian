@@ -9,8 +9,7 @@ asset scale, numeric registry, credit lifecycle, correction semantics, and
 payment-processor reconciliation contract.
 
 The deployment is one production cluster with three replicas. It is not a
-synthetic-only qualification cluster. [ADR 0011](adrs/0011-three-replica-tigerbeetle.md)
-records the accepted machine and site failure-domain constraint.
+synthetic-only qualification cluster.
 
 ## Fixed topology
 

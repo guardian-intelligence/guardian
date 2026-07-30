@@ -11,7 +11,6 @@ Companions:
 - [Storage](postflight-storage.md) — sticky disks, generations, sealing, locality
 - [Host](postflight-host.md) — hostd, the QEMU profile, the guest contract
 - [Runner lifecycle](postflight-runner-lifecycle.md) — the operational model per job
-- [ADR 0013](adrs/0013-bind-jobs-after-local-runner-assignment.md) — assignment is observed, never predicted
 
 ## Two SKU categories, three axes
 
@@ -87,7 +86,7 @@ GitHub webhooks/API ──► Control plane ──plans/prefetch──► hostd 
 1. **GitHub is the scheduler.** No internal workflow engine duplicates its
    DAG. Webhooks are hints (delivery and order are unreliable), the REST API
    is truth, the guest's locally observed assignment is the final fallback.
-2. **Assignment is observed, never predicted** (ADR 0013). All listeners
+2. **Assignment is observed, never predicted.** All listeners
    stay connected; GitHub picks one; the selected guest reports the binding
    before Runner.Worker exists; prepositioned plans mean the winner needs
    no round trip.
@@ -141,5 +140,5 @@ GitHub webhooks/API ──► Control plane ──plans/prefetch──► hostd 
   pointer CAS), so portable warmth would be a key-plane change, not a
   schema migration — adopted only on measured pull.
 - No QEMU fork.
-- No durable object-storage tier for customer state (ADR 0005, ADR 0009):
+- No durable object-storage tier for customer state:
   sticky disks are node-local NVMe; their loss is a cold build.

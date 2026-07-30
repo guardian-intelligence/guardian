@@ -19,7 +19,7 @@ data:
   #     trace-correlated (the ingest producer stamps correlation_id/route per
   #     span), which the lab measured as the layout that compresses best for
   #     this attribute structure (trace-adjacent 46.0 vs resource-first 61.5
-  #     B/span; docs/adrs/0002-analytics-event-storage-and-wire-contract.md).
+  #     B/span).
   #     Revisit on real spans.
   #   - 6-month TTL (traces are higher-volume, shorter-lived than the
   #     25-month business events).

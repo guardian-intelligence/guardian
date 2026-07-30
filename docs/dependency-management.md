@@ -1,7 +1,6 @@
 # Dependency management: proposers, tiers, and rollout safety
 
-See `supply-chain-design.md` for the first-party image trust model,
-`adrs/0003-validate-rendered-manifests.md` for Git-time invariants, and
+See `supply-chain-design.md` for the first-party image trust model and
 `renovate.json5` for executable policy.
 
 ## One proposer per pin
