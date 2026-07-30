@@ -20,10 +20,8 @@ from-nothing bring-up may require.
 
    Declare the printed fingerprint in
    `src/infrastructure/deployments/guardian/system/openbao-helmrelease.yaml`
-   (init-container key path + sha check, `current_key_id`, `current_key`) and
-   in `openBaoStaticSealKeyID` in
-   `src/infrastructure/tests/openbao_conformance_test.go`. Never print or
-   commit the key bytes.
+   (init-container key path + sha check, `current_key_id`, `current_key`).
+   Never print or commit the key bytes.
 2. **`custody.env`** — the operator keys (Cloudflare tokens, R2 credentials,
    account id, the rest of the `openbao_secret_import` schema) plus
    `tofu_state_encryption_passphrase`, the OpenTofu state-encryption
