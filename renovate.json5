@@ -115,6 +115,16 @@
       dependencyDashboardApproval: true,
     },
 
+    // Digest-only refreshes can never satisfy a cooldown: upstreams that
+    // republish faster than the window restart the clock on every branch
+    // update, and a bare digest often carries no release timestamp, which
+    // the stability gate also reads as "not met" — so these PRs pend
+    // forever. The tag pin took the soak; let its digest refresh flow.
+    {
+      matchUpdateTypes: ["digest"],
+      minimumReleaseAge: null,
+    },
+
     // Keycloak is pinned in two manifests (server + realm reconciler) that
     // must move together in one PR.
     {
