@@ -88,6 +88,7 @@ genrule(
     srcs = [
         ":node_modules/@playwright/test",
         ":sources",
+        "//src/products/viteplus-monorepo:tsconfig.base.json",
     ],
     outs = ["harness-runtime.tar"],
     cmd = """
@@ -102,6 +103,10 @@ for f in $(locations :sources); do
   mkdir -p "$$app/$$(dirname "$$rel")"
   cp "$$f" "$$app/$$rel"
 done
+# tsconfig.json extends ../../tsconfig.base.json; from /app that resolves to
+# /tsconfig.base.json, so the base rides at the image root. Playwright
+# resolves the extends chain at runtime and aborts on a missing file.
+cp "$(location //src/products/viteplus-monorepo:tsconfig.base.json)" "$$work/tsconfig.base.json"
 for d in $(locations :node_modules/@playwright/test); do
   case "$$d" in
     */node_modules/@playwright/test) dest="$$app/node_modules/@playwright/test" ;;
@@ -113,7 +118,7 @@ for d in $(locations :node_modules/@playwright/test); do
 done
 chmod -R u+w "$$work"
 tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \\
-  -cf "$$execroot/$@" -C "$$work" app
+  -cf "$$execroot/$@" -C "$$work" app tsconfig.base.json
 """,
 )
 
