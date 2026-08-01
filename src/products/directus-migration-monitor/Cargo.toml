@@ -1,0 +1,19 @@
+[package]
+name = "directus-migration-monitor"
+version = "0.1.0-pre"
+edition = "2024"
+rust-version = "1.97"
+description = "Read-only SSH progress checks for Directus and blog migrations"
+license = "Apache-2.0"
+repository = "https://github.com/guardian-intelligence/guardian"
+readme = "README.md"
+keywords = ["directus", "ssh", "monitoring", "cli"]
+categories = ["command-line-utilities"]
+publish = false
+
+[[bin]]
+name = "directus-migration-monitor"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }

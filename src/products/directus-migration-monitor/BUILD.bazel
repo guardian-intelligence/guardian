@@ -1,0 +1,22 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_clippy", "rust_test")
+
+rust_binary(
+    name = "directus-migration-monitor",
+    srcs = ["src/main.rs"],
+    edition = "2024",
+    rustc_env = {"CARGO_PKG_VERSION": "0.1.0-pre"},
+    visibility = ["//visibility:public"],
+    deps = ["@directus_migration_monitor_crates//:clap"],
+)
+
+rust_test(
+    name = "directus_migration_monitor_test",
+    crate = ":directus-migration-monitor",
+    edition = "2024",
+)
+
+rust_clippy(
+    name = "clippy",
+    testonly = True,
+    deps = [":directus-migration-monitor", ":directus_migration_monitor_test"],
+)
