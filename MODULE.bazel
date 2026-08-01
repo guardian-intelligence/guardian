@@ -268,11 +268,17 @@ oci.pull(
 # Stripe-hosted Checkout and propagates browser trace context across the
 # public edge. Playwright's pinned browser image carries Chromium plus the
 # exact shared-library and font set it requires.
+#
+# The tag must track the @playwright/test pin in the viteplus pnpm catalog:
+# Playwright refuses browser revisions from a different release, so a
+# tagless pull lets a digest-only refresh silently re-point at whatever the
+# registry's default tag holds and strand the npm side.
 oci.pull(
     name = "playwright",
-    digest = "sha256:02810c978d5396bf382ab6015c25ad6bed9e39f4a41c5b9c829e9fea439274e2",
+    digest = "sha256:b012874f829d298730411256666afcaeaeebaf505a0cf4c2f668d6dedb3d1e80",
     image = "mcr.microsoft.com/playwright",
     platforms = ["linux/amd64"],
+    tag = "v1.62.0-jammy",
 )
 use_repo(
     oci,
