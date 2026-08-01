@@ -1,0 +1,15 @@
+# Channel pins for Pipe to Remote Box. A pin names signed bytes already built
+# by pipe-to-remote-box-image.yml; the release cutter verifies those bytes and
+# their original build-time signatures before publishing them. Promotion is a
+# pointer move, never a rebuild or a re-sign.
+#
+# Every pin change must move the matching
+# releases.pipe-to-remote-box.<channel>.image entry in the release manifest in
+# the same commit. Kargo owns the nightly pointer and advances it only after
+# the exact edge digest passes the in-cluster OpenSSH deep test. Reviewed
+# release changes own rc and stable. A stable cut uses the first bare Cargo
+# version descended from a release candidate and therefore has a new digest.
+channels:
+  nightly: {}
+  rc: {}
+  stable: {}

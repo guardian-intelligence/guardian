@@ -36,5 +36,6 @@
 
 # Cargo output from the CLI crate's make path; Bazel builds elsewhere.
 /src/products/postflight-cli/target/
+/src/products/pipe-to-remote-box/target/
 
 *.pem__pycache__/

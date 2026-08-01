@@ -1,11 +1,12 @@
 # Supply-chain design: signing, SBOM, and the trust model
 
-Status: active as of 2026-07-03; reshaped 2026-07-22 — signing follows the
-publication boundary, so only what Guardian releases to users (the
-postflight CLI) is signed; cluster-internal images are governed by the
-merge gate and the admission backstop, not signatures. Complements
-`postflight-cli-distribution.md` (how the signed CLI artifact reaches
-users) and the cold-boot runbook (offline consumption).
+Status: active as of 2026-07-03; reshaped 2026-07-22 and extended 2026-07-31
+— signing follows the publication boundary, so public CLI artifacts are
+signed; cluster-internal images are governed by the merge gate and the
+admission backstop, not signatures. Complements
+`postflight-cli-distribution.md` and `pipe-to-remote-box-distribution.md`
+(how the signed CLI artifacts reach users) and the cold-boot runbook
+(offline consumption).
 
 ## The trust model in one paragraph
 
@@ -14,7 +15,7 @@ an `edge` tag on `ghcr.io/guardian-intelligence/*` is a merge to reviewed
 main history (the `images` workflow publishes on main pushes only), and the
 admission backstop requires every image the cluster runs to be digest-pinned
 from an allowlisted registry. Signatures exist where a consumer outside that
-loop needs them — the released postflight CLI: a cosign keyless signature
+loop needs them — the released CLI artifacts: a cosign keyless signature
 bound to the GitHub Actions OIDC workload identity via Fulcio and logged in
 Rekor, attesting "the reviewed main history of
 guardian-intelligence/guardian built this", plus Guardian's own
@@ -29,12 +30,16 @@ travel with the drive.
 ## Canonical identities
 
 Verifiers MUST pin these exact identity strings (OIDC issuer
-`https://token.actions.githubusercontent.com` for both):
+`https://token.actions.githubusercontent.com` for every keyless identity):
 
 - `postflight-cli` binaries, OCI artifact + SBOM attestations:
   `https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main`
 - `postflight-cli` `install.sh` release asset:
   `https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-release.yml@refs/heads/main`
+- `pipe-to-remote-box` binaries, OCI artifact + SBOM attestations:
+  `https://github.com/guardian-intelligence/guardian/.github/workflows/pipe-to-remote-box-image.yml@refs/heads/main`
+- `pipe-to-remote-box` `install.sh` release asset:
+  `https://github.com/guardian-intelligence/guardian/.github/workflows/pipe-to-remote-box-release.yml@refs/heads/main`
 - images.lock signature bundles:
   `https://github.com/guardian-intelligence/guardian/.github/workflows/images-lock-sign.yml@refs/heads/main`
 
@@ -53,6 +58,7 @@ identity can sign more than one artifact family.
 | Artifact | Producer | Signature/attestation | Location |
 |---|---|---|---|
 | `postflight-cli` binaries + OCI artifact | `postflight-cli-image` workflow on main | per-binary cosign keyless sign-blob bundles (travel inside the artifact layer), cosign keyless signature + SPDX SBOM attestation on the artifact digest | ghcr.io, attached to the digest; bundles republished with each GitHub Release |
+| `pipe-to-remote-box` binaries + OCI artifact | `pipe-to-remote-box-image` workflow on main | per-binary cosign keyless sign-blob bundles (travel inside the artifact layer), cosign keyless signature + SPDX SBOM attestation on the artifact digest | ghcr.io, attached to the digest; bundles republished with each GitHub Release |
 | every released digest (the release manifest) | in-cluster countersigner (`docs/registry-design.md`) | Guardian release countersignature (`openbao://guardian-images`, Rekor-logged, inclusion proof embedded in the bundle) as an OCI 1.1 referrer, minted only after the digest's Fulcio signature re-verifies | zot, attached to the digest; projected to ghcr by the release projector |
 | union images lock (generated) | `images-lock-sign` workflow on main pushes touching any union input (declared lock, manifest trees, the imageset tool) | derives the union with `//src/infrastructure/cmd/imageset`, then `cosign sign-blob --bundle` (embeds Fulcio cert + Rekor proof), pushed with `oras push` so the layer carries a filename title | `ghcr.io/guardian-intelligence/supply-chain:images.lock-<sha256>` (one tag per union hash, no floating tag; package stays private — only authenticated drive builds fetch it, dark bring-up reads it from the drive) |
 
@@ -114,11 +120,14 @@ through the main-protection ruleset's bypass. Post-push, the conformance
 suite still runs on main (loud-after-merge), the admission policy enforces
 digest pinning at apply time, and Flagger gates the rollout where a Canary
 exists. Third-party workload images are ordinary dependencies: Renovate
-proposes their bumps as reviewed PRs. The one Kargo lane left is the
-postflight CLI release train, whose Stage pushes the channel-pin commit
-straight to main through the same bypass; its channel ladder, the
-rc/stable cut ceremony, and the rule that promotion never re-signs are in
-`postflight-cli-distribution.md`.
+proposes their bumps as reviewed PRs. Kargo's remaining lanes are the public
+CLI release trains. Their Stages push nightly channel-pin commits straight to
+main through the same bypass only after a digest-bound deep test. Postflight's
+channel ladder, rc/stable cut ceremony, and the rule that promotion never
+re-signs are in `postflight-cli-distribution.md`. Pipe to Remote Box uses the
+same sign-once and release-manifest controls, with a real-OpenSSH deep test for
+the exact digest and reviewed rc/stable moves. See
+`pipe-to-remote-box-distribution.md`.
 
 The ruleset (required checks + the bot bypass) is the enforcement's
 load-bearing half and lives outside Git — it is described and applied by
@@ -137,6 +146,10 @@ than a violation.
 ## Verification
 
 Online (any machine):
+
+The example names Postflight; substitute the Pipe to Remote Box identity and
+`ghcr.io/guardian-intelligence/pipe-to-remote-box` repository when verifying
+that artifact family.
 
 ```sh
 cosign verify \

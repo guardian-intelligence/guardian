@@ -1,6 +1,6 @@
-# The postflight CLI release train — Kargo's only remaining lane. Cluster
-# workload pins are moved by Flux image automation (deployments/guardian/
-# imageops); third-party images are Renovate's like any other dependency.
+# Public CLI release trains are Kargo's remaining lanes. Cluster workload pins
+# are moved by Flux image automation (deployments/guardian/imageops);
+# third-party images are Renovate's like any other dependency.
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Project
 metadata:

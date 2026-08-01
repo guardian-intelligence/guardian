@@ -3,16 +3,19 @@
 # consume, not the images the cluster happens to run. The release projector
 # verifies each digest's Guardian countersignature in zot against the
 # committed public key and projects it — signature included — to the ghcr
-# path in the ref. Lanes mirror the CLI release channels: the nightly
-# promotion PR bumps this lane in the same commit as
-# src/products/postflight-cli/release/channels.yaml, and
-# TestReleaseManifestCoversReleaseChannels holds every hand-made bump to the
-# same rule.
+# path in the ref. Lanes mirror each CLI's release channels: every promotion
+# moves this file in the same commit as that product's channels.yaml, and
+# TestReleaseManifestCoversReleaseChannels holds both automated and reviewed
+# bumps to the same rule.
 #
 # This file is a configMapGenerator input, not a Kubernetes resource; the
 # `image:` leaf keys are deliberate — the imageset extractor enforces digest
 # pinning on them and carries the refs into the image union.
 releases:
+  # The lane is intentionally empty until the first reviewed channel pin.
+  # Once a digest is promoted, its matching channel entry moves here in the
+  # same commit so the countersigner and release projector cover it.
+  pipe-to-remote-box: {}
   postflight-cli:
     nightly:
       image: ghcr.io/guardian-intelligence/postflight-cli@sha256:95d8844ed6b664a2da8e88463490088762b7da5f5cce12cd7dbdb83f13a28381

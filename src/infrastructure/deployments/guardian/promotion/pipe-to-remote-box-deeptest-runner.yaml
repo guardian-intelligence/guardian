@@ -1,0 +1,787 @@
+# Pipe to Remote Box pre-promotion proof. The verifier resolves :edge, verifies
+# its signed OCI/SBOM/blob chain and exact object shape, and only then exposes
+# the native binary and signed _canary/sshd fixture to the journey container.
+# The journey uses the real OpenSSH client with ephemeral loopback keys; no
+# remote account, standing credential, or Kubernetes API token is present.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipe-to-remote-box-deeptest-runner
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: pipe-to-remote-box-deeptest-runner
+    app.kubernetes.io/part-of: guardian
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  extract-cosign.sh: |
+    #!/bin/sh
+    set -eu
+    REGISTRY=ghcr.io
+    REPO="${COSIGN_IMAGE#ghcr.io/}"
+    REPO="${REPO%%[@:]*}"
+    DIGEST="${COSIGN_IMAGE##*@}"
+    cd /tmp || exit 1
+    token="$(curl -fsS "https://$REGISTRY/token?service=$REGISTRY&scope=repository:$REPO:pull" | jq -r .token)"
+    test -n "$token" && test "$token" != null
+    fetch_manifest() {
+      curl -fsS -H "Authorization: Bearer $token" \
+        -H 'Accept: application/vnd.oci.image.index.v1+json' \
+        -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+        "https://$REGISTRY/v2/$REPO/manifests/$1"
+    }
+    fetch_manifest "$DIGEST" > root.json
+    echo "${DIGEST#sha256:}  root.json" | sha256sum -c - >/dev/null
+    case "$(jq -r .mediaType root.json)" in
+      application/vnd.oci.image.index.v1+json|application/vnd.docker.distribution.manifest.list.v2+json)
+        arch_digest="$(jq -r '.manifests[] | select(.platform.os=="linux" and .platform.architecture=="amd64") | .digest' root.json | head -1)"
+        fetch_manifest "$arch_digest" > manifest.json
+        echo "${arch_digest#sha256:}  manifest.json" | sha256sum -c - >/dev/null
+        ;;
+      *) cp root.json manifest.json ;;
+    esac
+    for layer in $(jq -r '.layers[].digest' manifest.json); do
+      curl -fsSL -H "Authorization: Bearer $token" \
+        "https://$REGISTRY/v2/$REPO/blobs/$layer" -o layer.tgz
+      echo "${layer#sha256:}  layer.tgz" | sha256sum -c - >/dev/null
+      member="$(tar tzf layer.tgz 2>/dev/null | grep -E '^/?ko-app/cosign$' || true)"
+      if [ -n "$member" ]; then
+        tar xzOf layer.tgz "$member" > /tools-bin/cosign
+        chmod 0755 /tools-bin/cosign
+      fi
+      rm -f layer.tgz
+    done
+    rm -f root.json manifest.json
+    /tools-bin/cosign version
+
+  verify-artifact.sh: |
+    #!/bin/bash
+    set -uo pipefail
+    REGISTRY=ghcr.io
+    REPO=guardian-intelligence/pipe-to-remote-box
+    IMAGE_REPO="$REGISTRY/$REPO"
+    BUILD_IDENTITY=https://github.com/guardian-intelligence/guardian/.github/workflows/pipe-to-remote-box-image.yml@refs/heads/main
+    ISSUER=https://token.actions.githubusercontent.com
+    EXPECTED_PROBE_SHA256=29cace58ddd742a3f404983218b4665181dbe8a306185465af8af7415139e803
+    EXPECTED_LICENSE_SHA256=cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
+    COSIGN=/tools-bin/cosign
+    TRUSTED_ROOT=/trusted-root/sigstore-trusted-root.json
+    TARGETS="x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin"
+    export HOME=/tmp
+    export LC_ALL=C
+    cd /tmp || exit 1
+    : > /work/checks
+    printf 'unresolved\n' > /work/digest
+    printf '0\n' > /work/trusted
+    printf '0\n' > /work/edge-seen
+    verified=1
+
+    record() {
+      printf '%s %s\n' "$1" "$2" >> /work/checks
+      [ "$2" = 1 ] || verified=0
+    }
+    zero_artifact_checks() {
+      record layers 0
+      record binaries_digest 0
+      record fixture_digest 0
+      record fixture_notices_digest 0
+      record license_digest 0
+      record remote_probe_digest 0
+      record fixture_notice 0
+      record blob_signatures 0
+      record structure 0
+      record revision 0
+    }
+
+    token="$(curl -fsS "https://$REGISTRY/token?service=$REGISTRY&scope=repository:$REPO:pull" 2>/dev/null | jq -r '.token // empty' 2>/dev/null || true)"
+    if [ -z "$token" ] || ! curl -fsS -H "Authorization: Bearer $token" \
+      -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+      -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+      "https://$REGISTRY/v2/$REPO/manifests/edge" -o manifest.json; then
+      echo "cannot resolve $IMAGE_REPO:edge"
+      exit 0
+    fi
+    digest="sha256:$(sha256sum manifest.json | cut -d' ' -f1)"
+    printf '%s\n' "$digest" > /work/digest
+    date -u +%s > /work/edge-seen
+    record edge_resolved 1
+
+    image_sig=1
+    "$COSIGN" verify --new-bundle-format=false \
+      --certificate-identity "$BUILD_IDENTITY" \
+      --certificate-oidc-issuer "$ISSUER" \
+      --trusted-root "$TRUSTED_ROOT" \
+      "$IMAGE_REPO@$digest" >/dev/null 2>&1 || image_sig=0
+    record image_signature "$image_sig"
+
+    sbom=1
+    "$COSIGN" verify-attestation --new-bundle-format=false --type spdxjson \
+      --certificate-identity "$BUILD_IDENTITY" \
+      --certificate-oidc-issuer "$ISSUER" \
+      --trusted-root "$TRUSTED_ROOT" \
+      "$IMAGE_REPO@$digest" >/dev/null 2>&1 || sbom=0
+    record sbom_attestation "$sbom"
+
+    # Never extract or execute bytes from an artifact whose signed identity and
+    # SBOM attestation did not verify.
+    if [ "$image_sig" != 1 ] || [ "$sbom" != 1 ]; then
+      zero_artifact_checks
+      exit 0
+    fi
+
+    rm -rf /work/stage
+    mkdir -p /work/stage
+    layers=1
+    while IFS= read -r layer; do
+      if ! curl -fsSL -H "Authorization: Bearer $token" \
+        "https://$REGISTRY/v2/$REPO/blobs/$layer" -o layer.tar; then
+        layers=0
+        break
+      fi
+      if ! echo "${layer#sha256:}  layer.tar" | sha256sum -c - >/dev/null; then
+        echo "layer $layer does not match its manifest digest"
+        layers=0
+        break
+      fi
+      unsafe=0
+      while IFS= read -r member; do
+        case "$member" in
+          /*|../*|*/../*|*/..) unsafe=1 ;;
+        esac
+      done < <(tar -tf layer.tar 2>/dev/null || { unsafe=1; false; })
+      if [ "$unsafe" != 0 ] \
+        || tar -tvf layer.tar 2>/dev/null | awk 'substr($0,1,1)!="-" && substr($0,1,1)!="d" { bad=1 } END { exit bad }'; then
+        :
+      else
+        unsafe=1
+      fi
+      if [ "$unsafe" != 0 ] \
+        || ! tar --no-same-owner -xf layer.tar -C /work/stage; then
+        echo "layer $layer has an unsafe or unreadable archive shape"
+        layers=0
+        break
+      fi
+      rm -f layer.tar
+    done < <(jq -r '.layers[].digest' manifest.json)
+    rm -f layer.tar
+    record layers "$layers"
+    if [ "$layers" != 1 ]; then
+      record binaries_digest 0
+      record fixture_digest 0
+      record fixture_notices_digest 0
+      record license_digest 0
+      record remote_probe_digest 0
+      record fixture_notice 0
+      record blob_signatures 0
+      record structure 0
+      record revision 0
+      exit 0
+    fi
+
+    claimed_binaries="$(jq -r '.annotations["org.guardian.binaries-digest"] // empty' manifest.json)"
+    recomputed_binaries="$(for target in $TARGETS; do
+      sha256sum "/work/stage/$target/pipe-to-remote-box" 2>/dev/null | cut -d' ' -f1
+    done | sha256sum | cut -d' ' -f1)"
+    binaries_ok=1
+    [ "$claimed_binaries" = "$recomputed_binaries" ] \
+      && [[ "$claimed_binaries" =~ ^[a-f0-9]{64}$ ]] || binaries_ok=0
+    record binaries_digest "$binaries_ok"
+
+    claimed_fixture="$(jq -r '.annotations["org.guardian.canary-fixture-digest"] // empty' manifest.json)"
+    actual_fixture="$(sha256sum /work/stage/_canary/sshd 2>/dev/null | cut -d' ' -f1 || true)"
+    fixture_ok=1
+    [ "$claimed_fixture" = "$actual_fixture" ] \
+      && [[ "$claimed_fixture" =~ ^[a-f0-9]{64}$ ]] || fixture_ok=0
+    record fixture_digest "$fixture_ok"
+
+    claimed_notices="$(jq -r '.annotations["org.guardian.canary-notices-digest"] // empty' manifest.json)"
+    actual_notices="$(sha256sum /work/stage/_canary/THIRD_PARTY_LICENSES.md 2>/dev/null | cut -d' ' -f1 || true)"
+    notices_digest_ok=1
+    [ "$claimed_notices" = "$actual_notices" ] \
+      && [[ "$claimed_notices" =~ ^[a-f0-9]{64}$ ]] || notices_digest_ok=0
+    record fixture_notices_digest "$notices_digest_ok"
+
+    claimed_license="$(jq -r '.annotations["org.guardian.license-digest"] // empty' manifest.json)"
+    actual_license="$(sha256sum /work/stage/LICENSE 2>/dev/null | cut -d' ' -f1 || true)"
+    license_ok=1
+    [ "$claimed_license" = "$actual_license" ] \
+      && [ "$claimed_license" = "$EXPECTED_LICENSE_SHA256" ] || license_ok=0
+    record license_digest "$license_ok"
+
+    claimed_probe="$(jq -r '.annotations["org.guardian.remote-probe-digest"] // empty' manifest.json)"
+    probe_ok=1
+    [ "$claimed_probe" = "$EXPECTED_PROBE_SHA256" ] || probe_ok=0
+    record remote_probe_digest "$probe_ok"
+
+    notice_ok=1
+    grep -qxF 'Copyright 2009 The Go Authors.' \
+      /work/stage/_canary/THIRD_PARTY_LICENSES.md 2>/dev/null || notice_ok=0
+    record fixture_notice "$notice_ok"
+
+    blobs=1
+    for target in $TARGETS; do
+      "$COSIGN" verify-blob \
+        --bundle "/work/stage/$target/pipe-to-remote-box.sigstore.json" \
+        --certificate-identity "$BUILD_IDENTITY" \
+        --certificate-oidc-issuer "$ISSUER" \
+        "/work/stage/$target/pipe-to-remote-box" >/dev/null 2>&1 || blobs=0
+    done
+    record blob_signatures "$blobs"
+
+    expected="$({
+      for target in $TARGETS; do
+        printf '%s\n' "$target/pipe-to-remote-box" "$target/pipe-to-remote-box.sigstore.json"
+      done
+      printf '%s\n' 'LICENSE' '_canary/sshd' '_canary/THIRD_PARTY_LICENSES.md'
+    } | sort)"
+    actual="$(cd /work/stage && find . -type f | sed 's#^\./##' | sort)"
+    structure=1
+    [ "$actual" = "$expected" ] || structure=0
+    if find /work/stage -type l | grep -q .; then structure=0; fi
+    field() { od -An -tx1 -N"$2" -j"$3" "$1" | tr -d ' \n'; }
+    for target in $TARGETS; do
+      case "$target" in
+        x86_64-unknown-linux-musl)  magic=7f454c46; arch=3e00; at=18; len=2 ;;
+        aarch64-unknown-linux-musl) magic=7f454c46; arch=b700; at=18; len=2 ;;
+        x86_64-apple-darwin)        magic=cffaedfe; arch=07000001; at=4; len=4 ;;
+        aarch64-apple-darwin)       magic=cffaedfe; arch=0c000001; at=4; len=4 ;;
+        *) structure=0; continue ;;
+      esac
+      binary="/work/stage/$target/pipe-to-remote-box"
+      [ -s "$binary" ] && [ "$(field "$binary" 4 0)" = "$magic" ] \
+        && [ "$(field "$binary" "$len" "$at")" = "$arch" ] || structure=0
+    done
+    [ -x /work/stage/_canary/sshd ] || structure=0
+    record structure "$structure"
+
+    revision="$(jq -r '.annotations["org.opencontainers.image.revision"] // empty' manifest.json)"
+    revision_ok=1
+    [[ "$revision" =~ ^[a-f0-9]{40}$ ]] || revision_ok=0
+    record revision "$revision_ok"
+
+    if [ "$verified" = 1 ]; then
+      printf '1\n' > /work/trusted
+    fi
+
+  journey.sh: |
+    #!/bin/bash
+    set -uo pipefail
+    VMINSERT=http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus
+    BINARY=/work/stage/x86_64-unknown-linux-musl/pipe-to-remote-box
+    SSHD=/work/stage/_canary/sshd
+    EXPECTED_PROBE_SHA256=29cace58ddd742a3f404983218b4665181dbe8a306185465af8af7415139e803
+    HOME_DIR=/tmp/home
+    FIXTURE=/tmp/fixture
+    export LC_ALL=C
+    failed=0
+    metrics_failed=0
+
+    push() {
+      curl -fsS --retry 3 --max-time 15 --data-binary "$1" "$VMINSERT" \
+        || { echo "could not write metric: $1"; metrics_failed=1; }
+    }
+    beat() { push "guardian_pipe_to_remote_box_deeptest_heartbeat 1"; }
+    record() {
+      echo "check $1 = $2"
+      push "guardian_pipe_to_remote_box_deeptest_check{digest=\"$digest\",check=\"$1\"} $2"
+      [ "$2" = 1 ] || failed=1
+    }
+    finish() {
+      local pass=1
+      [ "$failed" = 0 ] || pass=0
+      push "guardian_pipe_to_remote_box_deeptest_pass{digest=\"$digest\"} $pass"
+      push "guardian_pipe_to_remote_box_deeptest_edge_seen_seconds{digest=\"$digest\"} $edge_seen"
+      beat
+      [ "$metrics_failed" = 0 ] || return 1
+      if [ "$pass" = 1 ]; then
+        echo "Pipe to Remote Box deep test PASSED for $digest"
+      else
+        echo "Pipe to Remote Box deep test FAILED for $digest"
+      fi
+    }
+
+    digest="$(cat /work/digest 2>/dev/null || true)"
+    edge_seen="$(cat /work/edge-seen 2>/dev/null || printf 0)"
+    if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || [[ ! "$edge_seen" =~ ^[0-9]+$ ]]; then
+      echo "the verifier could not resolve an edge digest"
+      beat
+      exit 1
+    fi
+    while read -r name value; do
+      [[ "$name" =~ ^[a-z_]+$ && "$value" =~ ^[01]$ ]] \
+        || { echo "malformed verifier result"; beat; exit 1; }
+      record "$name" "$value"
+    done < /work/checks
+    if [ "$(cat /work/trusted 2>/dev/null || true)" != 1 ]; then
+      finish
+      exit $?
+    fi
+
+    mkdir -p "$HOME_DIR/.ssh" "$FIXTURE/keys" /tmp/remote
+    chmod 0700 "$HOME_DIR/.ssh"
+
+    ssh-keygen -q -t ed25519 -N '' -f "$FIXTURE/keys/host"
+    ssh-keygen -q -t ed25519 -N '' -f "$FIXTURE/keys/client"
+    ssh-keygen -q -t ed25519 -N '' -f "$FIXTURE/keys/wrong-host"
+    host_public="$(awk '{print $1, $2}' "$FIXTURE/keys/host.pub")"
+    wrong_public="$(awk '{print $1, $2}' "$FIXTURE/keys/wrong-host.pub")"
+    sequence=0
+    server_pid=
+    ready=
+    probe_log=
+    trap 'if [ -n "${server_pid:-}" ]; then kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; fi' EXIT INT TERM
+
+    quote_argument() {
+      node - "$1" <<'NODE'
+    const value = process.argv[2];
+    process.stdout.write("'" + value.split("'").join("'\\''") + "'");
+    NODE
+    }
+    start_server() {
+      local directory="$1" mode="$2"
+      local expected
+      expected="sh -s -- $(quote_argument "$directory")"
+      sequence=$((sequence + 1))
+      ready="$FIXTURE/ready-$sequence"
+      probe_log="$FIXTURE/probe-$sequence"
+      rm -f "$ready" "$probe_log"
+      args=(--host-key "$FIXTURE/keys/host" \
+        --authorized-key "$FIXTURE/keys/client.pub" \
+        --ready-file "$ready" --expected-command "$expected" \
+        --stdin-sha256-file "$probe_log")
+      [ "$mode" = hang ] && args+=(--hang)
+      PATH=/usr/bin:/bin "$SSHD" "${args[@]}" >"$FIXTURE/server-$sequence.out" \
+        2>"$FIXTURE/server-$sequence.err" &
+      server_pid=$!
+      for _ in $(seq 1 100); do
+        [ -s "$ready" ] && return 0
+        if ! kill -0 "$server_pid" 2>/dev/null; then
+          wait "$server_pid" 2>/dev/null || true
+          server_pid=
+          return 1
+        fi
+        sleep 0.05
+      done
+      stop_server
+      return 1
+    }
+    configure_client() {
+      local key="$1" port
+      port="$(sed 's/^.*://' "$ready")"
+      if [ "$key" = correct ]; then
+        printf '[127.0.0.1]:%s %s\n' "$port" "$host_public" > "$FIXTURE/known_hosts"
+      else
+        printf '[127.0.0.1]:%s %s\n' "$port" "$wrong_public" > "$FIXTURE/known_hosts"
+      fi
+      cat > "$HOME_DIR/.ssh/config" <<EOF
+    Host canary-box
+      HostName 127.0.0.1
+      Port $port
+      User canary
+      IdentityFile $FIXTURE/keys/client
+      IdentitiesOnly yes
+      UserKnownHostsFile $FIXTURE/known_hosts
+      StrictHostKeyChecking yes
+      LogLevel ERROR
+    EOF
+      chmod 0600 "$HOME_DIR/.ssh/config" "$FIXTURE/known_hosts"
+    }
+    invoke() {
+      env -i HOME="$HOME_DIR" PATH=/usr/bin:/bin LC_ALL=C LANG=C \
+        "$BINARY" --host canary-box --directory "$1" --timeout "$2"
+    }
+    stop_server() {
+      kill "$server_pid" 2>/dev/null || true
+      wait "$server_pid" 2>/dev/null || true
+      server_pid=
+    }
+    tree_snapshot() {
+      local root="$1"
+      (
+        cd "$root" || exit 1
+        find . -xdev -printf '%y %m %T@ %p -> %l\n' | sort
+        find . -xdev -type f -print0 | sort -z | xargs -0 -r sha256sum
+        if [ -d "$selected/.git" ]; then
+          GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_OPTIONAL_LOCKS=0 \
+            git --no-optional-locks -C "$selected" status --porcelain=v1 --untracked-files=all
+        fi
+      ) | sha256sum | cut -d' ' -f1
+    }
+    path_hex() { printf %s "$1" | od -An -v -tx1 | tr -d ' \n'; }
+
+    version_ok=1
+    version="$(env -i PATH=/usr/bin:/bin LC_ALL=C "$BINARY" --version 2>/dev/null || true)"
+    [[ "$version" =~ ^pipe-to-remote-box\ [0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || version_ok=0
+    record version "$version_ok"
+
+    selected="/tmp/remote/dir with ' quote;touch PWNED;\$(touch PWNED2)"
+    outside=/tmp/remote/outside
+    mkdir -p "$selected/one/deep" "$outside"
+    printf 'draft\n' > "$selected/draft.txt"
+    printf 'nested\n' > "$selected/one/nested.txt"
+    printf 'too deep\n' > "$selected/one/deep/too-deep.txt"
+    printf 'outside\n' > "$outside/secret.txt"
+    ln -s "$outside" "$selected/outside-link"
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git init -q "$selected"
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C "$selected" config user.name canary
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C "$selected" config user.email canary@example.invalid
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C "$selected" add .
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -C "$selected" commit -qm canary
+    revision="$(git -C "$selected" rev-parse HEAD)"
+    commit_time="$(git -C "$selected" log -1 --format=%ct)"
+    rm -f /tmp/PWNED /tmp/PWNED2
+
+    before="$(tree_snapshot /tmp/remote)"
+    transport=1
+    start_server "$selected" normal || transport=0
+    if [ "$transport" = 1 ]; then
+      configure_client correct
+      invoke "$selected" 5 > "$FIXTURE/report" 2> "$FIXTURE/report.err" || transport=0
+      wait "$server_pid" || transport=0
+      server_pid=
+    fi
+    grep -qxF "directory=$selected" "$FIXTURE/report" 2>/dev/null || transport=0
+    grep -qxF 'status=present' "$FIXTURE/report" 2>/dev/null || transport=0
+    grep -qxF 'entries=4' "$FIXTURE/report" 2>/dev/null || transport=0
+    grep -qxF "git_revision=$revision" "$FIXTURE/report" 2>/dev/null || transport=0
+    grep -qxF "git_commit_time=$commit_time" "$FIXTURE/report" 2>/dev/null || transport=0
+    [ ! -e /tmp/PWNED ] && [ ! -e /tmp/PWNED2 ] || transport=0
+    record ssh_transport "$transport"
+
+    probe_ok=1
+    [ "$(tr -d '\n' < "$probe_log" 2>/dev/null || true)" = "$EXPECTED_PROBE_SHA256" ] || probe_ok=0
+    record fixed_probe "$probe_ok"
+
+    boundaries=1
+    grep -qxF "$(path_hex "$selected/draft.txt")" "$FIXTURE/report" || boundaries=0
+    grep -qxF "$(path_hex "$selected/one/nested.txt")" "$FIXTURE/report" || boundaries=0
+    if grep -qxF "$(path_hex "$selected/one/deep/too-deep.txt")" "$FIXTURE/report" \
+      || grep -qxF "$(path_hex "$outside/secret.txt")" "$FIXTURE/report"; then
+      boundaries=0
+    fi
+    record directory_boundaries "$boundaries"
+    after="$(tree_snapshot /tmp/remote)"
+    normal_immutable=1
+    [ "$before" = "$after" ] || normal_immutable=0
+
+    missing="$selected/missing"
+    missing_ok=1
+    start_server "$missing" normal || missing_ok=0
+    if [ "$missing_ok" = 1 ]; then
+      configure_client correct
+      if invoke "$missing" 5 > "$FIXTURE/missing.out" 2> "$FIXTURE/missing.err"; then missing_ok=0; fi
+      wait "$server_pid" || true
+      server_pid=
+    fi
+    grep -qxF 'status=missing' "$FIXTURE/missing.out" 2>/dev/null || missing_ok=0
+    grep -q 'explicitly selected remote directory does not exist' "$FIXTURE/missing.err" 2>/dev/null || missing_ok=0
+    record missing_directory "$missing_ok"
+
+    file_path="$selected/draft.txt"
+    file_ok=1
+    start_server "$file_path" normal || file_ok=0
+    if [ "$file_ok" = 1 ]; then
+      configure_client correct
+      if invoke "$file_path" 5 > "$FIXTURE/file.out" 2> "$FIXTURE/file.err"; then file_ok=0; fi
+      wait "$server_pid" || true
+      server_pid=
+    fi
+    grep -qxF 'status=not-a-directory' "$FIXTURE/file.out" 2>/dev/null || file_ok=0
+    grep -q 'explicitly selected remote path is not a directory' "$FIXTURE/file.err" 2>/dev/null || file_ok=0
+    record not_directory "$file_ok"
+
+    host_key_ok=1
+    start_server "$selected" normal || host_key_ok=0
+    if [ "$host_key_ok" = 1 ]; then
+      configure_client wrong
+      if invoke "$selected" 2 > "$FIXTURE/host-key.out" 2> "$FIXTURE/host-key.err"; then host_key_ok=0; fi
+      wait "$server_pid" 2>/dev/null || true
+      server_pid=
+    fi
+    grep -q 'Host key verification failed' "$FIXTURE/host-key.err" 2>/dev/null || host_key_ok=0
+    [ ! -e "$probe_log" ] || host_key_ok=0
+    record strict_host_key "$host_key_ok"
+
+    timeout_ok=1
+    start_server "$selected" hang || timeout_ok=0
+    if [ "$timeout_ok" = 1 ]; then
+      configure_client correct
+      timeout_before="$(tree_snapshot /tmp/remote)"
+      started="$(date +%s%3N)"
+      timeout 5 env -i HOME="$HOME_DIR" PATH=/usr/bin:/bin LC_ALL=C LANG=C \
+        "$BINARY" --host canary-box --directory "$selected" --timeout 1 \
+        > "$FIXTURE/timeout.out" 2> "$FIXTURE/timeout.err"
+      status=$?
+      elapsed=$(( $(date +%s%3N) - started ))
+      [ "$status" -ne 0 ] && [ "$status" -ne 124 ] || timeout_ok=0
+      [ "$elapsed" -ge 800 ] && [ "$elapsed" -lt 3500 ] || timeout_ok=0
+      grep -q 'end-to-end deadline' "$FIXTURE/timeout.err" || timeout_ok=0
+      for _ in $(seq 1 20); do [ -s "$probe_log" ] && break; sleep 0.05; done
+      [ "$(tr -d '\n' < "$probe_log" 2>/dev/null || true)" = "$EXPECTED_PROBE_SHA256" ] || timeout_ok=0
+      sleep 0.1
+      pgrep -x ssh >/dev/null 2>&1 && timeout_ok=0
+      stop_server
+      timeout_after="$(tree_snapshot /tmp/remote)"
+      [ "$timeout_before" = "$timeout_after" ] || timeout_ok=0
+    fi
+    record timeout "$timeout_ok"
+
+    final_after="$(tree_snapshot /tmp/remote)"
+    immutable=1
+    [ "$normal_immutable" = 1 ] && [ "$before" = "$final_after" ] \
+      && [ "${timeout_before:-x}" = "${timeout_after:-y}" ] \
+      && [ ! -e /tmp/PWNED ] && [ ! -e /tmp/PWNED2 ] || immutable=0
+    record no_mutation "$immutable"
+
+    finish
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pipe-to-remote-box-deeptest-runner
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: pipe-to-remote-box-deeptest-runner
+    app.kubernetes.io/part-of: guardian
+spec:
+  schedule: "20 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 900
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: pipe-to-remote-box-deeptest-runner
+            app.kubernetes.io/part-of: guardian
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          terminationGracePeriodSeconds: 5
+          nodeSelector:
+            kubernetes.io/arch: amd64
+          securityContext:
+            runAsNonRoot: true
+            runAsGroup: 65534
+            fsGroup: 65534
+            fsGroupChangePolicy: OnRootMismatch
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: extract-cosign
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/sh", "/scripts/extract-cosign.sh"]
+              env:
+                - name: COSIGN_IMAGE
+                  value: "ghcr.io/sigstore/cosign/cosign:v3.1.2@sha256:d91bc4e7e95e8d2f549c747a72dc174f90579e410a1695f57f686674f84ce849"
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsUser: 65534
+                runAsGroup: 65534
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                  ephemeral-storage: 512Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+                  ephemeral-storage: 1Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tools-bin
+                  mountPath: /tools-bin
+                - name: tmp
+                  mountPath: /tmp
+            - name: verify-artifact
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/bash", "/scripts/verify-artifact.sh"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsUser: 65534
+                runAsGroup: 65534
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                  ephemeral-storage: 512Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+                  ephemeral-storage: 2Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tools-bin
+                  mountPath: /tools-bin
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+                - name: trusted-root
+                  mountPath: /trusted-root
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          containers:
+            - name: journey
+              # Reuse Guardian's existing digest-pinned journey runtime. It is
+              # built from the repository-pinned Playwright base and carries
+              # real OpenSSH, ssh-keygen, git, Node/npm, and GNU coreutils.
+              image: ghcr.io/guardian-intelligence/canary-journeys:edge@sha256:bad66489e28a4821ac3fc4782e9cbf7b1ee5855dc9a4ca2b407df7981bd1fbc1
+              command: ["/bin/bash", "/scripts/journey.sh"]
+              workingDir: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsUser: 10001
+                runAsGroup: 65534
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                  ephemeral-storage: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+                  ephemeral-storage: 1Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: scripts
+              configMap:
+                name: pipe-to-remote-box-deeptest-runner
+                defaultMode: 0555
+            - name: tools-bin
+              emptyDir: {}
+            - name: work
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
+            - name: trusted-root
+              configMap:
+                name: sigstore-trusted-root
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: pipe-to-remote-box-deeptest-runner
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: pipe-to-remote-box-deeptest-runner
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: pipe-to-remote-box-deeptest-runner
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-pipe-to-remote-box-deeptest-runner
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: guardian-analytics
+            k8s:app.kubernetes.io/name: pipe-to-remote-box-deeptest-runner
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: pipe-to-remote-box-deeptest-runner
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: pipe-to-remote-box-deeptest-runner
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: pipe-to-remote-box-deeptest-runner.rules
+      interval: 60s
+      rules:
+        - alert: GuardianPipeToRemoteBoxDeeptestSilent
+          expr: >-
+            absent_over_time(guardian_pipe_to_remote_box_deeptest_heartbeat[3h])
+            and on() (time() - max(kube_cronjob_status_last_schedule_time{
+              namespace="guardian-analytics", cronjob="pipe-to-remote-box-deeptest-runner"}) > 1800)
+          labels:
+            severity: warning
+            guardian_component: pipe-to-remote-box-release-train
+          annotations:
+            summary: "Pipe to Remote Box deep test has been silent for 3h"
+            description: >-
+              No deep-test heartbeat has arrived. Check the newest
+              pipe-to-remote-box-deeptest-runner Job in guardian-analytics.
+        - alert: GuardianPipeToRemoteBoxDeeptestFailing
+          expr: >-
+            last_over_time(guardian_pipe_to_remote_box_deeptest_pass[90m]) == 0
+            and on(digest)
+            (last_over_time(guardian_pipe_to_remote_box_deeptest_edge_seen_seconds[90m])
+            == scalar(max(last_over_time(guardian_pipe_to_remote_box_deeptest_edge_seen_seconds[90m]))))
+          labels:
+            severity: warning
+            guardian_component: pipe-to-remote-box-release-train
+          annotations:
+            summary: "Pipe to Remote Box edge digest failed its deep test"
+            description: >-
+              The exact digest currently eligible for nightly promotion has a
+              failing verdict. guardian_pipe_to_remote_box_deeptest_check names
+              the failed invariant; Kargo will not advance this digest.

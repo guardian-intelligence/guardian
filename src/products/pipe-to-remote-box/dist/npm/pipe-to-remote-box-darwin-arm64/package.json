@@ -1,0 +1,19 @@
+{
+  "name": "@guardian-intelligence/pipe-to-remote-box-darwin-arm64",
+  "version": "0.0.0-dev",
+  "description": "The macOS arm64 binary for Pipe to Remote Box.",
+  "homepage": "https://github.com/guardian-intelligence/guardian/tree/main/src/products/pipe-to-remote-box",
+  "bugs": "https://github.com/guardian-intelligence/guardian/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guardian-intelligence/guardian.git",
+    "directory": "src/products/pipe-to-remote-box/dist/npm/pipe-to-remote-box-darwin-arm64"
+  },
+  "license": "Apache-2.0",
+  "files": ["bin", "LICENSE", "THIRD_PARTY_LICENSES.md"],
+  "engines": { "node": ">=20" },
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "preferUnplugged": true,
+  "publishConfig": { "access": "public" }
+}

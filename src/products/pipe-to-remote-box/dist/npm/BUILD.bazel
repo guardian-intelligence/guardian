@@ -1,0 +1,24 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+filegroup(
+    name = "packages",
+    srcs = glob(["pipe-to-remote-box*/**"]),
+    visibility = ["//visibility:public"],
+)
+
+sh_test(
+    name = "package_templates_test",
+    size = "small",
+    srcs = ["package_templates_test.sh"],
+    args = [
+        "$(rootpath stage-packages.sh)",
+        "$(rootpath //src/products/pipe-to-remote-box:LICENSE)",
+        "$(rootpath //src/products/pipe-to-remote-box:THIRD_PARTY_LICENSES.md)",
+    ],
+    data = [
+        ":packages",
+        "stage-packages.sh",
+        "//src/products/pipe-to-remote-box:LICENSE",
+        "//src/products/pipe-to-remote-box:THIRD_PARTY_LICENSES.md",
+    ],
+)

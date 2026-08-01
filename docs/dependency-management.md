@@ -15,9 +15,14 @@ ruleset decide every merge:
   first-party workload pins that carry `$imagepolicy` setter markers; it
   commits straight to main as `guardian-promotions[bot]` through the
   ruleset bypass. Never hand-roll a pin bump on a marked line.
-- **Kargo** owns only the postflight CLI release channels
-  (`src/products/postflight-cli/release/channels.yaml` plus the release
-  manifest's CLI lane). Never hand-roll or duplicate its promotion PRs.
+- **Kargo** owns the Postflight nightly channel and the Pipe to Remote Box
+  nightly channel (each product's `release/channels.yaml` plus its release
+  manifest lane). Both advance only after their digest-specific deep test;
+  never hand-roll or duplicate those nightly moves.
+- **Reviewed release changes** own the rc and stable pointers for both public
+  CLIs. Keep each product's channel file and release-manifest lane in lockstep,
+  and verify the exact digest's product-specific qualification evidence before
+  proposing the move.
 
 Renovate runs as a `guardian-imageops` CronJob every six hours using a
 short-lived installation token for the `guardian-renovate` App. Its private

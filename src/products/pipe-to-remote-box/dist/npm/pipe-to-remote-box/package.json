@@ -1,0 +1,30 @@
+{
+  "name": "@guardian-intelligence/pipe-to-remote-box",
+  "version": "0.0.0-dev",
+  "description": "Read-only status for an explicitly selected remote directory over SSH.",
+  "keywords": ["ssh", "remote", "directory", "status", "cli"],
+  "homepage": "https://github.com/guardian-intelligence/guardian/tree/main/src/products/pipe-to-remote-box",
+  "bugs": "https://github.com/guardian-intelligence/guardian/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guardian-intelligence/guardian.git",
+    "directory": "src/products/pipe-to-remote-box/dist/npm/pipe-to-remote-box"
+  },
+  "license": "Apache-2.0",
+  "bin": {
+    "pipe-to-remote-box": "bin/pipe-to-remote-box"
+  },
+  "files": ["bin", "LICENSE", "README.md", "THIRD_PARTY_LICENSES.md"],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "optionalDependencies": {
+    "@guardian-intelligence/pipe-to-remote-box-darwin-arm64": "0.0.0-dev",
+    "@guardian-intelligence/pipe-to-remote-box-darwin-x64": "0.0.0-dev",
+    "@guardian-intelligence/pipe-to-remote-box-linux-arm64": "0.0.0-dev",
+    "@guardian-intelligence/pipe-to-remote-box-linux-x64": "0.0.0-dev"
+  }
+}

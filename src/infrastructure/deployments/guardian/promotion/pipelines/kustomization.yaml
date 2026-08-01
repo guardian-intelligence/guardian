@@ -4,4 +4,5 @@ resources:
   - products-namespace.yaml
   - products-project.yaml
   - products-secrets.yaml
+  - products-pipe-to-remote-box-stage-nightly.yaml
   - products-postflight-cli-stage-nightly.yaml

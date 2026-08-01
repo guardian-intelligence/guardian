@@ -4,6 +4,7 @@ exports_files([
     ".aspect/tasks/infra.axl",
     ".github/scripts/check-renovate-config.sh",
     "MODULE.bazel",
+    "go.mod",
     ".bazelignore",
     "AGENTS.md",
 ])

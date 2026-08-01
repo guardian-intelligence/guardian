@@ -1,0 +1,185 @@
+name: pipe-to-remote-box-publish-npm
+
+# Mirrors a stable Pipe to Remote Box release to npm. The platform packages
+# carry the exact binaries already published on GitHub; this lane verifies the
+# release checksums and original build-time signatures before packing them.
+# Authentication is npm trusted publishing, so this filename is an external
+# identity and must not be renamed after registration.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: pipe-to-remote-box-publish-npm
+  cancel-in-progress: false
+
+env:
+  IMAGE_REPO: ghcr.io/guardian-intelligence/pipe-to-remote-box
+  PLATFORMS: >-
+    x86_64-unknown-linux-musl:linux-x64
+    aarch64-unknown-linux-musl:linux-arm64
+    x86_64-apple-darwin:darwin-x64
+    aarch64-apple-darwin:darwin-arm64
+  BUILD_IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/pipe-to-remote-box-image.yml@refs/heads/main
+  ISSUER: https://token.actions.githubusercontent.com
+  PACKAGE_ROOT: src/products/pipe-to-remote-box/dist/npm
+  CRANE_VERSION: v0.21.7
+  CRANE_SHA256: 1a57bc98207fa1c0d04bf760699099e26f8383499bfd55b99c1b919a928a7230
+
+jobs:
+  publish:
+    if: startsWith(github.event.release.tag_name, 'pipe-to-remote-box/v') && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+
+      # Nothing from the release tag is executed until its commit is bound to
+      # an OCI artifact signed by the main-only build identity. A holder of
+      # Release write permission therefore cannot turn an arbitrary tag into
+      # code execution in this OIDC-authorized job.
+      - name: Bind the release tag to a signed main build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          curl -fsSLo crane.tar.gz "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf crane.tar.gz -C "$HOME/.local/bin" crane
+          rm crane.tar.gz
+
+          body="$(gh release view "$TAG" --repo "${{ github.repository }}" \
+            --json body --jq .body)"
+          image="$(sed -n 's/^- Artifact: `\(ghcr\.io\/guardian-intelligence\/pipe-to-remote-box@sha256:[a-f0-9]\{64\}\)`$/\1/p' <<<"$body")"
+          if [[ ! "$image" =~ ^${IMAGE_REPO}@sha256:[a-f0-9]{64}$ ]]; then
+            echo "release $TAG names no unique digest-pinned $IMAGE_REPO artifact" >&2
+            exit 1
+          fi
+          cosign verify --certificate-identity "$BUILD_IDENTITY" \
+            --certificate-oidc-issuer "$ISSUER" "$image" > /dev/null
+          cosign verify-attestation --type spdxjson \
+            --certificate-identity "$BUILD_IDENTITY" \
+            --certificate-oidc-issuer "$ISSUER" "$image" > /dev/null
+
+          manifest="$($HOME/.local/bin/crane manifest "$image")"
+          signed_revision="$(jq -r '.annotations["org.opencontainers.image.revision"] // empty' <<<"$manifest")"
+          tag_revision="$(git rev-parse HEAD)"
+          if [[ ! "$signed_revision" =~ ^[0-9a-f]{40}$ || "$tag_revision" != "$signed_revision" ]]; then
+            echo "release tag $tag_revision is not the signed build revision $signed_revision" >&2
+            exit 1
+          fi
+          echo "bound $TAG to signed main revision $signed_revision" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Assert npm supports trusted publishing
+        run: |
+          have="$(npm --version)"
+          need=11.5.1
+          if [[ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)" != "$need" ]]; then
+            echo "npm $have predates trusted publishing (need >= $need)" >&2
+            exit 1
+          fi
+
+      - name: Download and verify release binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release download "$TAG" --repo "${{ github.repository }}" --dir assets
+          (cd assets && sha256sum -c checksums.txt)
+          for pair in $PLATFORMS; do
+            target="${pair%%:*}"
+            cosign verify-blob \
+              --bundle "assets/pipe-to-remote-box-$target.sigstore.json" \
+              --certificate-identity "$BUILD_IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              "assets/pipe-to-remote-box-$target"
+          done
+
+      - name: Stage npm packages from verified assets
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#pipe-to-remote-box/v}"
+          stage="$RUNNER_TEMP/pipe-to-remote-box-npm-$version"
+          "$PACKAGE_ROOT/stage-packages.sh" \
+            "$version" "$PWD/assets" "$stage" \
+            "$PWD/assets/LICENSE" "$PWD/assets/THIRD_PARTY_LICENSES.md"
+          echo "NPM_STAGE=$stage" >> "$GITHUB_ENV"
+
+      - name: Assert package version matches the release
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          expected="pipe-to-remote-box ${TAG#pipe-to-remote-box/v}"
+          got="$("$NPM_STAGE/pipe-to-remote-box-linux-x64/bin/pipe-to-remote-box" --version)"
+          if [[ "$got" != "$expected" ]]; then
+            echo "release $TAG ships a binary reporting '$got', want '$expected'" >&2
+            exit 1
+          fi
+
+      - name: Publish to npm with provenance
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          publish() {
+            local dir="$1" out status name version local_integrity remote_integrity pack_dir
+            name="$(jq -r .name "$dir/package.json")"
+            version="$(jq -r .version "$dir/package.json")"
+            pack_dir="$(mktemp -d "$RUNNER_TEMP/pipe-npm-pack.XXXXXX")"
+            local_integrity="$(npm pack --ignore-scripts --json \
+              --pack-destination "$pack_dir" "$dir" | jq -r '.[0].integrity')"
+            rm -rf "$pack_dir"
+            [[ "$local_integrity" == sha512-* ]] \
+              || { echo "could not compute npm integrity for $name@$version" >&2; return 1; }
+
+            set +e
+            out="$(npm publish --provenance --access public --ignore-scripts "$dir" 2>&1)"
+            status=$?
+            set -e
+            printf '%s\n' "$out"
+            if ((status != 0)); then
+              if ! grep -qE 'EPUBLISHCONFLICT|cannot publish over' <<<"$out"; then
+                return "$status"
+              fi
+              remote_integrity=
+              for _ in {1..12}; do
+                remote_integrity="$(npm view "$name@$version" dist.integrity --json 2>/dev/null \
+                  | jq -r '. // empty' || true)"
+                [[ -n "$remote_integrity" ]] && break
+                sleep 5
+              done
+              if [[ "$remote_integrity" != "$local_integrity" ]]; then
+                echo "$name@$version already exists with integrity '$remote_integrity', not the verified package '$local_integrity'" >&2
+                return 1
+              fi
+              echo "$name@$version is already published with identical integrity"
+            fi
+          }
+
+          for pair in $PLATFORMS; do
+            publish "$NPM_STAGE/pipe-to-remote-box-${pair##*:}"
+          done
+          publish "$NPM_STAGE/pipe-to-remote-box"
+          echo "published @guardian-intelligence/pipe-to-remote-box ${TAG#pipe-to-remote-box/v}" >> "$GITHUB_STEP_SUMMARY"

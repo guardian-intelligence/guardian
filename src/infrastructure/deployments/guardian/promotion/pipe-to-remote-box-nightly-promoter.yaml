@@ -1,0 +1,311 @@
+# Pipe to Remote Box departures are cadence-driven rather than discovery-
+# driven. The newest Freight that has soaked for an hour may depart at most
+# once every six hours; the Stage itself remains the authoritative digest gate.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipe-to-remote-box-nightly-promoter
+  namespace: guardian-products
+  labels:
+    app.kubernetes.io/name: pipe-to-remote-box-nightly-promoter
+    app.kubernetes.io/part-of: guardian
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pipe-to-remote-box-nightly-promoter
+  namespace: guardian-products
+rules:
+  - apiGroups: ["kargo.akuity.io"]
+    resources: ["freights"]
+    verbs: ["get", "list"]
+  - apiGroups: ["kargo.akuity.io"]
+    resources: ["stages"]
+    resourceNames: ["pipe-to-remote-box-nightly"]
+    verbs: ["get", "promote"]
+  - apiGroups: ["kargo.akuity.io"]
+    resources: ["promotions"]
+    verbs: ["get", "list", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipe-to-remote-box-nightly-promoter
+  namespace: guardian-products
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pipe-to-remote-box-nightly-promoter
+subjects:
+  - kind: ServiceAccount
+    name: pipe-to-remote-box-nightly-promoter
+    namespace: guardian-products
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipe-to-remote-box-nightly-promoter
+  namespace: guardian-products
+  labels:
+    app.kubernetes.io/name: pipe-to-remote-box-nightly-promoter
+    app.kubernetes.io/part-of: guardian
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  promote.sh: |
+    #!/bin/bash
+    set -u
+    VMINSERT=http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus
+    NS=guardian-products
+    STAGE=pipe-to-remote-box-nightly
+    WAREHOUSE=pipe-to-remote-box
+    SOAK_SECONDS=3600
+    DEPARTURE_SECONDS=21600
+    RETRY_SECONDS=3600
+
+    beat() {
+      curl -fsS --retry 3 --max-time 15 --data-binary \
+        "guardian_pipe_to_remote_box_nightly_promoter_heartbeat 1" \
+        "$VMINSERT"
+    }
+
+    now="$(date -u +%s)"
+    freights="$(kubectl get freights -n "$NS" -o json)" || { beat; exit 1; }
+    latest="$(jq -r \
+      --arg warehouse "$WAREHOUSE" --argjson now "$now" --argjson soak "$SOAK_SECONDS" \
+      '[.items[] | select(.origin.name==$warehouse)
+        | select(($now - (.metadata.creationTimestamp | fromdateiso8601)) >= $soak)]
+       | sort_by(.metadata.creationTimestamp) | last | .metadata.name // empty' \
+      <<<"$freights")"
+    if [ -z "$latest" ]; then
+      echo "no freight from $WAREHOUSE has completed its ${SOAK_SECONDS}s soak"
+      beat
+      exit 0
+    fi
+
+    promotions="$(kubectl get promotions -n "$NS" -o json)" || { beat; exit 1; }
+    inflight="$(jq -r --arg stage "$STAGE" \
+      '[.items[] | select(.spec.stage==$stage)
+        | select(.status.phase=="Pending" or .status.phase=="Running")] | length' \
+      <<<"$promotions")"
+    if [ "$inflight" != 0 ]; then
+      echo "a promotion for $STAGE is already in flight"
+      beat
+      exit 0
+    fi
+
+    # Only a Succeeded promotion counts as shipped. Treating a failed attempt
+    # as complete would wedge the channel on the failed Freight forever.
+    last_ok="$(jq -r --arg stage "$STAGE" --argjson now "$now" \
+      '[.items[] | select(.spec.stage==$stage and .status.phase=="Succeeded")]
+       | sort_by(.metadata.creationTimestamp) | last
+       | if . == null then ""
+         else "\(.spec.freight) \($now - (.metadata.creationTimestamp | fromdateiso8601))" end' \
+      <<<"$promotions")"
+    if [ -z "$last_ok" ]; then
+      stage_json="$(kubectl get stage "$STAGE" -n "$NS" -o json)" || { beat; exit 1; }
+      last_ok="$(jq -r --argjson now "$now" \
+        '.status.lastPromotion
+         | if . == null or .status.phase != "Succeeded" then ""
+           else "\(.freight.name) \($now - (.status.finishedAt | fromdateiso8601))" end' \
+        <<<"$stage_json")"
+    fi
+    read -r last_ok_freight last_ok_age <<<"$last_ok"
+    if [ "$latest" = "${last_ok_freight:-}" ]; then
+      echo "channel already holds newest soaked freight $latest"
+      beat
+      exit 0
+    fi
+
+    try_age="$(jq -r --arg stage "$STAGE" --arg freight "$latest" --argjson now "$now" \
+      '[.items[] | select(.spec.stage==$stage and .spec.freight==$freight)]
+       | sort_by(.metadata.creationTimestamp) | last
+       | if . == null then ""
+         else "\($now - (.metadata.creationTimestamp | fromdateiso8601))" end' \
+      <<<"$promotions")"
+    if [ -n "$try_age" ] && [ "$try_age" -lt "$RETRY_SECONDS" ]; then
+      echo "last attempt at $latest was ${try_age}s ago; cooling down"
+      beat
+      exit 0
+    fi
+    if [ -n "${last_ok_age:-}" ] && [ "$last_ok_age" -lt "$DEPARTURE_SECONDS" ]; then
+      echo "last departure was ${last_ok_age}s ago; waiting for cadence"
+      beat
+      exit 0
+    fi
+
+    # Directly created Promotions do not inherit Stage template steps. Copy
+    # the reviewed template verbatim so the exact-digest HTTP gate is always
+    # the first step in the object this controller creates.
+    stage_json="$(kubectl get stage "$STAGE" -n "$NS" -o json)" || { beat; exit 1; }
+    template="$(jq '.spec.promotionTemplate.spec' <<<"$stage_json")"
+    if [ "$(jq -r '.steps | length' <<<"$template")" = 0 ]; then
+      echo "stage template defines no steps; refusing to promote"
+      beat
+      exit 1
+    fi
+    name="${STAGE}-$(date -u +%Y%m%d%H%M)-${latest:0:7}"
+    jq -n --arg stage "$STAGE" --arg freight "$latest" \
+      --arg name "$name" --arg namespace "$NS" --argjson template "$template" \
+      '{apiVersion: "kargo.akuity.io/v1alpha1", kind: "Promotion",
+        metadata: {name: $name, namespace: $namespace},
+        spec: {stage: $stage, freight: $freight,
+               vars: ($template.vars // []), steps: $template.steps}}' \
+      | kubectl create -f - || { beat; exit 1; }
+    curl -fsS --retry 3 --max-time 15 --data-binary \
+      "guardian_pipe_to_remote_box_nightly_promotion_created 1" \
+      "$VMINSERT" || { beat; exit 1; }
+    beat
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pipe-to-remote-box-nightly-promoter
+  namespace: guardian-products
+  labels:
+    app.kubernetes.io/name: pipe-to-remote-box-nightly-promoter
+    app.kubernetes.io/part-of: guardian
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: pipe-to-remote-box-nightly-promoter
+        spec:
+          serviceAccountName: pipe-to-remote-box-nightly-promoter
+          restartPolicy: Never
+          containers:
+            - name: promote
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/bash", "/scripts/promote.sh"]
+              env:
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65534
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 64Mi
+                  ephemeral-storage: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 256Mi
+                  ephemeral-storage: 256Mi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: scripts
+              configMap:
+                name: pipe-to-remote-box-nightly-promoter
+                defaultMode: 0555
+            - name: tmp
+              emptyDir: {}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: pipe-to-remote-box-nightly-promoter
+  namespace: guardian-products
+  labels:
+    app.kubernetes.io/name: pipe-to-remote-box-nightly-promoter
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: pipe-to-remote-box-nightly-promoter
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-pipe-to-remote-box-nightly-promoter
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: guardian-products
+            k8s:app.kubernetes.io/name: pipe-to-remote-box-nightly-promoter
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: pipe-to-remote-box-nightly-promoter
+  namespace: guardian-products
+  labels:
+    app.kubernetes.io/name: pipe-to-remote-box-nightly-promoter
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: pipe-to-remote-box-nightly-promoter.rules
+      interval: 60s
+      rules:
+        - alert: GuardianPipeToRemoteBoxNightlyPromoterSilent
+          expr: >-
+            absent_over_time(guardian_pipe_to_remote_box_nightly_promoter_heartbeat[2h])
+            and on() (time() - max(kube_cronjob_status_last_schedule_time{
+              namespace="guardian-products", cronjob="pipe-to-remote-box-nightly-promoter"}) > 1800)
+          labels:
+            severity: warning
+            guardian_component: pipe-to-remote-box-release-train
+          annotations:
+            summary: "Pipe to Remote Box nightly promoter has not run in 2h"
+            description: >-
+              The cadence controller heartbeats on every path. Check the newest
+              pipe-to-remote-box-nightly-promoter Job and the
+              pipe-to-remote-box-nightly Kargo Stage.

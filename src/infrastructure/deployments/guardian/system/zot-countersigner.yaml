@@ -234,6 +234,9 @@ data:
       # A repo missing from this map stays unsigned and pages: onboarding a
       # new released artifact includes teaching this map its identity.
       case "$name" in
+        pipe-to-remote-box)
+          identity="https://github.com/guardian-intelligence/guardian/.github/workflows/pipe-to-remote-box-image.yml@refs/heads/main"
+          ;;
         postflight-cli)
           identity="https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main"
           ;;

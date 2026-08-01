@@ -3,17 +3,29 @@ name = "pipe-to-remote-box"
 version = "0.1.0-pre"
 edition = "2024"
 rust-version = "1.97"
-description = "Read-only SSH progress checks for Directus and blog migrations"
+description = "Safely check in on an explicitly selected remote directory over SSH"
 license = "Apache-2.0"
 repository = "https://github.com/guardian-intelligence/guardian"
 readme = "README.md"
-keywords = ["directus", "ssh", "monitoring", "cli"]
+keywords = ["ssh", "remote", "directory", "monitoring", "cli"]
 categories = ["command-line-utilities"]
-publish = false
+include = [
+    "/src/**",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/Makefile",
+    "/LICENSE",
+    "/THIRD_PARTY_LICENSES.md",
+]
 
 [[bin]]
 name = "pipe-to-remote-box"
 path = "src/main.rs"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/pipe-to-remote-box%2Fv{ version }/pipe-to-remote-box-{ target }"
+pkg-fmt = "bin"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }

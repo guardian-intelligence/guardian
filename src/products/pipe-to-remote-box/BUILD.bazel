@@ -1,8 +1,30 @@
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_clippy", "rust_test")
 
+exports_files(
+    [
+        "LICENSE",
+        "THIRD_PARTY_LICENSES.md",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "release_metadata",
+    srcs = [
+        "BUILD.bazel",
+        "Cargo.lock",
+        "Cargo.toml",
+        "LICENSE",
+        "THIRD_PARTY_LICENSES.md",
+        "src/remote_probe.sh",
+    ],
+    visibility = ["//src/infrastructure/tests:__pkg__"],
+)
+
 rust_binary(
     name = "pipe-to-remote-box",
-    srcs = ["src/main.rs"],
+    srcs = glob(["src/**/*.rs"]),
+    compile_data = ["src/remote_probe.sh"],
     edition = "2024",
     rustc_env = {"CARGO_PKG_VERSION": "0.1.0-pre"},
     visibility = ["//visibility:public"],
@@ -19,4 +41,10 @@ rust_clippy(
     name = "clippy",
     testonly = True,
     deps = [":pipe-to-remote-box", ":pipe_to_remote_box_test"],
+)
+
+alias(
+    name = "format",
+    actual = "@rules_rust//tools/rustfmt",
+    tags = ["guardian-format"],
 )
