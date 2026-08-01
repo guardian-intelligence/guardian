@@ -1,5 +1,5 @@
 [package]
-name = "directus-migration-monitor"
+name = "pipe-to-remote-box"
 version = "0.1.0-pre"
 edition = "2024"
 rust-version = "1.97"
@@ -12,7 +12,7 @@ categories = ["command-line-utilities"]
 publish = false
 
 [[bin]]
-name = "directus-migration-monitor"
+name = "pipe-to-remote-box"
 path = "src/main.rs"
 
 [dependencies]

@@ -1,22 +1,22 @@
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_clippy", "rust_test")
 
 rust_binary(
-    name = "directus-migration-monitor",
+    name = "pipe-to-remote-box",
     srcs = ["src/main.rs"],
     edition = "2024",
     rustc_env = {"CARGO_PKG_VERSION": "0.1.0-pre"},
     visibility = ["//visibility:public"],
-    deps = ["@directus_migration_monitor_crates//:clap"],
+    deps = ["@pipe_to_remote_box_crates//:clap"],
 )
 
 rust_test(
-    name = "directus_migration_monitor_test",
-    crate = ":directus-migration-monitor",
+    name = "pipe_to_remote_box_test",
+    crate = ":pipe-to-remote-box",
     edition = "2024",
 )
 
 rust_clippy(
     name = "clippy",
     testonly = True,
-    deps = [":directus-migration-monitor", ":directus_migration_monitor_test"],
+    deps = [":pipe-to-remote-box", ":pipe_to_remote_box_test"],
 )
