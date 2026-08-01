@@ -110,6 +110,45 @@ spec:
             - port: "8080"
               protocol: TCP
 ---
+# Directus, the letters authoring backend. Egress is DNS plus this stage's
+# product Postgres and nothing else (telemetry is disabled; no outbound
+# integrations). No ingress section on purpose: the Studio is reached only
+# through kubectl port-forward, which arrives with the host identity, and
+# selecting the endpoint for ingress would flip it to default-deny and
+# strand that path.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: directus
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: directus
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company-site
+    guardian.dev/stage: prod
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: directus
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: postgres-products
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+---
 # The events writer's complete policy: vmagent scrape in; DNS, this stage's
 # Postgres, and the GitHub API (world) out.
 apiVersion: cilium.io/v2

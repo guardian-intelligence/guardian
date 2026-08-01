@@ -13,6 +13,7 @@ ghcr.io/tigerbeetle/
 quay.io/keycloak/
 quay.io/openbao/
 quay.io/prometheus/
+docker.io/directus/directus
 docker.io/electricsql/
 docker.io/envoyproxy/
 docker.io/library/postgres
