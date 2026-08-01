@@ -32,7 +32,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: canary
-              image: ghcr.io/guardian-intelligence/payments-canary:edge@sha256:774b6f735c40bdd48e27c2701c01062692109846911c90b7b440e24348e73549 # {"$imagepolicy": "guardian-imageops:payments-canary"}
+              image: ghcr.io/guardian-intelligence/payments-canary:edge@sha256:d42d7574f1f06e45bb76e2bb97bd1e01a581951d9a0deb54a0763c22af5a68e2 # {"$imagepolicy": "guardian-imageops:payments-canary"}
               imagePullPolicy: IfNotPresent
               env:
                 - name: PAYMENTS_PUBLIC_CANARY_URL
