@@ -126,16 +126,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/fluxcd/flux2/releases/download/v2.9.2/flux_2.9.2_linux_amd64.tar.gz",
-        "sha256": "4092b367fd060097976fb7261601f79420ecf7266328417dfd8dfee27de0e6a3",
+        "url": "https://github.com/fluxcd/flux2/releases/download/v2.9.3/flux_2.9.3_linux_amd64.tar.gz",
+        "sha256": "eae4e8608c0ade2bf4e8dec1669dbb6b0c28b5822b252d97feccfb4fb1181fd2",
         "os": "linux",
         "cpu": "x86_64",
         "file": "flux"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/fluxcd/flux2/releases/download/v2.9.2/flux_2.9.2_darwin_arm64.tar.gz",
-        "sha256": "1dd6791738b1c250748c24c24b48e92908881596f999ad8bf10f84763d66fdb3",
+        "url": "https://github.com/fluxcd/flux2/releases/download/v2.9.3/flux_2.9.3_darwin_arm64.tar.gz",
+        "sha256": "59627ac109a59b2c7e94a9ce0e290a81906d0ea435d53806699385e9d54ec10a",
         "os": "macos",
         "cpu": "arm64",
         "file": "flux"
@@ -406,16 +406,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/cozystack/talm/releases/download/v0.33.1/talm-linux-amd64.tar.gz",
-        "sha256": "8d5a39f4e20ce13cc43de278ce8cc776969f734f54f439b216e25553b470a278",
+        "url": "https://github.com/cozystack/talm/releases/download/v0.34.0/talm-linux-amd64.tar.gz",
+        "sha256": "74513f55c3818ab9ce63adac74f015a5029e185fe25ef977ee0e1f13df2c03e6",
         "os": "linux",
         "cpu": "x86_64",
         "file": "talm"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/cozystack/talm/releases/download/v0.33.1/talm-darwin-arm64.tar.gz",
-        "sha256": "c8d7631bb3a4f6138ef7deef9eab101cb2f1e1e827fb9552eda236d9b85b8084",
+        "url": "https://github.com/cozystack/talm/releases/download/v0.34.0/talm-darwin-arm64.tar.gz",
+        "sha256": "47ca98a3e8f22d34d99e9f10934d21ab92de0f21d16cdc0161cabf19396c3822",
         "os": "macos",
         "cpu": "arm64",
         "file": "talm"
@@ -426,15 +426,15 @@
     "binaries": [
       {
         "kind": "file",
-        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.6/talosctl-linux-amd64",
-        "sha256": "540c5e7cb0d3fa3a9b2e1c717ced212727b73bcaf0cf9cf9ba2472ec381041d4",
+        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.7/talosctl-linux-amd64",
+        "sha256": "97d08e5584e56114659f131e95e227910d1f3b427d26360dca2af3ed821b71f8",
         "os": "linux",
         "cpu": "x86_64"
       },
       {
         "kind": "file",
-        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.6/talosctl-darwin-arm64",
-        "sha256": "8badc3f3907776488e9b13b6a521ffadf301dff9a3f097c1551102c363905c9f",
+        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.7/talosctl-darwin-arm64",
+        "sha256": "8965b026f416a25147b99530721c25fc2616c4fa655480673bcb63eb7f0de331",
         "os": "macos",
         "cpu": "arm64"
       }
