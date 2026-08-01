@@ -284,16 +284,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/int128/kubelogin/releases/download/v1.36.2/kubelogin_linux_amd64.zip",
-        "sha256": "0f9b35e82469dbf1e1ed7cfa8cbaa27ffde733e18930dbaed590518a58eb11cc",
+        "url": "https://github.com/int128/kubelogin/releases/download/v1.36.3/kubelogin_linux_amd64.zip",
+        "sha256": "54428b2be68ce297c5c743feed65a2fa2ed2a671881ff70fb6560e560bb18eaf",
         "os": "linux",
         "cpu": "x86_64",
         "file": "kubelogin"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/int128/kubelogin/releases/download/v1.36.2/kubelogin_darwin_arm64.zip",
-        "sha256": "bf90d24882875641b8f89218b13900769e17677e8cfa6c12d05f1bf59acca1f7",
+        "url": "https://github.com/int128/kubelogin/releases/download/v1.36.3/kubelogin_darwin_arm64.zip",
+        "sha256": "52f445067da35b442cdcaf4aff884379188373c97d0564d61036caa178a6f62b",
         "os": "macos",
         "cpu": "arm64",
         "file": "kubelogin"
