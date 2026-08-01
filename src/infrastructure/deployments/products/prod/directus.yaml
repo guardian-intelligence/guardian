@@ -1,0 +1,171 @@
+# Directus: the authoring backend for company-site letters. It is never on
+# the public read path — the site keeps baking content at image-build time,
+# and letters flow Directus -> repo markdown via the letters-cms sync, so a
+# Directus outage can never affect a reader. Like the Keycloak admin
+# console, the Data Studio is deliberately not routed publicly: reach it
+# with `kubectl port-forward -n tenant-guardian-prod svc/directus 8055:80`.
+# Sign in with admin@guardianintelligence.org and Secret/directus-admin-credential.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    reloader.stakater.com/auto: "true"
+  name: directus
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: directus
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company-site
+    guardian.dev/stage: prod
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  # Single replica on a ReadWriteOnce uploads volume: a surged replacement
+  # could never attach it, so rollouts take the brief authoring gap.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: directus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: directus
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/product: company-site
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: directus
+          image: docker.io/directus/directus:12.2.0@sha256:4fb64fd8c264b187aab11f5a23fb2bc789df129d81c944a1628c082419613b67
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: DB_CLIENT
+              value: pg
+            - name: DB_HOST
+              value: postgres-products-rw.tenant-guardian-prod.svc
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_DATABASE
+              value: directus
+            - name: DB_USER
+              value: directus
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-products-credentials
+                  key: directus
+            # Encrypt-without-CA-verification, the same posture as Electric's
+            # sslmode=require against the operator-minted CNPG server cert.
+            - name: DB_SSL__REJECT_UNAUTHORIZED
+              value: "false"
+            - name: DB_POOL__MAX
+              value: "5"
+            # Session-token signing key; without it Directus mints a random
+            # one per boot and every authoring session dies on restart.
+            - name: SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: directus-app-secret
+                  key: password
+            # First-boot bootstrap creates this admin; on a populated
+            # database the same envs are inert.
+            - name: ADMIN_EMAIL
+              value: admin@guardianintelligence.org
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: directus-admin-credential
+                  key: password
+            # The Studio is only ever reached through a localhost
+            # port-forward, so the canonical URL is localhost.
+            - name: PUBLIC_URL
+              value: http://127.0.0.1:8055
+            - name: TELEMETRY
+              value: "false"
+            - name: WEBSOCKETS_ENABLED
+              value: "false"
+          ports:
+            - name: http
+              containerPort: 8055
+          startupProbe:
+            httpGet:
+              path: /server/health
+              port: 8055
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /server/health
+              port: 8055
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /server/health
+              port: 8055
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: uploads
+              mountPath: /directus/uploads
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: directus-uploads-encrypted
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: directus-uploads-encrypted
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: directus
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company-site
+    guardian.dev/stage: prod
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: replicated-encrypted
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: directus
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: directus
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company-site
+    guardian.dev/stage: prod
+spec:
+  selector:
+    app.kubernetes.io/name: directus
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8055

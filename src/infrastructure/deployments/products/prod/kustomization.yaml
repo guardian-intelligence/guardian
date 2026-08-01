@@ -5,6 +5,8 @@ resources:
   - ddl-job.yaml
   - cockpit-rollup.yaml
   - cockpit-events.yaml
+  - directus.yaml
+  - directus-secrets.yaml
   - electric.yaml
   - ingress.yaml
   - networkpolicy.yaml

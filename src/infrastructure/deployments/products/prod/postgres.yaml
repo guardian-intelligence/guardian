@@ -9,6 +9,7 @@
 # - cockpit-api pool: 10
 # - cockpit writers (rollup + events) pool: 4
 # - payments pool: 16 during a Flagger rollout, 8 at steady state
+# - directus pool: 5
 # - operators/ad-hoc: 5
 # - consumers' pools must sum to <=60; PGConnectionSaturation pages at 70%
 # A product graduates to its own instance only when it demonstrably needs one.
@@ -53,6 +54,7 @@ spec:
   users:
     cockpit: {}
     cockpit_writer: {}
+    directus: {}
     electric:
       replication: true
     payments: {}
@@ -63,6 +65,10 @@ spec:
           - cockpit
           - cockpit_writer
           - electric
+    directus:
+      roles:
+        admin:
+          - directus
     payments:
       roles:
         admin:

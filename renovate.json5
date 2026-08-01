@@ -45,13 +45,15 @@
     "src/infrastructure/deployments/products/prod/cockpit-rollup.yaml",
   ],
 
-  // Third-party workload images (Keycloak, Electric, Renovate) are ordinary
-  // dependencies — Renovate is their one proposer, scoped to exactly their
-  // manifests so it can never reach the automation-owned first-party pins.
+  // Third-party workload images (Keycloak, Electric, Renovate, Directus) are
+  // ordinary dependencies — Renovate is their one proposer, scoped to exactly
+  // their manifests so it can never reach the automation-owned first-party
+  // pins.
   kubernetes: {
     managerFilePatterns: [
       "/^src/infrastructure/deployments/iam/prod/keycloak\\.yaml$/",
       "/^src/infrastructure/deployments/iam/prod/realm-reconciler\\.yaml$/",
+      "/^src/infrastructure/deployments/products/prod/directus\\.yaml$/",
       "/^src/infrastructure/deployments/products/prod/electric\\.yaml$/",
       "/^src/infrastructure/deployments/guardian/imageops/renovate\\.yaml$/",
     ],
