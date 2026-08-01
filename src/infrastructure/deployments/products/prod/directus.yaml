@@ -101,22 +101,24 @@ spec:
           ports:
             - name: http
               containerPort: 8055
+          # /server/health is auth-gated (403 to the anonymous role), so the
+          # kubelet probes the public /server/ping instead.
           startupProbe:
             httpGet:
-              path: /server/health
+              path: /server/ping
               port: 8055
             periodSeconds: 10
             failureThreshold: 30
           readinessProbe:
             httpGet:
-              path: /server/health
+              path: /server/ping
               port: 8055
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
           livenessProbe:
             httpGet:
-              path: /server/health
+              path: /server/ping
               port: 8055
             periodSeconds: 15
           resources:
