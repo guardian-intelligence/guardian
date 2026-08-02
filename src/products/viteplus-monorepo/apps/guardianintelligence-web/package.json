@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vp dev",
     "build": "vp exec tsc -p tsconfig.json && vp test run && vp build",
+    "perf:company-intro": "node perf/company-home-intro-frames.mjs",
     "preview": "vp preview",
     "start": "node ./.output/server/index.mjs",
     "test": "vp test run",
@@ -30,6 +31,7 @@
     "web-vitals": "catalog:"
   },
   "devDependencies": {
+    "@playwright/test": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@types/d3-scale": "catalog:",
     "@types/d3-shape": "catalog:",

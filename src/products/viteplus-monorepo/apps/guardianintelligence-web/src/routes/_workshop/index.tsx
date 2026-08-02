@@ -41,6 +41,28 @@ function LandingPage() {
         </a>
         <div className="company-home-main">
           <section className="company-home-hero" aria-labelledby="company-home-title">
+            <div className="company-home-blueprint" aria-hidden="true">
+              <span
+                className="company-home-blueprint__rail company-home-blueprint__rail--top"
+                data-blueprint-rail="top"
+              />
+              <span
+                className="company-home-blueprint__rail company-home-blueprint__rail--right"
+                data-blueprint-rail="right"
+              />
+              <span
+                className="company-home-blueprint__rail company-home-blueprint__rail--bottom"
+                data-blueprint-rail="bottom"
+              />
+              <span
+                className="company-home-blueprint__rail company-home-blueprint__rail--left"
+                data-blueprint-rail="left"
+              />
+              <span
+                className="company-home-blueprint__rail company-home-blueprint__rail--divider"
+                data-blueprint-rail="divider"
+              />
+            </div>
             <div className="company-home-hero__eyebrow">
               <span>{landing.kicker}</span>
             </div>

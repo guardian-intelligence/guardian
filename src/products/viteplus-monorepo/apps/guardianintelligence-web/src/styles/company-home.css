@@ -137,14 +137,120 @@
   display: grid;
   width: min(100%, 52rem);
   margin-inline: auto;
-  border-inline: 1px solid rgb(186 215 247 / 11%);
   grid-template-columns: minmax(0, 1fr);
   justify-items: center;
 }
 
+.company-home-blueprint {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.company-home-blueprint__rail {
+  --draw-delay: 0s;
+  --draw-duration: 0.6s;
+  --rail-color: rgb(186 215 247 / 11%);
+  position: absolute;
+  display: block;
+  background: var(--rail-color);
+  opacity: 0;
+}
+
+.company-home-blueprint__rail::after {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  content: "";
+  background: rgb(204 225 250 / 38%);
+  filter: blur(0.45px);
+  opacity: 0;
+  animation: company-pencil-tip var(--draw-duration) var(--draw-delay) linear both;
+}
+
+.company-home-blueprint__rail--top,
+.company-home-blueprint__rail--bottom,
+.company-home-blueprint__rail--divider {
+  right: 0;
+  left: 0;
+  height: 1px;
+  transform: scaleX(0);
+  animation: company-rail-draw-x var(--draw-duration) var(--draw-delay)
+    cubic-bezier(0.45, 0, 0.55, 1) both;
+}
+
+.company-home-blueprint__rail--top::after,
+.company-home-blueprint__rail--divider::after {
+  top: -1px;
+  right: -1px;
+}
+
+.company-home-blueprint__rail--bottom::after {
+  top: -1px;
+  left: -1px;
+}
+
+.company-home-blueprint__rail--left,
+.company-home-blueprint__rail--right {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: scaleY(0);
+  animation: company-rail-draw-y var(--draw-duration) var(--draw-delay)
+    cubic-bezier(0.45, 0, 0.55, 1) both;
+}
+
+.company-home-blueprint__rail--right::after {
+  right: -1px;
+  bottom: -1px;
+}
+
+.company-home-blueprint__rail--left::after {
+  top: -1px;
+  right: -1px;
+}
+
+.company-home-blueprint__rail--top {
+  --draw-delay: 0.08s;
+  --draw-duration: 0.52s;
+  top: 0;
+  transform-origin: left center;
+}
+
+.company-home-blueprint__rail--right {
+  --draw-delay: 0.52s;
+  --draw-duration: 0.72s;
+  right: 0;
+  transform-origin: center top;
+}
+
+.company-home-blueprint__rail--bottom {
+  --draw-delay: 1.18s;
+  --draw-duration: 0.52s;
+  bottom: 0;
+  transform-origin: right center;
+}
+
+.company-home-blueprint__rail--left {
+  --draw-delay: 1.64s;
+  --draw-duration: 0.72s;
+  left: 0;
+  transform-origin: center bottom;
+}
+
+.company-home-blueprint__rail--divider {
+  --draw-delay: 2.2s;
+  --draw-duration: 0.7s;
+  top: 4.5rem;
+  transform-origin: left center;
+}
+
 .company-home-hero::before {
-  --dot-color: #d1e4fa;
-  --dot-size: 4px;
+  --dot-color: rgb(203 224 250 / 60%);
+  --dot-size: 2px;
   position: absolute;
   inset: calc(var(--dot-size) * -0.5);
   content: "";
@@ -161,9 +267,8 @@
     100% 100%;
   background-repeat: no-repeat;
   background-size: var(--dot-size) var(--dot-size);
-  filter: drop-shadow(0 0 0.5rem #d1e4fa);
   opacity: 0;
-  animation: company-dots-in 1.5s 0.4s ease forwards;
+  animation: company-dots-in 0.35s 2.72s ease forwards;
 }
 
 .company-home-hero__eyebrow {
@@ -173,7 +278,6 @@
   align-items: center;
   justify-content: center;
   gap: 0.9rem;
-  border-block: 1px solid rgb(186 215 247 / 10%);
   color: rgb(173 202 238 / 78%);
   font-size: clamp(0.72rem, 1vw, 0.84rem);
   letter-spacing: 0.005em;
@@ -191,10 +295,14 @@
   flex: 1;
   content: "";
   background: linear-gradient(90deg, transparent, rgb(186 215 247 / 14%));
+  opacity: 0;
+  transform: scaleX(0);
+  transform-origin: right center;
+  animation: company-label-rule-in 0.55s 2.35s ease both;
 }
 
 .company-home-hero__eyebrow::after {
-  transform: scaleX(-1);
+  transform-origin: left center;
 }
 
 .company-home-hero__copy-frame {
@@ -204,12 +312,11 @@
   min-height: 19rem;
   place-content: center;
   padding: 1.8rem 2rem 2.1rem;
-  border-bottom: 1px solid rgb(186 215 247 / 10%);
 }
 
 .company-home-hero__copy-frame::before {
-  --dot-color: #d1e4fa;
-  --dot-size: 4px;
+  --dot-color: rgb(203 224 250 / 60%);
+  --dot-size: 2px;
   position: absolute;
   inset: calc(var(--dot-size) * -0.5);
   content: "";
@@ -226,9 +333,8 @@
     100% 100%;
   background-repeat: no-repeat;
   background-size: var(--dot-size) var(--dot-size);
-  filter: drop-shadow(0 0 0.5rem #d1e4fa);
   opacity: 0;
-  animation: company-dots-in 1.5s 0.4s ease forwards;
+  animation: company-dots-in 0.35s 2.72s ease forwards;
 }
 
 .company-home-title {
@@ -443,7 +549,7 @@ html[data-canvas-mode="css"] .company-home-cta {
   }
 
   .company-home-title {
-    font-size: clamp(2.8rem, 15vw, 4.35rem);
+    font-size: clamp(4.25rem, 20vw, 5.4rem);
   }
 
   .company-home-hero__lede {
@@ -523,7 +629,57 @@ html[data-canvas-mode="css"] .company-home-cta {
 
 @keyframes company-dots-in {
   to {
+    opacity: 0.7;
+  }
+}
+
+@keyframes company-rail-draw-x {
+  from {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+  4% {
     opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes company-rail-draw-y {
+  from {
+    opacity: 0;
+    transform: scaleY(0);
+  }
+  4% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes company-pencil-tip {
+  from,
+  to {
+    opacity: 0;
+  }
+  8%,
+  88% {
+    opacity: 1;
+  }
+}
+
+@keyframes company-label-rule-in {
+  from {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
   }
 }
 
@@ -544,8 +700,12 @@ html[data-canvas-mode="css"] .company-home-cta {
 @media (prefers-reduced-motion: reduce) {
   .company-home-header,
   .company-home-beacon,
+  .company-home-blueprint__rail,
+  .company-home-blueprint__rail::after,
   .company-home-hero::before,
   .company-home-hero__eyebrow,
+  .company-home-hero__eyebrow::before,
+  .company-home-hero__eyebrow::after,
   .company-home-hero__copy-frame::before,
   .company-home-title__base,
   .company-home-title::before,
@@ -558,14 +718,21 @@ html[data-canvas-mode="css"] .company-home-cta {
 
   .company-home-header,
   .company-home-beacon,
+  .company-home-blueprint__rail,
   .company-home-hero::before,
   .company-home-hero__eyebrow,
+  .company-home-hero__eyebrow::before,
+  .company-home-hero__eyebrow::after,
   .company-home-hero__copy-frame::before,
   .company-home-title__base,
   .company-home-hero__lede,
   .company-home-cta {
     opacity: 1;
     transform: none;
+  }
+
+  .company-home-blueprint__rail::after {
+    opacity: 0;
   }
 
   .company-home-beacon {
