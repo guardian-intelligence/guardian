@@ -10,6 +10,16 @@ export type MaterializationPixel = {
 
 export type PixelLightState = "off" | "on" | "spotlight";
 
+export type SpotlightMask = {
+  readonly left: number;
+  readonly leftTrail: number;
+  readonly opacity: number;
+  readonly right: number;
+  readonly rightTrail: number;
+  readonly trailWidth: number;
+  readonly width: number;
+};
+
 const UINT32_MAX = 0xffff_ffff;
 
 export function clamp01(value: number) {
@@ -40,23 +50,51 @@ export function activationThreshold(
   return clamp01(distance * 0.65 + clusterNoise * 0.25 + cellNoise * 0.1);
 }
 
-export function spotlightEdge(normalizedY: number, progress: number, side: -1 | 1) {
-  const wave =
-    Math.sin(normalizedY * 7.4 + side * 0.8) * 0.62 +
-    Math.sin(normalizedY * 17.2 - side * 1.3) * 0.25 +
-    Math.sin(normalizedY * 31.6 + side * 2.1) * 0.13;
-  return clamp01(progress * (1 + wave * 0.065));
+export function spotlightMask(progress: number): SpotlightMask {
+  const fill = clamp01(progress);
+  const travel = Math.pow(fill, 1.16);
+  const width = 0.25 + smoothstep(0.02, 0.34, fill) * 10.25;
+  const left = 50 - travel * 70;
+  const right = 50 + travel * 70;
+  return {
+    left,
+    leftTrail: left + 12,
+    opacity: smoothstep(0.02, 0.12, fill),
+    right,
+    rightTrail: right - 12,
+    trailWidth: width * 0.68,
+    width,
+  };
+}
+
+function insideEllipse(
+  x: number,
+  y: number,
+  centerX: number,
+  centerY: number,
+  radiusX: number,
+  radiusY: number,
+) {
+  return Math.hypot((x - centerX) / radiusX, (y - centerY) / radiusY) <= 1;
+}
+
+export function pixelInSpotlightMask(pixel: MaterializationPixel, mask: SpotlightMask) {
+  const x = (pixel.normalizedX + 1) * 50;
+  const y = (pixel.normalizedY + 1) * 50;
+  return (
+    insideEllipse(x, y, mask.left, 38, mask.width, 82) ||
+    insideEllipse(x, y, mask.right, 42, mask.width, 82) ||
+    insideEllipse(x, y, mask.leftTrail, 68, mask.trailWidth, 58) ||
+    insideEllipse(x, y, mask.rightTrail, 72, mask.trailWidth, 58)
+  );
 }
 
 export function pixelLightState(pixel: MaterializationPixel, progress: number): PixelLightState {
   const fill = clamp01(progress);
   if (pixel.activation > fill) return "off";
-  const side = pixel.normalizedX < 0 ? -1 : 1;
-  return Math.abs(pixel.normalizedX) <= spotlightEdge(pixel.normalizedY, fill, side)
-    ? "spotlight"
-    : "on";
+  return pixelInSpotlightMask(pixel, spotlightMask(fill)) ? "spotlight" : "on";
 }
 
 export function materializationPixelOpacity(progress: number) {
-  return 1 - smoothstep(0.82, 1, progress);
+  return 1 - smoothstep(0.48, 0.98, progress);
 }

@@ -8,6 +8,7 @@ import {
   activationThreshold,
   materializationPixelOpacity,
   pixelLightState,
+  spotlightMask,
   type MaterializationPixel,
 } from "./hero-materialization-model";
 import { HERO_WORDMARK } from "./outlined-wordmarks";
@@ -56,15 +57,18 @@ function makePixelField(
 
 export function HeroMaterialization({ label }: { readonly label: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const luminosityCanvasRef = useRef<HTMLCanvasElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
+    const luminosityCanvas = luminosityCanvasRef.current;
     const title = titleRef.current;
-    if (!canvas || !title || companyExperienceMode() === "static") return;
+    if (!canvas || !luminosityCanvas || !title || companyExperienceMode() === "static") return;
 
     const context = canvas.getContext("2d", { alpha: true });
-    if (!context || typeof Path2D === "undefined") {
+    const luminosityContext = luminosityCanvas.getContext("2d", { alpha: true });
+    if (!context || !luminosityContext || typeof Path2D === "undefined") {
       canvas.dataset.titleMaterialization = "failed";
       markTitleMaterialization("failed");
       return;
@@ -78,9 +82,17 @@ export function HeroMaterialization({ label }: { readonly label: string }) {
     let pixels: MaterializationPixel[] = [];
     let width = 1;
 
+    const clearCanvas = (
+      targetContext: CanvasRenderingContext2D,
+      targetCanvas: HTMLCanvasElement,
+    ) => {
+      targetContext.setTransform(1, 0, 0, 1, 0, 0);
+      targetContext.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+    };
+
     const clear = () => {
-      context.setTransform(1, 0, 0, 1, 0, 0);
-      context.clearRect(0, 0, canvas.width, canvas.height);
+      clearCanvas(context, canvas);
+      clearCanvas(luminosityContext, luminosityCanvas);
     };
 
     const measure = () => {
@@ -94,6 +106,8 @@ export function HeroMaterialization({ label }: { readonly label: string }) {
       cellSize = Number.isFinite(computedSize) ? computedSize : 4;
       canvas.width = Math.max(1, Math.round(width * pixelRatio));
       canvas.height = Math.max(1, Math.round(height * pixelRatio));
+      luminosityCanvas.width = canvas.width;
+      luminosityCanvas.height = canvas.height;
       canvas.dataset.pixelRatio = pixelRatio.toFixed(2);
       pixels = makePixelField(context, glyphPath, width, height, cellSize);
       canvas.dataset.pixelCount = String(pixels.length);
@@ -113,8 +127,8 @@ export function HeroMaterialization({ label }: { readonly label: string }) {
       );
       const progress = Number.isFinite(progressValue) ? Math.min(1, Math.max(0, progressValue)) : 0;
       const pixelOpacity = materializationPixelOpacity(progress);
-      const base = new Path2D();
-      const spotlight = new Path2D();
+      const mask = spotlightMask(progress);
+      const active = new Path2D();
       const renderedSize = cellSize * 0.76;
       const inset = (cellSize - renderedSize) * 0.5;
       let offCount = 0;
@@ -127,8 +141,7 @@ export function HeroMaterialization({ label }: { readonly label: string }) {
           offCount += 1;
           continue;
         }
-        const target = state === "spotlight" ? spotlight : base;
-        target.rect(pixel.x + inset, pixel.y + inset, renderedSize, renderedSize);
+        active.rect(pixel.x + inset, pixel.y + inset, renderedSize, renderedSize);
         if (state === "spotlight") spotlightCount += 1;
         else onCount += 1;
       }
@@ -136,24 +149,30 @@ export function HeroMaterialization({ label }: { readonly label: string }) {
       clear();
       context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
       context.globalAlpha = pixelOpacity;
-      context.fillStyle = "rgb(122 153 194 / 58%)";
-      context.fill(base);
-      context.save();
-      context.fillStyle = "rgb(205 228 249 / 82%)";
-      context.shadowColor = "rgb(154 197 238 / 58%)";
-      context.shadowBlur = 5;
-      context.fill(spotlight);
-      context.restore();
-      context.fillStyle = "rgb(216 236 248 / 88%)";
-      context.fill(spotlight);
+      context.fillStyle = "rgb(115 148 190 / 62%)";
+      context.fill(active);
       context.globalAlpha = 1;
 
+      luminosityContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      luminosityContext.globalAlpha = pixelOpacity;
+      luminosityContext.fillStyle = "rgb(231 244 255 / 96%)";
+      luminosityContext.fill(active);
+      luminosityContext.globalAlpha = 1;
+
+      title.style.setProperty("--company-spotlight-left", `${mask.left.toFixed(3)}%`);
+      title.style.setProperty("--company-spotlight-left-trail", `${mask.leftTrail.toFixed(3)}%`);
+      title.style.setProperty("--company-spotlight-opacity", mask.opacity.toFixed(4));
+      title.style.setProperty("--company-spotlight-right", `${mask.right.toFixed(3)}%`);
+      title.style.setProperty("--company-spotlight-right-trail", `${mask.rightTrail.toFixed(3)}%`);
+      title.style.setProperty("--company-spotlight-trail-width", `${mask.trailWidth.toFixed(3)}%`);
+      title.style.setProperty("--company-spotlight-width", `${mask.width.toFixed(3)}%`);
+
       canvas.dataset.materializeProgress = progress.toFixed(4);
+      canvas.dataset.pixelOpacity = pixelOpacity.toFixed(4);
       canvas.dataset.pixelsOff = String(offCount);
       canvas.dataset.pixelsOn = String(onCount);
       canvas.dataset.pixelsSpotlight = String(spotlightCount);
       if (progress < 0.999) animationFrame = window.requestAnimationFrame(draw);
-      else clear();
     };
 
     const start = () => {
@@ -211,8 +230,14 @@ export function HeroMaterialization({ label }: { readonly label: string }) {
       </svg>
       <canvas
         ref={canvasRef}
-        className="company-home-title__materialization"
+        className="company-home-title__materialization company-home-title__materialization--base"
         data-title-materialization="idle"
+        aria-hidden="true"
+      />
+      <canvas
+        ref={luminosityCanvasRef}
+        className="company-home-title__materialization company-home-title__materialization--luminous"
+        data-title-luminosity="mask"
         aria-hidden="true"
       />
     </h1>

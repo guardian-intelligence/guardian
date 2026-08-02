@@ -4,7 +4,7 @@ import {
   deterministicNoise,
   materializationPixelOpacity,
   pixelLightState,
-  spotlightEdge,
+  spotlightMask,
   type MaterializationPixel,
 } from "./hero-materialization-model";
 
@@ -42,19 +42,19 @@ describe("hero materialization", () => {
     expect(states.slice(firstLit)).not.toContain("off");
   });
 
-  it("expands both spotlight fronts monotonically", () => {
-    for (const side of [-1, 1] as const) {
-      const edges = [0, 0.2, 0.4, 0.6, 0.8, 1].map((progress) =>
-        spotlightEdge(0.37, progress, side),
-      );
-      for (let index = 1; index < edges.length; index += 1) {
-        expect(edges[index]!).toBeGreaterThanOrEqual(edges[index - 1]!);
-      }
+  it("moves both mask fronts outward without reversing", () => {
+    const masks = [0, 0.2, 0.4, 0.6, 0.8, 1].map(spotlightMask);
+    expect(masks[0]?.width).toBeCloseTo(0.25);
+    expect(masks[0]?.opacity).toBe(0);
+    for (let index = 1; index < masks.length; index += 1) {
+      expect(masks[index]!.left).toBeLessThanOrEqual(masks[index - 1]!.left);
+      expect(masks[index]!.right).toBeGreaterThanOrEqual(masks[index - 1]!.right);
+      expect(masks[index]!.width).toBeGreaterThanOrEqual(masks[index - 1]!.width);
     }
   });
 
   it("crossfades the pixel field into the final outline without a discontinuity", () => {
-    const samples = [0.82, 0.86, 0.9, 0.94, 0.98, 1].map(materializationPixelOpacity);
+    const samples = [0.48, 0.58, 0.68, 0.78, 0.88, 0.98].map(materializationPixelOpacity);
     expect(samples[0]).toBe(1);
     expect(samples.at(-1)).toBe(0);
     for (let index = 1; index < samples.length; index += 1) {

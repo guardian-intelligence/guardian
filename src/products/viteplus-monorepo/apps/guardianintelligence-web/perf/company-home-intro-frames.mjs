@@ -57,6 +57,10 @@ await page.addInitScript(
         const title = document.querySelector(titleSelector);
         const titleStyle = title ? getComputedStyle(title) : null;
         const titleCanvas = document.querySelector("[data-title-materialization]");
+        const titleLuminosity = document.querySelector("[data-title-luminosity]");
+        const titleRoot = document.querySelector(".company-home-title");
+        const titleRootStyle = titleRoot ? getComputedStyle(titleRoot) : null;
+        const titleLuminosityStyle = titleLuminosity ? getComputedStyle(titleLuminosity) : null;
         const scene = document.querySelector(".illumination-document");
         const sceneStyle = scene ? getComputedStyle(scene) : null;
         const header = document.querySelector(".company-home-header");
@@ -122,10 +126,20 @@ await page.addInitScript(
               ? {
                   off: titleCanvas.dataset.pixelsOff ?? null,
                   on: titleCanvas.dataset.pixelsOn ?? null,
+                  opacity: titleCanvas.dataset.pixelOpacity ?? null,
                   progress: titleCanvas.dataset.materializeProgress ?? null,
                   spotlight: titleCanvas.dataset.pixelsSpotlight ?? null,
                   state: titleCanvas.dataset.titleMaterialization ?? null,
                   total: titleCanvas.dataset.pixelCount ?? null,
+                }
+              : null,
+          titleSpotlight:
+            titleRootStyle && titleLuminosityStyle
+              ? {
+                  left: titleRootStyle.getPropertyValue("--company-spotlight-left").trim(),
+                  opacity: titleLuminosityStyle.opacity,
+                  right: titleRootStyle.getPropertyValue("--company-spotlight-right").trim(),
+                  width: titleRootStyle.getPropertyValue("--company-spotlight-width").trim(),
                 }
               : null,
         });
