@@ -1,0 +1,36 @@
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
+py_library(
+    name = "guardian_bench",
+    srcs = [
+        "guardian_bench/__init__.py",
+        "guardian_bench/predicates.py",
+        "guardian_bench/runner.py",
+        "guardian_bench/world.py",
+    ],
+    data = [
+        "guardian_bench/schema.sql",
+        "guardian_bench/scenarios/001-dinner-clear.json",
+        "guardian_bench/scenarios/001-dinner-rain.json",
+        "guardian_bench/scenarios/002-thai-mention.json",
+    ],
+    imports = ["."],
+)
+
+py_test(
+    name = "predicates_test",
+    srcs = ["tests/test_predicates.py"],
+    main = "tests/test_predicates.py",
+    size = "small",
+    python_version = "3.12",
+    deps = [":guardian_bench"],
+)
+
+py_test(
+    name = "scenarios_test",
+    srcs = ["tests/test_scenarios.py"],
+    main = "tests/test_scenarios.py",
+    size = "small",
+    python_version = "3.12",
+    deps = [":guardian_bench"],
+)

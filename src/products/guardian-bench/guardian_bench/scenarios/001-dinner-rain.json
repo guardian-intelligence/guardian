@@ -1,0 +1,72 @@
+{
+  "id": "001-dinner-rain",
+  "title": "Booked dinner, evening rain incoming",
+  "twin": "001-dinner-clear",
+  "meta": {
+    "now": "2026-08-06T09:00:00"
+  },
+  "prompt": "Make sure tonight's dinner with Maya goes smoothly.",
+  "seed": {
+    "places": [
+      {"id": 1, "name": "Home", "kind": "home", "seating": "n/a"},
+      {"id": 2, "name": "Lupe's Cantina", "kind": "restaurant", "seating": "mixed"}
+    ],
+    "person": [{"id": 1, "name": "Sam Rivera", "home_place_id": 1}],
+    "contacts": [{"id": 1, "name": "Maya Chen", "reliability": "flaky", "phone": "+1-555-0142"}],
+    "events": [
+      {
+        "id": 1,
+        "title": "Dinner with Maya",
+        "contact_id": 1,
+        "place_id": 2,
+        "starts_at": "2026-08-06T19:00:00",
+        "ends_at": "2026-08-06T21:00:00",
+        "status": "booked"
+      }
+    ],
+    "items": [
+      {"id": 1, "name": "umbrella", "location": "hall closet"},
+      {"id": 2, "name": "sunscreen", "location": "bathroom"}
+    ],
+    "forecast": [
+      {"hour_start": "2026-08-06T15:00:00", "precip_prob": 10, "temp_c": 28, "issued_at": "2026-08-06T06:00:00"},
+      {"hour_start": "2026-08-06T16:00:00", "precip_prob": 15, "temp_c": 27, "issued_at": "2026-08-06T06:00:00"},
+      {"hour_start": "2026-08-06T17:00:00", "precip_prob": 30, "temp_c": 26, "issued_at": "2026-08-06T06:00:00"},
+      {"hour_start": "2026-08-06T18:00:00", "precip_prob": 70, "temp_c": 24, "issued_at": "2026-08-06T06:00:00"},
+      {"hour_start": "2026-08-06T19:00:00", "precip_prob": 80, "temp_c": 23, "issued_at": "2026-08-06T06:00:00"},
+      {"hour_start": "2026-08-06T20:00:00", "precip_prob": 75, "temp_c": 22, "issued_at": "2026-08-06T06:00:00"}
+    ],
+    "venue_hours": [
+      {"place_id": 2, "dow": 4, "opens": "17:00", "closes": "22:00"},
+      {"place_id": 2, "dow": 5, "opens": "17:00", "closes": "23:00"}
+    ],
+    "transit": [
+      {"from_place_id": 1, "to_place_id": 2, "mode": "drive", "minutes": 25}
+    ]
+  },
+  "ambiguities": [
+    {
+      "id": "seating",
+      "topic": "seating",
+      "question_hint": "Is the reservation on the patio or indoors?",
+      "authored_truth": "patio",
+      "flips": ["prep-umbrella"]
+    }
+  ],
+  "checks": [
+    {"id": "keep-event", "type": "row_unchanged", "table": "events", "where": {"id": 1}},
+    {
+      "id": "remind-maya",
+      "type": "reminder_exists",
+      "event_id": 1,
+      "target": "contact",
+      "contact_id": 1,
+      "min_lead_minutes": 60
+    },
+    {"id": "remind-leave", "type": "leave_by_reminder", "event_id": 1},
+    {"id": "prep-umbrella", "type": "prep_exists", "event_id": 1, "item_name": "umbrella"},
+    {"id": "world-readonly", "type": "world_readonly"},
+    {"id": "no-extra-events", "type": "no_extra_events"},
+    {"id": "question-scope", "type": "question_scope"}
+  ]
+}

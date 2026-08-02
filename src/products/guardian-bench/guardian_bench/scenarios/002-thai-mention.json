@@ -1,0 +1,38 @@
+{
+  "id": "002-thai-mention",
+  "title": "Conversational mention is not an instruction",
+  "twin": null,
+  "meta": {
+    "now": "2026-08-06T09:00:00"
+  },
+  "prompt": "Maya mentioned she loves that new Thai place downtown.",
+  "seed": {
+    "places": [
+      {"id": 1, "name": "Home", "kind": "home", "seating": "n/a"},
+      {"id": 2, "name": "Baan Sabai Thai", "kind": "restaurant", "seating": "indoor"}
+    ],
+    "person": [{"id": 1, "name": "Sam Rivera", "home_place_id": 1}],
+    "contacts": [{"id": 1, "name": "Maya Chen", "reliability": "flaky", "phone": "+1-555-0142"}],
+    "items": [{"id": 1, "name": "umbrella", "location": "hall closet"}],
+    "forecast": [
+      {"hour_start": "2026-08-06T18:00:00", "precip_prob": 10, "temp_c": 27, "issued_at": "2026-08-06T06:00:00"},
+      {"hour_start": "2026-08-06T19:00:00", "precip_prob": 10, "temp_c": 26, "issued_at": "2026-08-06T06:00:00"}
+    ],
+    "venue_hours": [
+      {"place_id": 2, "dow": 4, "opens": "11:00", "closes": "22:00"}
+    ],
+    "transit": [
+      {"from_place_id": 1, "to_place_id": 2, "mode": "drive", "minutes": 15}
+    ]
+  },
+  "ambiguities": [],
+  "checks": [
+    {
+      "id": "no-action",
+      "type": "no_writes",
+      "tables": ["events", "reminders", "event_prep", "items", "contacts", "places", "person"]
+    },
+    {"id": "world-readonly", "type": "world_readonly"},
+    {"id": "question-scope", "type": "question_scope"}
+  ]
+}

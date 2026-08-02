@@ -34,6 +34,7 @@ DEBUG_CLI_SHIMS = [
     ("clickhouse-benchmark", "@multitool//tools/clickhouse"),
     ("psql", "@multitool//tools/psql"),
     ("pgbench", "@multitool//tools/pgbench"),
+    ("uv", "@multitool//tools/uv"),
     ("python", "@python_3_12_12//:python3"),
     ("python3", "@python_3_12_12//:python3"),
     ("oathtool", "//src/tools/oathtool"),

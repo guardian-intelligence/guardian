@@ -460,6 +460,26 @@
       }
     ]
   },
+  "uv": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.12.1/uv-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "uv-x86_64-unknown-linux-gnu/uv"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.12.1/uv-aarch64-apple-darwin.tar.gz",
+        "sha256": "77d2906988e8074fd43f2f329ec452ebbf9b0c257ba1c66451c71de70a6baf42",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "uv-aarch64-apple-darwin/uv"
+      }
+    ]
+  },
   "velero": {
     "binaries": [
       {
