@@ -51,7 +51,11 @@ spec:
           type: RuntimeDefault
       containers:
         - name: directus
-          image: docker.io/directus/directus:12.2.0@sha256:4fb64fd8c264b187aab11f5a23fb2bc789df129d81c944a1628c082419613b67
+          # Held at 11.x deliberately: v12 license-enforces SSO and custom
+          # permission rules out of the free Core tier, both of which this
+          # deployment depends on. Moving to 12 means claiming the Directus
+          # Open Innovation Grant first (LICENSE_KEY via OpenBao).
+          image: docker.io/directus/directus:11.17.4@sha256:eb326f679ae847c0a776f93b972761dc2ebe84980e0b9d274a6bc31cd62809f7
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

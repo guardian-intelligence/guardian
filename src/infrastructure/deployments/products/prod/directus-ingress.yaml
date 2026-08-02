@@ -34,14 +34,15 @@ spec:
 # Workload DNS is declared, not clicked: external-dns (sources: [crd])
 # reconciles this record with its DNS-only token. Proxied through
 # Cloudflare so the edge terminates TLS and enforces AOP toward the
-# origin, same as the apex; targets are the three ingress node IPs.
+# origin, same as the apex; targets are the three ingress node IPs. The
+# proxied flag must be providerSpecific on the endpoint — the CRD source
+# does not read object annotations — and an unproxied record is dead on
+# arrival: origin 443 answers Cloudflare only.
 apiVersion: externaldns.k8s.io/v1alpha1
 kind: DNSEndpoint
 metadata:
   name: directus-cms
   namespace: tenant-guardian-prod
-  annotations:
-    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
   labels:
     app.kubernetes.io/name: directus
     app.kubernetes.io/part-of: guardian
@@ -51,6 +52,9 @@ spec:
   endpoints:
     - dnsName: cms.guardianintelligence.org
       recordType: A
+      providerSpecific:
+        - name: external-dns.alpha.kubernetes.io/cloudflare-proxied
+          value: "true"
       targets:
         - 206.223.228.101
         - 45.250.254.119
