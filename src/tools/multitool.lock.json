@@ -36,16 +36,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/cilium/cilium-cli/releases/download/v0.19.6/cilium-linux-amd64.tar.gz",
-        "sha256": "65ae7592ab873acc0b242b8e679e0a0a856255e34fdd0082e7b048b6285a9842",
+        "url": "https://github.com/cilium/cilium-cli/releases/download/v0.19.7/cilium-linux-amd64.tar.gz",
+        "sha256": "cd15e0983bf0acc7946cd05d453d1e58376ea92dec2642e745212df2b07d8852",
         "os": "linux",
         "cpu": "x86_64",
         "file": "cilium"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/cilium/cilium-cli/releases/download/v0.19.6/cilium-darwin-arm64.tar.gz",
-        "sha256": "363e6f050eaf64f8dd648806ebd3e371bcdc8ef4a5aebe7301cce4c2f28463ca",
+        "url": "https://github.com/cilium/cilium-cli/releases/download/v0.19.7/cilium-darwin-arm64.tar.gz",
+        "sha256": "c9aaa1b033919d47a3dce37bc266f1f1e0bc7a4f87e5288fc80f6061ec58cb3b",
         "os": "macos",
         "cpu": "arm64",
         "file": "cilium"
@@ -56,11 +56,11 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/ClickHouse/ClickHouse/releases/download/v26.3.16.16-lts/clickhouse-common-static-26.3.16.16-amd64.tgz",
-        "sha256": "178a3bebfc76ba3eeaf2e37c57fbb2abb9baf8e22fca21c55b83445e9cfcedda",
+        "url": "https://github.com/ClickHouse/ClickHouse/releases/download/v26.3.17.56-lts/clickhouse-common-static-26.3.17.56-amd64.tgz",
+        "sha256": "24b4b4814f51dda0e67e7bc5480a56a0d345bec4c72f007b5037a80d0e0fa2a2",
         "os": "linux",
         "cpu": "x86_64",
-        "file": "clickhouse-common-static-26.3.16.16/usr/bin/clickhouse"
+        "file": "clickhouse-common-static-26.3.17.56/usr/bin/clickhouse"
       }
     ]
   },
@@ -126,16 +126,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/fluxcd/flux2/releases/download/v2.9.2/flux_2.9.2_linux_amd64.tar.gz",
-        "sha256": "4092b367fd060097976fb7261601f79420ecf7266328417dfd8dfee27de0e6a3",
+        "url": "https://github.com/fluxcd/flux2/releases/download/v2.9.3/flux_2.9.3_linux_amd64.tar.gz",
+        "sha256": "eae4e8608c0ade2bf4e8dec1669dbb6b0c28b5822b252d97feccfb4fb1181fd2",
         "os": "linux",
         "cpu": "x86_64",
         "file": "flux"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/fluxcd/flux2/releases/download/v2.9.2/flux_2.9.2_darwin_arm64.tar.gz",
-        "sha256": "1dd6791738b1c250748c24c24b48e92908881596f999ad8bf10f84763d66fdb3",
+        "url": "https://github.com/fluxcd/flux2/releases/download/v2.9.3/flux_2.9.3_darwin_arm64.tar.gz",
+        "sha256": "59627ac109a59b2c7e94a9ce0e290a81906d0ea435d53806699385e9d54ec10a",
         "os": "macos",
         "cpu": "arm64",
         "file": "flux"
@@ -284,16 +284,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/int128/kubelogin/releases/download/v1.36.2/kubelogin_linux_amd64.zip",
-        "sha256": "0f9b35e82469dbf1e1ed7cfa8cbaa27ffde733e18930dbaed590518a58eb11cc",
+        "url": "https://github.com/int128/kubelogin/releases/download/v1.36.3/kubelogin_linux_amd64.zip",
+        "sha256": "54428b2be68ce297c5c743feed65a2fa2ed2a671881ff70fb6560e560bb18eaf",
         "os": "linux",
         "cpu": "x86_64",
         "file": "kubelogin"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/int128/kubelogin/releases/download/v1.36.2/kubelogin_darwin_arm64.zip",
-        "sha256": "bf90d24882875641b8f89218b13900769e17677e8cfa6c12d05f1bf59acca1f7",
+        "url": "https://github.com/int128/kubelogin/releases/download/v1.36.3/kubelogin_darwin_arm64.zip",
+        "sha256": "52f445067da35b442cdcaf4aff884379188373c97d0564d61036caa178a6f62b",
         "os": "macos",
         "cpu": "arm64",
         "file": "kubelogin"
@@ -406,16 +406,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/cozystack/talm/releases/download/v0.33.1/talm-linux-amd64.tar.gz",
-        "sha256": "8d5a39f4e20ce13cc43de278ce8cc776969f734f54f439b216e25553b470a278",
+        "url": "https://github.com/cozystack/talm/releases/download/v0.34.0/talm-linux-amd64.tar.gz",
+        "sha256": "74513f55c3818ab9ce63adac74f015a5029e185fe25ef977ee0e1f13df2c03e6",
         "os": "linux",
         "cpu": "x86_64",
         "file": "talm"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/cozystack/talm/releases/download/v0.33.1/talm-darwin-arm64.tar.gz",
-        "sha256": "c8d7631bb3a4f6138ef7deef9eab101cb2f1e1e827fb9552eda236d9b85b8084",
+        "url": "https://github.com/cozystack/talm/releases/download/v0.34.0/talm-darwin-arm64.tar.gz",
+        "sha256": "47ca98a3e8f22d34d99e9f10934d21ab92de0f21d16cdc0161cabf19396c3822",
         "os": "macos",
         "cpu": "arm64",
         "file": "talm"
@@ -426,15 +426,15 @@
     "binaries": [
       {
         "kind": "file",
-        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.6/talosctl-linux-amd64",
-        "sha256": "540c5e7cb0d3fa3a9b2e1c717ced212727b73bcaf0cf9cf9ba2472ec381041d4",
+        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.7/talosctl-linux-amd64",
+        "sha256": "97d08e5584e56114659f131e95e227910d1f3b427d26360dca2af3ed821b71f8",
         "os": "linux",
         "cpu": "x86_64"
       },
       {
         "kind": "file",
-        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.6/talosctl-darwin-arm64",
-        "sha256": "8badc3f3907776488e9b13b6a521ffadf301dff9a3f097c1551102c363905c9f",
+        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.7/talosctl-darwin-arm64",
+        "sha256": "8965b026f416a25147b99530721c25fc2616c4fa655480673bcb63eb7f0de331",
         "os": "macos",
         "cpu": "arm64"
       }
@@ -444,16 +444,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/opentofu/opentofu/releases/download/v1.12.4/tofu_1.12.4_linux_amd64.zip",
-        "sha256": "f5d2ae8a0efcddd3722546b3e0f2f2f0648ce5e5a3e411176041adcb7dccc1e8",
+        "url": "https://github.com/opentofu/opentofu/releases/download/v1.12.5/tofu_1.12.5_linux_amd64.zip",
+        "sha256": "dade9650e6b74fc7a8b986bd8717497d32f9e09cf82e479afef4977fa3085536",
         "os": "linux",
         "cpu": "x86_64",
         "file": "tofu"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/opentofu/opentofu/releases/download/v1.12.4/tofu_1.12.4_darwin_arm64.tar.gz",
-        "sha256": "7c06e4390d9ccd467773e37ff1c3d833c7ca0c24742cd9e9ad47284bea472247",
+        "url": "https://github.com/opentofu/opentofu/releases/download/v1.12.5/tofu_1.12.5_darwin_arm64.tar.gz",
+        "sha256": "2ae38150a667f5c0bd57b318d18ad8091d08f93fcca40345f3d88998661de5a9",
         "os": "macos",
         "cpu": "arm64",
         "file": "tofu"
