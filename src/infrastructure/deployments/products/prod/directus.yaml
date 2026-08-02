@@ -34,6 +34,10 @@ spec:
       app.kubernetes.io/name: directus
   template:
     metadata:
+      annotations:
+        # Bootstrap (migrations + first admin) runs only at container start;
+        # bump this to roll the pod after an out-of-band database reset.
+        guardian.dev/bootstrap-epoch: "v11-schema-reset-20260802"
       labels:
         app.kubernetes.io/name: directus
         app.kubernetes.io/part-of: guardian
