@@ -21,10 +21,9 @@ var eventsIngested = promauto.NewCounterVec(prometheus.CounterOpts{
 // which would otherwise be a cardinality faucet anyone on the internet can
 // open.
 var meteredEventNames = map[string]struct{}{
-	"company.software_request_submitted": {},
-	"privatecut.link_submitted":          {},
-	"privatecut.link_resolved":           {},
-	"privatecut.link_failed":             {},
+	"privatecut.link_submitted": {},
+	"privatecut.link_resolved":  {},
+	"privatecut.link_failed":    {},
 }
 
 var eventsByName = promauto.NewCounterVec(prometheus.CounterOpts{

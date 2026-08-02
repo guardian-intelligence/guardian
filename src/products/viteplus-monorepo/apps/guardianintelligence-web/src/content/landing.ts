@@ -5,13 +5,9 @@
 // Voice rules in brand/voice.md apply.
 
 export const landing = {
-  kicker: "Forward-deployed intelligence",
-  hero: "Request any software",
+  kicker: "Accepting Applications for Fall 2026",
+  hero: "Guardian",
   lede: "Tell us what your company needs. We build the strongest reusable ideas in the open, or privately under an enterprise contract.",
-  requestPlaceholder:
-    "Describe the software you wish existed, the problem it should solve, and what success looks like.",
-  openSourceNote:
-    "Open-source requests are reviewed at no cost. Private builds require an enterprise contract.",
 } as const;
 
 export type LandingContent = typeof landing;
