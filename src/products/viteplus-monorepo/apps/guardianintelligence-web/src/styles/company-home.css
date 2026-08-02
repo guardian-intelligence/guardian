@@ -78,7 +78,7 @@
   --company-pencil-opacity: 0;
   --company-rail-progress: 0;
   --company-title-opacity: 0;
-  animation: company-scene-intro 3.617s linear both;
+  animation: company-scene-intro 3.617s 250ms linear both;
   background: #05060f;
 }
 
@@ -693,26 +693,26 @@ html[data-canvas-mode="css"] .company-home-cta {
   }
 
   1.852% {
-    --company-materialize-left: 46%;
+    --company-materialize-left: 47.9%;
     --company-materialize-opacity: 0.18;
-    --company-materialize-right: 54%;
+    --company-materialize-right: 52.1%;
   }
 
   7.382% {
-    --company-materialize-left: 39%;
+    --company-materialize-left: 47.1%;
     --company-materialize-opacity: 0.95;
-    --company-materialize-right: 61%;
+    --company-materialize-right: 52.9%;
   }
 
   13.824% {
-    --company-materialize-left: 30%;
+    --company-materialize-left: 44.7%;
     --company-materialize-opacity: 1;
-    --company-materialize-right: 70%;
+    --company-materialize-right: 55.3%;
   }
 
   17.058% {
-    --company-materialize-left: 25%;
-    --company-materialize-right: 75%;
+    --company-materialize-left: 43%;
+    --company-materialize-right: 57%;
     --company-pencil-opacity: 0;
     --company-rail-progress: 0;
   }
@@ -722,9 +722,9 @@ html[data-canvas-mode="css"] .company-home-cta {
     --company-copy-opacity: 0;
     --company-eyebrow-opacity: 0;
     --company-illumination: 0;
-    --company-materialize-left: 20%;
+    --company-materialize-left: 41.2%;
     --company-materialize-opacity: 1;
-    --company-materialize-right: 80%;
+    --company-materialize-right: 58.8%;
     --company-node-opacity: 0;
     --company-title-opacity: 0;
   }
@@ -734,8 +734,8 @@ html[data-canvas-mode="css"] .company-home-cta {
     --company-copy-opacity: 0;
     --company-eyebrow-opacity: 0;
     --company-illumination: 0;
-    --company-materialize-left: 14%;
-    --company-materialize-right: 86%;
+    --company-materialize-left: 36.9%;
+    --company-materialize-right: 63.1%;
     --company-node-opacity: 0;
     --company-pencil-opacity: 1;
     --company-rail-progress: 0.086;
@@ -743,8 +743,8 @@ html[data-canvas-mode="css"] .company-home-cta {
   }
 
   28.034% {
-    --company-materialize-left: 10%;
-    --company-materialize-right: 90%;
+    --company-materialize-left: 34.4%;
+    --company-materialize-right: 65.6%;
   }
 
   30.882% {
@@ -769,8 +769,8 @@ html[data-canvas-mode="css"] .company-home-cta {
   }
 
   34.835% {
-    --company-materialize-left: 2%;
-    --company-materialize-right: 98%;
+    --company-materialize-left: 27%;
+    --company-materialize-right: 73%;
   }
 
   41.471% {
@@ -778,9 +778,9 @@ html[data-canvas-mode="css"] .company-home-cta {
     --company-copy-opacity: 0.23;
     --company-eyebrow-opacity: 0.64;
     --company-illumination: 0.38;
-    --company-materialize-left: -4%;
+    --company-materialize-left: 18.2%;
     --company-materialize-opacity: 0.9;
-    --company-materialize-right: 104%;
+    --company-materialize-right: 81.8%;
     --company-rail-progress: 0.52;
     --company-title-opacity: 0.65;
   }
@@ -790,9 +790,9 @@ html[data-canvas-mode="css"] .company-home-cta {
     --company-copy-opacity: 0.5;
     --company-eyebrow-opacity: 0.79;
     --company-illumination: 0.64;
-    --company-materialize-left: -8%;
+    --company-materialize-left: 10.7%;
     --company-materialize-opacity: 0.8;
-    --company-materialize-right: 108%;
+    --company-materialize-right: 89.3%;
     --company-rail-progress: 0.61;
     --company-title-opacity: 0.76;
   }
@@ -802,9 +802,9 @@ html[data-canvas-mode="css"] .company-home-cta {
     --company-copy-opacity: 0.75;
     --company-eyebrow-opacity: 0.92;
     --company-illumination: 0.82;
-    --company-materialize-left: -12%;
+    --company-materialize-left: -0.5%;
     --company-materialize-opacity: 0.55;
-    --company-materialize-right: 112%;
+    --company-materialize-right: 100.5%;
     --company-rail-progress: 0.72;
     --company-title-opacity: 0.88;
   }
@@ -814,9 +814,9 @@ html[data-canvas-mode="css"] .company-home-cta {
     --company-copy-opacity: 0.87;
     --company-eyebrow-opacity: 0.97;
     --company-illumination: 0.92;
-    --company-materialize-left: -18%;
+    --company-materialize-left: -11.6%;
     --company-materialize-opacity: 0.2;
-    --company-materialize-right: 118%;
+    --company-materialize-right: 111.6%;
     --company-rail-progress: 0.78;
     --company-title-opacity: 0.94;
   }
