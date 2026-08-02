@@ -129,10 +129,11 @@ float beam(
   vec2 origin,
   float angle,
   float spread,
-  float phase,
+  float swayDirection,
   float period
 ) {
-  float motion = sin(uTime * 6.2831853 / period + phase) * 0.061;
+  float travel = (1.0 - cos(uTime * 6.2831853 / period)) * 0.5;
+  float motion = radians(4.0) * swayDirection * travel;
   vec2 direction = normalize(vec2(sin(angle + motion), cos(angle + motion)));
   vec2 delta = point - origin;
   float along = dot(delta, direction);
@@ -141,7 +142,8 @@ float beam(
   float core = exp(-pow(across / max(width, 1.0), 2.0) * 2.0);
   float enter = smoothstep(-12.0, 80.0, along);
   float leave = 1.0 - smoothstep(uResolution.y * 0.54, uResolution.y * 1.02, along);
-  float pulse = 0.82 + 0.18 * sin(uTime * 6.2831853 / (period * 0.72) + phase * 2.0);
+  float opacityPeriod = period * 0.70588235;
+  float pulse = (0.55 + 0.05 * cos(uTime * 6.2831853 / opacityPeriod)) / 0.60;
   return core * enter * leave * pulse;
 }
 
@@ -160,9 +162,9 @@ void main() {
 
   vec2 origin = vec2(uResolution.x * 0.5, min(100.0, uResolution.y * 0.13));
   float beams =
-    beam(point, origin, radians(20.0), 0.17, 0.0, 8.5) * 0.19 +
-    beam(point, origin, 0.0, 0.20, 2.1, 13.6) * 0.24 +
-    beam(point, origin, radians(-20.0), 0.17, 4.2, 6.8) * 0.19;
+    beam(point, origin, radians(20.0), 0.17, 1.0, 8.5) * 0.19 +
+    beam(point, origin, 0.0, 0.20, 0.0, 13.6) * 0.24 +
+    beam(point, origin, radians(-20.0), 0.17, -1.0, 6.8) * 0.19;
   color += vec3(124.0, 145.0, 182.0) / 255.0 * beams * intro;
 
   float lineFade =

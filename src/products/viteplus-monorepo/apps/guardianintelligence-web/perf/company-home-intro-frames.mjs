@@ -105,7 +105,13 @@ await page.addInitScript(
                 copy: sceneStyle.getPropertyValue("--company-copy-opacity").trim(),
                 eyebrow: sceneStyle.getPropertyValue("--company-eyebrow-opacity").trim(),
                 illumination: sceneStyle.getPropertyValue("--company-illumination").trim(),
+                materializeLeft: sceneStyle
+                  .getPropertyValue("--company-materialize-left")
+                  .trim(),
                 materialize: sceneStyle.getPropertyValue("--company-materialize-opacity").trim(),
+                materializeRight: sceneStyle
+                  .getPropertyValue("--company-materialize-right")
+                  .trim(),
                 node: sceneStyle.getPropertyValue("--company-node-opacity").trim(),
                 pencil: sceneStyle.getPropertyValue("--company-pencil-opacity").trim(),
                 railProgress: sceneStyle.getPropertyValue("--company-rail-progress").trim(),
