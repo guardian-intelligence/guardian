@@ -1,9 +1,104 @@
 @import "./illumination.css";
 
-@property --materialize-x {
+@property --company-beacon-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --company-copy-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --company-eyebrow-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --company-illumination {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --company-materialize-left {
   syntax: "<percentage>";
-  inherits: false;
-  initial-value: 50%;
+  inherits: true;
+  initial-value: 52%;
+}
+
+@property --company-materialize-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --company-materialize-right {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 48%;
+}
+
+@property --company-node-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --company-pencil-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --company-rail-progress {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --company-title-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+.illumination-document {
+  --company-beacon-opacity: 0;
+  --company-copy-opacity: 0;
+  --company-eyebrow-opacity: 0;
+  --company-illumination: 0;
+  --company-materialize-left: 52%;
+  --company-materialize-opacity: 0;
+  --company-materialize-right: 48%;
+  --company-node-opacity: 0;
+  --company-pencil-opacity: 0;
+  --company-rail-progress: 0;
+  --company-title-opacity: 0;
+  animation: company-scene-intro 4.25s linear both;
+  background: #05060f;
+}
+
+.illumination-document:has(.illumination-canvas[data-mode="css"])::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  content: "";
+  background:
+    radial-gradient(circle at 17% 22%, rgb(216 236 248 / 18%) 0 1px, transparent 1.4px),
+    radial-gradient(circle at 68% 38%, rgb(216 236 248 / 14%) 0 1px, transparent 1.4px),
+    radial-gradient(circle at 82% 17%, rgb(216 236 248 / 12%) 0 1px, transparent 1.4px),
+    radial-gradient(50% 64.48% at 50% 35.52%, rgb(21 61 204 / 8%) 14.36%, transparent 100%);
+  background-size:
+    18rem 16rem,
+    23rem 21rem,
+    29rem 27rem,
+    auto;
+  opacity: var(--company-illumination);
+  pointer-events: none;
 }
 
 .company-home-shell {
@@ -36,9 +131,10 @@
   justify-content: space-between;
   color: rgb(216 236 248 / 78%);
   background: transparent;
-  opacity: 0;
-  transform: translateY(-0.625rem);
-  animation: company-intro-up 1.5s 0.3s ease forwards;
+  opacity: 1;
+  transform: none;
+  animation: none;
+  transition: none;
 }
 
 .company-home-header__lockup {
@@ -48,7 +144,11 @@
   color: inherit;
   text-decoration: none;
   touch-action: manipulation;
-  transition: color 200ms ease;
+  transition: none;
+}
+
+.company-home-header .transition-colors {
+  transition: none;
 }
 
 .company-home-beacon {
@@ -62,8 +162,7 @@
   height: 4.375rem;
   place-items: center;
   transform: translateX(-50%);
-  opacity: 0;
-  animation: company-beacon-in 1.5s 0.2s ease forwards;
+  opacity: var(--company-beacon-opacity);
 }
 
 .company-home-beacon::before {
@@ -79,7 +178,7 @@
   box-shadow:
     inset 0 -0.9rem 1.6rem rgb(216 236 248 / 8%),
     inset 0 1px 1px rgb(216 236 248 / 8%);
-  opacity: 0.5;
+  opacity: calc(0.5 * var(--company-illumination));
   -webkit-mask-image: radial-gradient(circle, #000 0%, #000 54%, transparent 76%);
   mask-image: radial-gradient(circle, #000 0%, #000 54%, transparent 76%);
 }
@@ -93,7 +192,7 @@
   content: "";
   background: radial-gradient(ellipse, rgb(174 207 242 / 18%) 0%, transparent 68%);
   filter: blur(0.8rem);
-  opacity: 0.55;
+  opacity: calc(0.55 * var(--company-illumination));
 }
 
 .company-home-beacon__mark {
@@ -150,13 +249,11 @@
 }
 
 .company-home-blueprint__rail {
-  --draw-delay: 0s;
-  --draw-duration: 0.6s;
   --rail-color: rgb(186 215 247 / 11%);
   position: absolute;
   display: block;
   background: var(--rail-color);
-  opacity: 0;
+  opacity: var(--company-rail-progress);
 }
 
 .company-home-blueprint__rail::after {
@@ -167,8 +264,7 @@
   content: "";
   background: rgb(204 225 250 / 38%);
   filter: blur(0.45px);
-  opacity: 0;
-  animation: company-pencil-tip var(--draw-duration) var(--draw-delay) linear both;
+  opacity: var(--company-pencil-opacity);
 }
 
 .company-home-blueprint__rail--top,
@@ -177,9 +273,7 @@
   right: 0;
   left: 0;
   height: 1px;
-  transform: scaleX(0);
-  animation: company-rail-draw-x var(--draw-duration) var(--draw-delay)
-    cubic-bezier(0.45, 0, 0.55, 1) both;
+  transform: scaleX(var(--company-rail-progress));
 }
 
 .company-home-blueprint__rail--top::after,
@@ -198,9 +292,7 @@
   top: 0;
   bottom: 0;
   width: 1px;
-  transform: scaleY(0);
-  animation: company-rail-draw-y var(--draw-duration) var(--draw-delay)
-    cubic-bezier(0.45, 0, 0.55, 1) both;
+  transform: scaleY(var(--company-rail-progress));
 }
 
 .company-home-blueprint__rail--right::after {
@@ -214,36 +306,26 @@
 }
 
 .company-home-blueprint__rail--top {
-  --draw-delay: 0.08s;
-  --draw-duration: 0.52s;
   top: 0;
   transform-origin: left center;
 }
 
 .company-home-blueprint__rail--right {
-  --draw-delay: 0.52s;
-  --draw-duration: 0.72s;
   right: 0;
   transform-origin: center top;
 }
 
 .company-home-blueprint__rail--bottom {
-  --draw-delay: 1.18s;
-  --draw-duration: 0.52s;
   bottom: 0;
   transform-origin: right center;
 }
 
 .company-home-blueprint__rail--left {
-  --draw-delay: 1.64s;
-  --draw-duration: 0.72s;
   left: 0;
   transform-origin: center bottom;
 }
 
 .company-home-blueprint__rail--divider {
-  --draw-delay: 2.2s;
-  --draw-duration: 0.7s;
   top: 4.5rem;
   transform-origin: left center;
 }
@@ -267,8 +349,7 @@
     100% 100%;
   background-repeat: no-repeat;
   background-size: var(--dot-size) var(--dot-size);
-  opacity: 0;
-  animation: company-dots-in 0.35s 2.72s ease forwards;
+  opacity: var(--company-node-opacity);
 }
 
 .company-home-hero__eyebrow {
@@ -283,9 +364,8 @@
   letter-spacing: 0.005em;
   white-space: nowrap;
   text-shadow: 0 2px 1rem rgb(174 207 242 / 12%);
-  opacity: 0;
-  transform: translateY(-0.3rem);
-  animation: company-intro-up 1.5s 0.3s ease forwards;
+  opacity: var(--company-eyebrow-opacity);
+  transform: none;
 }
 
 .company-home-hero__eyebrow::before,
@@ -295,10 +375,9 @@
   flex: 1;
   content: "";
   background: linear-gradient(90deg, transparent, rgb(186 215 247 / 14%));
-  opacity: 0;
-  transform: scaleX(0);
+  opacity: var(--company-rail-progress);
+  transform: scaleX(var(--company-rail-progress));
   transform-origin: right center;
-  animation: company-label-rule-in 0.55s 2.35s ease both;
 }
 
 .company-home-hero__eyebrow::after {
@@ -333,8 +412,7 @@
     100% 100%;
   background-repeat: no-repeat;
   background-size: var(--dot-size) var(--dot-size);
-  opacity: 0;
-  animation: company-dots-in 0.35s 2.72s ease forwards;
+  opacity: var(--company-node-opacity);
 }
 
 .company-home-title {
@@ -355,13 +433,11 @@
   background-clip: text;
   text-shadow: 0 2px 1rem rgb(174 207 242 / 24%);
   -webkit-text-fill-color: transparent;
-  opacity: 0.001;
-  animation: company-title-base-in 2s 0.1s ease-out forwards;
+  opacity: var(--company-title-opacity);
 }
 
 .company-home-title::before,
 .company-home-title::after {
-  --materialize-x: 50%;
   position: absolute;
   inset: 0;
   content: attr(data-copy);
@@ -389,16 +465,16 @@
     rgb(0 0 0 / 78%) 58%,
     transparent 100%
   );
-  opacity: 0;
+  opacity: var(--company-materialize-opacity);
   pointer-events: none;
 }
 
 .company-home-title::before {
-  animation: company-title-materialize-left 2.669s linear forwards;
+  --materialize-x: var(--company-materialize-left);
 }
 
 .company-home-title::after {
-  animation: company-title-materialize-right 2.669s linear forwards;
+  --materialize-x: var(--company-materialize-right);
 }
 
 .company-home-hero__lede {
@@ -410,9 +486,8 @@
   line-height: 1.42;
   text-align: center;
   text-shadow: 0 2px 1rem rgb(174 207 242 / 8%);
-  opacity: 0;
-  transform: translateY(0.625rem);
-  animation: company-intro-up 1.5s 0.65s ease forwards;
+  opacity: var(--company-copy-opacity);
+  transform: none;
 }
 
 .company-home-hero__cross {
@@ -433,9 +508,8 @@
       rgb(186 216 247 / 12%) 50%,
       transparent calc(50% + 1px)
     );
-  opacity: 0;
-  transform: translateY(-50%) scale(0.5);
-  animation: company-cross-in 1.5s 0.4s ease forwards;
+  opacity: var(--company-node-opacity);
+  transform: translateY(-50%) scale(1);
 }
 
 .company-home-hero__cross--left {
@@ -462,12 +536,11 @@
   font-size: 0.82rem;
   font-weight: 560;
   text-decoration: none;
-  opacity: 0.001;
-  transform: translateY(1rem);
+  opacity: var(--company-copy-opacity);
+  transform: none;
   transition:
     border-color 200ms ease,
     color 200ms ease;
-  animation: company-cta-in 1.5s 0.9s cubic-bezier(0.33, 1, 0.68, 1) forwards;
 }
 
 .company-home-cta:focus-visible {
@@ -478,6 +551,10 @@
 
 html[data-canvas-mode="css"] .company-home-cta {
   background: rgb(186 214 247 / 6%);
+}
+
+.illumination-document:has(.illumination-canvas[data-mode="css"]) {
+  background: #05060f;
 }
 
 .illumination-document[data-html-in-canvas="active"] .company-home-beacon::before,
@@ -563,185 +640,136 @@ html[data-canvas-mode="css"] .company-home-cta {
   }
 }
 
-@keyframes company-intro-up {
-  to {
-    opacity: 1;
-    transform: translateY(0);
+@keyframes company-scene-intro {
+  0%,
+  8% {
+    --company-beacon-opacity: 0;
+    --company-copy-opacity: 0;
+    --company-eyebrow-opacity: 0;
+    --company-illumination: 0;
+    --company-materialize-left: 52%;
+    --company-materialize-opacity: 0;
+    --company-materialize-right: 48%;
+    --company-node-opacity: 0;
+    --company-pencil-opacity: 0;
+    --company-rail-progress: 0;
+    --company-title-opacity: 0;
   }
-}
 
-@keyframes company-beacon-in {
-  to {
-    opacity: 1;
+  14% {
+    --company-beacon-opacity: 0.28;
+    --company-eyebrow-opacity: 0;
+    --company-pencil-opacity: 0;
+    --company-rail-progress: 0;
   }
-}
 
-@keyframes company-title-base-in {
-  from {
-    opacity: 0.08;
+  18% {
+    --company-beacon-opacity: 0.5;
+    --company-eyebrow-opacity: 0.05;
+    --company-pencil-opacity: 1;
+    --company-rail-progress: 0.04;
   }
-  to {
-    opacity: 1;
-  }
-}
 
-@keyframes company-title-materialize-left {
-  0% {
-    opacity: 0;
-    --materialize-x: 52%;
+  32% {
+    --company-beacon-opacity: 1;
   }
-  10% {
-    opacity: 0.95;
+
+  36.5% {
+    --company-copy-opacity: 0;
+    --company-eyebrow-opacity: 0.72;
+    --company-illumination: 0;
+    --company-materialize-left: 52%;
+    --company-materialize-opacity: 0;
+    --company-materialize-right: 48%;
+    --company-node-opacity: 0;
+    --company-pencil-opacity: 1;
+    --company-rail-progress: 0.76;
+    --company-title-opacity: 0;
   }
-  38% {
-    opacity: 1;
-    --materialize-x: 16%;
+
+  41% {
+    --company-node-opacity: 0.18;
+    --company-pencil-opacity: 1;
   }
-  72% {
-    opacity: 0.9;
+
+  44% {
+    --company-eyebrow-opacity: 1;
+    --company-illumination: 0.22;
+    --company-materialize-left: 41%;
+    --company-materialize-opacity: 0.75;
+    --company-materialize-right: 59%;
+    --company-node-opacity: 0.52;
+    --company-pencil-opacity: 0;
+    --company-rail-progress: 1;
+    --company-title-opacity: 0.22;
   }
+
+  47% {
+    --company-copy-opacity: 0;
+    --company-illumination: 0.38;
+    --company-materialize-left: 34%;
+    --company-materialize-opacity: 1;
+    --company-materialize-right: 66%;
+    --company-node-opacity: 0.7;
+    --company-title-opacity: 0.38;
+  }
+
+  60% {
+    --company-copy-opacity: 0.15;
+    --company-illumination: 0.75;
+    --company-materialize-left: 16%;
+    --company-materialize-opacity: 1;
+    --company-materialize-right: 84%;
+    --company-title-opacity: 0.75;
+  }
+
+  70.6% {
+    --company-copy-opacity: 0.55;
+    --company-illumination: 0.956;
+    --company-materialize-left: 0%;
+    --company-materialize-opacity: 0.9;
+    --company-materialize-right: 100%;
+    --company-title-opacity: 0.956;
+  }
+
+  83.5% {
+    --company-copy-opacity: 0.9;
+    --company-illumination: 1;
+    --company-materialize-left: -14%;
+    --company-materialize-opacity: 0;
+    --company-materialize-right: 114%;
+    --company-title-opacity: 1;
+  }
+
   100% {
-    opacity: 0;
-    --materialize-x: -14%;
-  }
-}
-
-@keyframes company-title-materialize-right {
-  0% {
-    opacity: 0;
-    --materialize-x: 48%;
-  }
-  10% {
-    opacity: 0.95;
-  }
-  38% {
-    opacity: 1;
-    --materialize-x: 84%;
-  }
-  72% {
-    opacity: 0.9;
-  }
-  100% {
-    opacity: 0;
-    --materialize-x: 114%;
-  }
-}
-
-@keyframes company-dots-in {
-  to {
-    opacity: 0.7;
-  }
-}
-
-@keyframes company-rail-draw-x {
-  from {
-    opacity: 0;
-    transform: scaleX(0);
-  }
-  4% {
-    opacity: 1;
-  }
-  to {
-    opacity: 1;
-    transform: scaleX(1);
-  }
-}
-
-@keyframes company-rail-draw-y {
-  from {
-    opacity: 0;
-    transform: scaleY(0);
-  }
-  4% {
-    opacity: 1;
-  }
-  to {
-    opacity: 1;
-    transform: scaleY(1);
-  }
-}
-
-@keyframes company-pencil-tip {
-  from,
-  to {
-    opacity: 0;
-  }
-  8%,
-  88% {
-    opacity: 1;
-  }
-}
-
-@keyframes company-label-rule-in {
-  from {
-    opacity: 0;
-    transform: scaleX(0);
-  }
-  to {
-    opacity: 1;
-    transform: scaleX(1);
-  }
-}
-
-@keyframes company-cross-in {
-  to {
-    opacity: 1;
-    transform: translateY(-50%) scale(1);
-  }
-}
-
-@keyframes company-cta-in {
-  to {
-    opacity: 1;
-    transform: translateY(0);
+    --company-beacon-opacity: 1;
+    --company-copy-opacity: 1;
+    --company-eyebrow-opacity: 1;
+    --company-illumination: 1;
+    --company-materialize-left: -14%;
+    --company-materialize-opacity: 0;
+    --company-materialize-right: 114%;
+    --company-node-opacity: 0.7;
+    --company-pencil-opacity: 0;
+    --company-rail-progress: 1;
+    --company-title-opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .company-home-header,
-  .company-home-beacon,
-  .company-home-blueprint__rail,
-  .company-home-blueprint__rail::after,
-  .company-home-hero::before,
-  .company-home-hero__eyebrow,
-  .company-home-hero__eyebrow::before,
-  .company-home-hero__eyebrow::after,
-  .company-home-hero__copy-frame::before,
-  .company-home-title__base,
-  .company-home-title::before,
-  .company-home-title::after,
-  .company-home-hero__lede,
-  .company-home-hero__cross,
-  .company-home-cta {
+  .illumination-document {
+    --company-beacon-opacity: 1;
+    --company-copy-opacity: 1;
+    --company-eyebrow-opacity: 1;
+    --company-illumination: 1;
+    --company-materialize-left: -14%;
+    --company-materialize-opacity: 0;
+    --company-materialize-right: 114%;
+    --company-node-opacity: 0.7;
+    --company-pencil-opacity: 0;
+    --company-rail-progress: 1;
+    --company-title-opacity: 1;
     animation: none;
-  }
-
-  .company-home-header,
-  .company-home-beacon,
-  .company-home-blueprint__rail,
-  .company-home-hero::before,
-  .company-home-hero__eyebrow,
-  .company-home-hero__eyebrow::before,
-  .company-home-hero__eyebrow::after,
-  .company-home-hero__copy-frame::before,
-  .company-home-title__base,
-  .company-home-hero__lede,
-  .company-home-cta {
-    opacity: 1;
-    transform: none;
-  }
-
-  .company-home-blueprint__rail::after {
-    opacity: 0;
-  }
-
-  .company-home-beacon {
-    transform: translateX(-50%);
-  }
-
-  .company-home-hero__cross {
-    opacity: 1;
-    transform: translateY(-50%) scale(1);
   }
 
   .company-home-title::before,

@@ -3,6 +3,9 @@ import path from "node:path";
 import { chromium } from "@playwright/test";
 
 const base = process.env.BASE ?? "http://127.0.0.1:4252";
+const targetUrl = process.env.TARGET_URL ?? `${base}/`;
+const titleSelector = process.env.TITLE_SELECTOR ?? ".company-home-title__base";
+const captureMs = Number.parseInt(process.env.CAPTURE_MS ?? "4750", 10);
 const profileName = process.argv[2] ?? "mobile";
 const outputRoot = process.argv[3] ?? "/tmp/company-home-intro";
 const profiles = {
@@ -32,41 +35,85 @@ const browser = await chromium.launch(executablePath ? { executablePath } : {});
 const context = await browser.newContext({ deviceScaleFactor: 1, viewport });
 const page = await context.newPage();
 
-await page.addInitScript(() => {
-  window.__guardianIntroTimeline = [];
-  window.addEventListener("DOMContentLoaded", () => {
-    const startedAt = performance.now();
-    const sample = (now) => {
-      const rails = Object.fromEntries(
-        [...document.querySelectorAll("[data-blueprint-rail]")].map((element) => {
-          const style = getComputedStyle(element);
-          return [
-            element.dataset.blueprintRail,
-            { opacity: style.opacity, transform: style.transform },
-          ];
-        }),
-      );
-      const animations = document
-        .getAnimations({ subtree: true })
-        .map((animation) => {
-          const effect = animation.effect;
-          const target = effect?.target;
-          if (!(target instanceof HTMLElement) || !target.dataset.blueprintRail) return null;
-          return {
-            currentTime: typeof animation.currentTime === "number" ? animation.currentTime : null,
-            name: getComputedStyle(target).animationName,
-            playState: animation.playState,
-            rail: target.dataset.blueprintRail,
-          };
-        })
-        .filter(Boolean);
+await page.addInitScript(
+  ({ captureMs, titleSelector }) => {
+    window.__guardianIntroTimeline = [];
+    window.addEventListener("DOMContentLoaded", () => {
+      const startedAt = performance.now();
+      const sample = (now) => {
+        const rails = Object.fromEntries(
+          [...document.querySelectorAll("[data-blueprint-rail]")].map((element) => {
+            const style = getComputedStyle(element);
+            return [
+              element.dataset.blueprintRail,
+              { opacity: style.opacity, transform: style.transform },
+            ];
+          }),
+        );
+        const title = document.querySelector(titleSelector);
+        const titleStyle = title ? getComputedStyle(title) : null;
+        const scene = document.querySelector(".illumination-document");
+        const sceneStyle = scene ? getComputedStyle(scene) : null;
+        const header = document.querySelector(".company-home-header");
+        const headerStyle = header ? getComputedStyle(header) : null;
+        const headerLink = document.querySelector(".company-home-header a");
+        const headerLinkStyle = headerLink ? getComputedStyle(headerLink) : null;
+        const animations = document
+          .getAnimations({ subtree: true })
+          .map((animation) => {
+            const effect = animation.effect;
+            const target = effect?.target;
+            if (
+              !(target instanceof HTMLElement) ||
+              (!target.dataset.blueprintRail && !target.classList.contains("illumination-document"))
+            )
+              return null;
+            return {
+              currentTime: typeof animation.currentTime === "number" ? animation.currentTime : null,
+              name: getComputedStyle(target).animationName,
+              playState: animation.playState,
+              rail: target.dataset.blueprintRail ?? null,
+            };
+          })
+          .filter(Boolean);
 
-      window.__guardianIntroTimeline.push({ animations, rails, time: now - startedAt });
-      if (now - startedAt < 3_200) requestAnimationFrame(sample);
-    };
-    requestAnimationFrame(sample);
-  });
-});
+        window.__guardianIntroTimeline.push({
+          animations,
+          header: headerStyle
+            ? {
+                animation: headerStyle.animationName,
+                opacity: headerStyle.opacity,
+                transform: headerStyle.transform,
+                transitionDuration: headerStyle.transitionDuration,
+                transitionProperty: headerStyle.transitionProperty,
+              }
+            : null,
+          headerLink: headerLinkStyle
+            ? {
+                animation: headerLinkStyle.animationName,
+                transitionDuration: headerLinkStyle.transitionDuration,
+                transitionProperty: headerLinkStyle.transitionProperty,
+              }
+            : null,
+          rails,
+          scene: sceneStyle
+            ? {
+                illumination: sceneStyle.getPropertyValue("--company-illumination").trim(),
+                railProgress: sceneStyle.getPropertyValue("--company-rail-progress").trim(),
+              }
+            : null,
+          time: now - startedAt,
+          title: titleStyle
+            ? { opacity: titleStyle.opacity, transform: titleStyle.transform }
+            : null,
+        });
+        if (now - startedAt < captureMs - 50) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+  },
+  { captureMs, titleSelector },
+);
 
 const cdp = await context.newCDPSession(page);
 const frames = [];
@@ -75,7 +122,7 @@ cdp.on("Page.screencastFrame", (event) => {
   void cdp.send("Page.screencastFrameAck", { sessionId: event.sessionId });
 });
 
-await page.goto(`${base}/`, { waitUntil: "commit" });
+await page.goto(targetUrl, { waitUntil: "commit" });
 await cdp.send("Page.startScreencast", {
   everyNthFrame: 1,
   format: "png",
@@ -83,7 +130,7 @@ await cdp.send("Page.startScreencast", {
   maxWidth: viewport.width,
 });
 await page.waitForLoadState("domcontentloaded");
-await page.waitForTimeout(3_250);
+await page.waitForTimeout(captureMs);
 await cdp.send("Page.stopScreencast");
 
 frames.sort((a, b) => a.timestamp - b.timestamp);
@@ -108,9 +155,12 @@ await fs.writeFile(
   `${JSON.stringify(
     {
       base,
+      captureMs,
       frames: capturedFrames.map(({ elapsedMs, filename }) => ({ elapsedMs, filename })),
       profileName,
+      targetUrl,
       timeline,
+      titleSelector,
       viewport,
     },
     null,

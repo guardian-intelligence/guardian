@@ -36,10 +36,10 @@ type Surface = {
 };
 
 type SceneUniforms = Record<
-  "uPixelRatio" | "uPointer" | "uResolution" | "uTime",
+  "uIntro" | "uPixelRatio" | "uPointer" | "uResolution" | "uTime",
   WebGLUniformLocation
 >;
-type ParticleUniforms = Record<"uPixelRatio" | "uTime", WebGLUniformLocation>;
+type ParticleUniforms = Record<"uIntro" | "uPixelRatio" | "uTime", WebGLUniformLocation>;
 type SurfaceUniforms = Record<
   "uContent" | "uHasContent" | "uPixelRatio" | "uResolution" | "uTime",
   WebGLUniformLocation
@@ -104,6 +104,7 @@ precision highp float;
 uniform vec2 uResolution;
 uniform float uPixelRatio;
 uniform float uTime;
+uniform float uIntro;
 uniform vec4 uPointer;
 
 out vec4 outColor;
@@ -148,24 +149,24 @@ void main() {
   vec2 point = vec2(gl_FragCoord.x, uResolution.y * uPixelRatio - gl_FragCoord.y) /
     uPixelRatio;
   vec2 center = vec2(uResolution.x * 0.5, uResolution.y * 0.36);
+  float intro = clamp(uIntro, 0.0, 1.0);
 
   vec3 color = vec3(5.0, 6.0, 15.0) / 255.0;
   color += vec3(21.0, 61.0, 204.0) / 255.0 *
-    radial(point, center, vec2(uResolution.x * 0.50, uResolution.y * 0.64)) * 0.083;
+    radial(point, center, vec2(uResolution.x * 0.50, uResolution.y * 0.64)) * 0.083 * intro;
   color += vec3(152.0, 192.0, 239.0) / 255.0 *
     radial(point, vec2(uResolution.x * 0.5, uResolution.y * 0.32),
-      vec2(uResolution.x * 0.43, uResolution.y * 0.60)) * 0.033;
+      vec2(uResolution.x * 0.43, uResolution.y * 0.60)) * 0.033 * intro;
 
-  float reveal = smoothstep(0.42, 1.92, uTime);
   vec2 origin = vec2(uResolution.x * 0.5, min(100.0, uResolution.y * 0.13));
   float beams =
     beam(point, origin, radians(20.0), 0.17, 0.0, 8.5) * 0.19 +
     beam(point, origin, 0.0, 0.20, 2.1, 13.6) * 0.24 +
     beam(point, origin, radians(-20.0), 0.17, 4.2, 6.8) * 0.19;
-  color += vec3(124.0, 145.0, 182.0) / 255.0 * beams * reveal;
+  color += vec3(124.0, 145.0, 182.0) / 255.0 * beams * intro;
 
-  float lineFade = (1.0 - smoothstep(uResolution.y * 0.68, uResolution.y, point.y)) *
-    smoothstep(0.0, 3.0, uTime);
+  float lineFade =
+    (1.0 - smoothstep(uResolution.y * 0.68, uResolution.y, point.y)) * intro;
   float grid = line(point.x, uResolution.x * 0.5, 0.8) * 0.34;
   if (uResolution.x > 640.0) {
     grid += line(point.x, uResolution.x * 0.5 - 520.0, 0.8) * 0.40;
@@ -182,11 +183,11 @@ void main() {
   if (uPointer.w > 0.001) {
     float distanceToPointer = distance(point, uPointer.xy) / max(uPointer.z, 1.0);
     float influence = pow(max(0.0, 1.0 - distanceToPointer), 2.6) * uPointer.w;
-    color += vec3(0.38, 0.70, 1.0) * influence;
+    color += vec3(0.38, 0.70, 1.0) * influence * intro;
   }
 
   float noise = hash(floor(gl_FragCoord.xy / max(uPixelRatio, 1.0))) - 0.5;
-  color += noise * 0.0105;
+  color += noise * 0.0105 * intro;
   outColor = vec4(max(color, vec3(0.0)), 1.0);
 }
 `;
@@ -199,6 +200,7 @@ layout(location = 1) in vec4 aAppearance;
 
 uniform float uPixelRatio;
 uniform float uTime;
+uniform float uIntro;
 
 out float vAlpha;
 out float vBlur;
@@ -220,7 +222,7 @@ void main() {
   vBlur = blur;
   vAlpha = aAppearance.x *
     (0.58 + 0.42 * ((sin(uTime * aAppearance.z + aAppearance.y) + 1.0) * 0.5)) *
-    (1.0 - smoothstep(0.74, 1.0, position.y)) * 0.65;
+    (1.0 - smoothstep(0.74, 1.0, position.y)) * 0.65 * clamp(uIntro, 0.0, 1.0);
 }
 `;
 
@@ -517,8 +519,14 @@ class WebGLCanvasRenderer implements CanvasRenderer {
     this.#htmlInCanvas = canRenderHtmlInCanvas(this.#source, this.#sourceContext);
     this.mode = this.#htmlInCanvas ? "canvas-ui" : "webgl2";
     this.#uniforms = [
-      collectUniforms(context, programs[0], ["uPixelRatio", "uPointer", "uResolution", "uTime"]),
-      collectUniforms(context, programs[1], ["uPixelRatio", "uTime"]),
+      collectUniforms(context, programs[0], [
+        "uIntro",
+        "uPixelRatio",
+        "uPointer",
+        "uResolution",
+        "uTime",
+      ]),
+      collectUniforms(context, programs[1], ["uIntro", "uPixelRatio", "uTime"]),
       collectUniforms(context, programs[2], [
         "uContent",
         "uHasContent",
@@ -900,11 +908,19 @@ class WebGLCanvasRenderer implements CanvasRenderer {
       this.#pointer.y += (this.#pointerTarget.y - this.#pointer.y) * follow;
     }
     this.#pointer.alpha += (targetAlpha - this.#pointer.alpha) * follow;
+    const configuredIntro = Number.parseFloat(
+      getComputedStyle(this.#content).getPropertyValue("--company-illumination"),
+    );
+    const introProgress = Number.isFinite(configuredIntro)
+      ? Math.min(1, Math.max(0, configuredIntro))
+      : 1;
+    this.#output.dataset.introProgress = introProgress.toFixed(3);
 
     const [sceneProgram, particleProgram, surfaceProgram] = this.#programs;
     const [sceneUniforms, particleUniforms, surfaceUniforms] = this.#uniforms;
     context.disable(context.BLEND);
     context.useProgram(sceneProgram);
+    context.uniform1f(sceneUniforms.uIntro, introProgress);
     context.uniform2f(sceneUniforms.uResolution, this.#width, this.#height);
     context.uniform1f(sceneUniforms.uPixelRatio, this.#pixelRatio);
     context.uniform1f(sceneUniforms.uTime, elapsedSeconds);
@@ -921,6 +937,7 @@ class WebGLCanvasRenderer implements CanvasRenderer {
     context.blendEquation(context.FUNC_ADD);
     context.blendFunc(context.ONE, context.ONE);
     context.useProgram(particleProgram);
+    context.uniform1f(particleUniforms.uIntro, introProgress);
     context.uniform1f(particleUniforms.uPixelRatio, this.#pixelRatio);
     context.uniform1f(particleUniforms.uTime, elapsedSeconds);
     context.bindVertexArray(this.#particleVertexArray);
