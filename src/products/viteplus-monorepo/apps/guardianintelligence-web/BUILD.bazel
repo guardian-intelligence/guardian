@@ -62,6 +62,19 @@ export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
 export NODE_PATH="$$node_modules_root$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
 cd "$$execroot/src/products/viteplus-monorepo/apps/guardianintelligence-web"
+saved_node_modules=""
+cleanup() {
+  rm -rf .output node_modules
+  if [[ -n "$$saved_node_modules" && ( -e "$$saved_node_modules" || -L "$$saved_node_modules" ) ]]; then
+    mv "$$saved_node_modules" node_modules
+    saved_node_modules=""
+  fi
+}
+trap cleanup EXIT
+if [[ -e node_modules || -L node_modules ]]; then
+  saved_node_modules="$$PWD/.guardian-node-modules.$$$$"
+  mv node_modules "$$saved_node_modules"
+fi
 rm -rf node_modules
 ln -s "$$node_modules_root" node_modules
 rm -rf .output
@@ -87,8 +100,25 @@ test -s .output/server/index.mjs
 # Normalize timestamps to the epoch (matching the tar's --mtime) and sort the
 # manifest keys so the same sources always produce the same digest — the
 # company-site-image workflow enforces pin == built digest on that basis.
-sed -i 's/"date": "[^"]*"/"date": "1970-01-01T00:00:00.000Z"/' .output/nitro.json
-find .output/server -name '*.mjs' -exec sed -i 's/"mtime": "[^"]*"/"mtime": "1970-01-01T00:00:00.000Z"/g' {} +
+"$$node" -e '
+const fs = require("fs");
+const p = ".output/nitro.json";
+const s = fs.readFileSync(p, "utf8").replace(
+  /"date": "[^"]*"/,
+  "\\\"date\\\": \\\"1970-01-01T00:00:00.000Z\\\"",
+);
+fs.writeFileSync(p, s);
+'
+find .output/server -name '*.mjs' -exec "$$node" -e '
+const fs = require("fs");
+for (const p of process.argv.slice(1)) {
+  const s = fs.readFileSync(p, "utf8").replace(
+    /"mtime": "[^"]*"/g,
+    "\\\"mtime\\\": \\\"1970-01-01T00:00:00.000Z\\\"",
+  );
+  fs.writeFileSync(p, s);
+}
+' {} +
 # Machine-specific absolute paths in chunk contents (and therefore in the
 # content-hashed chunk names) are prevented at the source: vite.config.ts
 # sets rolldown's experimental.attachDebugInfo to "none" and relativizes the
@@ -114,11 +144,18 @@ const ids = [...new Set(s.match(/_lazy_[A-Za-z0-9]+/g) || [])];
 ids.forEach((id, i) => { s = s.split(id).join("_lazy_h" + i); });
 fs.writeFileSync(p, s);
 '
-tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+tar_bin=tar
+if [[ -x /opt/homebrew/bin/gtar ]]; then
+  tar_bin=/opt/homebrew/bin/gtar
+elif command -v gtar >/dev/null 2>&1; then
+  tar_bin=gtar
+fi
+"$$tar_bin" --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
   --mode=u=rwX,go=rX \
   --transform 's#^\\./#app/#' \
   -cf "$$execroot/$@" -C .output .
-rm -rf .output node_modules
+cleanup
+trap - EXIT
 """,
     tags = [
         "no-remote",

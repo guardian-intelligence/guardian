@@ -26,7 +26,9 @@ function WorkshopLayout() {
       className="flex min-h-svh flex-col"
       style={criticalTreatmentRootStyle("workshop")}
     >
-      <AppChrome treatment="workshop" LinkComponent={LinkAdapter} slotRight={<TopNav />} />
+      {isLandingRoute ? null : (
+        <AppChrome treatment="workshop" LinkComponent={LinkAdapter} slotRight={<TopNav />} />
+      )}
       <main id="main" className="flex-1">
         <Outlet />
       </main>
