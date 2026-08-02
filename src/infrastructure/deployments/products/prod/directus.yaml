@@ -1,10 +1,15 @@
 # Directus: the authoring backend for company-site letters. It is never on
 # the public read path — the site keeps baking content at image-build time,
 # and letters flow Directus -> repo markdown via the letters-cms sync, so a
-# Directus outage can never affect a reader. Like the Keycloak admin
-# console, the Data Studio is deliberately not routed publicly: reach it
-# with `kubectl port-forward -n tenant-guardian-prod svc/directus 8055:80`.
-# Sign in with admin@guardianintelligence.org and Secret/directus-admin-credential.
+# Directus outage can never affect a reader.
+#
+# The Data Studio is routed at https://cms.guardianintelligence.org behind
+# Keycloak OIDC (client `directus` in the customer realm): public
+# registration is off, so only pre-created Directus users — the scoped
+# letters editor — can sign in through SSO. The local admin account is the
+# ops/break-glass identity and stays off the SSO path; reach it the old way
+# via `kubectl port-forward -n tenant-guardian-prod svc/directus 8055:80`
+# with admin@guardianintelligence.org and Secret/directus-admin-credential.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -90,10 +95,33 @@ spec:
                 secretKeyRef:
                   name: directus-admin-credential
                   key: password
-            # The Studio is only ever reached through a localhost
-            # port-forward, so the canonical URL is localhost.
             - name: PUBLIC_URL
-              value: http://127.0.0.1:8055
+              value: https://cms.guardianintelligence.org
+            # Cloudflare terminates TLS and the root ingress forwards the
+            # verified header chain; trust it so accountability logs carry
+            # real client IPs.
+            - name: IP_TRUST_PROXY
+              value: "true"
+            - name: AUTH_PROVIDERS
+              value: keycloak
+            - name: AUTH_KEYCLOAK_DRIVER
+              value: openid
+            - name: AUTH_KEYCLOAK_ISSUER_URL
+              value: https://guardianintelligence.org/realms/guardianintelligence.org/.well-known/openid-configuration
+            - name: AUTH_KEYCLOAK_CLIENT_ID
+              value: directus
+            - name: AUTH_KEYCLOAK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: directus-oidc-client
+                  key: password
+            - name: AUTH_KEYCLOAK_IDENTIFIER_KEY
+              value: email
+            # The customer realm serves Postflight users too; an SSO login
+            # only succeeds for users pre-created in Directus (the scoped
+            # letters editor), everyone else is refused.
+            - name: AUTH_KEYCLOAK_ALLOW_PUBLIC_REGISTRATION
+              value: "false"
             - name: TELEMETRY
               value: "false"
             - name: WEBSOCKETS_ENABLED

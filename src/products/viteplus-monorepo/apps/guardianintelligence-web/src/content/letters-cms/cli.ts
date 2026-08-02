@@ -240,11 +240,77 @@ async function pull(): Promise<void> {
   }
 }
 
+// Idempotently provisions the scoped SSO editor: a letters-only policy and
+// role (app access, no admin), and a pre-created Keycloak-provider user so
+// the email can sign in through SSO while public registration stays off.
+async function setupSso(email: string): Promise<void> {
+  const find = async (path: string): Promise<{ id: string } | undefined> => {
+    const res = await api(path);
+    if (!res.ok) throw new Error(`letters-cms: ${path} failed: ${res.status} ${await res.text()}`);
+    const json = (await res.json()) as { data: { id: string }[] };
+    return json.data[0];
+  };
+  const create = async (path: string, body: unknown): Promise<string> => {
+    const res = await api(path, { method: "POST", body: JSON.stringify(body) });
+    if (!res.ok)
+      throw new Error(`letters-cms: POST ${path} failed: ${res.status} ${await res.text()}`);
+    const json = (await res.json()) as { data: { id: string } };
+    return json.data.id;
+  };
+
+  let role = await find(`/roles?filter[name][_eq]=Letters%20Editor&fields=id`);
+  if (!role) role = { id: await create("/roles", { name: "Letters Editor", icon: "edit_note" }) };
+  console.error(`role Letters Editor: ${role.id}`);
+
+  let policy = await find(`/policies?filter[name][_eq]=letters-editor&fields=id`);
+  if (!policy) {
+    policy = {
+      id: await create("/policies", {
+        name: "letters-editor",
+        icon: "edit_note",
+        app_access: true,
+        admin_access: false,
+        roles: [{ role: role.id }],
+      }),
+    };
+  }
+  console.error(`policy letters-editor: ${policy.id}`);
+
+  for (const action of ["create", "read", "update", "delete"]) {
+    const existing = await find(
+      `/permissions?filter[policy][_eq]=${policy.id}&filter[collection][_eq]=${COLLECTION}&filter[action][_eq]=${action}&fields=id`,
+    );
+    if (!existing) {
+      await create("/permissions", {
+        policy: policy.id,
+        collection: COLLECTION,
+        action,
+        fields: ["*"],
+      });
+    }
+    console.error(`permission ${COLLECTION}.${action}: ok`);
+  }
+
+  const user = await find(`/users?filter[email][_eq]=${encodeURIComponent(email)}&fields=id`);
+  if (!user) {
+    await create("/users", {
+      email,
+      role: role.id,
+      provider: "keycloak",
+      external_identifier: email,
+    });
+    console.error(`user ${email}: created (keycloak provider, Letters Editor)`);
+  } else {
+    console.error(`user ${email}: exists`);
+  }
+}
+
 const command = process.argv[2];
 await login();
 if (command === "push") await push();
 else if (command === "pull") await pull();
+else if (command === "setup-sso" && process.argv[3]) await setupSso(process.argv[3]);
 else {
-  console.error("usage: node src/content/letters-cms/cli.ts <push|pull>");
+  console.error("usage: node src/content/letters-cms/cli.ts <push|pull|setup-sso <email>>");
   process.exit(2);
 }

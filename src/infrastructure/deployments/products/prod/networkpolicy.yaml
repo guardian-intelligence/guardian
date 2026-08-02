@@ -110,12 +110,13 @@ spec:
             - port: "8080"
               protocol: TCP
 ---
-# Directus, the letters authoring backend. Egress is DNS plus this stage's
-# product Postgres and nothing else (telemetry is disabled; no outbound
-# integrations). No ingress section on purpose: the Studio is reached only
-# through kubectl port-forward, which arrives with the host identity, and
-# selecting the endpoint for ingress would flip it to default-deny and
-# strand that path.
+# Directus, the letters authoring backend. Egress: DNS, this stage's
+# product Postgres, and the public edge on 443 — the Keycloak issuer is
+# fetched through the apex (discovery, JWKS, token endpoint) like any
+# external caller. No ingress section on purpose: public traffic arrives
+# through the hostNetwork root ingress, admitted by the entity-based CCNP
+# below, and kubectl port-forward rides the same host identity; selecting
+# the endpoint for ingress here would flip it to default-deny.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -147,6 +148,42 @@ spec:
       toPorts:
         - ports:
             - port: "5432"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# The public path terminates on the hostNetwork root ingress controller,
+# whose traffic arrives with the reserved host/remote-node identities —
+# never a pod identity — so the admit is entity-based.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-guardian-prod-allow-root-ingress-directus
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company-site
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: k8s:io.kubernetes.pod.namespace
+        operator: In
+        values:
+          - tenant-guardian-prod
+      - key: k8s:app.kubernetes.io/name
+        operator: In
+        values:
+          - directus
+  ingress:
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8055"
               protocol: TCP
 ---
 # The events writer's complete policy: vmagent scrape in; DNS, this stage's

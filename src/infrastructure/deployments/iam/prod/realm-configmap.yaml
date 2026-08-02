@@ -99,6 +99,26 @@ data:
           }
         },
         {
+          "clientId": "directus",
+          "name": "Letters CMS (Directus)",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "clientAuthenticatorType": "client-secret",
+          "standardFlowEnabled": true,
+          "directAccessGrantsEnabled": false,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": false,
+          "redirectUris": [
+            "https://cms.guardianintelligence.org/auth/login/keycloak/callback"
+          ],
+          "webOrigins": [],
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "post.logout.redirect.uris": "https://cms.guardianintelligence.org/admin/login"
+          }
+        },
+        {
           "clientId": "postflight-cli",
           "name": "Postflight CLI",
           "enabled": true,
@@ -317,6 +337,28 @@ data:
       "serviceAccountsEnabled": false,
       "attributes": {
         "oauth2.device.authorization.grant.enabled": "true"
+      }
+    }
+  directus.json: |
+    {
+      "clientId": "directus",
+      "name": "Letters CMS (Directus)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${vault.directus-client-secret}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "https://cms.guardianintelligence.org/auth/login/keycloak/callback"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://cms.guardianintelligence.org/admin/login"
       }
     }
   guardian-realm-reconciler.json: |
