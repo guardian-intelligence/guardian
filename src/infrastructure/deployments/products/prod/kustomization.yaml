@@ -6,6 +6,7 @@ resources:
   - cockpit-rollup.yaml
   - cockpit-events.yaml
   - directus.yaml
+  - directus-ingress.yaml
   - directus-secrets.yaml
   - electric.yaml
   - ingress.yaml

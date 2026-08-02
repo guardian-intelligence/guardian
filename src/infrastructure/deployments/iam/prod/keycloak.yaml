@@ -233,6 +233,11 @@ spec:
                     - key: password
                       path: guardianintelligence.org_postflight-client-secret
               - secret:
+                  name: directus-oidc-client
+                  items:
+                    - key: password
+                      path: guardianintelligence.org_directus-client-secret
+              - secret:
                   name: keycloak-realm-reconciler-client
                   items:
                     - key: password

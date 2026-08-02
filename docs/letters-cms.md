@@ -9,8 +9,12 @@ is the baked mirror the site image builds from.
 
 - Directus is never on the public read path. The site bakes letters HTML at
   image-build time; readers are unaffected by any Directus outage.
-- The Data Studio is not publicly routed (Keycloak admin-console precedent).
-  Reach it only by port-forward.
+- The Data Studio is routed at https://cms.guardianintelligence.org behind
+  Keycloak SSO (client `directus`, customer realm). Public registration is
+  off: an SSO login succeeds only for users pre-created in Directus via
+  `setup-sso`, and those users carry the letters-only editor policy — no
+  admin surface. The local admin account is ops/break-glass only and is
+  reached by port-forward.
 - Content flows one way per direction: `push` seeds/updates Directus from
   the repo and never deletes remote letters; `pull` mirrors Directus back
   exactly (including deletions), so after a pull `git diff` is precisely the
@@ -21,12 +25,10 @@ is the baked mirror the site image builds from.
 
 ## Authoring loop
 
-```sh
-kubectl port-forward -n tenant-guardian-prod svc/directus 8055:80
-# sign in at http://127.0.0.1:8055 as admin@guardianintelligence.org;
-# password: kubectl get secret -n tenant-guardian-prod directus-admin-credential \
-#   -o jsonpath='{.data.password}' | base64 -d
-```
+Open https://cms.guardianintelligence.org and continue with Keycloak — the
+Guardian sign-in you already use. (Ops fallback: port-forward
+`svc/directus 8055:80` and sign in as admin@guardianintelligence.org with
+`Secret/directus-admin-credential`.)
 
 Edit letters in the Studio, then from `src/products/viteplus-monorepo/apps/guardianintelligence-web`:
 
@@ -42,3 +44,14 @@ same ones the build always baked.
 Drafting: a letter without a `summary` is a draft — it syncs and builds but
 does not render on `/letters` or `/letters/$slug`. Fill in the summary in
 Directus and pull to publish.
+
+## Granting SSO access
+
+`setup-sso` provisions the scoped editor artifacts (idempotent) and
+pre-creates a Keycloak-provider user; the email must match the account's
+email claim in the customer realm:
+
+```sh
+DIRECTUS_EMAIL=admin@guardianintelligence.org DIRECTUS_PASSWORD=... \
+  node src/content/letters-cms/cli.ts setup-sso someone@example.com
+```

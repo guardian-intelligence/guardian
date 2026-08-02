@@ -262,8 +262,8 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	for _, client := range realm.Clients {
 		importedClients[client.ClientID] = client
 	}
-	if len(importedClients) != 5 || len(clientJSON) != 5 {
-		t.Fatalf("managed clients: import=%d steady-state=%d, want 5", len(importedClients), len(clientJSON))
+	if len(importedClients) != 6 || len(clientJSON) != 6 {
+		t.Fatalf("managed clients: import=%d steady-state=%d, want 6", len(importedClients), len(clientJSON))
 	}
 	for filename, raw := range clientJSON {
 		var desired keycloakClientRepresentation
@@ -297,6 +297,26 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 	}
 	if postflightDesired.Secret != "${vault.postflight-client-secret}" {
 		t.Fatal("Postflight client secret must remain a Vault SPI reference")
+	}
+
+	directus := importedClients["directus"]
+	if directus.PublicClient || !directus.StandardFlowEnabled || directus.DirectAccessGrantsEnabled ||
+		directus.ServiceAccountsEnabled {
+		t.Fatal("Directus must be a confidential authorization-code client with no service account")
+	}
+	if len(directus.RedirectURIs) != 1 ||
+		directus.RedirectURIs[0] != "https://cms.guardianintelligence.org/auth/login/keycloak/callback" {
+		t.Fatalf("Directus redirect URIs = %#v", directus.RedirectURIs)
+	}
+	if directus.Attributes["pkce.code.challenge.method"] != "S256" {
+		t.Fatal("Directus client must require PKCE S256")
+	}
+	var directusDesired keycloakClientRepresentation
+	if err := json.Unmarshal([]byte(clientJSON["directus.json"]), &directusDesired); err != nil {
+		t.Fatal(err)
+	}
+	if directusDesired.Secret != "${vault.directus-client-secret}" {
+		t.Fatal("Directus client secret must remain a Vault SPI reference")
 	}
 
 	reconcilerClient := importedClients["guardian-realm-reconciler"]
