@@ -1,9 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { WingsArgent } from "@guardian/brand";
 import { IlluminationDocument } from "~/components/company-home/illumination-document";
 import { CompanyHomeHeader } from "~/components/company-home/header";
 import { landing } from "~/content/landing";
 import { canonicalLink, ogMeta } from "~/lib/head";
 import "~/styles/company-home.css";
+
+const REPOSITORY_URL = "https://github.com/guardian-intelligence/guardian";
 
 export const Route = createFileRoute("/_workshop/")({
   component: LandingPage,
@@ -25,6 +28,18 @@ function LandingPage() {
     <IlluminationDocument>
       <div className="company-home-shell">
         <CompanyHomeHeader />
+        <a
+          href={REPOSITORY_URL}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Guardian Intelligence on GitHub"
+          className="company-home-beacon"
+          data-illumination-source="logo"
+        >
+          <span className="company-home-beacon__cone" aria-hidden="true" />
+          <WingsArgent className="company-home-beacon__mark company-home-beacon__mark--base" />
+          <WingsArgent className="company-home-beacon__mark company-home-beacon__mark--reflection" />
+        </a>
         <div className="company-home-main">
           <section className="company-home-hero" aria-labelledby="company-home-title">
             <div className="company-home-hero__eyebrow">
