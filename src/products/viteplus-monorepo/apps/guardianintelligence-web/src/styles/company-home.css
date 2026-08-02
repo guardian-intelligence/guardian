@@ -699,20 +699,20 @@ html[data-canvas-mode="css"] .company-home-cta {
   }
 
   7.382% {
-    --company-materialize-left: 38%;
+    --company-materialize-left: 39%;
     --company-materialize-opacity: 0.95;
-    --company-materialize-right: 62%;
+    --company-materialize-right: 61%;
   }
 
   13.824% {
-    --company-materialize-left: 20%;
+    --company-materialize-left: 30%;
     --company-materialize-opacity: 1;
-    --company-materialize-right: 80%;
+    --company-materialize-right: 70%;
   }
 
   17.058% {
-    --company-materialize-left: 35%;
-    --company-materialize-right: 65%;
+    --company-materialize-left: 25%;
+    --company-materialize-right: 75%;
     --company-pencil-opacity: 0;
     --company-rail-progress: 0;
   }
@@ -722,9 +722,9 @@ html[data-canvas-mode="css"] .company-home-cta {
     --company-copy-opacity: 0;
     --company-eyebrow-opacity: 0;
     --company-illumination: 0;
-    --company-materialize-left: 8%;
+    --company-materialize-left: 20%;
     --company-materialize-opacity: 1;
-    --company-materialize-right: 92%;
+    --company-materialize-right: 80%;
     --company-node-opacity: 0;
     --company-title-opacity: 0;
   }
@@ -734,8 +734,8 @@ html[data-canvas-mode="css"] .company-home-cta {
     --company-copy-opacity: 0;
     --company-eyebrow-opacity: 0;
     --company-illumination: 0;
-    --company-materialize-left: 28%;
-    --company-materialize-right: 72%;
+    --company-materialize-left: 14%;
+    --company-materialize-right: 86%;
     --company-node-opacity: 0;
     --company-pencil-opacity: 1;
     --company-rail-progress: 0.086;
@@ -743,8 +743,8 @@ html[data-canvas-mode="css"] .company-home-cta {
   }
 
   28.034% {
-    --company-materialize-left: 4%;
-    --company-materialize-right: 96%;
+    --company-materialize-left: 10%;
+    --company-materialize-right: 90%;
   }
 
   30.882% {
@@ -769,8 +769,8 @@ html[data-canvas-mode="css"] .company-home-cta {
   }
 
   34.835% {
-    --company-materialize-left: 30%;
-    --company-materialize-right: 70%;
+    --company-materialize-left: 2%;
+    --company-materialize-right: 98%;
   }
 
   41.471% {
@@ -790,9 +790,9 @@ html[data-canvas-mode="css"] .company-home-cta {
     --company-copy-opacity: 0.5;
     --company-eyebrow-opacity: 0.79;
     --company-illumination: 0.64;
-    --company-materialize-left: 18%;
+    --company-materialize-left: -8%;
     --company-materialize-opacity: 0.8;
-    --company-materialize-right: 82%;
+    --company-materialize-right: 108%;
     --company-rail-progress: 0.61;
     --company-title-opacity: 0.76;
   }
@@ -872,9 +872,9 @@ html[data-canvas-mode="css"] .company-home-cta {
     --company-copy-opacity: 1;
     --company-eyebrow-opacity: 1;
     --company-illumination: 1;
-    --company-materialize-left: -14%;
+    --company-materialize-left: -20%;
     --company-materialize-opacity: 0;
-    --company-materialize-right: 114%;
+    --company-materialize-right: 120%;
     --company-node-opacity: 0.7;
     --company-pencil-opacity: 0;
     --company-rail-progress: 1;
