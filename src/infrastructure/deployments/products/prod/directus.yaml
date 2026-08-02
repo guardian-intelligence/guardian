@@ -125,6 +125,12 @@ spec:
                   key: password
             - name: AUTH_KEYCLOAK_IDENTIFIER_KEY
               value: email
+            # The realm is invisible: it has no login page, and the bounce
+            # theme punts any un-hinted authorize request to the product
+            # error surface. Every sign-in must arrive pre-hinted at the
+            # GitHub broker.
+            - name: AUTH_KEYCLOAK_PARAMS
+              value: 'json:{"kc_idp_hint":"github"}'
             # The customer realm serves Postflight users too; an SSO login
             # only succeeds for users pre-created in Directus (the scoped
             # letters editor), everyone else is refused.
