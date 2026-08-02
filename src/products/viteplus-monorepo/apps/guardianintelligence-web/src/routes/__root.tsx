@@ -26,24 +26,7 @@ export const Route = createRootRoute({
       { property: "og:site_name", content: "Guardian" },
       ...deployMetaTags(),
     ],
-    links: [
-      ...faviconLinks(),
-      { rel: "sitemap", type: "application/xml", href: "/sitemap.xml" },
-      {
-        rel: "preload",
-        href: "/fonts/Fraunces-Variable.woff2",
-        as: "font",
-        type: "font/woff2",
-        crossOrigin: "anonymous",
-      },
-      {
-        rel: "preload",
-        href: "/fonts/Geist-Variable.woff2",
-        as: "font",
-        type: "font/woff2",
-        crossOrigin: "anonymous",
-      },
-    ],
+    links: [...faviconLinks(), { rel: "sitemap", type: "application/xml", href: "/sitemap.xml" }],
   }),
 });
 

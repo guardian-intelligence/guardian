@@ -1,5 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { WingsArgent } from "@guardian/brand";
+import {
+  COMPANY_EXPERIENCE_BOOTSTRAP,
+  prepareCompanyExperience,
+} from "~/components/company-home/company-experience";
+import { HeroMaterialization } from "~/components/company-home/hero-materialization";
 import { IlluminationDocument } from "~/components/company-home/illumination-document";
 import { CompanyHomeHeader } from "~/components/company-home/header";
 import { landing } from "~/content/landing";
@@ -9,6 +14,7 @@ import "~/styles/company-home.css";
 const REPOSITORY_URL = "https://github.com/guardian-intelligence/guardian";
 
 export const Route = createFileRoute("/_workshop/")({
+  beforeLoad: () => prepareCompanyExperience(),
   component: LandingPage,
   head: () => ({
     meta: ogMeta({
@@ -20,6 +26,7 @@ export const Route = createFileRoute("/_workshop/")({
       imageFormat: "png",
     }),
     links: [canonicalLink("/")],
+    scripts: [{ children: COMPANY_EXPERIENCE_BOOTSTRAP }],
   }),
 });
 
@@ -75,14 +82,7 @@ function LandingPage() {
                 className="company-home-hero__cross company-home-hero__cross--right"
                 aria-hidden="true"
               />
-              <h1
-                id="company-home-title"
-                className="company-home-title"
-                data-copy={landing.hero}
-                aria-label={landing.hero}
-              >
-                <span className="company-home-title__base">{landing.hero}</span>
-              </h1>
+              <HeroMaterialization label={landing.hero} />
               <p className="company-home-hero__lede">{landing.lede}</p>
               <Link to="/contact" className="company-home-cta" data-illumination-glass="control">
                 <span className="company-home-cta__text">Request Software</span>

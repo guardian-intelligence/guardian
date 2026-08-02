@@ -24,22 +24,10 @@
   initial-value: 0;
 }
 
-@property --company-materialize-left {
-  syntax: "<percentage>";
-  inherits: true;
-  initial-value: 52%;
-}
-
-@property --company-materialize-opacity {
+@property --company-materialize-progress {
   syntax: "<number>";
   inherits: true;
   initial-value: 0;
-}
-
-@property --company-materialize-right {
-  syntax: "<percentage>";
-  inherits: true;
-  initial-value: 48%;
 }
 
 @property --company-node-opacity {
@@ -67,19 +55,34 @@
 }
 
 .illumination-document {
+  --company-beacon-opacity: 1;
+  --company-copy-opacity: 1;
+  --company-eyebrow-opacity: 1;
+  --company-illumination: 1;
+  --company-materialize-progress: 1;
+  --company-node-opacity: 0.7;
+  --company-pencil-opacity: 0;
+  --company-rail-progress: 1;
+  --company-title-opacity: 1;
+  animation: none;
+  background: #05060f;
+}
+
+html[data-company-experience="pending"] .illumination-document,
+html[data-company-experience="animated"] .illumination-document {
   --company-beacon-opacity: 0;
   --company-copy-opacity: 0;
   --company-eyebrow-opacity: 0;
   --company-illumination: 0;
-  --company-materialize-left: 52%;
-  --company-materialize-opacity: 0;
-  --company-materialize-right: 48%;
+  --company-materialize-progress: 0;
   --company-node-opacity: 0;
   --company-pencil-opacity: 0;
   --company-rail-progress: 0;
   --company-title-opacity: 0;
+}
+
+html[data-company-experience="animated"] .illumination-document {
   animation: company-scene-intro 3.617s 250ms linear both;
-  background: #05060f;
 }
 
 .illumination-document:has(.illumination-canvas[data-mode="css"])::before {
@@ -99,6 +102,35 @@
     auto;
   opacity: var(--company-illumination);
   pointer-events: none;
+}
+
+html[data-company-home],
+html[data-company-home] body,
+html[data-company-home] .font-sans,
+html[data-company-home] .sr-only-focusable,
+.company-home-shell {
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+html[data-company-home] .sr-only-focusable {
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif !important;
+}
+
+html[data-company-home] .font-mono {
+  font-family:
+    ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace !important;
 }
 
 .company-home-shell {
@@ -141,10 +173,23 @@
   display: inline-flex;
   align-items: center;
   justify-self: start;
+  gap: 0.375rem;
   color: inherit;
   text-decoration: none;
   touch-action: manipulation;
   transition: none;
+}
+
+.company-home-header__mark {
+  width: 1.375rem;
+  height: 1.375rem;
+  flex: 0 0 1.375rem;
+}
+
+.company-home-header__wordmark {
+  width: 4.75rem;
+  height: auto;
+  color: currentColor;
 }
 
 .company-home-header .transition-colors {
@@ -416,106 +461,38 @@
 }
 
 .company-home-title {
+  --company-pixel-size: clamp(3px, 0.28vw, 4px);
+  --company-title-size: clamp(4.5rem, 21.5vw, 7.75rem);
   position: relative;
   isolation: isolate;
-  margin: 0;
-  font-size: clamp(4.5rem, 21.5vw, 7.75rem);
-  font-weight: 500;
-  letter-spacing: -0.045em;
-  line-height: 0.94;
-  text-align: center;
+  display: grid;
+  width: min(100%, calc(var(--company-title-size) * 3.771203));
+  min-height: calc(var(--company-title-size) * 0.94);
+  margin: 0 auto;
+  place-items: center;
 }
 
-.company-home-title__base {
-  display: block;
-  color: transparent;
-  background: linear-gradient(#98c0ef 0%, #d8ecf8 100%);
-  background-clip: text;
-  text-shadow: 0 2px 1rem rgb(174 207 242 / 24%);
-  -webkit-text-fill-color: transparent;
-  opacity: var(--company-title-opacity);
-}
-
-.company-home-title::before,
-.company-home-title::after {
-  position: absolute;
-  inset: 0;
-  content: attr(data-copy);
-  color: transparent;
-  background-image: repeating-conic-gradient(
-    from 90deg,
-    rgb(226 241 252 / 98%) 0 25%,
-    transparent 0 100%
-  );
-  background-size: 0.25rem 0.25rem;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  mix-blend-mode: color-dodge;
-  filter: saturate(0.7) drop-shadow(0 0 0.3rem rgb(216 236 248 / 92%))
-    drop-shadow(0 0 1.15rem rgb(174 207 242 / 62%));
-  opacity: var(--company-materialize-opacity);
+.company-home-title__outline,
+.company-home-title__materialization {
+  grid-area: 1 / 1;
+  width: 100%;
   pointer-events: none;
 }
 
-.company-home-title::before {
-  --materialize-x: var(--company-materialize-left);
-  -webkit-mask-image:
-    radial-gradient(
-      ellipse 10% 82% at var(--materialize-x) 38%,
-      #000 0 30%,
-      rgb(0 0 0 / 82%) 55%,
-      transparent 100%
-    ),
-    radial-gradient(
-      ellipse 7% 58% at calc(var(--materialize-x) + 12%) 68%,
-      #000 0 28%,
-      rgb(0 0 0 / 72%) 58%,
-      transparent 100%
-    );
-  mask-image:
-    radial-gradient(
-      ellipse 10% 82% at var(--materialize-x) 38%,
-      #000 0 30%,
-      rgb(0 0 0 / 82%) 55%,
-      transparent 100%
-    ),
-    radial-gradient(
-      ellipse 7% 58% at calc(var(--materialize-x) + 12%) 68%,
-      #000 0 28%,
-      rgb(0 0 0 / 72%) 58%,
-      transparent 100%
-    );
+.company-home-title__outline {
+  height: auto;
+  overflow: visible;
+  filter: drop-shadow(0 0.125rem 1rem rgb(174 207 242 / 24%));
+  opacity: var(--company-title-opacity);
 }
 
-.company-home-title::after {
-  --materialize-x: var(--company-materialize-right);
-  background-position: 0.125rem 0.125rem;
-  -webkit-mask-image:
-    radial-gradient(
-      ellipse 10% 82% at var(--materialize-x) 42%,
-      #000 0 30%,
-      rgb(0 0 0 / 82%) 55%,
-      transparent 100%
-    ),
-    radial-gradient(
-      ellipse 7% 58% at calc(var(--materialize-x) - 12%) 72%,
-      #000 0 28%,
-      rgb(0 0 0 / 72%) 58%,
-      transparent 100%
-    );
-  mask-image:
-    radial-gradient(
-      ellipse 10% 82% at var(--materialize-x) 42%,
-      #000 0 30%,
-      rgb(0 0 0 / 82%) 55%,
-      transparent 100%
-    ),
-    radial-gradient(
-      ellipse 7% 58% at calc(var(--materialize-x) - 12%) 72%,
-      #000 0 28%,
-      rgb(0 0 0 / 72%) 58%,
-      transparent 100%
-    );
+.company-home-title__materialization {
+  align-self: stretch;
+  height: 100%;
+}
+
+html[data-company-experience="static"] .company-home-title__materialization {
+  display: none;
 }
 
 .company-home-hero__lede {
@@ -607,12 +584,6 @@ html[data-canvas-mode="css"] .company-home-cta {
   box-shadow: none;
 }
 
-.illumination-document[data-html-in-canvas="active"] .company-home-title {
-  color: transparent;
-  background: none;
-}
-
-.illumination-document[data-html-in-canvas="active"] .company-home-title__base,
 .illumination-document[data-html-in-canvas="active"] .company-home-cta__text {
   color: #d1e4fa;
   background: none;
@@ -683,188 +654,82 @@ html[data-canvas-mode="css"] .company-home-cta {
     --company-copy-opacity: 0;
     --company-eyebrow-opacity: 0;
     --company-illumination: 0;
-    --company-materialize-left: 48%;
-    --company-materialize-opacity: 0;
-    --company-materialize-right: 52%;
+    --company-materialize-progress: 0;
     --company-node-opacity: 0;
     --company-pencil-opacity: 0;
     --company-rail-progress: 0;
     --company-title-opacity: 0;
   }
 
-  1.852% {
-    --company-materialize-left: 47.9%;
-    --company-materialize-opacity: 0.18;
-    --company-materialize-right: 52.1%;
+  11.06% {
+    --company-materialize-progress: 0.022;
   }
 
-  7.382% {
-    --company-materialize-left: 47.1%;
-    --company-materialize-opacity: 0.95;
-    --company-materialize-right: 52.9%;
+  44.24% {
+    --company-materialize-progress: 0.36;
   }
 
-  13.824% {
-    --company-materialize-left: 44.7%;
-    --company-materialize-opacity: 1;
-    --company-materialize-right: 55.3%;
-  }
-
-  17.058% {
-    --company-materialize-left: 43%;
-    --company-materialize-right: 57%;
-    --company-pencil-opacity: 0;
-    --company-rail-progress: 0;
-  }
-
-  19.823% {
+  59.03% {
     --company-beacon-opacity: 0;
     --company-copy-opacity: 0;
     --company-eyebrow-opacity: 0;
     --company-illumination: 0;
-    --company-materialize-left: 41.2%;
-    --company-materialize-opacity: 1;
-    --company-materialize-right: 58.8%;
+    --company-materialize-progress: 0.64;
     --company-node-opacity: 0;
+    --company-pencil-opacity: 0;
+    --company-rail-progress: 0;
     --company-title-opacity: 0;
   }
 
-  25.353% {
-    --company-beacon-opacity: 0;
+  63.6% {
+    --company-beacon-opacity: 0.28;
+    --company-materialize-progress: 0.745;
+    --company-node-opacity: 0;
+    --company-title-opacity: 0.05;
+  }
+
+  66.4% {
+    --company-beacon-opacity: 0.58;
     --company-copy-opacity: 0;
     --company-eyebrow-opacity: 0;
     --company-illumination: 0;
-    --company-materialize-left: 36.9%;
-    --company-materialize-right: 63.1%;
-    --company-node-opacity: 0;
+    --company-materialize-progress: 0.81;
+    --company-node-opacity: 0.02;
     --company-pencil-opacity: 1;
-    --company-rail-progress: 0.086;
-    --company-title-opacity: 0.082;
+    --company-rail-progress: 0.04;
+    --company-title-opacity: 0.16;
   }
 
-  28.034% {
-    --company-materialize-left: 34.4%;
-    --company-materialize-right: 65.6%;
+  68.5% {
+    --company-beacon-opacity: 0.72;
+    --company-copy-opacity: 0.06;
+    --company-eyebrow-opacity: 0.1;
+    --company-illumination: 0.08;
+    --company-materialize-progress: 0.86;
+    --company-node-opacity: 0.06;
+    --company-rail-progress: 0.08;
+    --company-title-opacity: 0.28;
   }
 
-  30.882% {
-    --company-beacon-opacity: 0.14;
-    --company-eyebrow-opacity: 0.14;
-    --company-illumination: 0;
-    --company-node-opacity: 0;
-    --company-pencil-opacity: 1;
-    --company-rail-progress: 0.214;
-    --company-title-opacity: 0.25;
-  }
-
-  33.647% {
-    --company-beacon-opacity: 0.27;
-    --company-copy-opacity: 0;
-    --company-eyebrow-opacity: 0.27;
-    --company-illumination: 0.06;
-    --company-node-opacity: 0;
-    --company-pencil-opacity: 1;
-    --company-rail-progress: 0.28;
-    --company-title-opacity: 0.4;
-  }
-
-  34.835% {
-    --company-materialize-left: 27%;
-    --company-materialize-right: 73%;
-  }
-
-  41.471% {
-    --company-beacon-opacity: 0.64;
-    --company-copy-opacity: 0.23;
-    --company-eyebrow-opacity: 0.64;
-    --company-illumination: 0.38;
-    --company-materialize-left: 18.2%;
-    --company-materialize-opacity: 0.9;
-    --company-materialize-right: 81.8%;
-    --company-rail-progress: 0.52;
-    --company-title-opacity: 0.65;
-  }
-
-  46.447% {
-    --company-beacon-opacity: 0.79;
-    --company-copy-opacity: 0.5;
-    --company-eyebrow-opacity: 0.79;
-    --company-illumination: 0.64;
-    --company-materialize-left: 10.7%;
-    --company-materialize-opacity: 0.8;
-    --company-materialize-right: 89.3%;
-    --company-rail-progress: 0.61;
-    --company-title-opacity: 0.76;
-  }
-
-  53% {
-    --company-beacon-opacity: 0.92;
-    --company-copy-opacity: 0.75;
-    --company-eyebrow-opacity: 0.92;
-    --company-illumination: 0.82;
-    --company-materialize-left: -0.5%;
-    --company-materialize-opacity: 0.55;
-    --company-materialize-right: 100.5%;
-    --company-rail-progress: 0.72;
-    --company-title-opacity: 0.88;
-  }
-
-  58.529% {
-    --company-beacon-opacity: 0.97;
-    --company-copy-opacity: 0.87;
-    --company-eyebrow-opacity: 0.97;
-    --company-illumination: 0.92;
-    --company-materialize-left: -11.6%;
-    --company-materialize-opacity: 0.2;
-    --company-materialize-right: 111.6%;
-    --company-rail-progress: 0.78;
-    --company-title-opacity: 0.94;
-  }
-
-  62.732% {
-    --company-beacon-opacity: 0.99;
-    --company-copy-opacity: 0.92;
-    --company-eyebrow-opacity: 0.99;
-    --company-illumination: 0.96;
-    --company-materialize-left: -20%;
-    --company-materialize-opacity: 0;
-    --company-materialize-right: 120%;
-    --company-rail-progress: 0.82;
-    --company-title-opacity: 0.96;
-  }
-
-  66.823% {
+  73.79% {
     --company-beacon-opacity: 1;
-    --company-copy-opacity: 0.96;
-    --company-eyebrow-opacity: 1;
-    --company-illumination: 0.98;
-    --company-rail-progress: 0.88;
-    --company-title-opacity: 0.98;
-  }
-
-  72.353% {
-    --company-copy-opacity: 0.99;
-    --company-illumination: 1;
-    --company-rail-progress: 0.92;
-    --company-title-opacity: 0.998;
-  }
-
-  75.118% {
-    --company-copy-opacity: 1;
-    --company-node-opacity: 0;
+    --company-copy-opacity: 0.18;
+    --company-eyebrow-opacity: 0.35;
+    --company-illumination: 0.24;
+    --company-materialize-progress: 1;
+    --company-node-opacity: 0.12;
+    --company-pencil-opacity: 1;
+    --company-rail-progress: 0.22;
     --company-title-opacity: 1;
   }
 
-  83.412% {
-    --company-node-opacity: 0.5;
+  85% {
+    --company-copy-opacity: 0.72;
+    --company-eyebrow-opacity: 0.8;
+    --company-illumination: 0.72;
+    --company-node-opacity: 0.4;
     --company-pencil-opacity: 1;
-    --company-rail-progress: 0.975;
-  }
-
-  91.706% {
-    --company-node-opacity: 0.65;
-    --company-pencil-opacity: 0.3;
-    --company-rail-progress: 0.995;
+    --company-rail-progress: 0.62;
   }
 
   100% {
@@ -872,9 +737,7 @@ html[data-canvas-mode="css"] .company-home-cta {
     --company-copy-opacity: 1;
     --company-eyebrow-opacity: 1;
     --company-illumination: 1;
-    --company-materialize-left: -20%;
-    --company-materialize-opacity: 0;
-    --company-materialize-right: 120%;
+    --company-materialize-progress: 1;
     --company-node-opacity: 0.7;
     --company-pencil-opacity: 0;
     --company-rail-progress: 1;
@@ -888,9 +751,7 @@ html[data-canvas-mode="css"] .company-home-cta {
     --company-copy-opacity: 1;
     --company-eyebrow-opacity: 1;
     --company-illumination: 1;
-    --company-materialize-left: -14%;
-    --company-materialize-opacity: 0;
-    --company-materialize-right: 114%;
+    --company-materialize-progress: 1;
     --company-node-opacity: 0.7;
     --company-pencil-opacity: 0;
     --company-rail-progress: 1;
@@ -898,8 +759,7 @@ html[data-canvas-mode="css"] .company-home-cta {
     animation: none;
   }
 
-  .company-home-title::before,
-  .company-home-title::after {
+  .company-home-title__materialization {
     display: none;
   }
 }

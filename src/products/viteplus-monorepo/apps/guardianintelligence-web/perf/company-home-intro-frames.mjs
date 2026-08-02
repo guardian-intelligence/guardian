@@ -4,8 +4,9 @@ import { chromium } from "@playwright/test";
 
 const base = process.env.BASE ?? "http://127.0.0.1:4252";
 const targetUrl = process.env.TARGET_URL ?? `${base}/`;
-const titleSelector = process.env.TITLE_SELECTOR ?? ".company-home-title__base";
+const titleSelector = process.env.TITLE_SELECTOR ?? ".company-home-title__outline";
 const captureMs = Number.parseInt(process.env.CAPTURE_MS ?? "6250", 10);
+const reducedMotion = process.env.REDUCED_MOTION === "1" ? "reduce" : "no-preference";
 const profileName = process.argv[2] ?? "mobile";
 const outputRoot = process.argv[3] ?? "/tmp/company-home-intro";
 const profiles = {
@@ -35,7 +36,7 @@ if (!executablePath && process.platform === "darwin") {
 }
 
 const browser = await chromium.launch(executablePath ? { executablePath } : {});
-const context = await browser.newContext({ deviceScaleFactor: 1, viewport });
+const context = await browser.newContext({ deviceScaleFactor: 1, reducedMotion, viewport });
 const page = await context.newPage();
 
 await page.addInitScript(
@@ -55,6 +56,7 @@ await page.addInitScript(
         );
         const title = document.querySelector(titleSelector);
         const titleStyle = title ? getComputedStyle(title) : null;
+        const titleCanvas = document.querySelector("[data-title-materialization]");
         const scene = document.querySelector(".illumination-document");
         const sceneStyle = scene ? getComputedStyle(scene) : null;
         const header = document.querySelector(".company-home-header");
@@ -105,13 +107,7 @@ await page.addInitScript(
                 copy: sceneStyle.getPropertyValue("--company-copy-opacity").trim(),
                 eyebrow: sceneStyle.getPropertyValue("--company-eyebrow-opacity").trim(),
                 illumination: sceneStyle.getPropertyValue("--company-illumination").trim(),
-                materializeLeft: sceneStyle
-                  .getPropertyValue("--company-materialize-left")
-                  .trim(),
-                materialize: sceneStyle.getPropertyValue("--company-materialize-opacity").trim(),
-                materializeRight: sceneStyle
-                  .getPropertyValue("--company-materialize-right")
-                  .trim(),
+                materialize: sceneStyle.getPropertyValue("--company-materialize-progress").trim(),
                 node: sceneStyle.getPropertyValue("--company-node-opacity").trim(),
                 pencil: sceneStyle.getPropertyValue("--company-pencil-opacity").trim(),
                 railProgress: sceneStyle.getPropertyValue("--company-rail-progress").trim(),
@@ -121,6 +117,17 @@ await page.addInitScript(
           title: titleStyle
             ? { opacity: titleStyle.opacity, transform: titleStyle.transform }
             : null,
+          titlePixels:
+            titleCanvas instanceof HTMLCanvasElement
+              ? {
+                  off: titleCanvas.dataset.pixelsOff ?? null,
+                  on: titleCanvas.dataset.pixelsOn ?? null,
+                  progress: titleCanvas.dataset.materializeProgress ?? null,
+                  spotlight: titleCanvas.dataset.pixelsSpotlight ?? null,
+                  state: titleCanvas.dataset.titleMaterialization ?? null,
+                  total: titleCanvas.dataset.pixelCount ?? null,
+                }
+              : null,
         });
         if (now - startedAt < captureMs - 50) requestAnimationFrame(sample);
       };
@@ -132,11 +139,24 @@ await page.addInitScript(
 
 const cdp = await context.newCDPSession(page);
 const frames = [];
+const fontRequests = [];
+const fontRequestDetails = [];
+page.on("request", (request) => {
+  if (request.resourceType() === "font" || /\.woff2?(?:$|\?)/.test(request.url())) {
+    fontRequests.push(request.url());
+  }
+});
+cdp.on("Network.requestWillBeSent", (event) => {
+  if (event.type === "Font" || /\.woff2?(?:$|\?)/.test(event.request.url)) {
+    fontRequestDetails.push({ initiator: event.initiator, url: event.request.url });
+  }
+});
 cdp.on("Page.screencastFrame", (event) => {
   frames.push({ data: event.data, timestamp: event.metadata.timestamp });
   void cdp.send("Page.screencastFrameAck", { sessionId: event.sessionId });
 });
 
+await cdp.send("Network.enable");
 await page.goto(targetUrl, { waitUntil: "commit" });
 await cdp.send("Page.startScreencast", {
   everyNthFrame: 1,
@@ -165,18 +185,22 @@ await Promise.all(
 );
 
 const timeline = await page.evaluate(() => window.__guardianIntroTimeline ?? []);
+const experience = await page.evaluate(() => ({
+  canvasFrameCount:
+    document.querySelector(".illumination-canvas")?.getAttribute("data-frame-count") ?? null,
+  canvasMode: document.documentElement.dataset.canvasMode ?? null,
+  mode: document.documentElement.dataset.companyExperience ?? null,
+  reason: document.documentElement.dataset.companyExperienceReason ?? null,
+}));
 const layout = await page.evaluate((selector) => {
   const title = document.querySelector(selector);
   const frame = document.querySelector(".company-home-hero__copy-frame");
-  if (!(title instanceof HTMLElement) || !(frame instanceof HTMLElement)) return null;
+  if (!(title instanceof Element) || !(frame instanceof HTMLElement)) return null;
 
-  const range = document.createRange();
-  range.selectNodeContents(title);
-  const titleInk = range.getBoundingClientRect();
-  const titleStyle = getComputedStyle(title);
+  const titleInk = title.getBoundingClientRect();
 
   return {
-    fontSize: Number.parseFloat(titleStyle.fontSize),
+    fontSize: Number.parseFloat(getComputedStyle(frame).fontSize),
     frameWidth: frame.getBoundingClientRect().width,
     hasHorizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
     titleInkWidth: titleInk.width,
@@ -190,9 +214,13 @@ await fs.writeFile(
     {
       base,
       captureMs,
+      experience,
       frames: capturedFrames.map(({ elapsedMs, filename }) => ({ elapsedMs, filename })),
+      fontRequestDetails,
+      fontRequests,
       layout,
       profileName,
+      reducedMotion,
       targetUrl,
       timeline,
       titleSelector,
