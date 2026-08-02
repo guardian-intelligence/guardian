@@ -419,11 +419,10 @@
   position: relative;
   isolation: isolate;
   margin: 0;
-  font-family: var(--font-mono);
-  font-size: clamp(3.5rem, 7.4vw, 6.75rem);
+  font-size: clamp(4rem, 8.6vw, 7.75rem);
   font-weight: 500;
-  letter-spacing: 0.16em;
-  line-height: 1;
+  letter-spacing: -0.045em;
+  line-height: 0.94;
   text-align: center;
 }
 
@@ -627,7 +626,7 @@ html[data-canvas-mode="css"] .company-home-cta {
   }
 
   .company-home-title {
-    font-size: clamp(3.1rem, 14.5vw, 4rem);
+    font-size: clamp(4.25rem, 20vw, 5.4rem);
   }
 
   .company-home-hero__lede {
