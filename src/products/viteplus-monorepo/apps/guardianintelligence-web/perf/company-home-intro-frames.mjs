@@ -5,7 +5,7 @@ import { chromium } from "@playwright/test";
 const base = process.env.BASE ?? "http://127.0.0.1:4252";
 const targetUrl = process.env.TARGET_URL ?? `${base}/`;
 const titleSelector = process.env.TITLE_SELECTOR ?? ".company-home-title__base";
-const captureMs = Number.parseInt(process.env.CAPTURE_MS ?? "4750", 10);
+const captureMs = Number.parseInt(process.env.CAPTURE_MS ?? "6250", 10);
 const profileName = process.argv[2] ?? "mobile";
 const outputRoot = process.argv[3] ?? "/tmp/company-home-intro";
 const profiles = {
@@ -98,7 +98,13 @@ await page.addInitScript(
           rails,
           scene: sceneStyle
             ? {
+                beacon: sceneStyle.getPropertyValue("--company-beacon-opacity").trim(),
+                copy: sceneStyle.getPropertyValue("--company-copy-opacity").trim(),
+                eyebrow: sceneStyle.getPropertyValue("--company-eyebrow-opacity").trim(),
                 illumination: sceneStyle.getPropertyValue("--company-illumination").trim(),
+                materialize: sceneStyle.getPropertyValue("--company-materialize-opacity").trim(),
+                node: sceneStyle.getPropertyValue("--company-node-opacity").trim(),
+                pencil: sceneStyle.getPropertyValue("--company-pencil-opacity").trim(),
                 railProgress: sceneStyle.getPropertyValue("--company-rail-progress").trim(),
               }
             : null,
