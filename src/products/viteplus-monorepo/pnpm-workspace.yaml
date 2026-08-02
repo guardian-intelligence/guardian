@@ -48,8 +48,10 @@ catalog:
   mediabunny: 1.50.9
   nitro: 3.0.260610-beta
   npm: 11.18.0
-  react: ^19.0.0
-  react-dom: ^19.0.0
+  # react and react-dom must be the exact same version — TanStack Start's SSR
+  # runtime asserts equality at boot, so a split bump crashloops the server.
+  react: 19.2.8
+  react-dom: 19.2.8
   sigstore: 5.0.0
   sonner: 2.0.7
   tailwindcss: ^4
