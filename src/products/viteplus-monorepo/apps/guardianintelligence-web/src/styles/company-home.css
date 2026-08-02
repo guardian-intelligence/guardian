@@ -96,28 +96,6 @@
   opacity: 0.55;
 }
 
-.company-home-beacon__cone {
-  position: absolute;
-  top: 2rem;
-  left: 50%;
-  z-index: -1;
-  width: min(48rem, 110vw);
-  height: 31rem;
-  background:
-    radial-gradient(
-      ellipse at 50% 0%,
-      rgb(184 216 250 / 19%) 0%,
-      rgb(124 170 229 / 7%) 38%,
-      transparent 72%
-    ),
-    linear-gradient(180deg, rgb(177 211 248 / 9%) 0%, rgb(85 126 190 / 2%) 62%, transparent 100%);
-  clip-path: polygon(47.5% 0%, 52.5% 0%, 92% 100%, 8% 100%);
-  filter: blur(1.35rem);
-  mix-blend-mode: screen;
-  pointer-events: none;
-  transform: translateX(-50%);
-}
-
 .company-home-beacon__mark {
   position: absolute;
   inset: 50% auto auto 50%;
@@ -453,12 +431,6 @@ html[data-canvas-mode="css"] .company-home-cta {
   .company-home-beacon::after {
     width: 6rem;
     height: 7rem;
-  }
-
-  .company-home-beacon__cone {
-    top: 1.75rem;
-    width: 130vw;
-    height: 25rem;
   }
 
   .company-home-main {

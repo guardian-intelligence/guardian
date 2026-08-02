@@ -36,7 +36,6 @@ function LandingPage() {
           className="company-home-beacon"
           data-illumination-source="logo"
         >
-          <span className="company-home-beacon__cone" aria-hidden="true" />
           <WingsArgent className="company-home-beacon__mark company-home-beacon__mark--base" />
           <WingsArgent className="company-home-beacon__mark company-home-beacon__mark--reflection" />
         </a>
