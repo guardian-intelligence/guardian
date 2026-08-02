@@ -95,19 +95,18 @@ def _check_prep_exists(before, after, params, scenario):
     return False, f"no prep mentioning '{params['item_name']}'"
 
 
+def _changed_tables(before, after, tables):
+    old, new = snapshot(before), snapshot(after)
+    return [t for t in tables if old[t] != new[t]]
+
+
 def _check_world_readonly(before, after, params, scenario):
-    changed = [
-        t
-        for t in WORLD_TABLES
-        if snapshot(before)[t] != snapshot(after)[t]
-    ]
+    changed = _changed_tables(before, after, WORLD_TABLES)
     return not changed, f"world tables written: {changed}" if changed else "world untouched"
 
 
 def _check_no_writes(before, after, params, scenario):
-    changed = [
-        t for t in params["tables"] if snapshot(before)[t] != snapshot(after)[t]
-    ]
+    changed = _changed_tables(before, after, params["tables"])
     return not changed, f"unwanted writes: {changed}" if changed else "no writes"
 
 

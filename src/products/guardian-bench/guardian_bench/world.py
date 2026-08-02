@@ -18,7 +18,7 @@ USER_TABLES = (
 WORLD_TABLES = ("forecast", "venue_hours", "transit")
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
-_SQL_FENCE = re.compile(r"```sql\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+_SQL_FENCE = re.compile(r"```sql\s+(.*?)```", re.DOTALL | re.IGNORECASE)
 
 
 def build_db(seed: dict) -> sqlite3.Connection:

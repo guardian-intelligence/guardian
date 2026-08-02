@@ -56,8 +56,10 @@ with the repo-pinned `uv` (`aspect tools install`):
 ```sh
 cd src/products/guardian-bench
 uv sync
-uv run eval guardian-bench --help
 ```
+
+`guardian_bench.taskset.GuardianBenchTaskset` is the verifiers v1 entrypoint;
+eval configs for specific models land alongside the first scored runs.
 
 Scenario authoring rules, in brief: every check must be computable from the
 database pair alone; every ambiguity must flip at least one check; every
