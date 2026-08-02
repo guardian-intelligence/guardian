@@ -167,7 +167,7 @@ void main() {
 
   float lineFade =
     (1.0 - smoothstep(uResolution.y * 0.68, uResolution.y, point.y)) * intro;
-  float grid = line(point.x, uResolution.x * 0.5, 0.8) * 0.34;
+  float grid = 0.0;
   if (uResolution.x > 640.0) {
     grid += line(point.x, uResolution.x * 0.5 - 520.0, 0.8) * 0.40;
     grid += line(point.x, uResolution.x * 0.5 - 416.0, 0.8) * 0.72;

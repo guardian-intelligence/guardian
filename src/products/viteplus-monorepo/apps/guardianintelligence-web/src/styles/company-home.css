@@ -334,14 +334,14 @@
   --dot-color: rgb(203 224 250 / 60%);
   --dot-size: 2px;
   position: absolute;
-  inset: calc(var(--dot-size) * -0.5);
+  inset: 0;
   content: "";
   pointer-events: none;
   background-image:
-    radial-gradient(var(--dot-color) 50%, transparent 50%),
-    radial-gradient(var(--dot-color) 50%, transparent 50%),
-    radial-gradient(var(--dot-color) 50%, transparent 50%),
-    radial-gradient(var(--dot-color) 50%, transparent 50%);
+    linear-gradient(var(--dot-color), var(--dot-color)),
+    linear-gradient(var(--dot-color), var(--dot-color)),
+    linear-gradient(var(--dot-color), var(--dot-color)),
+    linear-gradient(var(--dot-color), var(--dot-color));
   background-position:
     0 0,
     100% 0,
@@ -397,14 +397,14 @@
   --dot-color: rgb(203 224 250 / 60%);
   --dot-size: 2px;
   position: absolute;
-  inset: calc(var(--dot-size) * -0.5);
+  inset: 0;
   content: "";
   pointer-events: none;
   background-image:
-    radial-gradient(var(--dot-color) 50%, transparent 50%),
-    radial-gradient(var(--dot-color) 50%, transparent 50%),
-    radial-gradient(var(--dot-color) 50%, transparent 50%),
-    radial-gradient(var(--dot-color) 50%, transparent 50%);
+    linear-gradient(var(--dot-color), var(--dot-color)),
+    linear-gradient(var(--dot-color), var(--dot-color)),
+    linear-gradient(var(--dot-color), var(--dot-color)),
+    linear-gradient(var(--dot-color), var(--dot-color));
   background-position:
     0 0,
     100% 0,
@@ -419,10 +419,11 @@
   position: relative;
   isolation: isolate;
   margin: 0;
-  font-size: clamp(4rem, 8.6vw, 7.75rem);
+  font-family: var(--font-mono);
+  font-size: clamp(3.5rem, 7.4vw, 6.75rem);
   font-weight: 500;
-  letter-spacing: -0.045em;
-  line-height: 0.94;
+  letter-spacing: 0.16em;
+  line-height: 1;
   text-align: center;
 }
 
@@ -626,7 +627,7 @@ html[data-canvas-mode="css"] .company-home-cta {
   }
 
   .company-home-title {
-    font-size: clamp(4.25rem, 20vw, 5.4rem);
+    font-size: clamp(3.1rem, 14.5vw, 4rem);
   }
 
   .company-home-hero__lede {

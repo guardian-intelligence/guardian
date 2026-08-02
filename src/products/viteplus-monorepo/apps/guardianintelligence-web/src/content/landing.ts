@@ -7,7 +7,7 @@
 export const landing = {
   kicker: "Accepting Applications for Fall 2026",
   hero: "Guardian",
-  lede: "We build software libraries for companies working on AI alignment — for zero-cost. The only catch: the software will be free and open‑source.",
+  lede: "Guardian is a forward deployed intelligence company, building free, open-source software libraries for small businesses and labs working on AI alignment for zero-cost.",
 } as const;
 
 export type LandingContent = typeof landing;
