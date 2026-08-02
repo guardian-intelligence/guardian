@@ -185,6 +185,16 @@
       ],
     },
 
+    // react and react-dom must move together: TanStack Start's SSR runtime
+    // asserts exact version equality at boot, so a lone react bump ships an
+    // image whose server crashloops (react 19.2.8 vs react-dom 19.2.7,
+    // 2026-08-02 — CI stayed green because the gate never boots the server;
+    // the failed rollout was caught by the Deployment health check).
+    {
+      matchPackageNames: ["react", "react-dom"],
+      groupName: "react + react-dom",
+    },
+
     // Every lockfile bump completes itself: repin reconciles asset
     // filenames and archive member paths with the bumped release tag,
     // recomputes the sha256 pairs, and refuses hash changes for unbumped
