@@ -51,7 +51,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web
-          image: ghcr.io/guardian-intelligence/privatecut-web:edge@sha256:f6351e3a280321503dbe4ba191445a94825bcd9a712edc058afe3521e2f8c1a8 # {"$imagepolicy": "guardian-imageops:privatecut-web"}
+          image: ghcr.io/guardian-intelligence/privatecut-web:edge@sha256:ea49eef25d4e62619edc1f7f03d46078ec8daf882f769e5c78876d62388d145a # {"$imagepolicy": "guardian-imageops:privatecut-web"}
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -70,7 +70,7 @@ spec:
             # resource's service.version, so any event or trace names the
             # exact deployment that served it.
             - name: GUARDIAN_IMAGE
-              value: ghcr.io/guardian-intelligence/privatecut-web:edge@sha256:f6351e3a280321503dbe4ba191445a94825bcd9a712edc058afe3521e2f8c1a8 # {"$imagepolicy": "guardian-imageops:privatecut-web"}
+              value: ghcr.io/guardian-intelligence/privatecut-web:edge@sha256:ea49eef25d4e62619edc1f7f03d46078ec8daf882f769e5c78876d62388d145a # {"$imagepolicy": "guardian-imageops:privatecut-web"}
             - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
               value: http://otel-collector.guardian-analytics.svc.cozy.local:4318/v1/traces
           readinessProbe:
