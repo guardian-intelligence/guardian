@@ -9,8 +9,11 @@ const captureMs = Number.parseInt(process.env.CAPTURE_MS ?? "6250", 10);
 const profileName = process.argv[2] ?? "mobile";
 const outputRoot = process.argv[3] ?? "/tmp/company-home-intro";
 const profiles = {
-  desktop: { width: 1440, height: 900 },
+  narrow: { width: 320, height: 800 },
   mobile: { width: 390, height: 844 },
+  medium: { width: 754, height: 1_000 },
+  tablet: { width: 1_024, height: 900 },
+  desktop: { width: 1440, height: 900 },
 };
 const viewport = profiles[profileName];
 const macOsChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -156,6 +159,25 @@ await Promise.all(
 );
 
 const timeline = await page.evaluate(() => window.__guardianIntroTimeline ?? []);
+const layout = await page.evaluate((selector) => {
+  const title = document.querySelector(selector);
+  const frame = document.querySelector(".company-home-hero__copy-frame");
+  if (!(title instanceof HTMLElement) || !(frame instanceof HTMLElement)) return null;
+
+  const range = document.createRange();
+  range.selectNodeContents(title);
+  const titleInk = range.getBoundingClientRect();
+  const titleStyle = getComputedStyle(title);
+
+  return {
+    fontSize: Number.parseFloat(titleStyle.fontSize),
+    frameWidth: frame.getBoundingClientRect().width,
+    hasHorizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
+    titleInkWidth: titleInk.width,
+    titleToFrameRatio: titleInk.width / frame.getBoundingClientRect().width,
+    titleToViewportRatio: titleInk.width / window.innerWidth,
+  };
+}, titleSelector);
 await fs.writeFile(
   path.join(outputDir, "manifest.json"),
   `${JSON.stringify(
@@ -163,6 +185,7 @@ await fs.writeFile(
       base,
       captureMs,
       frames: capturedFrames.map(({ elapsedMs, filename }) => ({ elapsedMs, filename })),
+      layout,
       profileName,
       targetUrl,
       timeline,
