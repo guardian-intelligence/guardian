@@ -64,6 +64,7 @@ filegroup(
         "@multitool//tools/talm",
         "@multitool//tools/talosctl",
         "@multitool//tools/tofu",
+        "@multitool//tools/uv",
         "@multitool//tools/velero",
         "@multitool//tools/zed",
         "@python_3_12_12//:python3",
