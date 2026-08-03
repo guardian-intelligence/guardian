@@ -1,4 +1,4 @@
-import { letterBySlug, sortedLetters } from "~/content/letters";
+import type { Letter } from "~/content/letters";
 import { currentNewsroomItem } from "~/content/newsroom";
 import { excerptOf, formatLetterDate, formatLetterSalutation } from "~/features/letters/typography";
 import type { OGSpec } from "./template";
@@ -9,10 +9,10 @@ import type { OGSpec } from "./template";
 // validates each title before render so banned words fail loudly at request
 // time instead of reaching the share preview.
 //
-// Letters are NOT enumerated here — they synthesize an OGSpec from the
-// frontmatter at lookup time via the "letter/<slug>" namespace. Add a .md
-// file under src/content/letters/ and the OG endpoint serves a per-letter
-// card with no catalog edit.
+// Letters are NOT enumerated here — letterOgSpec() synthesizes an OGSpec
+// from letter data, and the server-side OG handler resolves the
+// "letter/<slug>" namespace against the runtime letters source. Publishing a
+// letter in the Studio serves its card with no catalog edit.
 
 const currentBulletin = currentNewsroomItem();
 
@@ -95,32 +95,21 @@ export const OG_CATALOG: Record<string, OGSpec> = {
   },
 };
 
-const LETTER_SLUG_PREFIX = "letter/";
+export const LETTER_SLUG_PREFIX = "letter/";
 
-export function ogSpecFor(slug: string): OGSpec | undefined {
-  if (slug.startsWith(LETTER_SLUG_PREFIX)) {
-    const letterSlug = slug.slice(LETTER_SLUG_PREFIX.length);
-    const letter = letterBySlug(letterSlug);
-    if (!letter) return undefined;
-    return {
-      treatment: "letters",
-      slug,
-      title: formatLetterSalutation(letter),
-      flare: letter.flare,
-      kicker: formatLetterDate(letter.publishedAt),
-      bodyExcerpt: excerptOf(letter.bodyHtml),
-      ...(letter.summary === letter.title ? {} : { subtitle: letter.summary }),
-      footerLeft: `guardianintelligence.org/letters/${letter.slug}`,
-      footerRight: "Read the letter →",
-    };
-  }
-  return OG_CATALOG[slug];
+// Pure letter → OGSpec mapping; the caller supplies the letter so this stays
+// usable from the client (the OG preview overlay) without pulling letter data
+// into the bundle.
+export function letterOgSpec(letter: Letter): OGSpec {
+  return {
+    treatment: "letters",
+    slug: `${LETTER_SLUG_PREFIX}${letter.slug}`,
+    title: formatLetterSalutation(letter),
+    flare: letter.flare,
+    kicker: formatLetterDate(letter.publishedAt),
+    bodyExcerpt: excerptOf(letter.bodyHtml),
+    ...(letter.summary === letter.title ? {} : { subtitle: letter.summary }),
+    footerLeft: `guardianintelligence.org/letters/${letter.slug}`,
+    footerRight: "Read the letter →",
+  };
 }
-
-// Public slug list. The sitemap + any other route enumerator consumes this
-// instead of hard-coding strings. Letter cards are appended dynamically so
-// new letters get their unfurl card without touching this file.
-export const OG_SLUGS: readonly string[] = [
-  ...Object.keys(OG_CATALOG),
-  ...sortedLetters().map((letter) => `${LETTER_SLUG_PREFIX}${letter.slug}`),
-];

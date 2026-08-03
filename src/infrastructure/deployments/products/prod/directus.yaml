@@ -1,7 +1,10 @@
-# Directus: the authoring backend for company-site letters. It is never on
-# the public read path — the site keeps baking content at image-build time,
-# and letters flow Directus -> repo markdown via the letters-cms sync, so a
-# Directus outage can never affect a reader.
+# Directus: the letters source of truth for company-site. The SSR server
+# fetches published letters from this service at request time (anonymous,
+# permission-filtered to letters with a summary — drafts never leave the
+# Studio). Availability is layered rather than duplicated: the site serves
+# its last-good fetch through a Directus outage, and Cloudflare edge-caches
+# /letters* with stale-if-error, so a CMS outage degrades to staleness, not
+# errors, for any page the edge has seen.
 #
 # The Data Studio is routed at https://cms.guardianintelligence.org behind
 # Keycloak OIDC (client `directus` in the customer realm): public

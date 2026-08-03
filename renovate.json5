@@ -54,6 +54,7 @@
       "/^src/infrastructure/deployments/iam/prod/keycloak\\.yaml$/",
       "/^src/infrastructure/deployments/iam/prod/realm-reconciler\\.yaml$/",
       "/^src/infrastructure/deployments/products/prod/directus\\.yaml$/",
+      "/^src/infrastructure/deployments/products/prod/directus-provisioner\\.yaml$/",
       "/^src/infrastructure/deployments/products/prod/electric\\.yaml$/",
       "/^src/infrastructure/deployments/guardian/imageops/renovate\\.yaml$/",
     ],

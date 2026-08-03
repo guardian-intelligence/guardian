@@ -5,7 +5,9 @@
 # edge is the only caller). company-site is a stateless server; the
 # Postflight OIDC callback exchanges authorization codes with Keycloak over
 # the namespace-local service; keycloak-primary is Flagger's clone of the
-# Keycloak Deployment.
+# Keycloak Deployment; the SSR server reads published letters from Directus
+# at request time (pod port 8055 — Cilium enforces on the pod, not the
+# Service port).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -40,4 +42,11 @@ spec:
       toPorts:
         - ports:
             - port: "8080"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: directus
+      toPorts:
+        - ports:
+            - port: "8055"
               protocol: TCP

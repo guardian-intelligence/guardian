@@ -9,9 +9,15 @@ const correlationCookieName = "guardian_correlation_id";
 const correlationContextKey = "guardian_correlation_id";
 //#endregion
 //#region correlation-middleware
+// /letters* is edge-cached at Cloudflare: a Set-Cookie minted here would
+// either make the response ineligible for the shared cache or replay one
+// visitor's correlation ID to every cached reader. Skip minting there — the
+// cookie mints on the reader's first request to any other route, including
+// the analytics beacon POSTs, which are never cached.
+const edgeCachedPath = (pathname) => pathname === "/letters" || pathname.startsWith("/letters/");
 const correlationMiddleware = defineEventHandler((event) => {
   let correlationID = (getCookie(event, "guardian_correlation_id") ?? "").trim();
-  if (correlationID === "") {
+  if (correlationID === "" && !edgeCachedPath(event.url.pathname)) {
     correlationID = randomUUID();
     setCookie(event, correlationCookieName, correlationID, {
       path: "/",

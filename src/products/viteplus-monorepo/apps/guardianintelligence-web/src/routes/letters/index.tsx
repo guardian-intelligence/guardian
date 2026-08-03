@@ -1,5 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { LETTERS_META, sortedLetters, type Letter } from "~/content/letters";
+import { createServerFn } from "@tanstack/react-start";
+import { LETTERS_META, type Letter } from "~/content/letters";
+import { publishedLetters, setLettersEdgeCacheHeader } from "~/content/letters.server";
 import {
   LETTER_OPEN_VIEW_TRANSITION,
   letterNavigationIntentHandlers,
@@ -24,8 +26,14 @@ import { ogMeta } from "~/lib/head";
 // has been dated and titled but not yet written; it shows the title alone
 // rather than a faked preview.
 
+const lettersLoader = createServerFn({ method: "GET" }).handler(async () => {
+  setLettersEdgeCacheHeader();
+  return { letters: await publishedLetters() };
+});
+
 export const Route = createFileRoute("/letters/")({
   component: LettersIndex,
+  loader: () => lettersLoader(),
   head: () => ({
     meta: ogMeta({
       slug: "letters",
@@ -36,7 +44,7 @@ export const Route = createFileRoute("/letters/")({
 });
 
 function LettersIndex() {
-  const letters = sortedLetters();
+  const { letters } = Route.useLoaderData();
 
   return (
     <div

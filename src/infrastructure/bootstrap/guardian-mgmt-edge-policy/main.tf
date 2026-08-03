@@ -79,6 +79,25 @@ resource "cloudflare_ruleset" "cache_policy" {
         }
       }
     },
+    {
+      ref         = "letters_page_cache"
+      description = "Letters pages: edge-cache per origin Cache-Control (stale-if-error keeps readers served through an origin outage)"
+      expression  = "(http.host in {\"guardianintelligence.org\" \"beta.guardianintelligence.org\" \"gamma.guardianintelligence.org\"}) and (http.request.uri.path eq \"/letters\" or starts_with(http.request.uri.path, \"/letters/\"))"
+      action      = "set_cache_settings"
+      enabled     = true
+
+      action_parameters = {
+        cache = true
+
+        edge_ttl = {
+          mode = "respect_origin"
+        }
+
+        browser_ttl = {
+          mode = "respect_origin"
+        }
+      }
+    },
   ]
 }
 
