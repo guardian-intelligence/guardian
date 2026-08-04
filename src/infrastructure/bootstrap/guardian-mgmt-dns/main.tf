@@ -32,7 +32,8 @@ locals {
     local.public_ingress_origins[name].public_ipv4
   ]
 
-  k8s_api_hostname = "k8s.${local.cloudflare_zone_name}"
+  k8s_api_hostname             = "k8s.${local.cloudflare_zone_name}"
+  codex_cloud_k8s_api_hostname = "k8s-codex.${local.cloudflare_zone_name}"
 }
 
 data "cloudflare_zone" "guardianintelligence_org" {
@@ -122,6 +123,91 @@ resource "cloudflare_dns_record" "guardian_mgmt_k8s_api" {
   ttl     = 300
   proxied = false
   comment = "guardian-mgmt ${each.key} control-plane API"
+}
+
+# Codex cloud reaches the private Kubernetes Service through a remotely
+# managed Cloudflare Tunnel. The public hostname accepts no origin traffic:
+# Access requires the one service token below, cloudflared carries the TCP
+# stream over Cloudflare's edge, and Kubernetes OIDC/RBAC remains the final
+# authority boundary.
+resource "cloudflare_zero_trust_tunnel_cloudflared" "guardian_codex_cloud" {
+  account_id = var.cloudflare_account_id
+  name       = "guardian-codex-cloud-kubernetes"
+  config_src = "cloudflare"
+}
+
+resource "cloudflare_zero_trust_tunnel_cloudflared_config" "guardian_codex_cloud" {
+  account_id = var.cloudflare_account_id
+  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.guardian_codex_cloud.id
+  config = {
+    ingress = [
+      {
+        hostname = local.codex_cloud_k8s_api_hostname
+        service  = "tcp://kubernetes.default.svc:443"
+      },
+      {
+        service = "http_status:404"
+      },
+    ]
+  }
+}
+
+data "cloudflare_zero_trust_tunnel_cloudflared_token" "guardian_codex_cloud" {
+  account_id = var.cloudflare_account_id
+  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.guardian_codex_cloud.id
+}
+
+resource "cloudflare_dns_record" "guardian_codex_cloud_k8s_api" {
+  zone_id = data.cloudflare_zone.guardianintelligence_org.id
+  name    = local.codex_cloud_k8s_api_hostname
+  type    = "CNAME"
+  content = "${cloudflare_zero_trust_tunnel_cloudflared.guardian_codex_cloud.id}.cfargotunnel.com"
+  ttl     = 1
+  proxied = true
+  comment = "Guardian Kubernetes API through the Codex cloud Tunnel"
+}
+
+resource "cloudflare_zero_trust_access_service_token" "guardian_codex_cloud" {
+  account_id = var.cloudflare_account_id
+  name       = "guardian-codex-cloud-kubernetes"
+  duration   = "2160h"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+check "codex_cloud_access_token_expiry_horizon" {
+  assert {
+    condition     = timecmp(timeadd(plantimestamp(), "504h"), cloudflare_zero_trust_access_service_token.guardian_codex_cloud.expires_at) < 0
+    error_message = "The Codex cloud Access service token expires within 21 days. Rotate it by incrementing client_secret_version, update the Codex environment secrets, and prove the cloud canary."
+  }
+}
+
+resource "cloudflare_zero_trust_access_policy" "guardian_codex_cloud" {
+  account_id = var.cloudflare_account_id
+  name       = "Guardian Codex cloud Kubernetes service token"
+  decision   = "non_identity"
+  include = [
+    {
+      service_token = {
+        token_id = cloudflare_zero_trust_access_service_token.guardian_codex_cloud.id
+      }
+    },
+  ]
+}
+
+resource "cloudflare_zero_trust_access_application" "guardian_codex_cloud" {
+  account_id = var.cloudflare_account_id
+  type       = "self_hosted"
+  name       = "Guardian Codex cloud Kubernetes"
+  domain     = local.codex_cloud_k8s_api_hostname
+  policies = [
+    {
+      id         = cloudflare_zero_trust_access_policy.guardian_codex_cloud.id
+      precedence = 1
+    },
+  ]
 }
 
 check "cloudflare_load_balancer_hostnames" {

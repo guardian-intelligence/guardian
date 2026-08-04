@@ -53,6 +53,53 @@ func TestCloudflareOriginPullIsRequired(t *testing.T) {
 	}
 }
 
+func TestCodexCloudTunnelIsServiceAuthenticatedAndReadPathOnly(t *testing.T) {
+	tokenRootPath := runfilePath("src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens/main.tf")
+	tokenRoot := readText(t, tokenRootPath)
+	for _, want := range []string{
+		`cloudflare_tunnel_write = "c07321b023e944ff818fec44d8203567"`,
+		`access_apps_write       = "1e13c5124ca64b72b1969a67e8829049"`, // gitleaks:allow -- public Cloudflare permission identifier
+		`access_tokens_write     = "a1c0fec57cf94af79479a6d827fa518c"`, // gitleaks:allow -- public Cloudflare permission identifier
+	} {
+		assertTextContains(t, tokenRoot, want, tokenRootPath)
+	}
+
+	tofuPath := runfilePath("src/infrastructure/bootstrap/guardian-mgmt-dns/main.tf")
+	tofu := readText(t, tofuPath)
+	for _, want := range []string{
+		`resource "cloudflare_zero_trust_tunnel_cloudflared" "guardian_codex_cloud"`,
+		`service  = "tcp://kubernetes.default.svc:443"`,
+		`resource "cloudflare_zero_trust_access_service_token" "guardian_codex_cloud"`,
+		`decision   = "non_identity"`,
+		`token_id = cloudflare_zero_trust_access_service_token.guardian_codex_cloud.id`,
+		`name    = local.codex_cloud_k8s_api_hostname`,
+		`proxied = true`,
+	} {
+		assertTextContains(t, tofu, want, tofuPath)
+	}
+
+	manifestPath := runfilePath("src/infrastructure/base/dns/codex-cloud-tunnel.yaml")
+	manifest := readText(t, manifestPath)
+	for _, want := range []string{
+		"key: guardian/guardian-mgmt/external-dns/codex-cloud-tunnel",
+		"docker.io/cloudflare/cloudflared:2026.7.2@sha256:4f6655284ab3d252b7f28fedb19fe6c8fc82ee5b1295c20ac74d475e5398a52d",
+		"serviceName: kubernetes",
+		"port: '7844'",
+		"protocol: TCP",
+		"automountServiceAccountToken: false",
+		"readOnlyRootFilesystem: true",
+	} {
+		assertTextContains(t, manifest, want, manifestPath)
+	}
+	for _, forbidden := range []string{
+		"TUNNEL_TOKEN",
+		"hostNetwork: true",
+		"privileged: true",
+	} {
+		assertTextNotContains(t, manifest, forbidden, manifestPath)
+	}
+}
+
 // personaSpec declares one rung of the persona ladder
 // (src/infrastructure/base/cozystack-identities/platform-admins.yaml). The ladder is
 // meant to grow: adding a rung is a manifest block plus an entry here, and
