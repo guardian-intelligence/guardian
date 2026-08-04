@@ -742,7 +742,7 @@ func relayPlan() []relayTarget {
 			SourceNamespace:   "external-dns",
 			SourceSecret:      "guardian-codex-cloud-tunnel",
 			Keys:              map[string]string{"token": "token"},
-			MissingHint:       "tofu -chdir=src/infrastructure/bootstrap/guardian-mgmt-dns output -raw codex_cloud_tunnel_connector_token",
+			MissingHint:       "tofu -chdir=src/infrastructure/bootstrap/guardian-mgmt-dns output -raw codex_cloud_tunnel_token",
 		},
 		{
 			Name:              "backups R2 keypair",
