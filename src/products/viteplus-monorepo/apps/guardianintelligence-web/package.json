@@ -8,6 +8,7 @@
     "dev": "vp dev",
     "build": "vp exec tsc -p tsconfig.json && vp test run && vp build",
     "perf:company-intro": "node perf/company-home-intro-frames.mjs",
+    "perf:company-route": "node perf/company-home-route-continuity.mjs",
     "preview": "vp preview",
     "start": "node ./.output/server/index.mjs",
     "test": "vp test run",

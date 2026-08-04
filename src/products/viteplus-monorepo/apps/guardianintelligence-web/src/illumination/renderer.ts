@@ -9,6 +9,7 @@ export type CanvasMode = "canvas-ui" | "css" | "webgl2";
 
 export interface CanvasRenderer {
   readonly mode: CanvasMode;
+  setActive(active: boolean): void;
   dispose(): void;
 }
 
@@ -490,6 +491,7 @@ class WebGLCanvasRenderer implements CanvasRenderer {
   readonly #surfaceBuffer: WebGLBuffer;
   readonly #surfaceVertexArray: WebGLVertexArrayObject;
   readonly #uniforms: readonly [SceneUniforms, ParticleUniforms, SurfaceUniforms];
+  #active = true;
   #activeSurface: HTMLElement | null = null;
   #contentDirty = false;
   #frameCount = 0;
@@ -502,6 +504,7 @@ class WebGLCanvasRenderer implements CanvasRenderer {
   #pixelRatio = 1;
   #pointer = { x: 0, y: 0, alpha: 0 };
   #pointerTarget: { x: number; y: number } | null = null;
+  #pausedAt: number | null = null;
   #startTime: number | null = null;
   #surfaces: Surface[] = [];
   #geometryAnimations: Animation[] = [];
@@ -650,14 +653,16 @@ class WebGLCanvasRenderer implements CanvasRenderer {
     );
     this.#resizeObserver = new ResizeObserver(() => {
       this.#layoutDirty = true;
-      this.#resize();
+      if (this.#active) this.#resize();
     });
     this.#resizeObserver.observe(this.#output);
     this.#resizeObserver.observe(this.#content);
     this.#mutationObserver = new MutationObserver(() => {
       this.#layoutDirty = true;
-      if (this.#htmlInCanvas) this.#source.requestPaint?.();
-      this.#scheduler.wake();
+      if (this.#active) {
+        if (this.#htmlInCanvas) this.#source.requestPaint?.();
+        this.#scheduler.wake();
+      }
     });
     this.#mutationObserver.observe(this.#content, {
       attributeFilter: ["class", "data-illumination-active", "style"],
@@ -681,7 +686,7 @@ class WebGLCanvasRenderer implements CanvasRenderer {
     if (this.#htmlInCanvas && this.#sourceContext) {
       this.#source.onpaint = () => {
         this.#captureContent();
-        this.#scheduler.wake();
+        if (this.#active) this.#scheduler.wake();
       };
     }
 
@@ -690,7 +695,8 @@ class WebGLCanvasRenderer implements CanvasRenderer {
   }
 
   readonly #onPointerMove = (event: PointerEvent) => {
-    if (this.#reducedMotion.matches || document.visibilityState === "hidden") return;
+    if (!this.#active || this.#reducedMotion.matches || document.visibilityState === "hidden")
+      return;
     const rect = this.#output.getBoundingClientRect();
     this.#pointerTarget = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     const target = event.target instanceof Element ? event.target : null;
@@ -701,20 +707,23 @@ class WebGLCanvasRenderer implements CanvasRenderer {
   readonly #onPointerLeave = () => {
     this.#pointerTarget = null;
     this.#activeSurface = null;
-    this.#scheduler.wake();
+    if (this.#active) this.#scheduler.wake();
   };
 
   readonly #onFocusChange = () => {
-    this.#scheduler.wake();
+    if (this.#active) this.#scheduler.wake();
   };
 
   readonly #onScroll = () => {
     this.#layoutDirty = true;
-    if (this.#htmlInCanvas) this.#source.requestPaint?.();
-    this.#scheduler.wake();
+    if (this.#active) {
+      if (this.#htmlInCanvas) this.#source.requestPaint?.();
+      this.#scheduler.wake();
+    }
   };
 
   readonly #onVisualSeek = () => {
+    if (!this.#active) return;
     this.#layoutDirty = true;
     this.#captureContent();
     this.#source.requestPaint?.();
@@ -735,14 +744,27 @@ class WebGLCanvasRenderer implements CanvasRenderer {
 
   readonly #onVisibilityChange = () => {
     if (document.visibilityState === "hidden") {
-      this.#scheduler.suspend();
+      this.#suspend();
       return;
     }
-    this.#startTime = null;
+    this.#resume();
+  };
+
+  #suspend() {
+    if (this.#pausedAt === null && this.#startTime !== null) this.#pausedAt = performance.now();
+    this.#scheduler.suspend();
+  }
+
+  #resume() {
+    if (!this.#active || document.visibilityState === "hidden") return;
+    if (this.#pausedAt !== null && this.#startTime !== null) {
+      this.#startTime += performance.now() - this.#pausedAt;
+    }
+    this.#pausedAt = null;
     this.#lastFrame = 0;
     this.#scheduler.resume();
     this.#scheduler.wake();
-  };
+  }
 
   #makeParticleData(width: number, height: number) {
     const particleCount = PARTICLE_LAYERS.reduce(
@@ -877,6 +899,7 @@ class WebGLCanvasRenderer implements CanvasRenderer {
   }
 
   #drawFrame() {
+    if (!this.#active) return false;
     const context = this.#context;
     if (context.isContextLost()) return false;
     if (this.#layoutDirty) this.#measureSurfaces();
@@ -974,7 +997,23 @@ class WebGLCanvasRenderer implements CanvasRenderer {
 
     this.#frameCount += 1;
     this.#output.dataset.frameCount = String(this.#frameCount);
-    return !this.#reducedMotion.matches && document.visibilityState !== "hidden";
+    return this.#active && !this.#reducedMotion.matches && document.visibilityState !== "hidden";
+  }
+
+  setActive(active: boolean) {
+    if (this.#active === active) return;
+    this.#active = active;
+    this.#output.dataset.routeState = active ? "active" : "suspended";
+    if (!active) {
+      this.#pointerTarget = null;
+      this.#activeSurface = null;
+      this.#suspend();
+      return;
+    }
+    this.#layoutDirty = true;
+    this.#resize();
+    this.#source.requestPaint?.();
+    this.#resume();
   }
 
   dispose() {
@@ -1002,6 +1041,7 @@ class WebGLCanvasRenderer implements CanvasRenderer {
 
 const cssRenderer: CanvasRenderer = {
   mode: "css",
+  setActive() {},
   dispose() {},
 };
 

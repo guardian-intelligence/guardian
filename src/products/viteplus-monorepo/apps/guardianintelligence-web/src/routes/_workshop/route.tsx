@@ -20,19 +20,19 @@ function WorkshopLayout() {
   const location = useLocation();
   const isLandingRoute = location.pathname === "/";
 
+  if (isLandingRoute) return <Outlet />;
+
   return (
     <div
       data-treatment="workshop"
       className="flex min-h-svh flex-col"
       style={criticalTreatmentRootStyle("workshop")}
     >
-      {isLandingRoute ? null : (
-        <AppChrome treatment="workshop" LinkComponent={LinkAdapter} slotRight={<TopNav />} />
-      )}
+      <AppChrome treatment="workshop" LinkComponent={LinkAdapter} slotRight={<TopNav />} />
       <main id="main" className="flex-1">
         <Outlet />
       </main>
-      {isLandingRoute ? null : <WorkshopFooter />}
+      <WorkshopFooter />
     </div>
   );
 }

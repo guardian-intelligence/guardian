@@ -1,5 +1,6 @@
-import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Outlet, Scripts, useLocation } from "@tanstack/react-router";
 import { BrandTelemetryProvider } from "@guardian/brand";
+import { PersistentCompanyHome } from "~/components/company-home/persistent-company-home";
 import { DevelopmentModeHotkey } from "~/components/development-mode-hotkey";
 import { emitSpan } from "~/lib/telemetry/browser";
 import { TelemetryProbe } from "~/lib/telemetry/page-view";
@@ -31,8 +32,11 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
+  const location = useLocation();
+  const isLandingRoute = location.pathname === "/";
+
   return (
-    <html lang="en">
+    <html lang="en" data-company-home={isLandingRoute ? "" : undefined} suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>
@@ -57,6 +61,7 @@ function RootComponent() {
           Skip to main content
         </a>
         <BrandTelemetryProvider emitSpan={emitSpan}>
+          <PersistentCompanyHome active={isLandingRoute} />
           <Outlet />
         </BrandTelemetryProvider>
         <TelemetryProbe />

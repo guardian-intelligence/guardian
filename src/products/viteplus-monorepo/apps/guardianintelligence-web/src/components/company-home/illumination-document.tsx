@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { supportsHtmlInCanvas } from "../../illumination/html-in-canvas";
 import { createCanvasRenderer, type CanvasRenderer } from "../../illumination/renderer";
 import {
@@ -9,28 +16,26 @@ import {
 } from "./company-experience";
 
 export interface IlluminationDocumentProps {
+  readonly active: boolean;
   readonly children: ReactNode;
 }
 
 const emptySubscribe = () => () => {};
 const INITIALIZATION_BUDGET_MS = 500;
 
-export function IlluminationDocument({ children }: IlluminationDocumentProps) {
+export function IlluminationDocument({ active, children }: IlluminationDocumentProps) {
   const sourceRef = useRef<HTMLCanvasElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLCanvasElement>(null);
+  const rendererRef = useRef<CanvasRenderer | null>(null);
+  const activeRef = useRef(active);
   const [nativeFailed, setNativeFailed] = useState(false);
   const supported = useSyncExternalStore(emptySubscribe, supportsHtmlInCanvas, () => false);
   const native = supported && !nativeFailed;
 
-  useEffect(() => {
-    document.documentElement.dataset.companyHome = "";
-    return () => {
-      delete document.documentElement.dataset.companyHome;
-    };
-  }, []);
+  activeRef.current = active;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const source = sourceRef.current;
     const content = contentRef.current;
     const output = outputRef.current;
@@ -50,6 +55,7 @@ export function IlluminationDocument({ children }: IlluminationDocumentProps) {
       generation += 1;
       renderer?.dispose();
       renderer = null;
+      rendererRef.current = null;
       showFallback();
       setCompanyExperience("static", reason);
     };
@@ -103,6 +109,8 @@ export function IlluminationDocument({ children }: IlluminationDocumentProps) {
       }
       renderer?.dispose();
       renderer = nextRenderer;
+      rendererRef.current = nextRenderer;
+      nextRenderer.setActive(activeRef.current);
       output.dataset.mode = nextRenderer.mode;
       output.dataset.state = !window.matchMedia("(prefers-reduced-motion: reduce)").matches
         ? "scheduled"
@@ -136,8 +144,14 @@ export function IlluminationDocument({ children }: IlluminationDocumentProps) {
       reducedMotion.removeEventListener("change", onReducedMotion);
       delete document.documentElement.dataset.canvasMode;
       renderer?.dispose();
+      if (rendererRef.current === renderer) rendererRef.current = null;
     };
   }, [native]);
+
+  useEffect(() => {
+    outputRef.current?.setAttribute("data-route-state", active ? "active" : "suspended");
+    rendererRef.current?.setActive(active);
+  }, [active]);
 
   return (
     <div

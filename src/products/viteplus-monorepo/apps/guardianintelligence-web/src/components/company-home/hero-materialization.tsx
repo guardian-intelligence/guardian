@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import {
   COMPANY_EXPERIENCE_EVENT,
   companyExperienceMode,
@@ -11,8 +11,38 @@ import {
   spotlightMask,
   type MaterializationPixel,
 } from "./hero-materialization-model";
-import { HERO_WORDMARK } from "./outlined-wordmarks";
+import { GUARDIAN_GLYPH_PATHS, GUARDIAN_WORDMARK } from "./outlined-wordmarks";
 
+const HERO_GLYPH_BOUNDS = [
+  [0, 634.609],
+  [1007.602, 1576.195],
+  [1898.805, 2569.602],
+  [2904.804, 3459.21],
+  [3853.605, 4443.011],
+  [4830.806, 4960.806],
+  [5310.01, 5980.807],
+  [6316.009, 6903.806],
+] as const;
+const HERO_GLYPH_GAP = 105;
+
+function makeHeroWordmark() {
+  let cursor = 0;
+  const glyphs = HERO_GLYPH_BOUNDS.map(([minX, maxX], index) => {
+    const path = GUARDIAN_GLYPH_PATHS[index];
+    if (!path) throw new Error("Guardian wordmark glyph data is invalid");
+    const offsetX = cursor - minX;
+    cursor += maxX - minX + HERO_GLYPH_GAP;
+    return { offsetX, path };
+  });
+
+  return {
+    glyphs,
+    height: GUARDIAN_WORDMARK.height,
+    width: cursor - HERO_GLYPH_GAP,
+  } as const;
+}
+
+const HERO_WORDMARK = makeHeroWordmark();
 const MAX_PIXEL_RATIO = 2;
 
 function makePixelField(
@@ -55,12 +85,22 @@ function makePixelField(
   return pixels;
 }
 
-export function HeroMaterialization({ label }: { readonly label: string }) {
+export function HeroMaterialization({
+  active,
+  label,
+}: {
+  readonly active: boolean;
+  readonly label: string;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const controllerRef = useRef<{ resume(): void; suspend(): void } | null>(null);
   const luminosityCanvasRef = useRef<HTMLCanvasElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const activeRef = useRef(active);
 
-  useEffect(() => {
+  activeRef.current = active;
+
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
     const luminosityCanvas = luminosityCanvasRef.current;
     const title = titleRef.current;
@@ -68,13 +108,21 @@ export function HeroMaterialization({ label }: { readonly label: string }) {
 
     const context = canvas.getContext("2d", { alpha: true });
     const luminosityContext = luminosityCanvas.getContext("2d", { alpha: true });
-    if (!context || !luminosityContext || typeof Path2D === "undefined") {
+    if (
+      !context ||
+      !luminosityContext ||
+      typeof DOMMatrix === "undefined" ||
+      typeof Path2D === "undefined"
+    ) {
       canvas.dataset.titleMaterialization = "failed";
       markTitleMaterialization("failed");
       return;
     }
 
-    const glyphPath = new Path2D(HERO_WORDMARK.path);
+    const glyphPath = new Path2D();
+    for (const glyph of HERO_WORDMARK.glyphs) {
+      glyphPath.addPath(new Path2D(glyph.path), new DOMMatrix([1, 0, 0, 1, glyph.offsetX, 0]));
+    }
     let animationFrame = 0;
     let cellSize = 4;
     let height = 1;
@@ -176,7 +224,7 @@ export function HeroMaterialization({ label }: { readonly label: string }) {
     };
 
     const start = () => {
-      if (animationFrame || companyExperienceMode() !== "animated") return;
+      if (animationFrame || !activeRef.current || companyExperienceMode() !== "animated") return;
       animationFrame = window.requestAnimationFrame(draw);
     };
     const onExperience = () => {
@@ -188,6 +236,7 @@ export function HeroMaterialization({ label }: { readonly label: string }) {
       }
     };
     const onVisualSeek = () => {
+      if (!activeRef.current) return;
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
       animationFrame = window.requestAnimationFrame(draw);
     };
@@ -200,6 +249,13 @@ export function HeroMaterialization({ label }: { readonly label: string }) {
     measure();
     window.addEventListener(COMPANY_EXPERIENCE_EVENT, onExperience);
     window.addEventListener("visual-harness:seek", onVisualSeek);
+    controllerRef.current = {
+      resume: start,
+      suspend: () => {
+        if (animationFrame) window.cancelAnimationFrame(animationFrame);
+        animationFrame = 0;
+      },
+    };
     start();
 
     return () => {
@@ -207,9 +263,15 @@ export function HeroMaterialization({ label }: { readonly label: string }) {
       resizeObserver.disconnect();
       window.removeEventListener(COMPANY_EXPERIENCE_EVENT, onExperience);
       window.removeEventListener("visual-harness:seek", onVisualSeek);
+      controllerRef.current = null;
       clear();
     };
   }, []);
+
+  useEffect(() => {
+    if (active) controllerRef.current?.resume();
+    else controllerRef.current?.suspend();
+  }, [active]);
 
   return (
     <h1 ref={titleRef} id="company-home-title" className="company-home-title" aria-label={label}>
@@ -226,7 +288,14 @@ export function HeroMaterialization({ label }: { readonly label: string }) {
             <stop offset="1" stopColor="#d8ecf8" />
           </linearGradient>
         </defs>
-        <path d={HERO_WORDMARK.path} fill="url(#company-home-title-gradient)" />
+        {HERO_WORDMARK.glyphs.map((glyph) => (
+          <path
+            key={glyph.path}
+            d={glyph.path}
+            fill="url(#company-home-title-gradient)"
+            transform={`translate(${glyph.offsetX})`}
+          />
+        ))}
       </svg>
       <canvas
         ref={canvasRef}

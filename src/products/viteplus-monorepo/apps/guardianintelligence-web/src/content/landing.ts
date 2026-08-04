@@ -5,9 +5,9 @@
 // Voice rules in brand/voice.md apply.
 
 export const landing = {
-  kicker: "Accepting Applications for Fall 2026",
-  hero: "Guardian",
-  lede: "We build software libraries for companies working on AI alignment — for zero-cost. The only catch: the software will be free and open‑source.",
+  kicker: "Seattle, WA · Est. 2026",
+  hero: "GUARDIAN",
+  lede: "We build free, open-source agent-native software to democratize AI alignment, towards a humanist future.",
 } as const;
 
 export type LandingContent = typeof landing;
