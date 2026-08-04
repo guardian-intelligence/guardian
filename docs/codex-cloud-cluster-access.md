@@ -18,6 +18,13 @@ The two boundaries are independent:
 
 ## Codex environment
 
+Before activating `codex-cloud-tunnel.yaml` in the DNS Kustomization, complete
+Cloudflare's one-time Zero Trust onboarding. The account must have a team name
+and an active Zero Trust plan before the Access service token, policy, and
+application can be created. Keep the connector manifest out of the live
+Kustomization until those three resources exist; otherwise Flux correctly
+reports the missing connector token as unhealthy.
+
 Create the environment at
 <https://chatgpt.com/codex/cloud/settings/environment/create> and select the
 Guardian repository. Use these scripts:
