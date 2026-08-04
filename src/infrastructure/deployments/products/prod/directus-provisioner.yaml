@@ -15,6 +15,10 @@ metadata:
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: company-site
     guardian.dev/stage: prod
+  annotations:
+    # The script's JS template literals are ${...} — Flux post-build
+    # substitution must never touch this resource or the build fails.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
 data:
   provision.mjs: |
     // Idempotent Directus provisioning: the letters collection, the hidden
