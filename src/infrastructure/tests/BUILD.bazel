@@ -68,6 +68,7 @@ go_test(
         "//src/infrastructure/bootstrap/bundle:images_declared_lock",
         "//src/infrastructure/bootstrap/guardian-github:root",
         "//src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens:root",
+        "//src/infrastructure/bootstrap/guardian-mgmt-dns:root",
         "//src/infrastructure/bootstrap/guardian-mgmt-edge-policy:root",
         "//src/infrastructure/bootstrap/guardian-stripe-sandbox:root",
         "//src/infrastructure/bootstrap/sync-dark:manifests",

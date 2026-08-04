@@ -20,6 +20,7 @@ DEBUG_CLI_SHIMS = [
     ("talm", "@multitool//tools/talm"),
     ("bao", "@multitool//tools/bao"),
     ("curl", "@multitool//tools/curl"),
+    ("cloudflared", "@multitool//tools/cloudflared"),
     ("cilium", "@multitool//tools/cilium"),
     ("hubble", "@multitool//tools/hubble"),
     ("stern", "@multitool//tools/stern"),

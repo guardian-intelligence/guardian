@@ -27,3 +27,20 @@ output "rumi_engineering_zone_id" {
   description = "Cloudflare zone id for the rumi.engineering product edge."
   value       = data.cloudflare_zone.rumi_engineering.id
 }
+
+output "codex_cloud_tunnel_token" {
+  description = "Connector token relayed to OpenBao for the in-cluster cloudflared Deployment."
+  value       = data.cloudflare_zero_trust_tunnel_cloudflared_token.guardian_codex_cloud.token
+  sensitive   = true
+}
+
+output "codex_cloud_access_client_id" {
+  description = "Cloudflare Access service-token client id installed only in the Codex cloud environment."
+  value       = cloudflare_zero_trust_access_service_token.guardian_codex_cloud.client_id
+}
+
+output "codex_cloud_access_client_secret" {
+  description = "Cloudflare Access service-token secret installed only in the Codex cloud environment."
+  value       = cloudflare_zero_trust_access_service_token.guardian_codex_cloud.client_secret
+  sensitive   = true
+}
