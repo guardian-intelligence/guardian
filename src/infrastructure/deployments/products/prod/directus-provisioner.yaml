@@ -1,0 +1,241 @@
+# Directus application config as code. Directus stores collections,
+# permissions, and field metadata as rows in its own database, so this
+# reconciler Job applies the desired shape through the admin API the same way
+# keycloak-realm-reconciler does for the realm: the admin credential is
+# mounted by the cluster, no operator ever reads it, and a config change is a
+# PR. Bump checksum/provision-script (sha256 of provision.mjs below) whenever
+# the script changes — Flux force-recreates the Job when its template moves.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: directus-provisioner-script
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: directus-provisioner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company-site
+    guardian.dev/stage: prod
+data:
+  provision.mjs: |
+    // Idempotent Directus provisioning: the letters collection, the hidden
+    // kind field, and the anonymous read grant the public site depends on.
+    const BASE = process.env.DIRECTUS_URL;
+
+    const login = await fetch(`${BASE}/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: process.env.DIRECTUS_EMAIL,
+        password: process.env.DIRECTUS_PASSWORD,
+      }),
+    });
+    if (!login.ok) throw new Error(`login failed: ${login.status}`);
+    const token = (await login.json()).data.access_token;
+
+    async function api(path, init) {
+      const res = await fetch(`${BASE}${path}`, {
+        ...init,
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          ...init?.headers,
+        },
+      });
+      if (!res.ok && res.status !== 404) {
+        throw new Error(`${init?.method ?? "GET"} ${path}: ${res.status} ${await res.text()}`);
+      }
+      return res;
+    }
+    const get = async (path) => {
+      const res = await api(path);
+      return res.ok ? (await res.json()).data : null;
+    };
+
+    const FIELDS = [
+      "slug", "title", "publishedAt", "flare", "kind", "summary",
+      "author", "authorTitle", "description", "note", "body",
+    ];
+
+    // Collection: create when absent (fresh database); the field list must
+    // stay in sync with letters.server.ts and letter-schema.ts.
+    const collection = await get("/collections/letters");
+    if (!collection) {
+      await api("/collections", {
+        method: "POST",
+        body: JSON.stringify({
+          collection: "letters",
+          meta: {
+            icon: "mail",
+            note: "Company-site letters. The public site serves published letters (summary set) from here at request time.",
+          },
+          schema: {},
+          fields: [
+            { field: "slug", type: "string", schema: { is_primary_key: true, length: 128 }, meta: { interface: "input", readonly: false } },
+            { field: "title", type: "string", schema: {}, meta: { interface: "input" } },
+            { field: "publishedAt", type: "date", schema: {}, meta: {} },
+            { field: "flare", type: "string", schema: {}, meta: { interface: "input", note: "Must be a substring of title; the OG card highlights it." } },
+            { field: "kind", type: "string", schema: { default_value: "dispatch" }, meta: { hidden: true } },
+            { field: "summary", type: "text", schema: {}, meta: { interface: "input-multiline", note: "Empty = draft; the site hides letters without a summary." } },
+            { field: "author", type: "string", schema: {}, meta: { interface: "input", note: "Provenance only, never rendered." } },
+            { field: "authorTitle", type: "string", schema: {}, meta: { interface: "input", note: "Provenance only, never rendered." } },
+            { field: "description", type: "text", schema: {}, meta: { interface: "input-multiline", note: "One-line account; doubles as OG/share text." } },
+            { field: "note", type: "text", schema: {}, meta: { interface: "input-multiline", note: "Author's longer context, JSON-LD only." } },
+            { field: "body", type: "text", schema: {}, meta: { interface: "input-rich-text-md" } },
+          ],
+        }),
+      });
+      console.error("created collection letters");
+    }
+
+    // kind is a rendering treatment reserved for dear-shovon, not an
+    // authoring decision: hidden in the form, every new letter a dispatch.
+    await api("/fields/letters/kind", {
+      method: "PATCH",
+      body: JSON.stringify({
+        meta: { hidden: true },
+        schema: { default_value: "dispatch" },
+      }),
+    });
+    console.error("kind field: hidden, default dispatch");
+
+    // Anonymous read on published letters only — the site's runtime read
+    // path. The same grant is what cms.guardianintelligence.org exposes to
+    // the world: exactly the content already public on /letters. Drafts
+    // (empty summary) never pass the filter. The policy id is Directus's
+    // well-known PUBLIC_POLICY_ID constant (migration 20240806A), stable
+    // across every install.
+    const PUBLIC_POLICY_ID = "abf8a154-5b1c-4a46-ac9c-7300570f4f17";
+    const publicPolicy = await get(`/policies/${PUBLIC_POLICY_ID}?fields=id`);
+    if (!publicPolicy) throw new Error("system Public policy not found");
+    const existing = await get(
+      `/permissions?filter[policy][_eq]=${publicPolicy.id}&filter[collection][_eq]=letters&filter[action][_eq]=read&fields=id`,
+    );
+    if (existing?.[0]) {
+      console.error(`public read permission exists: ${existing[0].id}`);
+    } else {
+      await api("/permissions", {
+        method: "POST",
+        body: JSON.stringify({
+          policy: publicPolicy.id,
+          collection: "letters",
+          action: "read",
+          fields: FIELDS,
+          permissions: { _and: [{ summary: { _nempty: true } }] },
+        }),
+      });
+      console.error("created public read permission");
+    }
+
+    // Verify as the anonymous role before declaring success.
+    const anon = await fetch(`${BASE}/items/letters?fields=slug,summary`);
+    if (!anon.ok) throw new Error(`anonymous read failed: ${anon.status}`);
+    const items = (await anon.json()).data ?? [];
+    if (items.some((item) => !item.summary)) {
+      throw new Error("anonymous read returned a draft — permission filter broken");
+    }
+    console.error(`anonymous read ok: ${items.map((item) => item.slug).join(", ")}`);
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: directus-provisioner
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: directus-provisioner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company-site
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: Enabled
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  backoffLimit: 20
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      annotations:
+        checksum/provision-script: e184ef6eea49a1ce80f7731c3c5846eb411aad9e6aa5fba8e4194164e5e0dc19
+      labels:
+        app.kubernetes.io/name: directus-provisioner
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/product: company-site
+        guardian.dev/stage: prod
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: provision
+          # Same pin as the directus Deployment (directus.yaml); the image
+          # is only borrowed for its node runtime.
+          image: docker.io/directus/directus:11.17.4@sha256:eb326f679ae847c0a776f93b972761dc2ebe84980e0b9d274a6bc31cd62809f7
+          command: ["node", "/provision/provision.mjs"]
+          env:
+            - name: DIRECTUS_URL
+              value: http://directus.tenant-guardian-prod.svc
+            - name: DIRECTUS_EMAIL
+              value: admin@guardianintelligence.org
+            - name: DIRECTUS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: directus-admin-credential
+                  key: password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+              ephemeral-storage: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+              ephemeral-storage: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: script
+              mountPath: /provision
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: directus-provisioner-script
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: directus-provisioner
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: directus-provisioner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: directus-provisioner
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: directus
+      toPorts:
+        - ports:
+            - port: "8055"
+              protocol: TCP

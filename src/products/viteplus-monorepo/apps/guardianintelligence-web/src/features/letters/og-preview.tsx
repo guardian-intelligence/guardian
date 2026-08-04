@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { ogSpecFor } from "~/og/catalog";
+import type { Letter } from "~/content/letters";
+import { letterOgSpec } from "~/og/catalog";
 import { buildOGCard } from "~/og/template";
 import { isDevelopmentModeEnabled } from "~/lib/development-mode";
 
@@ -72,10 +73,10 @@ function PreviewFrame({
 
 // The developer view: the server-served SVG and the client-built source SVG
 // from the same spec. No article body — just the two cards.
-export function LetterOgPreview({ slug }: { readonly slug: string }) {
-  const spec = ogSpecFor(`letter/${slug}`);
-  const built = spec ? buildOGCard(spec) : null;
-  const svg = built && built.ok ? built.svg : null;
+export function LetterOgPreview({ letter }: { readonly letter: Letter }) {
+  const slug = letter.slug;
+  const built = buildOGCard(letterOgSpec(letter));
+  const svg = built.ok ? built.svg : null;
   const svgSrc = svg ? `data:image/svg+xml;utf8,${encodeURIComponent(svg)}` : null;
 
   return (

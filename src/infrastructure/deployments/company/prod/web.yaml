@@ -63,6 +63,12 @@ spec:
           env:
             - name: GUARDIAN_SITE
               value: prod
+            # Runtime letters source: the SSR server fetches published
+            # letters from Directus (anonymous, permission-filtered) and
+            # serves last-good through CMS outages; /letters* is additionally
+            # edge-cached (guardian-mgmt-edge-policy cache rule).
+            - name: DIRECTUS_URL
+              value: http://directus.tenant-guardian-prod.svc
             - name: POSTFLIGHT_PUBLIC_URL
               value: https://guardianintelligence.org
             - name: POSTFLIGHT_AUTH_ENABLED

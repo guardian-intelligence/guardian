@@ -42,7 +42,6 @@ catalog:
   d3-scale: 4.0.2
   d3-shape: 3.2.0
   effect: 3.22.0
-  gray-matter: 4.0.3
   lucide-react: 1.25.0
   marked: 15.0.12
   mediabunny: 1.50.9

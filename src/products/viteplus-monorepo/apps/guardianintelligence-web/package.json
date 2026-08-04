@@ -21,7 +21,6 @@
     "@tanstack/react-start": "catalog:",
     "d3-scale": "catalog:",
     "d3-shape": "catalog:",
-    "gray-matter": "catalog:",
     "lucide-react": "catalog:",
     "marked": "catalog:",
     "nitro": "catalog:",
