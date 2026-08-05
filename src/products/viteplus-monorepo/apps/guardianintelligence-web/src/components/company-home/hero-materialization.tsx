@@ -1,49 +1,22 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import {
-  COMPANY_EXPERIENCE_EVENT,
-  companyExperienceMode,
-  markTitleMaterialization,
-} from "./company-experience";
+import { useCompanyExperienceMode } from "./company-experience";
+import { useCompanyScene } from "./company-scene";
 import {
   activationThreshold,
   materializationPixelOpacity,
   pixelLightState,
+  shimmerPixelIntensity,
   spotlightMask,
   type MaterializationPixel,
 } from "./hero-materialization-model";
-import { GUARDIAN_GLYPH_PATHS, GUARDIAN_WORDMARK } from "./outlined-wordmarks";
+import { GUARDIAN_HERO_WORDMARK } from "./outlined-wordmarks";
 
-const HERO_GLYPH_BOUNDS = [
-  [0, 634.609],
-  [1007.602, 1576.195],
-  [1898.805, 2569.602],
-  [2904.804, 3459.21],
-  [3853.605, 4443.011],
-  [4830.806, 4960.806],
-  [5310.01, 5980.807],
-  [6316.009, 6903.806],
-] as const;
-const HERO_GLYPH_GAP = 105;
-
-function makeHeroWordmark() {
-  let cursor = 0;
-  const glyphs = HERO_GLYPH_BOUNDS.map(([minX, maxX], index) => {
-    const path = GUARDIAN_GLYPH_PATHS[index];
-    if (!path) throw new Error("Guardian wordmark glyph data is invalid");
-    const offsetX = cursor - minX;
-    cursor += maxX - minX + HERO_GLYPH_GAP;
-    return { offsetX, path };
-  });
-
-  return {
-    glyphs,
-    height: GUARDIAN_WORDMARK.height,
-    width: cursor - HERO_GLYPH_GAP,
-  } as const;
-}
-
-const HERO_WORDMARK = makeHeroWordmark();
+const HERO_WORDMARK = {
+  ...GUARDIAN_HERO_WORDMARK,
+  glyphs: GUARDIAN_HERO_WORDMARK.glyphs.map((path) => ({ offsetX: 0, path })),
+} as const;
 const MAX_PIXEL_RATIO = 2;
+const SHIMMER_ALPHA_LEVELS = [0.1, 0.24, 0.42, 0.66, 0.9] as const;
 
 function makePixelField(
   context: CanvasRenderingContext2D,
@@ -92,11 +65,13 @@ export function HeroMaterialization({
   readonly active: boolean;
   readonly label: string;
 }) {
+  const scene = useCompanyScene();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const controllerRef = useRef<{ resume(): void; suspend(): void } | null>(null);
+  const controllerRef = useRef<{ redraw(): void; suspend(): void } | null>(null);
   const luminosityCanvasRef = useRef<HTMLCanvasElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const activeRef = useRef(active);
+  const motionAllowed = useCompanyExperienceMode() !== "static";
 
   activeRef.current = active;
 
@@ -104,7 +79,7 @@ export function HeroMaterialization({
     const canvas = canvasRef.current;
     const luminosityCanvas = luminosityCanvasRef.current;
     const title = titleRef.current;
-    if (!canvas || !luminosityCanvas || !title || companyExperienceMode() === "static") return;
+    if (!canvas || !luminosityCanvas || !title || !motionAllowed) return;
 
     const context = canvas.getContext("2d", { alpha: true });
     const luminosityContext = luminosityCanvas.getContext("2d", { alpha: true });
@@ -115,7 +90,6 @@ export function HeroMaterialization({
       typeof Path2D === "undefined"
     ) {
       canvas.dataset.titleMaterialization = "failed";
-      markTitleMaterialization("failed");
       return;
     }
 
@@ -160,30 +134,44 @@ export function HeroMaterialization({
       pixels = makePixelField(context, glyphPath, width, height, cellSize);
       canvas.dataset.pixelCount = String(pixels.length);
       canvas.dataset.titleMaterialization = pixels.length > 0 ? "ready" : "failed";
-      markTitleMaterialization(pixels.length > 0 ? "ready" : "failed");
     };
 
     const draw = () => {
       animationFrame = 0;
-      if (companyExperienceMode() !== "animated") {
+      if (document.documentElement.dataset.companyExperience !== "animated") {
         clear();
         return;
       }
 
-      const progressValue = Number.parseFloat(
-        getComputedStyle(title).getPropertyValue("--company-materialize-progress"),
-      );
-      const progress = Number.isFinite(progressValue) ? Math.min(1, Math.max(0, progressValue)) : 0;
+      const frame = scene.currentFrame();
+      const progress = frame.materialization;
       const pixelOpacity = materializationPixelOpacity(progress);
       const mask = spotlightMask(progress);
       const active = new Path2D();
+      const shimmerPaths = SHIMMER_ALPHA_LEVELS.map(() => new Path2D());
       const renderedSize = cellSize * 0.76;
       const inset = (cellSize - renderedSize) * 0.5;
       let offCount = 0;
       let onCount = 0;
+      let shimmerCount = 0;
       let spotlightCount = 0;
 
       for (const pixel of pixels) {
+        if (frame.shimmerProgress !== null) {
+          const intensity = shimmerPixelIntensity(pixel, frame.shimmerProgress);
+          const level =
+            intensity >= 0.018
+              ? Math.min(
+                  SHIMMER_ALPHA_LEVELS.length - 1,
+                  Math.floor(intensity * SHIMMER_ALPHA_LEVELS.length),
+                )
+              : -1;
+          if (level >= 0) {
+            shimmerPaths[level]!.rect(pixel.x + inset, pixel.y + inset, renderedSize, renderedSize);
+            shimmerCount += 1;
+          }
+          continue;
+        }
         const state = pixelLightState(pixel, progress);
         if (state === "off") {
           offCount += 1;
@@ -195,16 +183,24 @@ export function HeroMaterialization({
       }
 
       clear();
-      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-      context.globalAlpha = pixelOpacity;
-      context.fillStyle = "rgb(115 148 190 / 62%)";
-      context.fill(active);
-      context.globalAlpha = 1;
-
       luminosityContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-      luminosityContext.globalAlpha = pixelOpacity;
-      luminosityContext.fillStyle = "rgb(231 244 255 / 96%)";
-      luminosityContext.fill(active);
+      if (frame.shimmerProgress === null) {
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        context.globalAlpha = pixelOpacity;
+        context.fillStyle = "rgb(101 132 171 / 56%)";
+        context.fill(active);
+        context.globalAlpha = 1;
+
+        luminosityContext.globalAlpha = pixelOpacity;
+        luminosityContext.fillStyle = "rgb(221 239 255 / 90%)";
+        luminosityContext.fill(active);
+      } else {
+        luminosityContext.fillStyle = "rgb(205 229 255)";
+        for (const [index, path] of shimmerPaths.entries()) {
+          luminosityContext.globalAlpha = SHIMMER_ALPHA_LEVELS[index]!;
+          luminosityContext.fill(path);
+        }
+      }
       luminosityContext.globalAlpha = 1;
 
       title.style.setProperty("--company-spotlight-left", `${mask.left.toFixed(3)}%`);
@@ -214,62 +210,50 @@ export function HeroMaterialization({
       title.style.setProperty("--company-spotlight-right-trail", `${mask.rightTrail.toFixed(3)}%`);
       title.style.setProperty("--company-spotlight-trail-width", `${mask.trailWidth.toFixed(3)}%`);
       title.style.setProperty("--company-spotlight-width", `${mask.width.toFixed(3)}%`);
+      luminosityCanvas.dataset.shimmerActive = frame.shimmerProgress === null ? "false" : "true";
 
       canvas.dataset.materializeProgress = progress.toFixed(4);
       canvas.dataset.pixelOpacity = pixelOpacity.toFixed(4);
       canvas.dataset.pixelsOff = String(offCount);
       canvas.dataset.pixelsOn = String(onCount);
       canvas.dataset.pixelsSpotlight = String(spotlightCount);
-      if (progress < 0.999) animationFrame = window.requestAnimationFrame(draw);
+      luminosityCanvas.dataset.shimmerPixels = String(shimmerCount);
+      luminosityCanvas.dataset.shimmerProgress = frame.shimmerProgress?.toFixed(4) ?? "idle";
     };
 
-    const start = () => {
-      if (animationFrame || !activeRef.current || companyExperienceMode() !== "animated") return;
-      animationFrame = window.requestAnimationFrame(draw);
-    };
-    const onExperience = () => {
-      if (companyExperienceMode() === "animated") start();
-      else {
-        if (animationFrame) window.cancelAnimationFrame(animationFrame);
-        animationFrame = 0;
-        clear();
-      }
-    };
-    const onVisualSeek = () => {
+    const redraw = () => {
       if (!activeRef.current) return;
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
       animationFrame = window.requestAnimationFrame(draw);
     };
     const resizeObserver = new ResizeObserver(() => {
       measure();
-      if (companyExperienceMode() === "animated") onVisualSeek();
+      redraw();
     });
 
     resizeObserver.observe(title);
     measure();
-    window.addEventListener(COMPANY_EXPERIENCE_EVENT, onExperience);
-    window.addEventListener("visual-harness:seek", onVisualSeek);
+    const unsubscribe = scene.subscribe(redraw);
     controllerRef.current = {
-      resume: start,
+      redraw,
       suspend: () => {
         if (animationFrame) window.cancelAnimationFrame(animationFrame);
         animationFrame = 0;
       },
     };
-    start();
+    redraw();
 
     return () => {
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
       resizeObserver.disconnect();
-      window.removeEventListener(COMPANY_EXPERIENCE_EVENT, onExperience);
-      window.removeEventListener("visual-harness:seek", onVisualSeek);
+      unsubscribe();
       controllerRef.current = null;
       clear();
     };
-  }, []);
+  }, [motionAllowed, scene]);
 
   useEffect(() => {
-    if (active) controllerRef.current?.resume();
+    if (active) controllerRef.current?.redraw();
     else controllerRef.current?.suspend();
   }, [active]);
 
@@ -284,8 +268,8 @@ export function HeroMaterialization({
       >
         <defs>
           <linearGradient id="company-home-title-gradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#98c0ef" />
-            <stop offset="1" stopColor="#d8ecf8" />
+            <stop offset="0" stopColor="#7698c0" />
+            <stop offset="1" stopColor="#a9c1da" />
           </linearGradient>
         </defs>
         {HERO_WORDMARK.glyphs.map((glyph) => (

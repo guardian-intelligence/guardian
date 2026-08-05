@@ -4,6 +4,7 @@ import {
   deterministicNoise,
   materializationPixelOpacity,
   pixelLightState,
+  shimmerPixelIntensity,
   spotlightMask,
   type MaterializationPixel,
 } from "./hero-materialization-model";
@@ -60,5 +61,27 @@ describe("hero materialization", () => {
     for (let index = 1; index < samples.length; index += 1) {
       expect(samples[index]!).toBeLessThanOrEqual(samples[index - 1]!);
     }
+  });
+
+  it("expands the shimmer symmetrically from the center", () => {
+    const center = pixel(0, 0.15);
+    const left = pixel(-0.55, 0.15);
+    const right = pixel(0.55, 0.15);
+    const edge = pixel(0.92, 0.15);
+
+    expect(shimmerPixelIntensity(center, 0.16)).toBeGreaterThan(shimmerPixelIntensity(edge, 0.16));
+    expect(shimmerPixelIntensity(left, 0.42)).toBeCloseTo(shimmerPixelIntensity(right, 0.42));
+  });
+
+  it("carries the dot front past the outer glyphs until the matrix disappears", () => {
+    const center = pixel(0, 0.15);
+    const edge = pixel(0.92, 0.15);
+
+    expect(shimmerPixelIntensity(edge, 0.62)).toBeGreaterThan(shimmerPixelIntensity(center, 0.62));
+    expect(shimmerPixelIntensity(edge, 0.82)).toBeLessThan(0.018);
+    expect(shimmerPixelIntensity(edge, 0.86)).toBeLessThan(shimmerPixelIntensity(edge, 0.62));
+    expect(shimmerPixelIntensity(edge, 0.86)).toBeLessThan(0.02);
+    expect(shimmerPixelIntensity(edge, 0)).toBe(0);
+    expect(shimmerPixelIntensity(edge, 1)).toBe(0);
   });
 });

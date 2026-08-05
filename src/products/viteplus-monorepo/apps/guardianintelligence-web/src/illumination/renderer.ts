@@ -4,12 +4,14 @@ import {
   type PaintableCanvas,
 } from "./html-in-canvas";
 import { WakeScheduler } from "./scheduler";
+import type { CompanySceneFrame } from "../components/company-home/company-scene-timeline";
 
 export type CanvasMode = "canvas-ui" | "css" | "webgl2";
 
 export interface CanvasRenderer {
   readonly mode: CanvasMode;
   setActive(active: boolean): void;
+  setSceneFrame(frame: CompanySceneFrame): void;
   dispose(): void;
 }
 
@@ -37,10 +39,10 @@ type Surface = {
 };
 
 type SceneUniforms = Record<
-  "uIntro" | "uPixelRatio" | "uPointer" | "uResolution" | "uTime",
+  "uAmbient" | "uBeacon" | "uPixelRatio" | "uPointer" | "uResolution" | "uTime",
   WebGLUniformLocation
 >;
-type ParticleUniforms = Record<"uIntro" | "uPixelRatio" | "uTime", WebGLUniformLocation>;
+type ParticleUniforms = Record<"uAmbient" | "uPixelRatio" | "uTime", WebGLUniformLocation>;
 type SurfaceUniforms = Record<
   "uContent" | "uHasContent" | "uPixelRatio" | "uResolution" | "uTime",
   WebGLUniformLocation
@@ -105,7 +107,8 @@ precision highp float;
 uniform vec2 uResolution;
 uniform float uPixelRatio;
 uniform float uTime;
-uniform float uIntro;
+uniform float uAmbient;
+uniform float uBeacon;
 uniform vec4 uPointer;
 
 out vec4 outColor;
@@ -114,10 +117,6 @@ float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
   return fract((p3.x + p3.y) * p3.z);
-}
-
-float line(float value, float position, float width) {
-  return 1.0 - smoothstep(width * 0.35, width, abs(value - position));
 }
 
 float radial(vec2 point, vec2 center, vec2 scale) {
@@ -152,45 +151,31 @@ void main() {
   vec2 point = vec2(gl_FragCoord.x, uResolution.y * uPixelRatio - gl_FragCoord.y) /
     uPixelRatio;
   vec2 center = vec2(uResolution.x * 0.5, uResolution.y * 0.36);
-  float intro = clamp(uIntro, 0.0, 1.0);
+  float ambient = clamp(uAmbient, 0.0, 1.0);
+  float beacon = clamp(uBeacon, 0.0, 1.0);
 
   vec3 color = vec3(5.0, 6.0, 15.0) / 255.0;
   color += vec3(21.0, 61.0, 204.0) / 255.0 *
-    radial(point, center, vec2(uResolution.x * 0.50, uResolution.y * 0.64)) * 0.083 * intro;
+    radial(point, center, vec2(uResolution.x * 0.50, uResolution.y * 0.64)) * 0.083 * ambient;
   color += vec3(152.0, 192.0, 239.0) / 255.0 *
     radial(point, vec2(uResolution.x * 0.5, uResolution.y * 0.32),
-      vec2(uResolution.x * 0.43, uResolution.y * 0.60)) * 0.033 * intro;
+      vec2(uResolution.x * 0.43, uResolution.y * 0.60)) * 0.033 * ambient;
 
   vec2 origin = vec2(uResolution.x * 0.5, min(100.0, uResolution.y * 0.13));
   float beams =
     beam(point, origin, radians(20.0), 0.17, 1.0, 8.5) * 0.19 +
     beam(point, origin, 0.0, 0.20, 0.0, 13.6) * 0.24 +
     beam(point, origin, radians(-20.0), 0.17, -1.0, 6.8) * 0.19;
-  color += vec3(124.0, 145.0, 182.0) / 255.0 * beams * intro;
-
-  float lineFade =
-    (1.0 - smoothstep(uResolution.y * 0.68, uResolution.y, point.y)) * intro;
-  float grid = 0.0;
-  if (uResolution.x > 640.0) {
-    grid += line(point.x, uResolution.x * 0.5 - 520.0, 0.8) * 0.40;
-    grid += line(point.x, uResolution.x * 0.5 - 416.0, 0.8) * 0.72;
-    grid += line(point.x, uResolution.x * 0.5 + 416.0, 0.8) * 0.72;
-    grid += line(point.x, uResolution.x * 0.5 + 520.0, 0.8) * 0.40;
-  }
-  float headerY = uResolution.x <= 640.0 ? 85.0 : 105.0;
-  float horizontalFade = smoothstep(0.0, uResolution.x * 0.22, point.x) *
-    smoothstep(uResolution.x, uResolution.x * 0.78, point.x);
-  grid += line(point.y, headerY, 0.8) * horizontalFade * 0.80;
-  color += vec3(186.0, 215.0, 247.0) / 255.0 * grid * 0.052 * lineFade;
+  color += vec3(124.0, 145.0, 182.0) / 255.0 * beams * beacon;
 
   if (uPointer.w > 0.001) {
     float distanceToPointer = distance(point, uPointer.xy) / max(uPointer.z, 1.0);
     float influence = pow(max(0.0, 1.0 - distanceToPointer), 2.6) * uPointer.w;
-    color += vec3(0.38, 0.70, 1.0) * influence * intro;
+    color += vec3(0.38, 0.70, 1.0) * influence * ambient;
   }
 
   float noise = hash(floor(gl_FragCoord.xy / max(uPixelRatio, 1.0))) - 0.5;
-  color += noise * 0.0105 * intro;
+  color += noise * 0.0105 * ambient;
   outColor = vec4(max(color, vec3(0.0)), 1.0);
 }
 `;
@@ -203,7 +188,7 @@ layout(location = 1) in vec4 aAppearance;
 
 uniform float uPixelRatio;
 uniform float uTime;
-uniform float uIntro;
+uniform float uAmbient;
 
 out float vAlpha;
 out float vBlur;
@@ -225,7 +210,7 @@ void main() {
   vBlur = blur;
   vAlpha = aAppearance.x *
     (0.58 + 0.42 * ((sin(uTime * aAppearance.z + aAppearance.y) + 1.0) * 0.5)) *
-    (1.0 - smoothstep(0.74, 1.0, position.y)) * 0.65 * clamp(uIntro, 0.0, 1.0);
+    (1.0 - smoothstep(0.74, 1.0, position.y)) * 0.65 * clamp(uAmbient, 0.0, 1.0);
 }
 `;
 
@@ -493,6 +478,8 @@ class WebGLCanvasRenderer implements CanvasRenderer {
   readonly #uniforms: readonly [SceneUniforms, ParticleUniforms, SurfaceUniforms];
   #active = true;
   #activeSurface: HTMLElement | null = null;
+  #ambient = 0;
+  #beacon = 0;
   #contentDirty = false;
   #frameCount = 0;
   #height = 1;
@@ -525,13 +512,14 @@ class WebGLCanvasRenderer implements CanvasRenderer {
     this.mode = this.#htmlInCanvas ? "canvas-ui" : "webgl2";
     this.#uniforms = [
       collectUniforms(context, programs[0], [
-        "uIntro",
+        "uAmbient",
+        "uBeacon",
         "uPixelRatio",
         "uPointer",
         "uResolution",
         "uTime",
       ]),
-      collectUniforms(context, programs[1], ["uIntro", "uPixelRatio", "uTime"]),
+      collectUniforms(context, programs[1], ["uAmbient", "uPixelRatio", "uTime"]),
       collectUniforms(context, programs[2], [
         "uContent",
         "uHasContent",
@@ -933,19 +921,15 @@ class WebGLCanvasRenderer implements CanvasRenderer {
       this.#pointer.y += (this.#pointerTarget.y - this.#pointer.y) * follow;
     }
     this.#pointer.alpha += (targetAlpha - this.#pointer.alpha) * follow;
-    const configuredIntro = Number.parseFloat(
-      getComputedStyle(this.#content).getPropertyValue("--company-illumination"),
-    );
-    const introProgress = Number.isFinite(configuredIntro)
-      ? Math.min(1, Math.max(0, configuredIntro))
-      : 1;
-    this.#output.dataset.introProgress = introProgress.toFixed(3);
+    this.#output.dataset.ambientLight = this.#ambient.toFixed(3);
+    this.#output.dataset.beaconLight = this.#beacon.toFixed(3);
 
     const [sceneProgram, particleProgram, surfaceProgram] = this.#programs;
     const [sceneUniforms, particleUniforms, surfaceUniforms] = this.#uniforms;
     context.disable(context.BLEND);
     context.useProgram(sceneProgram);
-    context.uniform1f(sceneUniforms.uIntro, introProgress);
+    context.uniform1f(sceneUniforms.uAmbient, this.#ambient);
+    context.uniform1f(sceneUniforms.uBeacon, this.#beacon);
     context.uniform2f(sceneUniforms.uResolution, this.#width, this.#height);
     context.uniform1f(sceneUniforms.uPixelRatio, this.#pixelRatio);
     context.uniform1f(sceneUniforms.uTime, elapsedSeconds);
@@ -962,7 +946,7 @@ class WebGLCanvasRenderer implements CanvasRenderer {
     context.blendEquation(context.FUNC_ADD);
     context.blendFunc(context.ONE, context.ONE);
     context.useProgram(particleProgram);
-    context.uniform1f(particleUniforms.uIntro, introProgress);
+    context.uniform1f(particleUniforms.uAmbient, this.#ambient);
     context.uniform1f(particleUniforms.uPixelRatio, this.#pixelRatio);
     context.uniform1f(particleUniforms.uTime, elapsedSeconds);
     context.bindVertexArray(this.#particleVertexArray);
@@ -1016,6 +1000,14 @@ class WebGLCanvasRenderer implements CanvasRenderer {
     this.#resume();
   }
 
+  setSceneFrame(frame: CompanySceneFrame) {
+    this.#ambient = frame.ambient;
+    this.#beacon = frame.beacon;
+    if (!this.#active) return;
+    if (this.#htmlInCanvas) this.#source.requestPaint?.();
+    this.#scheduler.wake();
+  }
+
   dispose() {
     this.#scheduler.dispose();
     this.#content.removeEventListener("pointermove", this.#onPointerMove);
@@ -1042,6 +1034,7 @@ class WebGLCanvasRenderer implements CanvasRenderer {
 const cssRenderer: CanvasRenderer = {
   mode: "css",
   setActive() {},
+  setSceneFrame() {},
   dispose() {},
 };
 

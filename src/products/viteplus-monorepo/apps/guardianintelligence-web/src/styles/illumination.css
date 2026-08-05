@@ -43,17 +43,7 @@
 }
 
 .illumination-document:has(.illumination-canvas[data-mode="css"]) {
-  background:
-    radial-gradient(circle at 17% 22%, rgb(216 236 248 / 18%) 0 1px, transparent 1.4px),
-    radial-gradient(circle at 68% 38%, rgb(216 236 248 / 14%) 0 1px, transparent 1.4px),
-    radial-gradient(circle at 82% 17%, rgb(216 236 248 / 12%) 0 1px, transparent 1.4px),
-    radial-gradient(50% 64.48% at 50% 35.52%, rgb(21 61 204 / 8%) 14.36%, transparent 100%), #05060f;
-  background-size:
-    18rem 16rem,
-    23rem 21rem,
-    29rem 27rem,
-    auto,
-    auto;
+  background: #05060f;
 }
 
 .illumination-document[data-html-in-canvas="active"] .illumination-document__content * {

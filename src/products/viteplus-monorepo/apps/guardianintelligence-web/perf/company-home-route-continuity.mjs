@@ -29,8 +29,10 @@ try {
 
   const host = await page.$(".persistent-company-home");
   const canvas = await page.$(".illumination-canvas");
+  const scene = await page.$(".illumination-document");
   assert(host, "expected the persistent company-home host");
   assert(canvas, "expected the illumination canvas");
+  assert(scene, "expected the company scene controller host");
   const experience = await page.locator("html").getAttribute("data-company-experience");
 
   await page.getByRole("link", { exact: true, name: "Letters" }).click();
@@ -39,8 +41,10 @@ try {
     frames: Number(element.dataset.frameCount ?? 0),
     routeState: element.dataset.routeState,
   }));
+  const suspendedSceneElapsed = Number(await scene.getAttribute("data-scene-elapsed-ms"));
   await page.waitForTimeout(300);
   const suspendedAfter = Number(await canvas.getAttribute("data-frame-count"));
+  const suspendedSceneElapsedAfter = Number(await scene.getAttribute("data-scene-elapsed-ms"));
   const hiddenState = await host.evaluate((element) => ({
     active: element.dataset.companyHomeActive,
     inert: element.hasAttribute("inert"),
@@ -49,6 +53,7 @@ try {
 
   assert.equal(suspended.routeState, "suspended");
   assert.equal(suspendedAfter, suspended.frames);
+  assert.equal(suspendedSceneElapsedAfter, suspendedSceneElapsed);
   assert.deepEqual(hiddenState, { active: "false", inert: true, visibility: "hidden" });
 
   await page.getByRole("link", { exact: true, name: "Home" }).click();
@@ -75,6 +80,7 @@ try {
       }),
   );
   const resumed = Number(await canvas.getAttribute("data-frame-count"));
+  const resumedSceneElapsed = Number(await scene.getAttribute("data-scene-elapsed-ms"));
 
   assert(
     await host.evaluate(
@@ -85,6 +91,7 @@ try {
     await canvas.evaluate((element) => element === document.querySelector(".illumination-canvas")),
   );
   assert(resumed >= suspendedAfter);
+  assert(resumedSceneElapsed >= suspendedSceneElapsedAfter);
   assert(
     returnFrames.every(
       (frame) =>
@@ -99,6 +106,7 @@ try {
   console.log(
     JSON.stringify({
       offRouteFrameDelta: suspendedAfter - suspended.frames,
+      offRouteSceneElapsedDelta: suspendedSceneElapsedAfter - suspendedSceneElapsed,
       experience,
       retainedCanvas: true,
       retainedHost: true,

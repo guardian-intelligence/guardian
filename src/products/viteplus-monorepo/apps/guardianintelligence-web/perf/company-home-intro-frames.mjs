@@ -110,7 +110,7 @@ await page.addInitScript(
                 beacon: sceneStyle.getPropertyValue("--company-beacon-opacity").trim(),
                 copy: sceneStyle.getPropertyValue("--company-copy-opacity").trim(),
                 eyebrow: sceneStyle.getPropertyValue("--company-eyebrow-opacity").trim(),
-                illumination: sceneStyle.getPropertyValue("--company-illumination").trim(),
+                ambient: sceneStyle.getPropertyValue("--company-ambient-light").trim(),
                 materialize: sceneStyle.getPropertyValue("--company-materialize-progress").trim(),
                 node: sceneStyle.getPropertyValue("--company-node-opacity").trim(),
                 pencil: sceneStyle.getPropertyValue("--company-pencil-opacity").trim(),
@@ -140,6 +140,14 @@ await page.addInitScript(
                   opacity: titleLuminosityStyle.opacity,
                   right: titleRootStyle.getPropertyValue("--company-spotlight-right").trim(),
                   width: titleRootStyle.getPropertyValue("--company-spotlight-width").trim(),
+                }
+              : null,
+          titleShimmer:
+            titleLuminosity instanceof HTMLCanvasElement
+              ? {
+                  active: titleLuminosity.dataset.shimmerActive ?? null,
+                  pixels: titleLuminosity.dataset.shimmerPixels ?? null,
+                  progress: titleLuminosity.dataset.shimmerProgress ?? null,
                 }
               : null,
         });
@@ -205,6 +213,7 @@ const experience = await page.evaluate(() => ({
   canvasMode: document.documentElement.dataset.canvasMode ?? null,
   mode: document.documentElement.dataset.companyExperience ?? null,
   reason: document.documentElement.dataset.companyExperienceReason ?? null,
+  visualIntegrity: document.documentElement.dataset.companyVisualIntegrity ?? null,
 }));
 const layout = await page.evaluate((selector) => {
   const title = document.querySelector(selector);

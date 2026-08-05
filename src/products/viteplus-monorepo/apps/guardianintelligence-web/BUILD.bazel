@@ -72,7 +72,8 @@ cleanup() {
 }
 trap cleanup EXIT
 if [[ -e node_modules || -L node_modules ]]; then
-  saved_node_modules="$$PWD/.guardian-node-modules.$$$$"
+  saved_node_modules="$$(mktemp -d "$$execroot/.guardian-node-modules.XXXXXX")"
+  rmdir "$$saved_node_modules"
   mv node_modules "$$saved_node_modules"
 fi
 rm -rf node_modules

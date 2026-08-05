@@ -98,3 +98,24 @@ export function pixelLightState(pixel: MaterializationPixel, progress: number): 
 export function materializationPixelOpacity(progress: number) {
   return 1 - smoothstep(0.48, 0.98, progress);
 }
+
+export function shimmerPixelIntensity(pixel: MaterializationPixel, progress: number) {
+  const shimmer = clamp01(progress);
+  const envelope = smoothstep(0, 0.045, shimmer) * (1 - smoothstep(0.94, 1, shimmer));
+  if (envelope <= 0) return 0;
+  const noise = deterministicNoise(pixel.column, pixel.row, 0x5348_494d);
+  const distanceFromCenter = Math.abs(pixel.normalizedX);
+  const strand = Math.sin(
+    pixel.normalizedY * Math.PI * 5.5 + distanceFromCenter * Math.PI * 2.25 + noise * 1.4,
+  );
+  const wovenDistance = Math.max(0, distanceFromCenter + strand * 0.055 + (noise - 0.5) * 0.035);
+  const front = smoothstep(0.015, 0.92, shimmer) * 1.45;
+  const distanceFromFront = wovenDistance - front;
+  const wavefront = Math.exp(-0.5 * Math.pow(distanceFromFront / 0.1, 2));
+  const arrival = smoothstep(wovenDistance - 0.09, wovenDistance + 0.035, front);
+  const recession = 1 - smoothstep(0.1, 0.24, front - wovenDistance);
+  const trailingThread = arrival * recession * (0.1 + noise * 0.16);
+  const weaveGrain = 0.72 + noise * 0.28;
+
+  return clamp01(Math.max(wavefront * weaveGrain, trailingThread) * envelope);
+}

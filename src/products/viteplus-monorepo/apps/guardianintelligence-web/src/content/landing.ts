@@ -6,8 +6,8 @@
 
 export const landing = {
   kicker: "Seattle, WA · Est. 2026",
-  hero: "GUARDIAN",
-  lede: "We build free, open-source agent-native software to democratize AI alignment, towards a humanist future.",
+  hero: "Guardian",
+  lede: "Building free, open-source software to ensure AI works for every human being.",
 } as const;
 
 export type LandingContent = typeof landing;
