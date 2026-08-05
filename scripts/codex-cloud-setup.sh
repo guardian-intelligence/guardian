@@ -15,7 +15,11 @@ tool_bin_dir="${GUARDIAN_CODEX_TOOL_BIN_DIR:-/usr/local/bin}"
 
 umask 077
 eval "$("${repo_root}/scripts/bootstrap.sh" path)"
-aspect tools install-codex-cloud --bin-dir "${tool_bin_dir}"
+aspect tools install-codex-cloud
+mkdir -p "${tool_bin_dir}"
+for tool in cloudflared kubectl kubectl-oidc_login; do
+  ln -sfn "${repo_root}/.guardian/tools/bin/${tool}" "${tool_bin_dir}/${tool}"
+done
 export PATH="${tool_bin_dir}:${PATH}"
 mkdir -p "${oidc_cache_dir}" "${config_dir}"
 printf '%s' "${GUARDIAN_CODEX_KUBECONFIG_B64}" | base64 --decode >"${kubeconfig}.encoded"
