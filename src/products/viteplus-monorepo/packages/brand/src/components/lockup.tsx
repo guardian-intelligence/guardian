@@ -94,7 +94,11 @@ const GAP_TO_CAP_RATIO = 0.35;
 // lockup the wordmark supplies the clearspace, so we never ship one.
 export type LockupVariant = "argent" | "chip" | "emboss";
 
-// Per-variant SVG geometry, declared in units of markH.
+// Per-variant SVG geometry, declared in units of markH. Every SVG is
+// centered inside a markH × markH layout slot. A padded asset may paint
+// outside that slot, but it cannot move the wordmark or change the lockup's
+// line box. Letters is the canonical chrome geometry; Workshop and Newsroom
+// vary the artwork inside the slot only.
 //
 //   inkScale     — visible-ink height as a fraction of markH. Contained
 //                  variants (chip, emboss) use markH as their container
@@ -108,20 +112,10 @@ export type LockupVariant = "argent" | "chip" | "emboss";
 //   svgW         — rendered SVG width as a fraction of inkHeight. Glyph-tight
 //                  cropped wings are taller than they are wide, so argent
 //                  renders narrower; chip/emboss are square.
-//   rightBleed   — invisible horizontal padding between the visible ink's
-//                  right edge and the SVG bounding box's right edge, as a
-//                  fraction of inkHeight. The flex gap is measured against
-//                  the SVG box edge, so we subtract this so the optical
-//                  ink-to-wordmark gap stays constant across variants.
-//
-// Contained and bare variants no longer share a visible-ink vertical footprint
-// at a given markH — the bare variant is smaller, because 32px of ink weighs
-// more than 32px of tile-around-ink. They share *optical weight* instead,
-// which is the honest thing for a lockup family to share.
-const VARIANT_BOX: Record<
-  LockupVariant,
-  { inkScale: number; svgH: number; svgW: number; rightBleed: number }
-> = {
+// The visible frame of chip and emboss fills the canonical slot. Emboss's
+// padded viewBox therefore paints past the slot by its transparent bleed;
+// centering it makes the 252-unit medallion itself land at exactly markH.
+const VARIANT_BOX: Record<LockupVariant, { inkScale: number; svgH: number; svgW: number }> = {
   // Padded viewBox (292 × 292) with no surrounding tile — the same internal
   // geometry as chip and emboss but with the frame omitted. The wings land
   // at the exact same pixel position and size they have inside the chip
@@ -131,10 +125,10 @@ const VARIANT_BOX: Record<
   // Workshop / Letters / Newsroom — without it, the bare-wing SVG is
   // ~7.7px wide while chip/emboss are 22px, and the wordmark jumps
   // 14px on every cross-section transition.
-  argent: { inkScale: 1, svgH: 1, svgW: 1, rightBleed: 0 },
+  argent: { inkScale: 1, svgH: 1, svgW: 1 },
   // Iron rounded rect fills the 292 viewBox to the pixel (the 291.14 × 291.14
   // rect nested in a 292 × 292 viewBox rounds to a zero bleed in practice).
-  chip: { inkScale: 1, svgH: 1, svgW: 1, rightBleed: 0 },
+  chip: { inkScale: 1, svgH: 1, svgW: 1 },
   // Circular medallion: r=126 inside a 292 viewBox, leaves (292-252)/2 = 20
   // units of invisible padding on each side. We render the SVG box 292/252
   // larger than markH so the disc itself is markH across; the remaining
@@ -143,7 +137,6 @@ const VARIANT_BOX: Record<
     inkScale: 1,
     svgH: 292 / 252,
     svgW: 292 / 252,
-    rightBleed: (292 - 252) / 2 / 252,
   },
 };
 
@@ -170,13 +163,11 @@ export interface LockupProps {
 // same pixel count of container around ink. markH is the nominal unit; each
 // variant's inkScale resolves it to the variant's actual visible-ink height.
 //
-// Both axes of the layout are typographic, not geometric:
-//   • markH is the nominal unit. inkHeight = markH × inkScale is the visible
-//     ink; the SVG box is derived from there.
-//   • The flex gap is derived from the wordmark's cap-height minus each
-//     variant's right-side invisible bleed. Changing the mark SVG container
-//     (tight viewBox, padded viewBox, different padding ratio) never silently
-//     widens or lengthens the lockup — the gap stays constant.
+// Both axes of the layout are typographic, not asset-box-dependent:
+//   • markH is the shared layout slot and visible-frame unit.
+//   • the wordmark gap is derived from cap-height with a 6px raster floor.
+//   • each SVG is centered within the slot, so transparent viewBox padding
+//     cannot move the wordmark horizontally or vertically.
 export function Lockup({
   size = "md",
   variant = "argent",
@@ -196,14 +187,12 @@ export function Lockup({
   const inkHeight = markH * box.inkScale;
   const svgHeightPx = inkHeight * box.svgH;
   const svgWidthPx = inkHeight * box.svgW;
-  const rightBleedPx = inkHeight * box.rightBleed;
-
   const wordmarkFontSize = markH * ratio;
   const capHeight = wordmarkFontSize * WORDMARK_CAP_RATIO;
   const opticalGap = capHeight * GAP_TO_CAP_RATIO;
   // 6px floor keeps the pair locked at the smallest sizes where rounding
   // error and coarse-pixel rasterization would otherwise fuse the glyphs.
-  const gapPx = Math.max(6, opticalGap - rightBleedPx);
+  const gapPx = Math.max(6, opticalGap);
 
   const lockupStyle: CSSProperties = {
     display: "inline-flex",
@@ -214,10 +203,20 @@ export function Lockup({
     ...style,
   };
 
+  const markSlotStyle: CSSProperties = {
+    position: "relative",
+    width: `${markH}px`,
+    height: `${markH}px`,
+    flex: `0 0 ${markH}px`,
+  };
+
   const markStyle: CSSProperties = {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
     width: `${svgWidthPx}px`,
     height: `${svgHeightPx}px`,
-    flex: `0 0 ${svgWidthPx}px`,
+    transform: "translate(-50%, -50%)",
   };
 
   // Uppercase sans with no descenders sits in the upper half of the em-box;
@@ -253,29 +252,31 @@ export function Lockup({
 
   return (
     <span className={className} style={lockupStyle} data-variant={variant} data-lockup="">
-      {variant === "argent" ? (
-        // Figure-ground compensation: bare wings on the canvas read smaller
-        // than the same pixel footprint inside chip/emboss because a framed
-        // mark borrows visual weight from its container. Scale up only at
-        // chrome size (sm) where the eye reads the mark at small pixel
-        // counts; md/lg specimens are large enough that the optical illusion
-        // does not kick in. 1.21 lands two compounded +10% iterations — the
-        // value tuned by eye against the chip on Letters.
-        <WingsArgent
-          title={title}
-          viewBoxMode="padded"
-          style={markStyle}
-          wingsScale={size === "sm" ? 1.21 : 1}
-        />
-      ) : variant === "chip" ? (
-        <WingsChip title={title} style={markStyle} />
-      ) : (
-        // At chrome size (sm) the wings read a touch heavy inside the
-        // medallion — anti-aliased ink concentrates visual mass at 22px in
-        // a way that doesn't show at md/lg. Scale the inner mark down only
-        // at sm so the disc itself stays the same size against the wordmark.
-        <WingsEmboss title={title} style={markStyle} wingsScale={size === "sm" ? 0.92 : 1} />
-      )}
+      <span style={markSlotStyle} data-lockup-mark-slot="">
+        {variant === "argent" ? (
+          // Figure-ground compensation: bare wings on the canvas read smaller
+          // than the same pixel footprint inside chip/emboss because a framed
+          // mark borrows visual weight from its container. Scale up only at
+          // chrome size (sm) where the eye reads the mark at small pixel
+          // counts; md/lg specimens are large enough that the optical illusion
+          // does not kick in. 1.21 lands two compounded +10% iterations — the
+          // value tuned by eye against the chip on Letters.
+          <WingsArgent
+            title={title}
+            viewBoxMode="padded"
+            style={markStyle}
+            wingsScale={size === "sm" ? 1.21 : 1}
+          />
+        ) : variant === "chip" ? (
+          <WingsChip title={title} style={markStyle} />
+        ) : (
+          // At chrome size (sm) the wings read a touch heavy inside the
+          // medallion — anti-aliased ink concentrates visual mass at 22px in
+          // a way that doesn't show at md/lg. Scale the inner mark down only
+          // at sm so the disc itself stays the same size against the wordmark.
+          <WingsEmboss title={title} style={markStyle} wingsScale={size === "sm" ? 0.92 : 1} />
+        )}
+      </span>
       <span style={wordmarkStyle} data-lockup-wordmark="">
         {wordmark}
         {section ? (
