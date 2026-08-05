@@ -14,7 +14,7 @@ kubeconfig="${kube_dir}/guardian-codex-cloud"
 
 umask 077
 eval "$("${repo_root}/scripts/bootstrap.sh" path)"
-aspect tools install
+aspect tools install-codex-cloud
 eval "$(aspect tools path)"
 mkdir -p "${oidc_cache_dir}" "${config_dir}"
 printf '%s' "${GUARDIAN_CODEX_KUBECONFIG_B64}" | base64 --decode >"${kubeconfig}.encoded"

@@ -58,6 +58,12 @@ BUILD_TOOL_SHIMS = [
     ("protoc-gen-connect-go", "@com_connectrpc_connect//cmd/protoc-gen-connect-go"),
 ]
 
+CODEX_CLOUD_SHIMS = [
+    ("cloudflared", "@multitool//tools/cloudflared"),
+    ("kubectl", "@multitool//tools/kubectl"),
+    ("kubectl-oidc_login", "@multitool//tools/kubectl-oidc_login"),
+]
+
 def _path_export(bin_dir):
     return "export PATH=\"" + bin_dir + ":${PATH}\"\n"
 
@@ -105,6 +111,10 @@ def _install_impl(ctx):
         ctx.std.io.stdout.write(bin_dir + ":" + (ctx.std.env.var("PATH") or "") + "\n")
     return 0
 
+def _install_codex_cloud_impl(ctx):
+    bin_dir = install_bazel_tool_shims(ctx, CODEX_CLOUD_SHIMS, ctx.args.bin_dir)
+    return 0 if bin_dir != "" else 1
+
 def _uninstall_impl(ctx):
     return uninstall_bazel_tool_shims(ctx, DEBUG_CLI_SHIMS + BUILD_TOOL_SHIMS, ctx.args.bin_dir)
 
@@ -123,6 +133,16 @@ install = task(
     args = {
         "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory for installed CLI shims. Pass an absolute path such as ${HOME}/.local/bin to install into an existing user bin directory."),
         "print_path": args.boolean(default = False, description = "Print the full PATH value with the shim directory prepended after install."),
+    },
+)
+
+install_codex_cloud = task(
+    implementation = _install_codex_cloud_impl,
+    name = "install-codex-cloud",
+    group = ["tools"],
+    summary = "Install only the repo-pinned CLIs required by the Codex cloud cluster read path.",
+    args = {
+        "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory for installed Codex cloud CLI shims."),
     },
 )
 
