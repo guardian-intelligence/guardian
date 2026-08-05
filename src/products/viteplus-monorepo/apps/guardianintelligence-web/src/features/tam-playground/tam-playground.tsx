@@ -4,9 +4,9 @@ import { emitSpan } from "~/lib/telemetry/browser";
 import { TamControls } from "./tam-controls";
 
 // The canvas chart pulls in d3 + pretext and only runs client-side. Lazy-load
-// it (the FirstLight pattern) so those libraries land in a hydration-time chunk
-// instead of the SSR bundle and the initial client payload. The endpoint KPIs
-// render server-side, so the headline numbers are present before hydration.
+// it so those libraries land in a hydration-time chunk instead of the SSR
+// bundle and the initial client payload. The endpoint KPIs render server-side,
+// so the headline numbers are present before hydration.
 const TamChart = lazy(() => import("./tam-chart").then((m) => ({ default: m.TamChart })));
 
 function ChartFallback() {

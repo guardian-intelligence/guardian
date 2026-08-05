@@ -117,7 +117,13 @@ for d in $(locations :node_modules/@playwright/test); do
   [ -e "$$dest" ] || cp -RL "$$execroot/$$d" "$$dest"
 done
 chmod -R u+w "$$work"
-tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \\
+tar_bin=tar
+if [[ -x /opt/homebrew/bin/gtar ]]; then
+  tar_bin=/opt/homebrew/bin/gtar
+elif command -v gtar >/dev/null 2>&1; then
+  tar_bin=gtar
+fi
+"$$tar_bin" --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \\
   -cf "$$execroot/$@" -C "$$work" app tsconfig.base.json
 """,
 )
