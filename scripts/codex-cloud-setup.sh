@@ -11,11 +11,12 @@ kube_dir="${HOME}/.kube"
 oidc_cache_dir="${kube_dir}/cache/oidc-login-platform-agent"
 config_dir="${HOME}/.config/guardian"
 kubeconfig="${kube_dir}/guardian-codex-cloud"
+tool_bin_dir="${GUARDIAN_CODEX_TOOL_BIN_DIR:-/usr/local/bin}"
 
 umask 077
 eval "$("${repo_root}/scripts/bootstrap.sh" path)"
-aspect tools install-codex-cloud
-eval "$(aspect tools path)"
+aspect tools install-codex-cloud --bin-dir "${tool_bin_dir}"
+export PATH="${tool_bin_dir}:${PATH}"
 mkdir -p "${oidc_cache_dir}" "${config_dir}"
 printf '%s' "${GUARDIAN_CODEX_KUBECONFIG_B64}" | base64 --decode >"${kubeconfig}.encoded"
 sed \
@@ -28,16 +29,7 @@ printf 'TUNNEL_SERVICE_TOKEN_ID=%q\nTUNNEL_SERVICE_TOKEN_SECRET=%q\n' \
   "${CF_ACCESS_CLIENT_ID}" "${CF_ACCESS_CLIENT_SECRET}" \
   >"${config_dir}/codex-cloud-tunnel.env"
 chmod 600 "${kubeconfig}" "${config_dir}/codex-cloud-tunnel.env"
-
-profile="${HOME}/.bashrc"
-profile_marker="# Guardian Codex cloud cluster access"
-if ! grep -Fq "${profile_marker}" "${profile}" 2>/dev/null; then
-  {
-    printf '\n%s\n' "${profile_marker}"
-    printf 'export KUBECONFIG=%q\n' "${kubeconfig}"
-    printf 'export PATH=%q:$PATH\n' "${repo_root}/.guardian/tools/bin"
-  } >>"${profile}"
-fi
+ln -sfn "${kubeconfig}" "${kube_dir}/config"
 
 export KUBECONFIG="${kubeconfig}"
 "${repo_root}/tools/ops/codex-cloud-tunnel" start
