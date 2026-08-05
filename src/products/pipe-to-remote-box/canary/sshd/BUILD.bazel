@@ -1,0 +1,24 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "sshd_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/products/pipe-to-remote-box/canary/sshd",
+    visibility = ["//visibility:private"],
+    deps = ["@org_golang_x_crypto//ssh:ssh"],
+)
+
+go_binary(
+    name = "sshd",
+    embed = [":sshd_lib"],
+    goarch = "amd64",
+    goos = "linux",
+    pure = "on",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "sshd_test",
+    srcs = ["main_test.go"],
+    embed = [":sshd_lib"],
+)

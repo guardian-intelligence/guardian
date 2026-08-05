@@ -1,0 +1,913 @@
+# Public-distribution canary for Pipe to Remote Box. Every six hours it walks
+# the nonempty Pipe lanes in the projected release manifest and exercises the
+# same public GitHub, installer, npm, and crates.io paths users consume. The
+# SSH journey is entirely credentialless: a signed fixture from the lane's OCI
+# artifact accepts one ephemeral key on loopback and only the CLI's one fixed
+# remote command.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipe-to-remote-box-install-canary
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: pipe-to-remote-box-install-canary
+    app.kubernetes.io/part-of: guardian
+  annotations:
+    # Flux must leave the shell variables in these scripts untouched.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  # This is the canonical digest-verifying extraction used by Guardian's CLI
+  # release canaries. Cosign's ko image is shell-less and ImageVolume is not
+  # enabled, so its binary is streamed from a layer only after every manifest
+  # and blob has matched the digest above it.
+  extract-cosign.sh: |
+    #!/bin/sh
+    set -eu
+    REGISTRY=ghcr.io
+    REPO="${COSIGN_IMAGE#ghcr.io/}"
+    REPO="${REPO%%[@:]*}"
+    DIGEST="${COSIGN_IMAGE##*@}"
+    cd /tmp
+    token="$(curl -fsS "https://$REGISTRY/token?service=$REGISTRY&scope=repository:$REPO:pull" | jq -r .token)"
+    test -n "$token" && test "$token" != null
+    fetch_manifest() {
+      curl -fsS -H "Authorization: Bearer $token" \
+        -H 'Accept: application/vnd.oci.image.index.v1+json' \
+        -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+        -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+        "https://$REGISTRY/v2/$REPO/manifests/$1"
+    }
+    fetch_manifest "$DIGEST" > root.json
+    echo "${DIGEST#sha256:}  root.json" | sha256sum -c - >/dev/null
+    case "$(jq -r .mediaType root.json)" in
+      application/vnd.oci.image.index.v1+json|application/vnd.docker.distribution.manifest.list.v2+json)
+        arch_digest="$(jq -r '.manifests[] | select(.platform.os=="linux" and .platform.architecture=="amd64") | .digest' root.json | head -1)"
+        fetch_manifest "$arch_digest" > manifest.json
+        echo "${arch_digest#sha256:}  manifest.json" | sha256sum -c - >/dev/null
+        ;;
+      *)
+        cp root.json manifest.json
+        ;;
+    esac
+    for layer in $(jq -r '.layers[].digest' manifest.json); do
+      curl -fsSL -H "Authorization: Bearer $token" \
+        "https://$REGISTRY/v2/$REPO/blobs/$layer" -o layer.tgz
+      echo "${layer#sha256:}  layer.tgz" | sha256sum -c - >/dev/null
+      member="$(tar tzf layer.tgz 2>/dev/null | grep -E '^/?ko-app/cosign$' || true)"
+      if [ -n "$member" ]; then
+        tar xzOf layer.tgz "$member" > /tools-bin/cosign
+        chmod 0755 /tools-bin/cosign
+      fi
+      rm -f layer.tgz
+    done
+    rm -f root.json manifest.json
+    /tools-bin/cosign version
+  canary.sh: |
+    #!/bin/bash
+    set -uo pipefail
+
+    VMINSERT=http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus
+    RELEASES_API=https://api.github.com/repos/guardian-intelligence/guardian/releases
+    REGISTRY=ghcr.io
+    REPO=guardian-intelligence/pipe-to-remote-box
+    NPM_PACKAGE=@guardian-intelligence/pipe-to-remote-box
+    CRATE=pipe-to-remote-box
+    BUILD_IDENTITY=https://github.com/guardian-intelligence/guardian/.github/workflows/pipe-to-remote-box-image.yml@refs/heads/main
+    RELEASE_IDENTITY=https://github.com/guardian-intelligence/guardian/.github/workflows/pipe-to-remote-box-release.yml@refs/heads/main
+    ISSUER=https://token.actions.githubusercontent.com
+    TRUSTED_ROOT=/trusted-root/sigstore-trusted-root.json
+    COSIGN=/tools-bin/cosign
+    TARGETS="x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin"
+    NATIVE=x86_64-unknown-linux-musl
+    EXPECTED_REMOTE_PROBE_DIGEST=29cace58ddd742a3f404983218b4665181dbe8a306185465af8af7415139e803
+    PLATFORM=linux-x86_64-cluster
+    WORK=/work
+    export HOME=$WORK/home
+    export TMPDIR=$WORK/tmp
+    export LC_ALL=C
+    export npm_config_update_notifier=false
+    mkdir -p "$HOME" "$TMPDIR"
+
+    metrics_failed=0
+    detail=
+    tag=
+    version=
+    source_revision=
+    release_file=
+    assets_dir=
+    oci_dir=
+
+    push() {
+      curl -fsS --retry 3 --max-time 15 --data-binary "$1" "$VMINSERT" >/dev/null \
+        || { echo "failed to record metric: $1"; metrics_failed=1; return 1; }
+    }
+
+    record() {
+      local channel="$1" method="$2" ok="$3"
+      push "guardian_pipe_to_remote_box_install_canary_success{channel=\"$channel\",method=\"$method\",platform=\"$PLATFORM\"} $ok" || true
+    }
+
+    fail() {
+      detail="$1"
+      echo "$detail"
+      return 1
+    }
+
+    # Select the newest release whose immutable tag shape and prerelease bit
+    # match the channel. GitHub's repository-wide latest pointer is irrelevant
+    # because this repository publishes multiple products.
+    select_release() { # <channel> <output> <page...>
+      node - "$@" <<'JS'
+    const fs = require("node:fs");
+    const [channel, output, ...pages] = process.argv.slice(2);
+    const grammar = {
+      nightly: {re: /^pipe-to-remote-box\/nightly-[0-9]{8}(?:-[0-9]{4})?$/, prerelease: true},
+      rc: {re: /^pipe-to-remote-box\/rc-[0-9]{8}(?:-[0-9]{4})?$/, prerelease: true},
+      stable: {re: /^pipe-to-remote-box\/v[0-9]+\.[0-9]+\.[0-9]+$/, prerelease: false},
+    }[channel];
+    if (grammar === undefined) process.exit(2);
+    const releases = pages.flatMap((path) => JSON.parse(fs.readFileSync(path, "utf8")));
+    const selected = releases
+      .filter((release) => grammar.re.test(release.tag_name) && release.prerelease === grammar.prerelease)
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+      .at(-1);
+    if (selected === undefined) process.exit(3);
+    fs.writeFileSync(output, JSON.stringify(selected));
+    JS
+    }
+
+    release_value() { # <json key>
+      node - "$release_file" "$1" <<'JS'
+    const fs = require("node:fs");
+    const [path, key] = process.argv.slice(2);
+    const value = JSON.parse(fs.readFileSync(path, "utf8"))[key];
+    if (typeof value !== "string") process.exit(1);
+    process.stdout.write(value);
+    JS
+    }
+
+    asset_url() { # <asset name>
+      node - "$release_file" "$1" <<'JS'
+    const fs = require("node:fs");
+    const [path, name] = process.argv.slice(2);
+    const assets = JSON.parse(fs.readFileSync(path, "utf8")).assets;
+    const matches = assets.filter((asset) => asset.name === name);
+    if (matches.length !== 1 || typeof matches[0].browser_download_url !== "string") process.exit(1);
+    process.stdout.write(matches[0].browser_download_url);
+    JS
+    }
+
+    json_value() { # <file> <dot-separated path>
+      node - "$1" "$2" <<'JS'
+    const fs = require("node:fs");
+    const [path, selector] = process.argv.slice(2);
+    let value = JSON.parse(fs.readFileSync(path, "utf8"));
+    for (const part of selector.split(".")) value = value?.[part];
+    if (typeof value !== "string" && typeof value !== "boolean") process.exit(1);
+    process.stdout.write(String(value));
+    JS
+    }
+
+    annotation_value() { # <manifest> <annotation key>
+      node - "$1" "$2" <<'JS'
+    const fs = require("node:fs");
+    const [path, key] = process.argv.slice(2);
+    const value = JSON.parse(fs.readFileSync(path, "utf8")).annotations?.[key];
+    if (typeof value !== "string") process.exit(1);
+    process.stdout.write(value);
+    JS
+    }
+
+    fetch_releases() {
+      local page body count
+      mkdir -p "$WORK/releases" || return 1
+      for page in $(seq 1 20); do
+        body="$WORK/releases/page-$page.json"
+        curl -fsSL --retry 3 --max-time 60 \
+          -H 'Accept: application/vnd.github+json' \
+          "$RELEASES_API?per_page=100&page=$page" -o "$body" \
+          || return 1
+        count="$(node -e 'const x=require(process.argv[1]); if(!Array.isArray(x))process.exit(1); process.stdout.write(String(x.length))' "$body")" \
+          || return 1
+        [ "$count" -eq 100 ] || return 0
+      done
+      return 0
+    }
+
+    release_for_channel() { # <channel>
+      local channel="$1" body artifact_lines source_lines version_lines binaries_lines published
+      release_file="$WORK/$channel/release.json"
+      mkdir -p "$WORK/$channel" || return 1
+      select_release "$channel" "$release_file" "$WORK"/releases/page-*.json \
+        || return 1
+      tag="$(release_value tag_name)" || return 1
+      release_value body > "$WORK/$channel/body.txt" || return 1
+      body="$WORK/$channel/body.txt"
+
+      artifact_lines="$(grep -Fxc -- "- Artifact: \`$image\`" "$body" || true)"
+      [ "$artifact_lines" -eq 1 ] \
+        || return 1
+      source_lines="$(grep -Ec '^- Source commit: [0-9a-f]{40}$' "$body" || true)"
+      version_lines="$(grep -Ec '^- Version: `[^`]+`$' "$body" || true)"
+      binaries_lines="$(grep -Ec '^- Binaries digest: `[0-9a-f]{64}`$' "$body" || true)"
+      [ "$source_lines" -eq 1 ] && [ "$version_lines" -eq 1 ] && [ "$binaries_lines" -eq 1 ] \
+        || return 1
+      source_revision="$(sed -n 's/^- Source commit: \([0-9a-f]\{40\}\)$/\1/p' "$body")"
+      version="$(sed -n 's/^- Version: `\([^`]*\)`$/\1/p' "$body")"
+      claimed_binaries="$(sed -n 's/^- Binaries digest: `\([0-9a-f]\{64\}\)`$/\1/p' "$body")"
+      case "$version" in
+        ''|*[!0-9A-Za-z.+-]*) return 1 ;;
+      esac
+      encoded_tag="$(node -p 'encodeURIComponent(process.argv[1])' "$tag")" || return 1
+      curl -fsSL --retry 3 --max-time 60 \
+        -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/guardian-intelligence/guardian/git/ref/tags/$encoded_tag" \
+        -o "$WORK/$channel/tag-ref.json" || return 1
+      [ "$(json_value "$WORK/$channel/tag-ref.json" object.sha)" = "$source_revision" ] \
+        || return 1
+      published="$(release_value published_at)" || return 1
+      published_epoch="$(date -u -d "$published" +%s)" || return 1
+      push "guardian_pipe_to_remote_box_install_canary_release_age_seconds{channel=\"$channel\",platform=\"$PLATFORM\"} $(( $(date -u +%s) - published_epoch ))" || true
+      return 0
+    }
+
+    verify_release_assets() { # <channel>
+      local channel="$1" expected name url listed prefix source_archive target
+      assets_dir="$WORK/$channel/assets"
+      mkdir -p "$assets_dir" || return 1
+      expected="$WORK/$channel/expected-assets.txt"
+      : > "$expected"
+      for target in $TARGETS; do
+        printf '%s\n' "pipe-to-remote-box-$target" \
+          "pipe-to-remote-box-$target.sigstore.json" >> "$expected"
+      done
+      prefix="pipe-to-remote-box-$version-src"
+      source_archive="$prefix.tar.gz"
+      printf '%s\n' "$source_archive" LICENSE THIRD_PARTY_LICENSES.md \
+        install.sh install.sh.sigstore.json checksums.txt >> "$expected"
+      sort -u -o "$expected" "$expected"
+
+      node - "$release_file" > "$WORK/$channel/listed-assets.txt" <<'JS'
+    const fs = require("node:fs");
+    const path = process.argv[2];
+    const assets = JSON.parse(fs.readFileSync(path, "utf8")).assets;
+    if (!Array.isArray(assets) || assets.some((asset) => typeof asset.name !== "string")) process.exit(1);
+    process.stdout.write(assets.map((asset) => asset.name).sort().join("\n") + "\n");
+    JS
+      listed="$WORK/$channel/listed-assets.txt"
+      cmp -s "$expected" "$listed" || return 1
+
+      while IFS= read -r name; do
+        url="$(asset_url "$name")" || return 1
+        curl -fsSL --retry 3 --max-time 120 -o "$assets_dir/$name" "$url" \
+          || return 1
+      done < "$expected"
+
+      node - "$assets_dir/checksums.txt" "$expected" <<'JS'
+    const fs = require("node:fs");
+    const [checksumsPath, expectedPath] = process.argv.slice(2);
+    const expected = fs.readFileSync(expectedPath, "utf8").trim().split("\n").filter((name) => name !== "checksums.txt").sort();
+    const lines = fs.readFileSync(checksumsPath, "utf8").trim().split("\n");
+    const names = [];
+    for (const line of lines) {
+      const match = /^([0-9a-f]{64})  ([A-Za-z0-9._+-]+)$/.exec(line);
+      if (match === null) process.exit(1);
+      names.push(match[2]);
+    }
+    names.sort();
+    if (JSON.stringify(names) !== JSON.stringify(expected)) process.exit(1);
+    JS
+      (cd "$assets_dir" && sha256sum -c checksums.txt >/dev/null) || return 1
+
+      grep -qF 'Apache License' "$assets_dir/LICENSE" || return 1
+      grep -qF 'Copyright (c) 2015 Danny Guo' "$assets_dir/THIRD_PARTY_LICENSES.md" || return 1
+      grep -qF 'UNICODE LICENSE V3' "$assets_dir/THIRD_PARTY_LICENSES.md" || return 1
+      tar -tzf "$assets_dir/$source_archive" > "$WORK/$channel/source-contents.txt" || return 1
+      grep -qxF "$prefix/LICENSE" "$WORK/$channel/source-contents.txt" || return 1
+      grep -qxF "$prefix/THIRD_PARTY_LICENSES.md" "$WORK/$channel/source-contents.txt" || return 1
+      tar -xzOf "$assets_dir/$source_archive" "$prefix/LICENSE" \
+        | cmp -s - "$assets_dir/LICENSE" || return 1
+      tar -xzOf "$assets_dir/$source_archive" "$prefix/THIRD_PARTY_LICENSES.md" \
+        | cmp -s - "$assets_dir/THIRD_PARTY_LICENSES.md" || return 1
+
+      for target in $TARGETS; do
+        "$COSIGN" verify-blob \
+          --bundle "$assets_dir/pipe-to-remote-box-$target.sigstore.json" \
+          --certificate-identity "$BUILD_IDENTITY" \
+          --certificate-oidc-issuer "$ISSUER" \
+          "$assets_dir/pipe-to-remote-box-$target" >/dev/null 2>&1 \
+          || return 1
+      done
+      "$COSIGN" verify-blob \
+        --bundle "$assets_dir/install.sh.sigstore.json" \
+        --certificate-identity "$RELEASE_IDENTITY" \
+        --certificate-oidc-issuer "$ISSUER" \
+        "$assets_dir/install.sh" >/dev/null 2>&1 \
+        || return 1
+      return 0
+    }
+
+    verify_object_shapes() {
+      local target file magic arch at len got_magic got_arch
+      for target in $TARGETS; do
+        case "$target" in
+          x86_64-unknown-linux-musl)  magic=7f454c46; arch=3e00; at=18; len=2 ;;
+          aarch64-unknown-linux-musl) magic=7f454c46; arch=b700; at=18; len=2 ;;
+          x86_64-apple-darwin)        magic=cffaedfe; arch=07000001; at=4; len=4 ;;
+          aarch64-apple-darwin)       magic=cffaedfe; arch=0c000001; at=4; len=4 ;;
+          *) return 1 ;;
+        esac
+        file="$assets_dir/pipe-to-remote-box-$target"
+        got_magic="$(od -An -tx1 -N4 -j0 "$file" | tr -d ' \n')" || return 1
+        got_arch="$(od -An -tx1 -N"$len" -j"$at" "$file" | tr -d ' \n')" || return 1
+        [ "$got_magic" = "$magic" ] && [ "$got_arch" = "$arch" ] || return 1
+      done
+      return 0
+    }
+
+    fetch_oci() {
+      local digest token manifest claimed_fixture claimed_notices claimed_license claimed_probe claimed_binaries_oci recomputed target layer blob member
+      digest="${image##*@}"
+      "$COSIGN" verify --new-bundle-format=false \
+        --certificate-identity "$BUILD_IDENTITY" \
+        --certificate-oidc-issuer "$ISSUER" \
+        --trusted-root "$TRUSTED_ROOT" "$image" >/dev/null 2>&1 \
+        || return 1
+      "$COSIGN" verify-attestation --new-bundle-format=false --type spdxjson \
+        --certificate-identity "$BUILD_IDENTITY" \
+        --certificate-oidc-issuer "$ISSUER" \
+        --trusted-root "$TRUSTED_ROOT" "$image" >/dev/null 2>&1 \
+        || return 1
+
+      token="$(curl -fsS "https://$REGISTRY/token?service=$REGISTRY&scope=repository:$REPO:pull" \
+        | node -e 'let s="";process.stdin.on("data",x=>s+=x).on("end",()=>process.stdout.write(JSON.parse(s).token||""))')" \
+        || return 1
+      [ -n "$token" ] || return 1
+      manifest="$WORK/$channel/oci-manifest.json"
+      curl -fsSL --retry 3 --max-time 60 \
+        -H "Authorization: Bearer $token" \
+        -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+        "https://$REGISTRY/v2/$REPO/manifests/$digest" -o "$manifest" || return 1
+      echo "${digest#sha256:}  $manifest" | sha256sum -c - >/dev/null || return 1
+
+      [ "$(annotation_value "$manifest" org.opencontainers.image.revision)" = "$source_revision" ] \
+        || return 1
+      claimed_fixture="$(annotation_value "$manifest" org.guardian.canary-fixture-digest)" \
+        || return 1
+      claimed_notices="$(annotation_value "$manifest" org.guardian.canary-notices-digest)" \
+        || return 1
+      claimed_license="$(annotation_value "$manifest" org.guardian.license-digest)" \
+        || return 1
+      claimed_probe="$(annotation_value "$manifest" org.guardian.remote-probe-digest)" \
+        || return 1
+      [ "$claimed_probe" = "$EXPECTED_REMOTE_PROBE_DIGEST" ] || return 1
+      claimed_binaries_oci="$(annotation_value "$manifest" org.guardian.binaries-digest)" \
+        || return 1
+      [ "$claimed_binaries_oci" = "$claimed_binaries" ] || return 1
+
+      oci_dir="$WORK/$channel/oci"
+      mkdir -p "$oci_dir"
+      node - "$manifest" <<'JS' > "$WORK/$channel/layers.txt"
+    const fs = require("node:fs");
+    const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+    if (!Array.isArray(manifest.layers) || manifest.layers.length === 0) process.exit(1);
+    for (const layer of manifest.layers) {
+      if (!/^sha256:[0-9a-f]{64}$/.test(layer.digest)) process.exit(1);
+      console.log(layer.digest);
+    }
+    JS
+      while IFS= read -r layer; do
+        blob="$WORK/$channel/${layer#sha256:}.layer"
+        curl -fsSL --retry 3 --max-time 120 \
+          -H "Authorization: Bearer $token" \
+          "https://$REGISTRY/v2/$REPO/blobs/$layer" -o "$blob" || return 1
+        echo "${layer#sha256:}  $blob" | sha256sum -c - >/dev/null || return 1
+        while IFS= read -r member; do
+          case "$member" in
+            /|/*|..|./..|../*|*/../*|*/..) return 1 ;;
+          esac
+        done < <(tar -tf "$blob")
+        tar -xf "$blob" -C "$oci_dir" --no-same-owner --no-same-permissions || return 1
+      done < "$WORK/$channel/layers.txt"
+
+      [ -f "$oci_dir/_canary/sshd" ] || return 1
+      [ -f "$oci_dir/_canary/THIRD_PARTY_LICENSES.md" ] || return 1
+      [ -f "$oci_dir/LICENSE" ] || return 1
+      [ "$(sha256sum "$oci_dir/_canary/sshd" | cut -d' ' -f1)" = "$claimed_fixture" ] \
+        || return 1
+      [ "$(sha256sum "$oci_dir/_canary/THIRD_PARTY_LICENSES.md" | cut -d' ' -f1)" = "$claimed_notices" ] \
+        || return 1
+      grep -qxF 'Copyright 2009 The Go Authors.' \
+        "$oci_dir/_canary/THIRD_PARTY_LICENSES.md" || return 1
+      [ "$(sha256sum "$oci_dir/LICENSE" | cut -d' ' -f1)" = "$claimed_license" ] \
+        || return 1
+      cmp -s "$oci_dir/LICENSE" "$assets_dir/LICENSE" || return 1
+      chmod 0755 "$oci_dir/_canary/sshd"
+
+      : > "$WORK/$channel/expected-oci-files.txt"
+      printf '%s\n' LICENSE _canary/sshd _canary/THIRD_PARTY_LICENSES.md \
+        >> "$WORK/$channel/expected-oci-files.txt"
+      for target in $TARGETS; do
+        printf '%s\n' "$target/pipe-to-remote-box" \
+          "$target/pipe-to-remote-box.sigstore.json" \
+          >> "$WORK/$channel/expected-oci-files.txt"
+      done
+      sort -u -o "$WORK/$channel/expected-oci-files.txt" \
+        "$WORK/$channel/expected-oci-files.txt"
+      (cd "$oci_dir" && find . -type f -print | sed 's|^./||' | sort) \
+        > "$WORK/$channel/actual-oci-files.txt" || return 1
+      cmp -s "$WORK/$channel/expected-oci-files.txt" \
+        "$WORK/$channel/actual-oci-files.txt" || return 1
+
+      recomputed="$(for target in $TARGETS; do
+        sha256sum "$assets_dir/pipe-to-remote-box-$target" | cut -d' ' -f1
+      done | sha256sum | cut -d' ' -f1)" || return 1
+      [ "$recomputed" = "$claimed_binaries" ] || return 1
+      for target in $TARGETS; do
+        cmp -s "$oci_dir/$target/pipe-to-remote-box" \
+          "$assets_dir/pipe-to-remote-box-$target" || return 1
+        cmp -s "$oci_dir/$target/pipe-to-remote-box.sigstore.json" \
+          "$assets_dir/pipe-to-remote-box-$target.sigstore.json" || return 1
+      done
+      return 0
+    }
+
+    prepare_remote() {
+      REMOTE_DIR="$WORK/remote"
+      rm -rf "$REMOTE_DIR" "$WORK/REMOTE_MUTATION_SENTINEL"
+      mkdir -p "$REMOTE_DIR/nested"
+      printf 'public canary fixture\n' > "$REMOTE_DIR/nested/recent.txt"
+      printf 'tracked\n' > "$REMOTE_DIR/tracked.txt"
+      printf '* filter=ptrb-canary\n' > "$REMOTE_DIR/.gitattributes"
+      git -C "$REMOTE_DIR" init -q || return 1
+      git -C "$REMOTE_DIR" config user.name 'Pipe canary' || return 1
+      git -C "$REMOTE_DIR" config user.email 'pipe-canary@invalid.example' || return 1
+      git -C "$REMOTE_DIR" add . || return 1
+      git -C "$REMOTE_DIR" commit -qm fixture || return 1
+      git -C "$REMOTE_DIR" config filter.ptrb-canary.clean \
+        "touch $WORK/REMOTE_MUTATION_SENTINEL; cat" || return 1
+      printf 'working tree change\n' >> "$REMOTE_DIR/tracked.txt"
+      rm -f "$WORK/REMOTE_MUTATION_SENTINEL"
+    }
+
+    snapshot_remote() {
+      (
+        cd "$REMOTE_DIR" || exit 1
+        find . -xdev -type f -print0 | sort -z | xargs -0 sha256sum
+        find . -xdev -printf '%P\0%y\0%m\0%s\0%T@\0' | sort -z
+      ) | sha256sum | cut -d' ' -f1
+    }
+
+    run_ssh_journey() { # <binary-or-shim> <label>
+      local binary="$1" label="$2"
+      local cell="$WORK/$channel/ssh-$label" before after address port host_public output status fixture_pid
+      [ "$(PATH=/usr/bin:/bin command -v ssh)" = /usr/bin/ssh ] || return 1
+      rm -rf "$cell"
+      mkdir -p "$cell/home/.ssh" "$cell/keys"
+      chmod 0700 "$cell/home/.ssh" "$cell/keys"
+      ssh-keygen -q -t ed25519 -N '' -f "$cell/keys/host" || return 1
+      ssh-keygen -q -t ed25519 -N '' -f "$cell/keys/client" || return 1
+      before="$(snapshot_remote)" || return 1
+
+      "$oci_dir/_canary/sshd" \
+        --host-key "$cell/keys/host" \
+        --authorized-key "$cell/keys/client.pub" \
+        --ready-file "$cell/ready" \
+        --expected-command "sh -s -- '$REMOTE_DIR'" \
+        >"$cell/fixture.log" 2>&1 &
+      fixture_pid=$!
+      for _ in $(seq 1 100); do
+        [ -s "$cell/ready" ] && break
+        kill -0 "$fixture_pid" 2>/dev/null || break
+        sleep 0.05
+      done
+      if [ ! -s "$cell/ready" ]; then
+        kill "$fixture_pid" 2>/dev/null || true
+        wait "$fixture_pid" 2>/dev/null || true
+        return 1
+      fi
+      address="$(cat "$cell/ready")"
+      port="${address##*:}"
+      case "$port" in ''|*[!0-9]*) return 1 ;; esac
+      host_public="$(ssh-keygen -y -f "$cell/keys/host")" || return 1
+      printf '[127.0.0.1]:%s %s\n' "$port" "$host_public" > "$cell/known_hosts"
+      cat > "$cell/home/.ssh/config" <<EOF
+    Host pipe-canary
+      HostName 127.0.0.1
+      Port $port
+      User canary
+      IdentityFile $cell/keys/client
+      IdentitiesOnly yes
+      UserKnownHostsFile $cell/known_hosts
+    EOF
+      chmod 0600 "$cell/home/.ssh/config" "$cell/known_hosts" "$cell/keys/client"
+
+      if output="$(HOME="$cell/home" PATH=/usr/bin:/bin timeout 25 "$binary" \
+        --host pipe-canary --directory "$REMOTE_DIR" --timeout 10 2>&1)"; then
+        status=0
+      else
+        status=$?
+      fi
+      for _ in $(seq 1 100); do
+        kill -0 "$fixture_pid" 2>/dev/null || break
+        sleep 0.05
+      done
+      kill "$fixture_pid" 2>/dev/null || true
+      wait "$fixture_pid" 2>/dev/null || true
+      [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+      grep -qxF "directory=$REMOTE_DIR" <<<"$output" || return 1
+      grep -qxF 'status=present' <<<"$output" || return 1
+      grep -Eq '^git_revision=[0-9a-f]{40,64}$' <<<"$output" || return 1
+      [ ! -e "$WORK/REMOTE_MUTATION_SENTINEL" ] || return 1
+      after="$(snapshot_remote)" || return 1
+      [ "$before" = "$after" ] || return 1
+      return 0
+    }
+
+    method_release() {
+      chmod 0755 "$assets_dir/pipe-to-remote-box-$NATIVE"
+      [ "$("$assets_dir/pipe-to-remote-box-$NATIVE" --version)" = "pipe-to-remote-box $version" ] \
+        || return 1
+      run_ssh_journey "$assets_dir/pipe-to-remote-box-$NATIVE" release
+    }
+
+    method_installer() { # <channel>
+      local channel="$1"
+      local install_dir="$WORK/$channel/installed" install_home="$WORK/$channel/install-home"
+      rm -rf "$install_dir" "$install_home"
+      mkdir -p "$install_dir" "$install_home"
+      if [ "$channel" = stable ]; then
+        PIPE_TO_REMOTE_BOX_INSTALL_DIR="$install_dir" HOME="$install_home" PATH="/tools-bin:$PATH" \
+          timeout 180 sh "$assets_dir/install.sh" --version "$version" || return 1
+      else
+        PIPE_TO_REMOTE_BOX_INSTALL_DIR="$install_dir" HOME="$install_home" PATH="/tools-bin:$PATH" \
+          timeout 180 sh "$assets_dir/install.sh" --channel "$channel" || return 1
+      fi
+      cmp -s "$install_dir/pipe-to-remote-box" \
+        "$assets_dir/pipe-to-remote-box-$NATIVE" || return 1
+      run_ssh_journey "$install_dir/pipe-to-remote-box" installer
+    }
+
+    method_npm() {
+      local npm_home="$WORK/$channel/npm-home" npm_prefix="$WORK/$channel/npm" meta platform binary shim expected_shim
+      rm -rf "$npm_home" "$npm_prefix"
+      mkdir -p "$npm_home" "$npm_prefix"
+      HOME="$npm_home" timeout 180 npm install --ignore-scripts --no-audit --no-fund \
+        --package-lock=false --prefix "$npm_prefix" "$NPM_PACKAGE@$version" >/dev/null \
+        || return 1
+      meta="$npm_prefix/node_modules/@guardian-intelligence/pipe-to-remote-box"
+      platform="$npm_prefix/node_modules/@guardian-intelligence/pipe-to-remote-box-linux-x64"
+      binary="$platform/bin/pipe-to-remote-box"
+      shim="$npm_prefix/node_modules/.bin/pipe-to-remote-box"
+      expected_shim="$WORK/$channel/expected-npm-shim"
+      curl -fsSL --retry 3 --max-time 60 \
+        "https://raw.githubusercontent.com/guardian-intelligence/guardian/$source_revision/src/products/pipe-to-remote-box/dist/npm/pipe-to-remote-box/bin/pipe-to-remote-box" \
+        -o "$expected_shim" || return 1
+      [ "$(json_value "$meta/package.json" version)" = "$version" ] || return 1
+      [ "$(json_value "$platform/package.json" version)" = "$version" ] || return 1
+      cmp -s "$binary" "$assets_dir/pipe-to-remote-box-$NATIVE" || return 1
+      cmp -s "$shim" "$expected_shim" || return 1
+      node - "$meta/package.json" "$version" <<'JS'
+    const fs = require("node:fs");
+    const [path, version] = process.argv.slice(2);
+    const manifest = JSON.parse(fs.readFileSync(path, "utf8"));
+    if (manifest.name !== "@guardian-intelligence/pipe-to-remote-box") process.exit(1);
+    if (manifest.bin?.["pipe-to-remote-box"] !== "bin/pipe-to-remote-box") process.exit(1);
+    if (manifest.scripts !== undefined) process.exit(1);
+    const native = manifest.optionalDependencies?.["@guardian-intelligence/pipe-to-remote-box-linux-x64"];
+    if (native !== version) process.exit(1);
+    JS
+      for package in "$meta" "$platform"; do
+        cmp -s "$package/LICENSE" "$assets_dir/LICENSE" || return 1
+        cmp -s "$package/THIRD_PARTY_LICENSES.md" "$assets_dir/THIRD_PARTY_LICENSES.md" || return 1
+      done
+      [ "$("$shim" --version)" = "pipe-to-remote-box $version" ] || return 1
+      run_ssh_journey "$shim" npm
+    }
+
+    method_crates() {
+      local api="$WORK/$channel/crate.json" archive="$WORK/$channel/$CRATE-$version.crate" checksum repository yanked root prefix vcs path_in_vcs file
+      curl -A 'pipe-to-remote-box-install-canary/1.0' -fsSL --retry 3 --max-time 60 \
+        "https://crates.io/api/v1/crates/$CRATE/$version" -o "$api" || return 1
+      checksum="$(json_value "$api" version.checksum)" || return 1
+      repository="$(json_value "$api" version.repository)" || return 1
+      yanked="$(json_value "$api" version.yanked)" || return 1
+      [ "$repository" = https://github.com/guardian-intelligence/guardian ] || return 1
+      [ "$yanked" = false ] || return 1
+      curl -A 'pipe-to-remote-box-install-canary/1.0' -fsSL --retry 3 --max-time 120 \
+        "https://crates.io/api/v1/crates/$CRATE/$version/download" -o "$archive" || return 1
+      [ "$(sha256sum "$archive" | cut -d' ' -f1)" = "$checksum" ] || return 1
+      root="$WORK/$channel/crate-source"
+      rm -rf "$root"
+      mkdir -p "$root"
+      prefix="$CRATE-$version"
+      for file in .cargo_vcs_info.json LICENSE THIRD_PARTY_LICENSES.md Cargo.toml.orig; do
+        tar -xzOf "$archive" "$prefix/$file" > "$root/$file" || return 1
+      done
+      [ -f "$root/.cargo_vcs_info.json" ] || return 1
+      vcs="$(json_value "$root/.cargo_vcs_info.json" git.sha1)" || return 1
+      path_in_vcs="$(json_value "$root/.cargo_vcs_info.json" path_in_vcs)" || return 1
+      [ "$vcs" = "$source_revision" ] || return 1
+      [ "$path_in_vcs" = src/products/pipe-to-remote-box ] || return 1
+      cmp -s "$root/LICENSE" "$assets_dir/LICENSE" || return 1
+      cmp -s "$root/THIRD_PARTY_LICENSES.md" "$assets_dir/THIRD_PARTY_LICENSES.md" || return 1
+      grep -qF 'name = "pipe-to-remote-box"' "$root/Cargo.toml.orig" || return 1
+      grep -qF "version = \"$version\"" "$root/Cargo.toml.orig" || return 1
+      return 0
+    }
+
+    lanes="$(awk '
+      /^releases:/ { releases = 1; next }
+      releases && /^  pipe-to-remote-box:/ { pipe = 1; next }
+      releases && pipe && /^  [^ ]/ { pipe = 0 }
+      pipe && /^    [A-Za-z0-9_-]+:[[:space:]]*$/ { channel = $1; sub(/:$/, "", channel); next }
+      pipe && channel != "" && /^      image:[[:space:]]/ { print channel, $2 }
+    ' /release-manifest/release-manifest.yaml)"
+    if ! grep -q '^  pipe-to-remote-box:' /release-manifest/release-manifest.yaml; then
+      echo 'release manifest has no Pipe to Remote Box section'
+      exit 1
+    fi
+
+    active_lanes="$(grep -c . <<<"$lanes")"
+    [ -n "$lanes" ] || active_lanes=0
+    push "guardian_pipe_to_remote_box_install_canary_active_lanes $active_lanes" || true
+    if [ "$active_lanes" -eq 0 ]; then
+      push 'guardian_pipe_to_remote_box_install_canary_heartbeat 1' || true
+      [ "$metrics_failed" -eq 0 ]
+      exit $?
+    fi
+
+    if ! fetch_releases; then
+      echo 'could not enumerate public GitHub Releases'
+      exit 1
+    fi
+
+    cells=0
+    failures=0
+    while read -r channel image; do
+      [ -n "$channel" ] || continue
+      case "$channel" in nightly|rc|stable) ;; *) echo "unknown Pipe channel $channel"; exit 1 ;; esac
+      if [[ ! "$image" =~ ^ghcr\.io/guardian-intelligence/pipe-to-remote-box@sha256:[0-9a-f]{64}$ ]]; then
+        echo "$channel has a malformed Pipe OCI pin: $image"
+        exit 1
+      fi
+
+      methods="release-assets installer"
+      [ "$channel" = stable ] && methods="$methods npm crates"
+      detail=
+      prepared=1
+      release_for_channel "$channel" \
+        && verify_release_assets "$channel" \
+        && verify_object_shapes \
+        && fetch_oci \
+        && prepare_remote \
+        || prepared=0
+
+      for method in $methods; do
+        cells=$((cells + 1))
+        ok=0
+        if [ "$prepared" -eq 1 ]; then
+          case "$method" in
+            release-assets) method_release && ok=1 ;;
+            installer) method_installer "$channel" && ok=1 ;;
+            npm) method_npm && ok=1 ;;
+            crates) method_crates && ok=1 ;;
+          esac
+        fi
+        record "$channel" "$method" "$ok"
+        if [ "$ok" -eq 1 ]; then
+          echo "ok $channel/$method ($tag)"
+        else
+          failures=$((failures + 1))
+          echo "FAILED $channel/$method ($tag)"
+        fi
+      done
+    done <<< "$lanes"
+
+    push 'guardian_pipe_to_remote_box_install_canary_heartbeat 1' || true
+    echo "Pipe install matrix: $cells cells, $failures failing"
+    # Cell failures are samples so the alert can require repetition; a hollow
+    # run or an inability to publish metrics is a Job failure.
+    [ "$cells" -gt 0 ] && [ "$metrics_failed" -eq 0 ]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pipe-to-remote-box-install-canary
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: pipe-to-remote-box-install-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  schedule: "55 */6 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1500
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: pipe-to-remote-box-install-canary
+            app.kubernetes.io/part-of: guardian
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 12345
+            runAsGroup: 12345
+            fsGroup: 12345
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: extract-cosign
+              image: docker.io/alpine/k8s:1.33.4@sha256:b0523f0a244ddc4c8e055aa335c040d3d78b3ead5528f4544395f7f9f69c7b68
+              command: ["/bin/sh", "/scripts/extract-cosign.sh"]
+              env:
+                - name: COSIGN_IMAGE
+                  # Shared with the countersigner, projector, and canonical
+                  # CLI verifier; the version-skew test owns this pin.
+                  value: "ghcr.io/sigstore/cosign/cosign:v3.1.2@sha256:d91bc4e7e95e8d2f549c747a72dc174f90579e410a1695f57f686674f84ce849"
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                  ephemeral-storage: 512Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+                  ephemeral-storage: 1Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: tools-bin
+                  mountPath: /tools-bin
+                - name: work
+                  mountPath: /tmp
+          containers:
+            - name: canary
+              # Guardian's exact digest-pinned canary runtime is built from
+              # MODULE.bazel's pinned Playwright image. It supplies npm/Node
+              # and /usr/bin/ssh without adding packages at runtime.
+              image: ghcr.io/guardian-intelligence/canary-journeys:edge@sha256:bad66489e28a4821ac3fc4782e9cbf7b1ee5855dc9a4ca2b407df7981bd1fbc1
+              command: ["/bin/bash", "/scripts/canary.sh"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 200m
+                  memory: 256Mi
+                  ephemeral-storage: 1Gi
+                limits:
+                  cpu: "2"
+                  memory: 1Gi
+                  ephemeral-storage: 3Gi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: tools-bin
+                  mountPath: /tools-bin
+                - name: work
+                  mountPath: /work
+                - name: release-manifest
+                  mountPath: /release-manifest
+                  readOnly: true
+                - name: trusted-root
+                  mountPath: /trusted-root
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: pipe-to-remote-box-install-canary
+            - name: tools-bin
+              emptyDir: {}
+            - name: work
+              emptyDir:
+                sizeLimit: 3Gi
+            - name: release-manifest
+              configMap:
+                name: release-manifest
+            - name: trusted-root
+              configMap:
+                name: sigstore-trusted-root
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: pipe-to-remote-box-install-canary
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: pipe-to-remote-box-install-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: pipe-to-remote-box-install-canary
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            k8s:app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-root-vminsert-from-pipe-to-remote-box-install-canary
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: tenant-root
+      k8s:app.kubernetes.io/name: vminsert
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: guardian-analytics
+            k8s:app.kubernetes.io/name: pipe-to-remote-box-install-canary
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: pipe-to-remote-box-install-canary
+  namespace: guardian-analytics
+  labels:
+    app.kubernetes.io/name: pipe-to-remote-box-install-canary
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: pipe-to-remote-box-install-canary.rules
+      interval: 60s
+      rules:
+        - alert: GuardianPipeToRemoteBoxInstallCanaryFailing
+          # A seven-hour window contains the two most recent six-hourly runs,
+          # so one public-network transient does not page and an older success
+          # cannot mask two consecutive failures.
+          expr: >-
+            max_over_time(guardian_pipe_to_remote_box_install_canary_success[7h]) == 0
+            and count_over_time(guardian_pipe_to_remote_box_install_canary_success[7h]) >= 2
+          labels:
+            severity: critical
+            guardian_component: pipe-to-remote-box-release
+          annotations:
+            summary: "Pipe to Remote Box {{ $labels.channel }} fails through {{ $labels.method }}"
+            description: >-
+              Two consecutive public-distribution sweeps failed for the
+              {{ $labels.channel }} channel through {{ $labels.method }}. The
+              canary checks the manifest-to-release OCI digest, Sigstore and
+              checksum chain, licenses, object shape, and the real install or
+              registry journey. Check the newest
+              pipe-to-remote-box-install-canary Job in guardian-analytics.
+        - alert: GuardianPipeToRemoteBoxInstallCanarySilent
+          expr: >-
+            absent_over_time(guardian_pipe_to_remote_box_install_canary_heartbeat[13h])
+            and on() (time() - max(kube_cronjob_status_last_schedule_time{
+              namespace="guardian-analytics",
+              cronjob="pipe-to-remote-box-install-canary"}) > 3600)
+          labels:
+            severity: warning
+            guardian_component: pipe-to-remote-box-release
+          annotations:
+            summary: "Pipe to Remote Box public-distribution canary is silent"
+            description: >-
+              No heartbeat has arrived for more than two six-hour intervals.
+              The canary cannot read its release manifest, reach public
+              distribution services, verify its pinned trust inputs, or push
+              metrics. Check the newest CronJob pod in guardian-analytics.

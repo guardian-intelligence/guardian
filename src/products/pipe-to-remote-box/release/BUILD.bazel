@@ -1,0 +1,5 @@
+filegroup(
+    name = "channels",
+    srcs = ["channels.yaml"],
+    visibility = ["//src/infrastructure/tests:__pkg__"],
+)

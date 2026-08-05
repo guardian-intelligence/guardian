@@ -1,0 +1,40 @@
+#!/usr/bin/env node
+"use strict";
+
+const { spawnSync } = require("node:child_process");
+
+const PACKAGES = {
+  "darwin arm64": "@guardian-intelligence/pipe-to-remote-box-darwin-arm64",
+  "darwin x64": "@guardian-intelligence/pipe-to-remote-box-darwin-x64",
+  "linux arm64": "@guardian-intelligence/pipe-to-remote-box-linux-arm64",
+  "linux x64": "@guardian-intelligence/pipe-to-remote-box-linux-x64",
+};
+
+const platform = `${process.platform} ${process.arch}`;
+const pkg = PACKAGES[platform];
+if (pkg === undefined) {
+  console.error(
+    `pipe-to-remote-box: no prebuilt binary for ${platform}; build from source at https://github.com/guardian-intelligence/guardian/tree/main/src/products/pipe-to-remote-box`,
+  );
+  process.exit(1);
+}
+
+let binary;
+try {
+  binary = require.resolve(`${pkg}/bin/pipe-to-remote-box`);
+} catch {
+  console.error(
+    `pipe-to-remote-box: ${pkg} is not installed; reinstall without --omit=optional so npm fetches this platform's binary`,
+  );
+  process.exit(1);
+}
+
+const result = spawnSync(binary, process.argv.slice(2), { stdio: "inherit" });
+if (result.error) {
+  console.error(`pipe-to-remote-box: ${result.error.message}`);
+  process.exit(1);
+}
+if (result.signal) {
+  process.kill(process.pid, result.signal);
+}
+process.exit(result.status ?? 1);

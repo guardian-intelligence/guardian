@@ -1,0 +1,14 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+exports_files(
+    ["install.sh"],
+    visibility = ["//visibility:public"],
+)
+
+sh_test(
+    name = "installer_test",
+    size = "small",
+    srcs = ["installer_test.sh"],
+    args = ["$(rootpath install.sh)"],
+    data = ["install.sh"],
+)

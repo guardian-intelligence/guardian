@@ -1,0 +1,7 @@
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "pipe_to_remote_box_crates",
+    cargo_lockfile = "//src/products/pipe-to-remote-box:Cargo.lock",
+    manifests = ["//src/products/pipe-to-remote-box:Cargo.toml"],
+)
+use_repo(crate, "pipe_to_remote_box_crates")

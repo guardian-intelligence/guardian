@@ -1,0 +1,450 @@
+name: pipe-to-remote-box-release
+
+# Release cutter for Pipe to Remote Box. Channel pins point at the signed OCI
+# artifact built on main. This job verifies the OCI signature, SPDX attestation,
+# and every original per-binary bundle, then publishes those bytes unchanged.
+# Only the installer, which tracks current main rather than the build revision,
+# is signed by this workflow. An App-authored Release is required so the npm and
+# crates.io trusted-publisher workflows receive the release event.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/products/pipe-to-remote-box/release/channels.yaml"
+      - ".github/workflows/pipe-to-remote-box-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: pipe-to-remote-box-release
+  cancel-in-progress: false
+
+env:
+  IMAGE_REPO: ghcr.io/guardian-intelligence/pipe-to-remote-box
+  CHANNELS: nightly rc stable
+  CHANNELS_FILE: src/products/pipe-to-remote-box/release/channels.yaml
+  TARGETS: x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin
+  NATIVE_TARGET: x86_64-unknown-linux-musl
+  BUILD_IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/pipe-to-remote-box-image.yml@refs/heads/main
+  RELEASE_IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/pipe-to-remote-box-release.yml@refs/heads/main
+  RELEASE_APP_LOGIN: guardian-promotions[bot]
+  ISSUER: https://token.actions.githubusercontent.com
+  RC_SOAK_DAYS: 7
+  CRANE_VERSION: v0.21.7
+  CRANE_SHA256: 1a57bc98207fa1c0d04bf760699099e26f8383499bfd55b99c1b919a928a7230
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Plan channel cuts
+        id: plan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - > pins.txt <<'PY'
+          import os
+          import sys
+
+          import yaml
+
+
+          def fail(message):
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+                  summary.write(message + "\n")
+              sys.exit(message)
+
+
+          known = os.environ["CHANNELS"].split()
+          document = yaml.safe_load(open(os.environ["CHANNELS_FILE"])) or {}
+          channels = document.get("channels") or {}
+          unknown = sorted(set(channels) - set(known))
+          if unknown:
+              fail("channels.yaml declares unknown channel(s): " + " ".join(unknown))
+          for name in known:
+              pin = channels.get(name) or {}
+              if not isinstance(pin, dict):
+                  fail(f"channels.{name} is not a mapping")
+              print(name, pin.get("image", ""), pin.get("version", ""))
+          PY
+
+          releases() {
+            RELEASES="releases-$1.tsv"
+            local match
+            case "$1" in
+              nightly) match='test("^pipe-to-remote-box/nightly-[0-9]{8}(-[0-9]{4})?$")' ;;
+              rc) match='test("^pipe-to-remote-box/rc-[0-9]{8}(-[0-9]{4})?$")' ;;
+              stable) match='test("^pipe-to-remote-box/v[0-9]+\\.[0-9]+\\.[0-9]+$")' ;;
+              *)
+                echo "no release tag grammar for channel $1" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+                ;;
+            esac
+            if [[ ! -f "$RELEASES" ]]; then
+              gh api "repos/${{ github.repository }}/releases" --paginate \
+                --jq ".[] | select(.draft == false) | select(.tag_name | $match)
+                  | [.tag_name, .published_at, (.body // \"\")] | @tsv" \
+                > "$RELEASES.part"
+              mv "$RELEASES.part" "$RELEASES"
+            fi
+          }
+
+          cuts=()
+          : > plan.txt
+          while read -r channel image version <&3; do
+            image="$(grep -o "$IMAGE_REPO@sha256:[a-f0-9]\{64\}" <<<"$image" || true)"
+            if [[ -z "$image" ]]; then
+              echo "$channel: no pin; nothing to release" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            digest="${image##*@}"
+
+            releases "$channel"
+            if grep -q "$digest" "$RELEASES"; then
+              echo "$channel: $digest is already released; skipping" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            case "$channel" in
+              rc)
+                if [[ -z "$version" ]]; then
+                  echo "$channel: the pin claims no version" >> "$GITHUB_STEP_SUMMARY"
+                  exit 1
+                fi
+                releases nightly
+                if ! grep -q "$digest" "$RELEASES"; then
+                  echo "$channel: $digest was never released on nightly; refusing to cut" >> "$GITHUB_STEP_SUMMARY"
+                  exit 1
+                fi
+                ;;
+              stable)
+                if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                  echo "$channel: version '$version' is not a bare stable version" >> "$GITHUB_STEP_SUMMARY"
+                  exit 1
+                fi
+                releases rc
+                cutoff=$(( $(date -u +%s) - RC_SOAK_DAYS * 86400 ))
+                : > "lineage-$channel.rev"
+                while IFS=$'\t' read -r tag published body <&4; do
+                  [[ -n "$published" ]] || continue
+                  (( $(date -u -d "$published" +%s) >= cutoff )) || continue
+                  source_commit="$(sed -n 's/.*Source commit: \([0-9a-f]\{40\}\).*/\1/p' <<<"$body")"
+                  [[ -n "$source_commit" ]] || continue
+                  printf '%s %s\n' "$tag" "$source_commit" >> "lineage-$channel.rev"
+                done 4< "$RELEASES"
+                if [[ ! -s "lineage-$channel.rev" ]]; then
+                  echo "$channel: no release candidate published in the last $RC_SOAK_DAYS days" >> "$GITHUB_STEP_SUMMARY"
+                  exit 1
+                fi
+                ;;
+            esac
+
+            cuts+=("$channel")
+            printf '%s %s %s\n' "$channel" "$image" "$version" >> plan.txt
+          done 3< pins.txt
+          echo "cuts=${cuts[*]}" >> "$GITHUB_OUTPUT"
+
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+        if: steps.plan.outputs.cuts != ''
+
+      - name: Verify and stage release assets
+        if: steps.plan.outputs.cuts != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -fsSLo crane.tar.gz "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf crane.tar.gz -C "$HOME/.local/bin" crane
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+
+          mkdir -p meta
+          while read -r channel image version <&3; do
+            cosign verify --certificate-identity "$BUILD_IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" "$image" > /dev/null
+            cosign verify-attestation --type spdxjson \
+              --certificate-identity "$BUILD_IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" "$image" > /dev/null
+
+            manifest="$(crane manifest "$image")"
+            revision="$(jq -r '.annotations["org.opencontainers.image.revision"]' <<<"$manifest")"
+            binaries_digest="$(jq -r '.annotations["org.guardian.binaries-digest"]' <<<"$manifest")"
+            license_digest="$(jq -r '.annotations["org.guardian.license-digest"]' <<<"$manifest")"
+            [[ "$revision" =~ ^[0-9a-f]{40}$ ]] \
+              || { echo "$channel: artifact has no source revision"; exit 1; }
+            [[ "$binaries_digest" =~ ^[0-9a-f]{64}$ ]] \
+              || { echo "$channel: artifact has no binaries digest"; exit 1; }
+            [[ "$license_digest" =~ ^[0-9a-f]{64}$ ]] \
+              || { echo "$channel: artifact has no license digest"; exit 1; }
+
+            if [[ -f "lineage-$channel.rev" ]]; then
+              soaked=
+              while read -r tag base <&4; do
+                if status="$(gh api "repos/${{ github.repository }}/compare/$base...$revision" \
+                    --jq .status 2>/dev/null)"; then
+                  case "$status" in
+                    ahead | identical) soaked="$tag"; break ;;
+                  esac
+                fi
+              done 4< "lineage-$channel.rev"
+              if [[ -z "$soaked" ]]; then
+                echo "$channel: build $revision descends from no recently published candidate" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+              echo "$channel: lineage descends from $soaked" >> "$GITHUB_STEP_SUMMARY"
+            fi
+
+            mkdir -p "stage/$channel" "work/$channel" "assets/$channel"
+            crane export "$image" - | tar -x -C "stage/$channel"
+            echo "$license_digest  stage/$channel/LICENSE" | sha256sum -c -
+            for target in $TARGETS; do
+              cp "stage/$channel/$target/pipe-to-remote-box" \
+                "assets/$channel/pipe-to-remote-box-$target"
+              cp "stage/$channel/$target/pipe-to-remote-box.sigstore.json" \
+                "assets/$channel/pipe-to-remote-box-$target.sigstore.json"
+              cosign verify-blob \
+                --bundle "assets/$channel/pipe-to-remote-box-$target.sigstore.json" \
+                --certificate-identity "$BUILD_IDENTITY" \
+                --certificate-oidc-issuer "$ISSUER" \
+                "assets/$channel/pipe-to-remote-box-$target"
+            done
+
+            reported="$("assets/$channel/pipe-to-remote-box-$NATIVE_TARGET" --version)"
+            built="${reported#pipe-to-remote-box }"
+            if [[ "$reported" != "pipe-to-remote-box $built" || -z "$built" ]]; then
+              echo "$channel: native artifact reported malformed version '$reported'" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            if [[ -n "$version" && "$built" != "$version" ]]; then
+              echo "$channel: pin claims $version but artifact reports $built" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+
+            git fetch --depth 1 origin "$revision"
+            prefix="pipe-to-remote-box-$built-src"
+            tarball="assets/$channel/$prefix.tar.gz"
+            git archive --format=tar --prefix="$prefix/" \
+              -o "work/$channel/src.tar" \
+              "$revision:src/products/pipe-to-remote-box"
+            gzip -n -c "work/$channel/src.tar" > "$tarball"
+
+            contents="$(tar tzf "$tarball")"
+            grep -qxF "$prefix/LICENSE" <<<"$contents" \
+              || { echo "$channel: source archive carries no Apache license"; exit 1; }
+            grep -qxF "$prefix/THIRD_PARTY_LICENSES.md" <<<"$contents" \
+              || { echo "$channel: source archive carries no third-party notices"; exit 1; }
+
+            git show "$revision:src/products/pipe-to-remote-box/LICENSE" \
+              > "assets/$channel/LICENSE"
+            git show "$revision:src/products/pipe-to-remote-box/THIRD_PARTY_LICENSES.md" \
+              > "assets/$channel/THIRD_PARTY_LICENSES.md"
+            cmp -s "stage/$channel/LICENSE" "assets/$channel/LICENSE" \
+              || { echo "$channel: OCI and source archive carry different license bytes"; exit 1; }
+
+            cp src/products/pipe-to-remote-box/dist/install.sh \
+              "assets/$channel/install.sh"
+            cosign sign-blob --yes \
+              --bundle "assets/$channel/install.sh.sigstore.json" \
+              "assets/$channel/install.sh"
+            cosign verify-blob \
+              --bundle "assets/$channel/install.sh.sigstore.json" \
+              --certificate-identity "$RELEASE_IDENTITY" \
+              --certificate-oidc-issuer "$ISSUER" \
+              "assets/$channel/install.sh"
+
+            (cd "assets/$channel" && \
+              sha256sum pipe-to-remote-box-* install.sh* LICENSE \
+                THIRD_PARTY_LICENSES.md > checksums.txt)
+            printf '%s %s %s\n' "$revision" "$binaries_digest" "$built" \
+              > "meta/$channel.txt"
+          done 3< plan.txt
+
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        if: steps.plan.outputs.cuts != ''
+        id: app
+        with:
+          app-id: ${{ secrets.PROMOTIONS_APP_ID }}
+          private-key: ${{ secrets.PROMOTIONS_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Cut GitHub Releases
+        if: steps.plan.outputs.cuts != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          tag_sha() {
+            local out
+            if out="$(gh api "repos/${{ github.repository }}/git/ref/tags/$1" \
+                --jq .object.sha 2>/dev/null)"; then
+              printf '%s' "$out"
+            fi
+          }
+
+          while read -r channel image _ <&3; do
+            read -r revision binaries_digest version < "meta/$channel.txt"
+            case "$channel" in
+              nightly)
+                day="$(date -u +%Y%m%d -d "@$(git log -1 --format=%ct)")"
+                tag="pipe-to-remote-box/nightly-$day"
+                title="Pipe to Remote Box nightly $day"
+                flags=(--prerelease --latest=false)
+                summary="Nightly release of Pipe to Remote Box from a reviewed channel pin."
+                ;;
+              rc)
+                day="$(date -u +%Y%m%d -d "@$(git log -1 --format=%ct)")"
+                tag="pipe-to-remote-box/rc-$day"
+                title="Pipe to Remote Box release candidate $day"
+                flags=(--prerelease --latest=false)
+                summary="Release candidate $day of Pipe to Remote Box."
+                ;;
+              stable)
+                tag="pipe-to-remote-box/v$version"
+                title="Pipe to Remote Box v$version"
+                # This repository releases more than one product. A Pipe
+                # release must not steal the repository-global "Latest"
+                # pointer that Postflight's historical installer resolves.
+                flags=(--prerelease=false --latest=false)
+                summary="Release $version of Pipe to Remote Box."
+                ;;
+            esac
+
+            existing="$(tag_sha "$tag")"
+            if [[ -n "$existing" && "$existing" != "$revision" ]]; then
+              if [[ "$channel" == stable ]]; then
+                echo "$channel: tag $tag already points at $existing, not $revision" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+              tag="$tag-$(date -u +%H%M -d "@$(git log -1 --format=%ct)")"
+              existing="$(tag_sha "$tag")"
+              if [[ -n "$existing" && "$existing" != "$revision" ]]; then
+                echo "$channel: tag $tag already points at $existing, not $revision" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+            fi
+            if [[ -z "$existing" ]]; then
+              gh api -X POST "repos/${{ github.repository }}/git/refs" \
+                -f ref="refs/tags/$tag" -f sha="$revision" > /dev/null
+            fi
+
+            notes="$(printf '%s\n' \
+              "$summary" \
+              "" \
+              "- Version: \`$version\`" \
+              "- Artifact: \`$image\`" \
+              "- Source commit: $revision" \
+              "- Binaries digest: \`$binaries_digest\`" \
+              "- Sources: \`pipe-to-remote-box-$version-src.tar.gz\`" \
+              "- Licenses: \`LICENSE\` and \`THIRD_PARTY_LICENSES.md\`" \
+              "" \
+              "The OCI artifact and its SPDX SBOM attestation are signed by the build identity:" \
+              "" \
+              '```sh' \
+              "cosign verify --certificate-identity $BUILD_IDENTITY \\" \
+              "  --certificate-oidc-issuer $ISSUER $image" \
+              "cosign verify-attestation --type spdxjson \\" \
+              "  --certificate-identity $BUILD_IDENTITY \\" \
+              "  --certificate-oidc-issuer $ISSUER $image" \
+              '```' \
+              "" \
+              "Verify a binary before running it:" \
+              "" \
+              '```sh' \
+              "cosign verify-blob --bundle pipe-to-remote-box-<target>.sigstore.json \\" \
+              "  --certificate-identity $BUILD_IDENTITY \\" \
+              "  --certificate-oidc-issuer $ISSUER \\" \
+              "  pipe-to-remote-box-<target>" \
+              '```' \
+              "" \
+              "The attached installer is separately signed by the release identity:" \
+              "" \
+              '```sh' \
+              "cosign verify-blob --bundle install.sh.sigstore.json \\" \
+              "  --certificate-identity $RELEASE_IDENTITY \\" \
+              "  --certificate-oidc-issuer $ISSUER \\" \
+              "  install.sh" \
+              '```')"
+            # A draft is the transaction boundary: release:published must not
+            # fire until every byte is present and read back. A failed retry
+            # repairs the App-authored draft instead of treating its body as a
+            # completed release.
+            if release_json="$(gh release view "$tag" \
+                --json databaseId,isDraft,author \
+                --jq '{id: .databaseId, draft: .isDraft, author: .author.login}' \
+                2>/dev/null)"; then
+              if [[ "$(jq -r .draft <<<"$release_json")" != true ]]; then
+                echo "$channel: $tag already exists as a published release but was not in the published-release plan" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+              if [[ "$(jq -r .author <<<"$release_json")" != "$RELEASE_APP_LOGIN" ]]; then
+                echo "$channel: refusing to modify a colliding draft not authored by $RELEASE_APP_LOGIN" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+              gh release edit "$tag" --draft --verify-tag \
+                --title "$title" "${flags[@]}" --notes "$notes"
+            else
+              gh release create "$tag" --draft --verify-tag \
+                --title "$title" "${flags[@]}" --notes "$notes"
+            fi
+
+            [[ "$(gh release view "$tag" --json isDraft --jq .isDraft)" == true ]] \
+              || { echo "$channel: $tag became public before asset verification"; exit 1; }
+            [[ "$(gh release view "$tag" --json author --jq .author.login)" == "$RELEASE_APP_LOGIN" ]] \
+              || { echo "$channel: refusing to repair or publish a draft not authored by $RELEASE_APP_LOGIN"; exit 1; }
+            release_id="$(gh release view "$tag" --json databaseId --jq .databaseId)"
+            [[ "$release_id" =~ ^[0-9]+$ ]] \
+              || { echo "$channel: $tag has no numeric release id"; exit 1; }
+
+            mapfile -t upload_assets < <(find "assets/$channel" -maxdepth 1 -type f -print | sort)
+            ((${#upload_assets[@]} > 0)) \
+              || { echo "$channel: no assets were staged"; exit 1; }
+            expected_assets="$RUNNER_TEMP/pipe-to-remote-box-$channel.expected-assets"
+            printf '%s\n' "${upload_assets[@]##*/}" | sort > "$expected_assets"
+
+            # Remove only stale assets from this still-draft release. The
+            # expected set is fixed by the locally verified stage above.
+            while IFS=$'\t' read -r asset_id asset_name; do
+              if ! grep -qxF "$asset_name" "$expected_assets"; then
+                gh api -X DELETE \
+                  "repos/${{ github.repository }}/releases/assets/$asset_id"
+              fi
+            done < <(gh api \
+              "repos/${{ github.repository }}/releases/$release_id/assets" \
+              --paginate --jq '.[] | [.id, .name] | @tsv')
+
+            gh release upload "$tag" --clobber "${upload_assets[@]}"
+            remote_assets="$RUNNER_TEMP/pipe-to-remote-box-$channel.remote-assets"
+            gh api "repos/${{ github.repository }}/releases/$release_id/assets" \
+              --paginate --jq '.[].name' | sort > "$remote_assets"
+            cmp -s "$expected_assets" "$remote_assets" \
+              || { echo "$channel: draft $tag does not carry the exact asset set"; exit 1; }
+
+            downloaded="$RUNNER_TEMP/pipe-to-remote-box-$channel.downloaded"
+            mkdir -p "$downloaded"
+            gh release download "$tag" --dir "$downloaded" --clobber
+            while IFS= read -r asset_name; do
+              cmp -s "assets/$channel/$asset_name" "$downloaded/$asset_name" \
+                || { echo "$channel: uploaded $asset_name differs from the verified local bytes"; exit 1; }
+            done < "$expected_assets"
+            [[ "$(gh release view "$tag" --json isDraft --jq .isDraft)" == true ]] \
+              || { echo "$channel: $tag became public during asset verification"; exit 1; }
+
+            gh release edit "$tag" --draft=false "${flags[@]}"
+            [[ "$(gh release view "$tag" --json isDraft --jq .isDraft)" == false ]] \
+              || { echo "$channel: $tag did not publish after complete verification"; exit 1; }
+            echo "released $tag from $image" >> "$GITHUB_STEP_SUMMARY"
+          done 3< plan.txt

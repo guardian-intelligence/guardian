@@ -1,0 +1,84 @@
+# Pipe to Remote Box is a distributed binary, not a cluster workload. Kargo
+# discovers its signed :edge OCI artifacts by digest and advances only the
+# nightly channel pointer after the exact digest has a fresh deep-test verdict.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: pipe-to-remote-box
+  namespace: guardian-products
+spec:
+  interval: 1m0s
+  subscriptions:
+    - image:
+        repoURL: ghcr.io/guardian-intelligence/pipe-to-remote-box
+        imageSelectionStrategy: Digest
+        constraint: edge
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: pipe-to-remote-box-nightly
+  namespace: guardian-products
+  annotations:
+    # Kargo expressions and shell variables must reach the controller intact.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  requestedFreight:
+    - origin:
+        kind: Warehouse
+        name: pipe-to-remote-box
+      sources:
+        direct: true
+  promotionTemplate:
+    spec:
+      vars:
+        - name: repoURL
+          value: https://github.com/guardian-intelligence/guardian.git
+        - name: imageRepo
+          value: ghcr.io/guardian-intelligence/pipe-to-remote-box
+        - name: vmQueryURL
+          value: http://vmselect-shortterm.tenant-root.svc:8481/select/0/prometheus/api/v1/query
+      steps:
+        # A verdict belongs to the digest, never merely to a recent run. A
+        # present 0 fails terminally. No result matches neither expression and
+        # retries through the next hourly runner without becoming a false pass.
+        - uses: http
+          as: check-deeptest-pass
+          retry:
+            timeout: 28m
+          config:
+            method: GET
+            url: ${{ vars.vmQueryURL }}
+            queryParams:
+              - name: query
+                value: last_over_time(guardian_pipe_to_remote_box_deeptest_pass{digest="${{ imageFrom(vars.imageRepo).Digest }}"}[3h])
+            successExpression: len(response.body.data.result) > 0 && float(response.body.data.result[0].value[1]) == 1.0
+            failureExpression: len(response.body.data.result) > 0 && float(response.body.data.result[0].value[1]) != 1.0
+        - uses: git-clone
+          config:
+            repoURL: ${{ vars.repoURL }}
+            checkout:
+              - branch: main
+                path: ./repo
+        - uses: yaml-update
+          config:
+            path: ./repo/src/products/pipe-to-remote-box/release/channels.yaml
+            updates:
+              - key: channels.nightly.image
+                value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
+        # The public release projector and countersigner read the shared
+        # manifest, so the product pin and publication-boundary pin move in
+        # the same commit or not at all.
+        - uses: yaml-update
+          config:
+            path: ./repo/src/infrastructure/deployments/guardian/system/release-manifest.yaml
+            updates:
+              - key: releases.pipe-to-remote-box.nightly.image
+                value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-commit
+          config:
+            path: ./repo
+            message: promote pipe-to-remote-box (nightly) to ${{ imageFrom(vars.imageRepo).Digest }}
+        - uses: git-push
+          config:
+            path: ./repo

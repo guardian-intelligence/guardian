@@ -13,9 +13,12 @@ guidelines). A workflow earns a file here for exactly one of two reasons:
    of the merge button: merge cadence is the scarce resource.
 2. **Trusted publisher identity** — post-merge jobs that build, sign, and
    push artifacts (`images.yml`, `images-lock-sign.yml`,
-   `postflight-cli-image.yml`, `postflight-cli-release.yml`), plus the
+   `postflight-cli-image.yml`, `postflight-cli-release.yml`,
+   `pipe-to-remote-box-image.yml`, `pipe-to-remote-box-release.yml`), plus the
    ecosystem mirrors (`postflight-cli-publish-npm.yml`,
-   `postflight-cli-publish-crates.yml`). Each workflow file path IS an
+   `postflight-cli-publish-crates.yml`,
+   `pipe-to-remote-box-publish-npm.yml`,
+   `pipe-to-remote-box-publish-crates.yml`). Each workflow file path IS an
    identity someone else checks: Fulcio-side for the signing lanes, where
    the cluster and the world verify the certificate, and registry-side for
    the mirrors, where npm and crates.io trusted publishing authorize by

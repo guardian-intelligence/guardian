@@ -26,3 +26,6 @@ resources:
   - cli-nightly-promoter.yaml
   - cli-deeptest-runner.yaml
   - cli-install-canary.yaml
+  - pipe-to-remote-box-nightly-promoter.yaml
+  - pipe-to-remote-box-deeptest-runner.yaml
+  - pipe-to-remote-box-install-canary.yaml

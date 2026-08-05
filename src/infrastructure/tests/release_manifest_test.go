@@ -24,9 +24,13 @@ import (
 
 const (
 	releaseManifestRunfile = "src/infrastructure/deployments/guardian/system/release-manifest.yaml"
-	releaseChannelsFile    = "src/products/postflight-cli/release/channels.yaml"
 	firstPartyPrefix       = "ghcr.io/guardian-intelligence/"
 )
+
+var releaseChannelFiles = []string{
+	"src/products/postflight-cli/release/channels.yaml",
+	"src/products/pipe-to-remote-box/release/channels.yaml",
+}
 
 // The projector and the countersigner both enumerate first-party refs with
 // the shell grammar ghcr.io/guardian-intelligence/[a-z0-9-]+@sha256:... — a
@@ -96,9 +100,19 @@ func TestReleaseManifestCoversReleaseChannels(t *testing.T) {
 		t.Fatalf("no first-party refs extracted from %s; the release manifest is empty or its image keys moved", releaseManifestRunfile)
 	}
 
-	channels := collectFirstPartyRefs(t, filepath.Join(root, releaseChannelsFile))
+	channels := map[string]map[string]bool{}
+	for _, file := range releaseChannelFiles {
+		for repo, digests := range collectFirstPartyRefs(t, filepath.Join(root, file)) {
+			if channels[repo] == nil {
+				channels[repo] = map[string]bool{}
+			}
+			for digest := range digests {
+				channels[repo][digest] = true
+			}
+		}
+	}
 	if len(channels) == 0 {
-		t.Fatalf("no first-party refs found in %s; the channels file is empty or its image keys moved", releaseChannelsFile)
+		t.Fatalf("no first-party refs found in %s; the channel files are empty or their image keys moved", strings.Join(releaseChannelFiles, ", "))
 	}
 
 	repos := map[string]bool{}
@@ -112,7 +126,7 @@ func TestReleaseManifestCoversReleaseChannels(t *testing.T) {
 	for repo := range repos {
 		if missing := digestDiff(channels[repo], manifest[repo]); len(missing) > 0 {
 			failures = append(failures,
-				repo+" is pinned to "+strings.Join(missing, ", ")+" in "+releaseChannelsFile+" but the release manifest does not list it — bump the matching lane in "+releaseManifestRunfile)
+				repo+" is pinned to "+strings.Join(missing, ", ")+" in a product channel file but the release manifest does not list it — bump the matching lane in "+releaseManifestRunfile)
 		}
 		if stale := digestDiff(manifest[repo], channels[repo]); len(stale) > 0 {
 			failures = append(failures,
