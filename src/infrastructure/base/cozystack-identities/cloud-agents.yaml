@@ -193,6 +193,60 @@ subjects:
     kind: Group
     name: guardian-persona-write-basic
 ---
+# Match the unattended identity by username as well as persona claim so a
+# missing or stale groups claim cannot bypass the read-only boundary.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-platform-agent-readonly
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - "*"
+        apiVersions:
+          - "*"
+        operations:
+          - CREATE
+          - UPDATE
+          - DELETE
+          - CONNECT
+        resources:
+          - "*/*"
+  matchConditions:
+    - name: platform-agent-identity
+      expression: >-
+        request.userInfo.username.endsWith("#platform-agent") ||
+        "guardian-platform-agent" in request.userInfo.groups
+  validations:
+    - expression: >-
+        (request.operation == "CONNECT" && request.resource.group == "" &&
+          request.resource.resource == "pods" &&
+          has(request.subResource) && request.subResource == "portforward") ||
+        (request.operation == "CREATE" && request.resource.group == "" &&
+          request.resource.resource == "serviceaccounts" &&
+          has(request.subResource) && request.subResource == "token" &&
+          has(request.name) &&
+          request.name in ["guardian-cloud-agent-cursor", "guardian-cloud-agent-devin"] &&
+          request.namespace == "tenant-root" &&
+          has(object.spec.expirationSeconds) &&
+          object.spec.expirationSeconds <= 3600 &&
+          size(object.spec.audiences) == 1 &&
+          object.spec.audiences[0] == "https://kubernetes.default.svc")
+      message: >-
+        platform-agent is read-only except for pod port-forwards and
+        one-hour-or-shorter delivery-read cloud-agent tokens
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-platform-agent-readonly
+spec:
+  policyName: guardian-platform-agent-readonly
+  validationActions:
+    - Deny
+---
 # RBAC already withholds every mutation. This fail-closed policy is the second
 # boundary and also covers future accidental RBAC expansion.
 apiVersion: admissionregistration.k8s.io/v1
