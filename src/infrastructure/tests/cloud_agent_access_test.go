@@ -131,3 +131,23 @@ func TestCloudAgentSetupDoesNotExportStandingKubernetesIdentity(t *testing.T) {
 	tokenHelper := readText(t, tokenPath)
 	assertTextContains(t, tokenHelper, "--audience=https://10.8.0.250:6443", tokenPath)
 }
+
+func TestCloudAgentAspectTaskRegistered(t *testing.T) {
+	configPath := runfilePath(".aspect/config.axl")
+	config := readText(t, configPath)
+	for _, want := range []string{
+		`tools_install_agent_cloud = "install_agent_cloud"`,
+		"ctx.tasks.add(tools_install_agent_cloud)",
+	} {
+		assertTextContains(t, config, want, configPath)
+	}
+
+	toolsPath := runfilePath(".aspect/tasks/tools.axl")
+	tools := readText(t, toolsPath)
+	for _, want := range []string{
+		"install_agent_cloud = task(",
+		`name = "install-agent-cloud"`,
+	} {
+		assertTextContains(t, tools, want, toolsPath)
+	}
+}

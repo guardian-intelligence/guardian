@@ -42,7 +42,9 @@ go_test(
         "zot_sync_test.go",
     ],
     data = glob(["fixtures/**"]) + [
+        "//:.aspect/config.axl",
         "//:.aspect/tasks/infra.axl",
+        "//:.aspect/tasks/tools.axl",
         "//:AGENTS.md",
         "//:MODULE.bazel",
         "//:scripts/agent-cloud-setup.sh",
