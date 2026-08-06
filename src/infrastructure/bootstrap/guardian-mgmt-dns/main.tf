@@ -34,6 +34,7 @@ locals {
 
   k8s_api_hostname             = "k8s.${local.cloudflare_zone_name}"
   codex_cloud_k8s_api_hostname = "k8s-codex.${local.cloudflare_zone_name}"
+  cloud_agent_providers        = toset(["cursor", "devin"])
 }
 
 data "cloudflare_zone" "guardianintelligence_org" {
@@ -177,10 +178,35 @@ resource "cloudflare_zero_trust_access_service_token" "guardian_codex_cloud" {
   }
 }
 
+# Cursor and Devin share the proven tunnel hostname but not credentials. The
+# Access token authenticates transport only; Kubernetes still requires each
+# provider's independently minted, short-lived delivery-read token.
+resource "cloudflare_zero_trust_access_service_token" "guardian_cloud_agent" {
+  for_each = local.cloud_agent_providers
+
+  account_id = var.cloudflare_account_id
+  name       = "guardian-${each.key}-cloud-kubernetes"
+  duration   = "2160h"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 check "codex_cloud_access_token_expiry_horizon" {
   assert {
     condition     = timecmp(timeadd(plantimestamp(), "504h"), cloudflare_zero_trust_access_service_token.guardian_codex_cloud.expires_at) < 0
     error_message = "The Codex cloud Access service token expires within 21 days. Rotate it by incrementing client_secret_version, update the Codex environment secrets, and prove the cloud canary."
+  }
+}
+
+check "cloud_agent_access_token_expiry_horizon" {
+  assert {
+    condition = alltrue([
+      for token in cloudflare_zero_trust_access_service_token.guardian_cloud_agent :
+      timecmp(timeadd(plantimestamp(), "504h"), token.expires_at) < 0
+    ])
+    error_message = "A cloud-agent Access service token expires within 21 days. Rotate the affected provider token, update only that provider environment, and prove its cloud canary."
   }
 }
 
@@ -197,6 +223,21 @@ resource "cloudflare_zero_trust_access_policy" "guardian_codex_cloud" {
   ]
 }
 
+resource "cloudflare_zero_trust_access_policy" "guardian_cloud_agent" {
+  for_each = local.cloud_agent_providers
+
+  account_id = var.cloudflare_account_id
+  name       = "Guardian ${title(each.key)} cloud Kubernetes service token"
+  decision   = "non_identity"
+  include = [
+    {
+      service_token = {
+        token_id = cloudflare_zero_trust_access_service_token.guardian_cloud_agent[each.key].id
+      }
+    },
+  ]
+}
+
 resource "cloudflare_zero_trust_access_application" "guardian_codex_cloud" {
   account_id = var.cloudflare_account_id
   type       = "self_hosted"
@@ -206,6 +247,14 @@ resource "cloudflare_zero_trust_access_application" "guardian_codex_cloud" {
     {
       id         = cloudflare_zero_trust_access_policy.guardian_codex_cloud.id
       precedence = 1
+    },
+    {
+      id         = cloudflare_zero_trust_access_policy.guardian_cloud_agent["cursor"].id
+      precedence = 2
+    },
+    {
+      id         = cloudflare_zero_trust_access_policy.guardian_cloud_agent["devin"].id
+      precedence = 3
     },
   ]
 }

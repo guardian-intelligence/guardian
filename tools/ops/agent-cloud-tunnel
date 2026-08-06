@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+provider="${GUARDIAN_AGENT_PROVIDER:-}"
+case "${provider}" in
+cursor | devin) ;;
+*)
+  echo "GUARDIAN_AGENT_PROVIDER must be cursor or devin" >&2
+  exit 2
+  ;;
+esac
+
+hostname="${GUARDIAN_AGENT_TUNNEL_HOSTNAME:-k8s-codex.guardianintelligence.org}"
+listen_address="${GUARDIAN_AGENT_TUNNEL_LISTEN:-127.0.0.1:16443}"
+state_dir="${GUARDIAN_AGENT_TUNNEL_STATE_DIR:-${HOME}/.cache/guardian/${provider}-cloud-tunnel}"
+credential_file="${GUARDIAN_AGENT_TUNNEL_CREDENTIAL_FILE:-${HOME}/.config/guardian/${provider}-cloud-tunnel.env}"
+pid_file="${state_dir}/pid"
+log_file="${state_dir}/cloudflared.log"
+
+usage() {
+  echo "usage: tools/ops/agent-cloud-tunnel <start|stop|status>" >&2
+  exit 2
+}
+
+running() {
+  [[ -f "${pid_file}" ]] && kill -0 "$(<"${pid_file}")" 2>/dev/null
+}
+
+listener_ready() {
+  python3 - "${listen_address}" <<'PY'
+import socket
+import sys
+
+host, port = sys.argv[1].rsplit(":", 1)
+with socket.socket() as sock:
+    sock.settimeout(1)
+    raise SystemExit(sock.connect_ex((host, int(port))))
+PY
+}
+
+start() {
+  if running && listener_ready; then
+    echo "Guardian ${provider} cloud tunnel already ready on ${listen_address}"
+    return
+  fi
+  if running; then
+    kill "$(<"${pid_file}")" 2>/dev/null || true
+  fi
+  if [[ ! -r "${credential_file}" ]]; then
+    echo "missing Cloudflare Access credential file: ${credential_file}" >&2
+    exit 1
+  fi
+  set -a
+  # shellcheck disable=SC1090
+  source "${credential_file}"
+  set +a
+  : "${TUNNEL_SERVICE_TOKEN_ID:?missing TUNNEL_SERVICE_TOKEN_ID}"
+  : "${TUNNEL_SERVICE_TOKEN_SECRET:?missing TUNNEL_SERVICE_TOKEN_SECRET}"
+
+  mkdir -p "${state_dir}"
+  chmod 700 "${state_dir}"
+  nohup cloudflared access tcp \
+    --hostname "${hostname}" \
+    --url "${listen_address}" \
+    >"${log_file}" 2>&1 &
+  echo "$!" >"${pid_file}"
+  chmod 600 "${pid_file}" "${log_file}"
+
+  for _ in {1..20}; do
+    if ! running; then
+      echo "cloudflared exited before opening ${listen_address}; see ${log_file}" >&2
+      exit 1
+    fi
+    if listener_ready; then
+      echo "Guardian ${provider} cloud tunnel ready on ${listen_address}"
+      return
+    fi
+    sleep 0.25
+  done
+  echo "cloudflared did not open ${listen_address}; see ${log_file}" >&2
+  exit 1
+}
+
+stop() {
+  if running; then
+    kill "$(<"${pid_file}")"
+    for _ in {1..20}; do
+      running || break
+      sleep 0.1
+    done
+  fi
+  rm -f "${pid_file}"
+  echo "Guardian ${provider} cloud tunnel stopped"
+}
+
+status() {
+  if running && listener_ready; then
+    echo "Guardian ${provider} cloud tunnel ready on ${listen_address}"
+    exit 0
+  fi
+  echo "Guardian ${provider} cloud tunnel is not ready" >&2
+  exit 1
+}
+
+case "${1:-}" in
+start) start ;;
+stop) stop ;;
+status) status ;;
+*) usage ;;
+esac

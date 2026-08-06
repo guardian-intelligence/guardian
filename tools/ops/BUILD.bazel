@@ -3,6 +3,8 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 exports_files(
     [
+        "agent-cloud-token",
+        "agent-cloud-tunnel",
         "multitool-repin",
         "oathtool-repin",
         "spicedb-qualify",

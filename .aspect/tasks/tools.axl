@@ -58,9 +58,12 @@ BUILD_TOOL_SHIMS = [
     ("protoc-gen-connect-go", "@com_connectrpc_connect//cmd/protoc-gen-connect-go"),
 ]
 
-CODEX_CLOUD_SHIMS = [
+AGENT_CLOUD_SHIMS = [
     ("cloudflared", "@multitool//tools/cloudflared"),
     ("kubectl", "@multitool//tools/kubectl"),
+]
+
+CODEX_CLOUD_SHIMS = AGENT_CLOUD_SHIMS + [
     ("kubectl-oidc_login", "@multitool//tools/kubectl-oidc_login"),
 ]
 
@@ -115,6 +118,10 @@ def _install_codex_cloud_impl(ctx):
     bin_dir = install_bazel_tool_shims(ctx, CODEX_CLOUD_SHIMS, ctx.args.bin_dir)
     return 0 if bin_dir != "" else 1
 
+def _install_agent_cloud_impl(ctx):
+    bin_dir = install_bazel_tool_shims(ctx, AGENT_CLOUD_SHIMS, ctx.args.bin_dir)
+    return 0 if bin_dir != "" else 1
+
 def _uninstall_impl(ctx):
     return uninstall_bazel_tool_shims(ctx, DEBUG_CLI_SHIMS + BUILD_TOOL_SHIMS, ctx.args.bin_dir)
 
@@ -143,6 +150,16 @@ install_codex_cloud = task(
     summary = "Install only the repo-pinned CLIs required by the Codex cloud cluster read path.",
     args = {
         "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory for installed Codex cloud CLI shims."),
+    },
+)
+
+install_agent_cloud = task(
+    implementation = _install_agent_cloud_impl,
+    name = "install-agent-cloud",
+    group = ["tools"],
+    summary = "Install the pinned CLIs required by provider-hosted delivery-read sessions.",
+    args = {
+        "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory for agent cloud CLI shims."),
     },
 )
 

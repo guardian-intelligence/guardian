@@ -70,6 +70,10 @@ func TestCodexCloudTunnelIsServiceAuthenticatedAndReadPathOnly(t *testing.T) {
 		`resource "cloudflare_zero_trust_tunnel_cloudflared" "guardian_codex_cloud"`,
 		`service  = "tcp://kubernetes.default.svc:443"`,
 		`resource "cloudflare_zero_trust_access_service_token" "guardian_codex_cloud"`,
+		`resource "cloudflare_zero_trust_access_service_token" "guardian_cloud_agent"`,
+		`for_each = local.cloud_agent_providers`,
+		`guardian_cloud_agent["cursor"].id`,
+		`guardian_cloud_agent["devin"].id`,
 		`decision   = "non_identity"`,
 		`token_id = cloudflare_zero_trust_access_service_token.guardian_codex_cloud.id`,
 		`name    = local.codex_cloud_k8s_api_hostname`,
@@ -291,7 +295,7 @@ func TestPersonaLadderShape(t *testing.T) {
 				case "secrets":
 					t.Fatalf("ClusterRole %s grants secrets; no persona may read a secret value", name)
 				case "serviceaccounts/token":
-					if name != "guardian-persona-secrets-writer-token" {
+					if name != "guardian-persona-secrets-writer-token" && name != "guardian-persona-cloud-agent-token" {
 						t.Fatalf("ClusterRole %s grants serviceaccounts/token outside the pinned token-mint lane", name)
 					}
 				}
