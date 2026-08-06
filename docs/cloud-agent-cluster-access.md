@@ -40,6 +40,11 @@ Cursor environment immediately before one cloud run, and remove any temporary
 file immediately after injection. Reusing an expired environment intentionally
 fails closed.
 
+The accepted audience is the management API server's service-account issuer,
+`https://10.8.0.250:6443`, which is also the `apiServerEndpoint` in the
+Cozystack platform package. The public Cloudflare hostname is transport only
+and is not a Kubernetes token audience.
+
 Each provider environment receives:
 
 - `GUARDIAN_AGENT_PROVIDER`: `devin` or `cursor`.

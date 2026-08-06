@@ -469,7 +469,7 @@ spec:
           has(object.spec.expirationSeconds) &&
           object.spec.expirationSeconds <= 3600 &&
           size(object.spec.audiences) == 1 &&
-          object.spec.audiences[0] == "https://kubernetes.default.svc")
+          object.spec.audiences[0] == "https://10.8.0.250:6443")
       message: >-
         the read persona may only open pod port-forwards and mint one-hour-or-
         shorter delivery-read cloud-agent tokens; every other write is denied.
@@ -694,7 +694,7 @@ spec:
             has(object.spec.expirationSeconds) &&
             object.spec.expirationSeconds <= 3600 &&
             size(object.spec.audiences) == 1 &&
-            object.spec.audiences[0] == "https://kubernetes.default.svc")))
+            object.spec.audiences[0] == "https://10.8.0.250:6443")))
       message: >-
         the write-basic persona may only delete pods and jobs, scale workloads,
         open pod port-forwards, mint non-root secrets-writer tokens, and mint

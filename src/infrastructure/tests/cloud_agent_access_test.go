@@ -69,7 +69,7 @@ func TestCloudAgentDeliveryReadBoundary(t *testing.T) {
 	platformRaw := readText(t, platformPath)
 	for _, want := range []string{
 		`object.spec.expirationSeconds <= 3600`,
-		`object.spec.audiences[0] == "https://kubernetes.default.svc"`,
+		`object.spec.audiences[0] == "https://10.8.0.250:6443"`,
 	} {
 		assertTextContains(t, platformRaw, want, platformPath)
 	}
@@ -84,7 +84,7 @@ func TestCloudAgentDeliveryReadBoundary(t *testing.T) {
 		`guardian-cloud-agent-cursor`,
 		`guardian-cloud-agent-devin`,
 		`object.spec.expirationSeconds <= 3600`,
-		`object.spec.audiences[0] == "https://kubernetes.default.svc"`,
+		`object.spec.audiences[0] == "https://10.8.0.250:6443"`,
 	} {
 		if !strings.Contains(usernameGuardRaw, want) {
 			t.Fatalf("platform-agent username admission policy is missing %q", want)
@@ -126,4 +126,8 @@ func TestCloudAgentSetupDoesNotExportStandingKubernetesIdentity(t *testing.T) {
 	} {
 		assertTextNotContains(t, setup, forbidden, setupPath)
 	}
+
+	tokenPath := runfilePath("tools/ops/agent-cloud-token")
+	tokenHelper := readText(t, tokenPath)
+	assertTextContains(t, tokenHelper, "--audience=https://10.8.0.250:6443", tokenPath)
 }

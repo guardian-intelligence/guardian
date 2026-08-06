@@ -47,7 +47,7 @@ trap 'rm -f "${tmp}"' EXIT
 umask 077
 
 kubectl -n tenant-root create token "guardian-cloud-agent-${provider}" \
-  --audience=https://kubernetes.default.svc \
+  --audience=https://10.8.0.250:6443 \
   --duration="${duration}" \
   >"${tmp}"
 test -s "${tmp}"
