@@ -29,7 +29,7 @@ cases:
       kind: TokenRequest
       metadata: {name: guardian-cloud-agent-devin, namespace: tenant-root}
       spec:
-        audiences: [https://kubernetes.default.svc]
+        audiences: [https://10.8.0.250:6443]
         expirationSeconds: 3600
     user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
     expect: allow
@@ -43,7 +43,7 @@ cases:
       kind: TokenRequest
       metadata: {name: guardian-cloud-agent-cursor, namespace: tenant-root}
       spec:
-        audiences: [https://kubernetes.default.svc]
+        audiences: [https://10.8.0.250:6443]
         expirationSeconds: 1800
     user: {username: "keycloak:cozy#other", groups: ["guardian-persona-read", "system:authenticated"]}
     expect: allow
@@ -57,7 +57,7 @@ cases:
       kind: TokenRequest
       metadata: {name: guardian-cloud-agent-devin, namespace: tenant-root}
       spec:
-        audiences: [https://kubernetes.default.svc]
+        audiences: [https://10.8.0.250:6443]
         expirationSeconds: 3601
     user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
     expect: deny
