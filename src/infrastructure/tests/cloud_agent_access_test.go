@@ -74,6 +74,23 @@ func TestCloudAgentDeliveryReadBoundary(t *testing.T) {
 		assertTextContains(t, platformRaw, want, platformPath)
 	}
 
+	usernameGuard := findDoc(t, docs, "ValidatingAdmissionPolicy", "guardian-platform-agent-readonly")
+	usernameGuardSpec := mapValue(usernameGuard["spec"])
+	if stringValue(usernameGuardSpec["failurePolicy"]) != "Fail" {
+		t.Fatal("platform-agent username admission policy must fail closed")
+	}
+	usernameGuardRaw := stringValue(mapValue(sliceValue(usernameGuardSpec["validations"])[0])["expression"])
+	for _, want := range []string{
+		`guardian-cloud-agent-cursor`,
+		`guardian-cloud-agent-devin`,
+		`object.spec.expirationSeconds <= 3600`,
+		`object.spec.audiences[0] == "https://kubernetes.default.svc"`,
+	} {
+		if !strings.Contains(usernameGuardRaw, want) {
+			t.Fatalf("platform-agent username admission policy is missing %q", want)
+		}
+	}
+
 	policy := findDoc(t, docs, "ValidatingAdmissionPolicy", "guardian-persona-delivery-read")
 	spec := mapValue(policy["spec"])
 	if stringValue(spec["failurePolicy"]) != "Fail" {
