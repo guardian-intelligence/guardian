@@ -51,6 +51,29 @@ func TestCloudAgentDeliveryReadBoundary(t *testing.T) {
 		t.Fatalf("cloud-agent token minter resourceNames = %v", names)
 	}
 
+	binding := findDoc(t, docs, "ClusterRoleBinding", "guardian-persona-cloud-agent-token")
+	boundGroups := map[string]bool{}
+	for _, item := range sliceValue(binding["subjects"]) {
+		subject := mapValue(item)
+		if stringValue(subject["kind"]) == "Group" {
+			boundGroups[stringValue(subject["name"])] = true
+		}
+	}
+	for _, group := range []string{"guardian-persona-read", "guardian-persona-write-basic"} {
+		if !boundGroups[group] {
+			t.Fatalf("cloud-agent token minter is not bound to %s", group)
+		}
+	}
+
+	platformPath := runfilePath("src/infrastructure/base/cozystack-identities/platform-admins.yaml")
+	platformRaw := readText(t, platformPath)
+	for _, want := range []string{
+		`object.spec.expirationSeconds <= 3600`,
+		`object.spec.audiences[0] == "https://kubernetes.default.svc"`,
+	} {
+		assertTextContains(t, platformRaw, want, platformPath)
+	}
+
 	policy := findDoc(t, docs, "ValidatingAdmissionPolicy", "guardian-persona-delivery-read")
 	spec := mapValue(policy["spec"])
 	if stringValue(spec["failurePolicy"]) != "Fail" {

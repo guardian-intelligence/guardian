@@ -152,8 +152,10 @@ subjects:
     name: guardian-cloud-agent-cursor
     namespace: tenant-root
 ---
-# Only an interactively approved write-basic session can mint a provider token,
-# and resourceNames prevents it from choosing any more powerful ServiceAccount.
+# The unattended read persona may mint a strictly weaker provider token without
+# crossing a privilege boundary. write-basic retains the same lane for operator
+# workflows, and resourceNames prevents either persona from choosing a more
+# powerful ServiceAccount.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -175,7 +177,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: guardian-persona-write-basic-cloud-agent-token
+  name: guardian-persona-cloud-agent-token
   labels:
     app.kubernetes.io/name: guardian-cloud-agents
     app.kubernetes.io/part-of: guardian
@@ -184,6 +186,9 @@ roleRef:
   kind: ClusterRole
   name: guardian-persona-cloud-agent-token
 subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-persona-read
   - apiGroup: rbac.authorization.k8s.io
     kind: Group
     name: guardian-persona-write-basic

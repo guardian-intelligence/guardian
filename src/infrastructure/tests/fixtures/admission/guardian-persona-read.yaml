@@ -1,8 +1,8 @@
 # The read persona is the rung agent sessions hold unattended, so its boundary
-# is the one a leaked offline token buys. Everything except opening a
-# port-forward must be denied, and the identity must be matched by group as
-# well as by username — a token that arrives without a groups claim must not
-# fail open into an unmatched, unrestricted session.
+# is the one a leaked offline token buys. It may only open a port-forward or
+# derive an exact, shorter-lived delivery-read credential, and the identity
+# must be matched by group as well as by username — a token that arrives
+# without a groups claim must not fail open into an unmatched session.
 policy: guardian-persona-read
 cases:
   - name: pod port-forward
@@ -19,6 +19,62 @@ cases:
     objectName: some-pod
     user: {username: "keycloak:cozy#other", groups: ["guardian-persona-read", "system:authenticated"]}
     expect: allow
+  - name: mint one-hour Devin delivery-read token
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-cloud-agent-devin
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-cloud-agent-devin, namespace: tenant-root}
+      spec:
+        audiences: [https://kubernetes.default.svc]
+        expirationSeconds: 3600
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: allow
+  - name: mint Cursor delivery-read token matched by group
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-cloud-agent-cursor
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-cloud-agent-cursor, namespace: tenant-root}
+      spec:
+        audiences: [https://kubernetes.default.svc]
+        expirationSeconds: 1800
+    user: {username: "keycloak:cozy#other", groups: ["guardian-persona-read", "system:authenticated"]}
+    expect: allow
+  - name: mint cloud agent token longer than one hour
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-cloud-agent-devin
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-cloud-agent-devin, namespace: tenant-root}
+      spec:
+        audiences: [https://kubernetes.default.svc]
+        expirationSeconds: 3601
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: mint cloud agent token for another audience
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-cloud-agent-devin
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-cloud-agent-devin, namespace: tenant-root}
+      spec:
+        audiences: [https://example.invalid]
+        expirationSeconds: 3600
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
   - name: delete pod
     operation: DELETE
     resource: {group: "", version: v1, resource: pods}
