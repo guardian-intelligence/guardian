@@ -22,20 +22,23 @@ CONNECT operation even if RBAC is accidentally widened later.
 
 ## Credential lifecycle
 
-Authenticate locally with the interactive write-basic rung, then mint the
-single provider session credential without printing it:
+Authenticate locally with the unattended read rung, then mint the single
+provider session credential without printing it:
 
 ```sh
-aspect infra auth --persona=write-basic
+aspect infra auth --persona=read
 tools/ops/agent-cloud-token devin --output /dev/shm/guardian-devin-token
 tools/ops/agent-cloud-token cursor --output /dev/shm/guardian-cursor-token
 ```
 
-The API server caps the credential at the requested lifetime; the helper caps
-requests at one hour. Store it only as a Devin `session_secret` or in the Cursor
-environment immediately before one cloud run, and remove any temporary file
-immediately after injection. Reusing an expired environment intentionally fails
-closed.
+The read persona already carries broader cluster read authority than either
+provider ServiceAccount, so minting the derived credential does not cross a
+privilege boundary. RBAC pins the mint to the two exact ServiceAccounts and the
+read persona's admission policy requires the Kubernetes audience and a lifetime
+of no more than one hour. Store it only as a Devin `session_secret` or in the
+Cursor environment immediately before one cloud run, and remove any temporary
+file immediately after injection. Reusing an expired environment intentionally
+fails closed.
 
 Each provider environment receives:
 
@@ -89,7 +92,8 @@ The expected identities are
 
 The one-hour TokenRequest path is the lowest-risk deployable path that does not
 change Guardian's OpenBao initialization ceremony. The durable design removes
-the human mint step while preserving the same ServiceAccounts and RBAC:
+the local mint-and-inject step while preserving the same ServiceAccounts and
+RBAC:
 
 - Devin exchanges its native per-session, audience-bound workload OIDC token.
 - Cursor exchanges its automatically refreshed one-hour AWS AssumeRole
