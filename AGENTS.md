@@ -28,7 +28,7 @@ The loop is: worktree → change → PR/CI → merge → babysit convergence →
 Optional:
 
 * Learn what development tooling exists with `aspect --help`
-* Install tools and confirm access if this is first time setup: `eval "$(scripts/bootstrap.sh path)" && aspect tools install && eval "$(aspect tools path)" && aspect infra auth` (auth required for babysitting your change after merge). Tool shims installed by `aspect tools install` are available in `./.guardian/tools/bin`.
+* Install tools if this is first time setup: `eval "$(scripts/bootstrap.sh path)" && aspect tools install && eval "$(aspect tools path)"`. Before cluster access, select the authentication route for the execution environment from `docs/agent-environment-authentication.md`. Tool shims installed by `aspect tools install` are available in `./.guardian/tools/bin`.
 
 
 ```sh
@@ -59,8 +59,8 @@ Common post-merge issues:
 
 House rules:
 - Do not use administration CLIs as a second control plane, use them for reads. Rely on Flux to converge the cluster after merge.
-- Sessions carry authority by persona: `aspect infra auth --persona=<rung>`. The default `read` gives cluster-wide read plus port-forward and stays logged in unattended. Repair verbs (delete a wedged pod, scale a workload, mint a non-root secrets-writer token) need `write-basic`; tenant-root secret writes and emergencies need `write-all`. Neither write rung holds `offline_access`, so each costs the operator a device approval and expires with its Keycloak session. Ask for the rung you need rather than assuming you have it. The ladder and how to extend it: `src/infrastructure/base/cozystack-identities/platform-admins.yaml`.
-- If relevant to your task, clean up any hanging resources post-merge. `--persona=root --reason "<why>"` is the x509 breakglass minted from the custody bundle; it is audit logged, pages a human, and is only for when Keycloak itself is unavailable.
+- Authentication, persona selection, provider-cloud credentials, and breakglass are routed by `docs/agent-environment-authentication.md`. Select the execution-environment row before cluster access; never copy an authentication path between environments or assume an agent product implies authority.
+- If relevant to your task, clean up any hanging resources post-merge.
 </development_loop>
 
 <observability>
