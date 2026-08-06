@@ -1,5 +1,10 @@
 # Devin and Cursor cluster access
 
+For environment selection, authority comparison, and routes for local agents,
+Codex Cloud, self-hosted agents, CI, and breakglass, start with
+[Agent environment authentication](agent-environment-authentication.md). This
+page is the setup and proof runbook for provider-hosted Cursor and Devin.
+
 Provider-hosted development sessions reach the Guardian management cluster
 through the existing Cloudflare TCP tunnel and a provider-specific Kubernetes
 ServiceAccount. Git remains the write path: agents push a branch and open a PR;
