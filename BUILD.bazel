@@ -6,6 +6,8 @@ exports_files([
     "MODULE.bazel",
     ".bazelignore",
     "AGENTS.md",
+    "scripts/agent-cloud-maintenance.sh",
+    "scripts/agent-cloud-setup.sh",
 ])
 
 # .github is part of this package (no BUILD file below it), so the workflow

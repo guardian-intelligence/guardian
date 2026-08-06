@@ -676,11 +676,14 @@ spec:
         (request.operation == "CREATE" && request.resource.group == "" &&
           request.resource.resource == "serviceaccounts" &&
           has(request.subResource) && request.subResource == "token" &&
-          has(request.name) && request.name == "secrets-writer" &&
-          request.namespace != "tenant-root")
+          has(request.name) &&
+          ((request.name == "secrets-writer" && request.namespace != "tenant-root") ||
+           (request.name in ["guardian-cloud-agent-cursor", "guardian-cloud-agent-devin"] &&
+            request.namespace == "tenant-root")))
       message: >-
         the write-basic persona may only delete pods and jobs, scale workloads,
-        open pod port-forwards, and mint non-root secrets-writer ServiceAccount tokens
+        open pod port-forwards, mint non-root secrets-writer tokens, and mint
+        short-lived delivery-read cloud-agent tokens
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
