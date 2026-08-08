@@ -57,10 +57,16 @@ async function connect() {
   const myEpoch = ++epoch;
   try {
     const info = await (await fetch("/mythra/wt-info", { cache: "no-store" })).json();
-    const hash = Uint8Array.from(atob(info.certHashB64), c => c.charCodeAt(0));
-    transport = new WebTransport(`https://${info.addr}/wt`, {
-      serverCertificateHashes: [{ algorithm: "sha-256", value: hash.buffer }],
-    });
+    if (info.certHashB64) {
+      // self-signed fallback: hash-pinned dial (Chromium-only)
+      const hash = Uint8Array.from(atob(info.certHashB64), c => c.charCodeAt(0));
+      transport = new WebTransport(`https://${info.addr}/wt`, {
+        serverCertificateHashes: [{ algorithm: "sha-256", value: hash.buffer }],
+      });
+    } else {
+      // CA-issued cert: standards path, works wherever WebTransport does
+      transport = new WebTransport(`https://${info.addr}/wt`);
+    }
     await transport.ready;
     if (myEpoch !== epoch) { transport.close(); return; }
     backoff = 300;
@@ -197,8 +203,16 @@ function render(dogs) {
   }
 }
 
-logLine(spectate ? "spectating — your dog stays home" : "joining with your dog");
-connect();
+if (typeof WebTransport === "undefined") {
+  setStatus("unsupported");
+  $("who").textContent = "This browser can't reach the dog park (no WebTransport). " +
+    "Open this page in Chrome or Edge on desktop, or Chrome on Android. " +
+    "iPhone support arrives with the app.";
+  logLine("WebTransport unavailable in this browser");
+} else {
+  logLine(spectate ? "spectating — your dog stays home" : "joining with your dog");
+  connect();
+}
 </script>
 </body>
 </html>

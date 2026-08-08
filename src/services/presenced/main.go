@@ -703,6 +703,62 @@ func (rc *rotatingCert) get() (tls.Certificate, [32]byte) {
 	return rc.cert, rc.hash
 }
 
+// fileCert serves a CA-issued cert from mounted Secret files, re-reading on
+// change so cert-manager renewals land without a restart. loaded() reports
+// whether a real cert is being served (vs the self-signed fallback).
+type fileCert struct {
+	mu       sync.Mutex
+	certFile string
+	keyFile  string
+	cert     *tls.Certificate
+	modTime  time.Time
+}
+
+func newFileCert(certFile, keyFile string) *fileCert {
+	fc := &fileCert{certFile: certFile, keyFile: keyFile}
+	fc.reload()
+	go func() {
+		for range time.Tick(30 * time.Second) {
+			fc.reload()
+		}
+	}()
+	return fc
+}
+
+func (fc *fileCert) reload() {
+	st, err := os.Stat(fc.certFile)
+	if err != nil {
+		return
+	}
+	fc.mu.Lock()
+	unchanged := st.ModTime().Equal(fc.modTime)
+	fc.mu.Unlock()
+	if unchanged {
+		return
+	}
+	cert, err := tls.LoadX509KeyPair(fc.certFile, fc.keyFile)
+	if err != nil {
+		log.Printf("tls: keypair load failed (keeping previous): %v", err)
+		return
+	}
+	fc.mu.Lock()
+	fc.cert, fc.modTime = &cert, st.ModTime()
+	fc.mu.Unlock()
+	log.Printf("tls: loaded CA-issued certificate from %s", fc.certFile)
+}
+
+func (fc *fileCert) loaded() bool {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	return fc.cert != nil
+}
+
+func (fc *fileCert) get() *tls.Certificate {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	return fc.cert
+}
+
 func main() {
 	tickHz := envInt("TICK_HZ", 24)
 	wtPort := envInt("WT_PORT", 4433)
@@ -710,7 +766,7 @@ func main() {
 	metricsPort := envInt("METRICS_PORT", 9633)
 	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/mythra/behavior")
 	assetDir := envStr("ASSET_DIR", "/etc/mythra/assets")
-	publicAddr := envStr("PUBLIC_ADDR", "") // "ip:port" advertised to clients
+	publicAddr := envStr("PUBLIC_ADDR", "") // "host:port" advertised to clients
 	allowedOrigins := envStr("ALLOWED_ORIGINS", "")
 
 	sans := []net.IP{net.ParseIP("127.0.0.1")}
@@ -727,6 +783,7 @@ func main() {
 		}
 	}
 	rc := newRotatingCert(sans)
+	fc := newFileCert(envStr("TLS_CERT_FILE", ""), envStr("TLS_KEY_FILE", ""))
 
 	live := newBehaviorSlot("live")
 	shadow := newBehaviorSlot("shadow")
@@ -745,7 +802,12 @@ func main() {
 		H3: &http3.Server{
 			Addr: fmt.Sprintf(":%d", wtPort),
 			TLSConfig: &tls.Config{
+				// CA-issued cert when the mounted Secret has one; self-signed
+				// fallback (hash-pinned dial) until then.
 				GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+					if c := fc.get(); c != nil {
+						return c, nil
+					}
 					c, _ := rc.get()
 					return &c, nil
 				},
@@ -787,17 +849,20 @@ func main() {
 		w.Write(mythraHTML)
 	})
 	pageMux.HandleFunc("/mythra/wt-info", func(w http.ResponseWriter, r *http.Request) {
-		_, hash := rc.get()
 		addr := publicAddr
 		if addr == "" {
 			addr = "127.0.0.1:" + strconv.Itoa(wtPort)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(map[string]any{
-			"addr":        addr,
-			"certHashB64": base64.StdEncoding.EncodeToString(hash[:]),
-		})
+		info := map[string]any{"addr": addr}
+		// The hash rides only while the self-signed fallback serves: with a
+		// CA-issued cert the dial is the standards path (WebKit-compatible).
+		if !fc.loaded() {
+			_, hash := rc.get()
+			info["certHashB64"] = base64.StdEncoding.EncodeToString(hash[:])
+		}
+		json.NewEncoder(w).Encode(info)
 	})
 	pageMux.HandleFunc("/mythra/assets/", func(w http.ResponseWriter, r *http.Request) {
 		ref := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/mythra/assets/"), ".svg")

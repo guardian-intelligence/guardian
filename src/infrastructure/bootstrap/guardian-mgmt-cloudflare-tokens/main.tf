@@ -6,11 +6,13 @@
 # check below turns every routine plan into the renewal reminder.
 
 locals {
-  zone_id            = "c952fb5989d232593ec9cca71030cb58" # guardianintelligence.org
-  rumi_zone_id       = "034bf5d0a4ff33b0e9965f50be70d8d0" # rumi.engineering
-  account_resource   = "com.cloudflare.api.account.${var.cloudflare_account_id}"
-  zone_resource      = "com.cloudflare.api.account.zone.${local.zone_id}"
-  rumi_zone_resource = "com.cloudflare.api.account.zone.${local.rumi_zone_id}"
+  zone_id              = "c952fb5989d232593ec9cca71030cb58" # guardianintelligence.org
+  rumi_zone_id         = "034bf5d0a4ff33b0e9965f50be70d8d0" # rumi.engineering
+  mythra_zone_id       = "4bfa5c0e3d0183dc0e30b9c4cbc17d47"   # wakeupmythra.com
+  account_resource     = "com.cloudflare.api.account.${var.cloudflare_account_id}"
+  zone_resource        = "com.cloudflare.api.account.zone.${local.zone_id}"
+  rumi_zone_resource   = "com.cloudflare.api.account.zone.${local.rumi_zone_id}"
+  mythra_zone_resource = "com.cloudflare.api.account.zone.${local.mythra_zone_id}"
 
   # Stable identifiers from GET /accounts/<id>/tokens/permission_groups.
   permission_groups = {
@@ -45,6 +47,7 @@ locals {
     payments_journal      = "2026-10-06T00:00:00Z"
     r2_backups            = "2026-10-06T00:00:00Z"
     r2_state              = "2026-10-06T00:00:00Z"
+    mythra_acme_dns       = "2026-10-06T00:00:00Z"
   }
 }
 
@@ -78,7 +81,7 @@ resource "cloudflare_account_token" "dns_lb_provisioner" {
         { id = local.permission_groups.load_balancers_read },
         { id = local.permission_groups.load_balancers_write },
       ]
-      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*" })
+      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*", (local.mythra_zone_resource) = "*" })
     },
   ]
 }
@@ -125,7 +128,7 @@ resource "cloudflare_account_token" "edge_policy_provisioner" {
         { id = local.permission_groups.ssl_certificates_write },
         { id = local.permission_groups.firewall_services_write },
       ]
-      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*" })
+      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*", (local.mythra_zone_resource) = "*" })
     },
   ]
 }
@@ -240,4 +243,30 @@ check "token_expiry_horizon" {
     ])
     error_message = "A lane token expires within 21 days. Rotate it: bump local.expires, taint the token resource, apply, relay to the lane's consumer."
   }
+}
+
+# In-cluster credential for cert-manager's ACME DNS-01 solver on the
+# wakeupmythra.com game plane (wt.wakeupmythra.com). The QUIC endpoint is
+# dialed directly by browsers - Cloudflare cannot proxy WebTransport - so its
+# certificate must chain to a public CA; this is the repo's first ACME lane.
+# DNS write on the mythra zone ONLY: the blast radius of a leak is TXT
+# records on the product zone, never the apex estate. Relayed into OpenBao at
+# kv/guardian/guardian-mgmt/tenant-guardian-prod/mythra/acme-dns (property
+# CF_API_TOKEN) via the guardian-writer-tenant-guardian-prod scoped role.
+resource "cloudflare_account_token" "mythra_acme_dns" {
+  account_id = var.cloudflare_account_id
+  name       = "guardian-mythra-acme-dns"
+  expires_on = local.expires.mythra_acme_dns
+
+  policies = [
+    {
+      effect = "allow"
+      permission_groups = [
+        { id = local.permission_groups.zone_read },
+        { id = local.permission_groups.dns_read },
+        { id = local.permission_groups.dns_write },
+      ]
+      resources = jsonencode({ (local.mythra_zone_resource) = "*" })
+    },
+  ]
 }

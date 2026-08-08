@@ -320,3 +320,59 @@ resource "cloudflare_dns_record" "rumi_engineering_caa" {
   }
   comment = "privatecut edge certificate issuance policy"
 }
+
+data "cloudflare_zone" "wakeupmythra_com" {
+  filter = {
+    name = "wakeupmythra.com"
+    account = {
+      id = var.cloudflare_account_id
+    }
+  }
+}
+
+resource "cloudflare_dns_record" "wakeupmythra_com_apex" {
+  for_each = local.public_ingress_origins
+
+  zone_id = data.cloudflare_zone.wakeupmythra_com.id
+  name    = "wakeupmythra.com"
+  type    = "A"
+  content = each.value.public_ipv4
+  ttl     = 1
+  proxied = true
+  comment = "wake up mythra ${each.key} product edge"
+}
+
+# The game plane: browsers dial WebTransport/QUIC on this name directly -
+# Cloudflare cannot proxy it - so the record is DNS-only and points at the
+# node that binds UDP 4433 (the presenced hostNetwork pin). Multi-node game
+# fleets later mean more records here, not a proxy.
+resource "cloudflare_dns_record" "wakeupmythra_com_wt" {
+  zone_id = data.cloudflare_zone.wakeupmythra_com.id
+  name    = "wt.wakeupmythra.com"
+  type    = "A"
+  content = local.public_ingress_origins["ash-earth"].public_ipv4
+  ttl     = 300
+  proxied = false
+  comment = "wake up mythra game plane (WebTransport, dialed direct)"
+}
+
+# CAA: the Cloudflare edge issues via Google Trust Services or Let's
+# Encrypt, and the wt game-plane certificate issues via Let's Encrypt
+# (cert-manager DNS-01). Nothing else may issue for this zone.
+resource "cloudflare_dns_record" "wakeupmythra_com_caa" {
+  for_each = {
+    letsencrypt = "letsencrypt.org"
+    google      = "pki.goog"
+  }
+
+  zone_id = data.cloudflare_zone.wakeupmythra_com.id
+  name    = "wakeupmythra.com"
+  type    = "CAA"
+  ttl     = 1
+  data = {
+    flags = 0
+    tag   = "issue"
+    value = each.value
+  }
+  comment = "wake up mythra certificate issuance policy"
+}
