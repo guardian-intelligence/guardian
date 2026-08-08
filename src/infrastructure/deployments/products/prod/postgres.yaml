@@ -1,13 +1,9 @@
 # Prod shared product Postgres: one instance per stage, with a database per
 # product inside it; never per-product instances, never cross-stage sharing.
-# The first database is cockpit, the status-cockpit event ledger, consumed via
-# ElectricSQL logical replication for the read path. Credentials for declared
-# users are generated into Secret/postgres-products-credentials.
+# Credentials for declared users are generated into
+# Secret/postgres-products-credentials.
 #
 # Connection budget (max_connections=100):
-# - electric pool: 20 when the Electric consumer lands
-# - cockpit-api pool: 10
-# - cockpit writers (rollup + events) pool: 4
 # - payments pool: 16 during a Flagger rollout, 8 at steady state
 # - directus pool: 5
 # - operators/ad-hoc: 5
@@ -52,19 +48,9 @@ spec:
       archive_timeout: 300s
       max_slot_wal_keep_size: 4GB
   users:
-    cockpit: {}
-    cockpit_writer: {}
     directus: {}
-    electric:
-      replication: true
     payments: {}
   databases:
-    cockpit:
-      roles:
-        admin:
-          - cockpit
-          - cockpit_writer
-          - electric
     directus:
       roles:
         admin:
