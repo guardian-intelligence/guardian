@@ -16,9 +16,11 @@ require (
 	github.com/chromedp/cdproto v0.0.0-20260719223732-95f6af754cfe
 	github.com/chromedp/chromedp v0.16.0
 	github.com/coreos/go-oidc/v3 v3.20.0
-	github.com/google/cel-go v0.29.2
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/openbao/openbao/api/v2 v2.6.0
+	github.com/prometheus/common v0.70.1
+	github.com/quic-go/quic-go v0.61.0
+	github.com/quic-go/webtransport-go v0.12.0
 	github.com/stripe/stripe-go/v83 v83.2.1
 	github.com/tigerbeetle/tigerbeetle-go v0.17.9
 	go.opentelemetry.io/otel v1.44.0
@@ -56,6 +58,7 @@ require (
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/dunglas/httpsfv v1.1.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
@@ -67,6 +70,7 @@ require (
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.4.0 // indirect
+	github.com/google/cel-go v0.29.2 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
@@ -78,8 +82,8 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.67.5 // indirect
-	github.com/prometheus/procfs v0.19.2 // indirect
+	github.com/prometheus/procfs v0.21.0 // indirect
+	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
@@ -137,7 +141,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
-	go.yaml.in/yaml/v2 v2.4.3 // indirect
+	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
 	golang.org/x/sync v0.22.0 // indirect

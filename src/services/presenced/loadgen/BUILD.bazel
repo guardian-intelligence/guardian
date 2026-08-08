@@ -1,0 +1,23 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "loadgen_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/presenced/loadgen",
+    visibility = ["//visibility:private"],
+    deps = [
+        "@com_github_prometheus_client_golang//prometheus:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus/promauto:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus/promhttp:go_default_library",
+        "@com_github_prometheus_common//expfmt:go_default_library",
+        "@com_github_quic_go_quic_go//http3:go_default_library",
+        "@com_github_quic_go_webtransport_go//:go_default_library",
+    ],
+)
+
+go_binary(
+    name = "loadgen",
+    embed = [":loadgen_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)
