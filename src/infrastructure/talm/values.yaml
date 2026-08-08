@@ -153,6 +153,12 @@ ingressFirewall:
   # firewall does not exempt it, so the fabric subnets are admitted
   # explicitly alongside podSubnets (declared at the top of this file).
   joinSubnet: "100.64.0.0/16"
+  # The Wake Up Mythra game plane: WebTransport/QUIC must be dialed directly
+  # by browsers (Cloudflare cannot proxy it), so these UDP ports admit the
+  # world. Admission past the port is QUIC's stateless retry plus the
+  # certificate-hash contract served by the control plane.
+  publicUDPPorts:
+    - "4433"
   operatorSubnets:
     - "148.113.198.223/32"
   cloudflareEdgeSubnets:

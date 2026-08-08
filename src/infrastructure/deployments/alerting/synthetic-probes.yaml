@@ -66,7 +66,6 @@ spec:
         - https://guardianintelligence.org/
         - https://guardianintelligence.org/letters
         - https://guardianintelligence.org/letters/dear-shovon
-        - https://guardianintelligence.org/electric/v1/shape?table=status_heartbeat&offset=-1
       labels:
         probe_class: edge
         probe_namespace: tenant-guardian-prod

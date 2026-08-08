@@ -1,0 +1,202 @@
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: guardian-codex-cloud-tunnel
+  namespace: external-dns
+  labels:
+    app.kubernetes.io/name: guardian-codex-cloud-tunnel
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/secret-scope: external-dns
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: external-dns-openbao
+  target:
+    name: guardian-codex-cloud-tunnel
+    creationPolicy: Orphan
+    deletionPolicy: Retain
+    template:
+      type: Opaque
+      engineVersion: v2
+  data:
+    - secretKey: token
+      remoteRef:
+        key: guardian/guardian-mgmt/external-dns/codex-cloud-tunnel
+        property: token
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guardian-codex-cloud-tunnel
+  namespace: external-dns
+  labels:
+    app.kubernetes.io/name: guardian-codex-cloud-tunnel
+    app.kubernetes.io/part-of: guardian
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: guardian-codex-cloud-tunnel
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: guardian-codex-cloud-tunnel
+        app.kubernetes.io/part-of: guardian
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: guardian-codex-cloud-tunnel
+      containers:
+        - name: cloudflared
+          image: docker.io/cloudflare/cloudflared:2026.7.2@sha256:4f6655284ab3d252b7f28fedb19fe6c8fc82ee5b1295c20ac74d475e5398a52d
+          args:
+            - tunnel
+            - --protocol
+            - http2
+            - --metrics
+            - 0.0.0.0:2000
+            - run
+            - --token-file
+            - /etc/cloudflared/token
+          ports:
+            - name: metrics
+              containerPort: 2000
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            runAsUser: 65532
+            runAsGroup: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: tunnel-token
+              mountPath: /etc/cloudflared
+              readOnly: true
+      volumes:
+        - name: tunnel-token
+          secret:
+            secretName: guardian-codex-cloud-tunnel
+            items:
+              - key: token
+                path: token
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: guardian-codex-cloud-tunnel
+  namespace: external-dns
+  labels:
+    app.kubernetes.io/name: guardian-codex-cloud-tunnel
+    app.kubernetes.io/part-of: guardian
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: guardian-codex-cloud-tunnel
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: guardian-codex-cloud-tunnel
+  namespace: external-dns
+  labels:
+    app.kubernetes.io/name: guardian-codex-cloud-tunnel
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: guardian-codex-cloud-tunnel
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: vmagent
+            k8s:io.kubernetes.pod.namespace: cozy-monitoring
+      toPorts:
+        - ports:
+            - port: '2000'
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: '53'
+              protocol: UDP
+            - port: '53'
+              protocol: TCP
+    - toEntities:
+        - kube-apiserver
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: '7844'
+              protocol: TCP
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: guardian-codex-cloud-tunnel
+  namespace: external-dns
+  labels:
+    app.kubernetes.io/name: guardian-codex-cloud-tunnel
+    app.kubernetes.io/part-of: guardian
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: guardian-codex-cloud-tunnel
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: guardian-codex-cloud-tunnel
+  namespace: external-dns
+  labels:
+    app.kubernetes.io/name: guardian-codex-cloud-tunnel
+    app.kubernetes.io/part-of: guardian
+spec:
+  groups:
+    - name: guardian-codex-cloud-tunnel
+      rules:
+        - alert: GuardianCodexCloudTunnelDown
+          expr: kube_deployment_status_replicas_available{namespace="external-dns",deployment="guardian-codex-cloud-tunnel"} < 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Guardian Codex cloud tunnel has no available connectors

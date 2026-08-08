@@ -37,4 +37,10 @@
 # Cargo output from the CLI crate's make path; Bazel builds elsewhere.
 /src/products/postflight-cli/target/
 
-*.pem__pycache__/
+*.pem
+__pycache__/
+
+# uv-managed dev venv for the guardian-bench eval loop; Bazel tests use the
+# repo Python toolchain instead.
+/src/products/guardian-bench/.venv/
+/src/products/guardian-bench/outputs/

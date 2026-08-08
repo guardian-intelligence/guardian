@@ -30,9 +30,8 @@
   // ignorePaths replaces the preset default, so the node_modules entries
   // come along). The image-automation controller (deployments/guardian/
   // imageops) git-pushes first-party pin bumps into exactly these marker
-  // files; the cockpit pins move by hand; the rest of deployments/ is
-  // infrastructure components whose chart pins Renovate proposes like any
-  // other dep.
+  // files; the rest of deployments/ is infrastructure components whose chart
+  // pins Renovate proposes like any other dep.
   ignorePaths: [
     "**/node_modules/**",
     "**/bower_components/**",
@@ -41,20 +40,17 @@
     "src/infrastructure/deployments/privatecut/**",
     "src/infrastructure/deployments/postflight-runner/**",
     "src/infrastructure/deployments/iam/prod/journey-canary.yaml",
-    "src/infrastructure/deployments/products/prod/cockpit-events.yaml",
-    "src/infrastructure/deployments/products/prod/cockpit-rollup.yaml",
   ],
 
-  // Third-party workload images (Keycloak, Electric, Renovate, Directus) are
-  // ordinary dependencies — Renovate is their one proposer, scoped to exactly
-  // their manifests so it can never reach the automation-owned first-party
-  // pins.
+  // Third-party workload images (Keycloak, Renovate, Directus) are ordinary
+  // dependencies — Renovate is their one proposer, scoped to exactly their
+  // manifests so it can never reach the automation-owned first-party pins.
   kubernetes: {
     managerFilePatterns: [
       "/^src/infrastructure/deployments/iam/prod/keycloak\\.yaml$/",
       "/^src/infrastructure/deployments/iam/prod/realm-reconciler\\.yaml$/",
       "/^src/infrastructure/deployments/products/prod/directus\\.yaml$/",
-      "/^src/infrastructure/deployments/products/prod/electric\\.yaml$/",
+      "/^src/infrastructure/deployments/products/prod/directus-provisioner\\.yaml$/",
       "/^src/infrastructure/deployments/guardian/imageops/renovate\\.yaml$/",
     ],
   },

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "usage: tools/ops/agent-cloud-token <cursor|devin> --output <path> [--duration <duration>]" >&2
+  exit 2
+}
+
+provider="${1:-}"
+shift || true
+case "${provider}" in
+cursor | devin) ;;
+*) usage ;;
+esac
+
+output=""
+duration="1h"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+  --output)
+    [[ $# -ge 2 ]] || usage
+    output="$2"
+    shift 2
+    ;;
+  --duration)
+    [[ $# -ge 2 ]] || usage
+    duration="$2"
+    shift 2
+    ;;
+  *) usage ;;
+  esac
+done
+
+[[ -n "${output}" ]] || usage
+case "${duration}" in
+10m | 15m | 30m | 45m | 1h) ;;
+*)
+  echo "duration must be one of 10m, 15m, 30m, 45m, or 1h" >&2
+  exit 2
+  ;;
+esac
+
+output_dir="$(dirname "${output}")"
+mkdir -p "${output_dir}"
+tmp="$(mktemp "${output}.XXXXXX")"
+trap 'rm -f "${tmp}"' EXIT
+umask 077
+
+kubectl -n tenant-root create token "guardian-cloud-agent-${provider}" \
+  --audience=https://10.8.0.250:6443 \
+  --duration="${duration}" \
+  >"${tmp}"
+test -s "${tmp}"
+chmod 600 "${tmp}"
+mv "${tmp}" "${output}"
+trap - EXIT
+echo "minted ${duration} ${provider} delivery-read credential at ${output}"

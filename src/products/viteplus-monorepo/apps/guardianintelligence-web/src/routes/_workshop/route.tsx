@@ -20,6 +20,8 @@ function WorkshopLayout() {
   const location = useLocation();
   const isLandingRoute = location.pathname === "/";
 
+  if (isLandingRoute) return <Outlet />;
+
   return (
     <div
       data-treatment="workshop"
@@ -30,7 +32,7 @@ function WorkshopLayout() {
       <main id="main" className="flex-1">
         <Outlet />
       </main>
-      {isLandingRoute ? null : <WorkshopFooter />}
+      <WorkshopFooter />
     </div>
   );
 }

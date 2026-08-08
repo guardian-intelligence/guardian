@@ -1,31 +1,29 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { FirstLight } from "~/features/first-light";
+import {
+  COMPANY_EXPERIENCE_BOOTSTRAP,
+  COMPANY_EXPERIENCE_CRITICAL_CSS,
+  prepareCompanyExperience,
+} from "~/components/company-home/company-experience";
 import { canonicalLink, ogMeta } from "~/lib/head";
 
 export const Route = createFileRoute("/_workshop/")({
+  beforeLoad: () => prepareCompanyExperience(),
   component: LandingPage,
   head: () => ({
     meta: ogMeta({
       slug: "home",
-      title: "Guardian — The world needs your business to succeed.",
+      title: "Guardian Intelligence",
       description:
-        "Guardian is an American applied intelligence firm. We build the reference architecture for the systems every founder has to build before they can build what matters.",
+        "Guardian Intelligence builds reusable software in the open and private systems under enterprise contract.",
       path: "/",
       imageFormat: "png",
     }),
     links: [canonicalLink("/")],
+    styles: [{ children: COMPANY_EXPERIENCE_CRITICAL_CSS }],
+    scripts: [{ children: COMPANY_EXPERIENCE_BOOTSTRAP }],
   }),
 });
 
 function LandingPage() {
-  return <LandingHero />;
-}
-
-function LandingHero() {
-  return (
-    <section className="relative isolate min-h-[calc(100svh-var(--header-h))] overflow-hidden">
-      <div className="absolute inset-0 bg-[var(--treatment-ground)]" />
-      <FirstLight />
-    </section>
-  );
+  return null;
 }

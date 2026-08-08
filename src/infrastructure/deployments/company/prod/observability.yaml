@@ -1,0 +1,29 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: guardianintelligence-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: guardianintelligence-web
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: company
+    guardian.dev/stage: prod
+spec:
+  groups:
+    - name: guardianintelligence-web.rules
+      interval: 30s
+      rules:
+        - alert: GuardianHomepageVisualIntegrityFailures
+          expr: >-
+            sum(increase(analytics_ingest_events_by_name_total{site="guardianintelligence.org",event_name="company.hero_visual_integrity_failed"}[15m]))
+            >= 3
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "Guardian homepage startup visual integrity is degraded"
+            description: >-
+              The Guardian homepage reported {{ printf "%.0f" $value }} startup visual
+              integrity failures in the last 15m. Inspect
+              company.hero_visual_integrity_failed events in guardian_analytics.events;
+              props identify premature content, layout shifts, and long-frame thrash.

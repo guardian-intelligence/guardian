@@ -1,0 +1,78 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
+go_library(
+    name = "presenced_lib",
+    srcs = ["main.go"],
+    embedsrcs = [
+        "behaviors/random_walk.lua",
+        "static/mythra.html",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/presenced",
+    visibility = ["//visibility:private"],
+    deps = [
+        "@com_github_prometheus_client_golang//prometheus:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus/promauto:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus/promhttp:go_default_library",
+        "@com_github_quic_go_quic_go//http3:go_default_library",
+        "@com_github_quic_go_webtransport_go//:go_default_library",
+        "@com_github_yuin_gopher_lua//:go_default_library",
+    ],
+)
+
+go_binary(
+    name = "presenced",
+    embed = [":presenced_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)
+
+# The image carries both the service and its protocol load driver; the
+# loadgen Job selects it via command. k6 cannot speak WebTransport, so the
+# driver ships here rather than as a k6 script (docs/loadtest.md conventions
+# still apply: results land in VictoriaMetrics, never only pod logs).
+pkg_tar(
+    name = "presenced_layer",
+    files = {
+        ":presenced": "app/presenced",
+        "//src/services/presenced/loadgen": "app/loadgen",
+    },
+    modes = {
+        "app/presenced": "0755",
+        "app/loadgen": "0755",
+    },
+)
+
+oci_image(
+    name = "image",
+    annotations = {
+        "org.opencontainers.image.description": "Room presence and tick service over WebTransport, with its load driver",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "guardian-presenced",
+    },
+    architecture = "amd64",
+    os = "linux",
+    entrypoint = ["/app/presenced"],
+    exposed_ports = [
+        "4433/udp",
+        "9090/tcp",
+    ],
+    tars = [":presenced_layer"],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/presenced:dev"],
+)
+
+# Pushed by CI (.github/workflows/images.yml) on merges to main.
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/presenced",
+    visibility = ["//visibility:public"],
+)

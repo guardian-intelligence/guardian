@@ -1,7 +1,14 @@
 import { createFileRoute, Link, notFound, useSearch } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
 import { ArrowLeft } from "lucide-react";
 import { useEffect } from "react";
-import { letterBySlug, type Letter } from "~/content/letters";
+import * as v from "valibot";
+import type { Letter } from "~/content/letters";
+import {
+  publishedLetterBySlug,
+  setLettersEdgeCacheHeader,
+  setUncacheableHeader,
+} from "~/content/letters.server";
 import { HandwrittenSignature } from "~/features/letters/handwritten-signature";
 import {
   LETTER_POST_PAGE_PADDING_CLASS,
@@ -76,10 +83,21 @@ function letterJsonLd(letter: Letter) {
 // characters wide, struck where it would be. The frontmatter title doubles as
 // the <head>/OG title.
 
+const letterLoader = createServerFn({ method: "GET" })
+  .validator((slug: unknown) => v.parse(v.string(), slug))
+  .handler(async ({ data: slug }) => {
+    const letter = await publishedLetterBySlug(slug);
+    // A miss must not become a cached 404: a just-published letter's URL
+    // would otherwise stay dead at the edge for the whole TTL.
+    if (letter) setLettersEdgeCacheHeader();
+    else setUncacheableHeader();
+    return { letter: letter ?? null };
+  });
+
 export const Route = createFileRoute("/letters/$slug")({
   component: LetterPost,
-  loader: ({ params }) => {
-    const letter = letterBySlug(params.slug);
+  loader: async ({ params }) => {
+    const { letter } = await letterLoader({ data: params.slug });
     if (!letter) {
       throw notFound();
     }
@@ -133,7 +151,7 @@ function LetterPost() {
     >
       <LetterOgPreviewHotkey />
       {showOgPreview ? (
-        <LetterOgPreview slug={letter.slug} />
+        <LetterOgPreview letter={letter} />
       ) : (
         <div className={LETTER_TEXT_MEASURE_CLASS} data-letter-entry={letter.slug}>
           <LetterReturnLink />

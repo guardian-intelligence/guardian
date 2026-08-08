@@ -346,7 +346,7 @@ each gate:
 4. **Custody re-import.** Runs the importer built from this checkout with
    `--delete-env-file`; the importer removes its own one-shot role and policy
    after verified writes.
-5. **Re-relay.** The four in-cluster-generated values the importer does not
+5. **Re-relay.** The five generated values the importer does not
    carry, each written through its own scoped `guardian-writer-<ns>` role and
    sourced from its still-materialized `Orphan`/`Retain` Secret (values stay
    in memory, never printed): analytics ClickHouse `ingest` (Secret

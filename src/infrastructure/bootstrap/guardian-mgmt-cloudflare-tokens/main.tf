@@ -21,6 +21,9 @@ locals {
     load_balancers_write    = "6d7f2f5f5b1d4a0e9081fdc98d432fd1" # Load Balancers Write (zone)
     lb_monitors_pools_read  = "9d24387c6e8544e2bc4024a03991339f" # Load Balancing: Monitors and Pools Read (account)
     lb_monitors_pools_write = "d2a1802cc9a34e30852f8b33869b2f3c" # Load Balancing: Monitors and Pools Write (account)
+    cloudflare_tunnel_write = "c07321b023e944ff818fec44d8203567" # Cloudflare Tunnel Write (account)
+    access_apps_write       = "1e13c5124ca64b72b1969a67e8829049" # Access: Apps and Policies Write (account); gitleaks:allow -- public permission identifier
+    access_tokens_write     = "a1c0fec57cf94af79479a6d827fa518c" # Access: Service Tokens Write (account); gitleaks:allow -- public permission identifier
     zone_settings_write     = "3030687196b94b638145a3953da2b699" # Zone Settings Write (zone)
     zone_dns_settings_write = "c4df38be41c247b3b4b7702e76eadae0" # Zone DNS Settings Write (zone)
     cache_settings_write    = "9ff81cbbe65c400b97d92c3c1033cab6" # Cache Settings Write (zone)
@@ -60,6 +63,9 @@ resource "cloudflare_account_token" "dns_lb_provisioner" {
       permission_groups = [
         { id = local.permission_groups.lb_monitors_pools_read },
         { id = local.permission_groups.lb_monitors_pools_write },
+        { id = local.permission_groups.cloudflare_tunnel_write },
+        { id = local.permission_groups.access_apps_write },
+        { id = local.permission_groups.access_tokens_write },
       ]
       resources = jsonencode({ (local.account_resource) = "*" })
     },

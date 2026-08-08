@@ -1,0 +1,31 @@
+policy: guardian-persona-delivery-read
+cases:
+  - name: Devin cannot create a ConfigMap
+    operation: CREATE
+    resource: {group: "", version: v1, resource: configmaps}
+    objectName: denied
+    object:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata: {name: denied, namespace: tenant-root}
+    user:
+      username: system:serviceaccount:tenant-root:guardian-cloud-agent-devin
+      groups: [system:serviceaccounts, system:authenticated]
+    expect: deny
+  - name: Cursor cannot open a port-forward
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: portforward
+    objectName: some-pod
+    user:
+      username: system:serviceaccount:tenant-root:guardian-cloud-agent-cursor
+      groups: [system:serviceaccounts, system:authenticated]
+    expect: deny
+  - name: unrelated ServiceAccount is not matched
+    operation: CREATE
+    resource: {group: "", version: v1, resource: configmaps}
+    objectName: controller-owned
+    user:
+      username: system:serviceaccount:tenant-root:flux
+      groups: [system:serviceaccounts, system:authenticated]
+    expect: no-match

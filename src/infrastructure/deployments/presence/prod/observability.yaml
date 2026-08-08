@@ -1,0 +1,62 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: presenced
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: presenced
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  namespaceSelector:
+    matchNames:
+      - tenant-guardian-prod
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: presenced
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: presenced
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: presenced
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  groups:
+    - name: presenced
+      rules:
+        - alert: PresencedScrapeDown
+          expr: sum(up{namespace="tenant-guardian-prod",job="presenced-metrics"}) < 1 or absent(up{namespace="tenant-guardian-prod",job="presenced-metrics"})
+          for: 5m
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "presenced metrics scrape is down"
+            description: "No presenced replica has been scrapeable for five minutes; every other presenced rule is blind while this fires."
+        - alert: PresencedTickBudgetExceeded
+          expr: histogram_quantile(0.99, sum(rate(presence_tick_duration_seconds_bucket[5m])) by (le)) > 0.035
+          for: 10m
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "presenced tick p99 above 35ms"
+            description: "Tick p99 is converging on the 41.7ms budget at 24Hz; the simulation is close to missing ticks."
+        - alert: PresencedBehaviorReloadRejected
+          expr: increase(presence_behavior_reloads_total{result="error"}[10m]) > 0
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "presenced rejected a behavior script"
+            description: "A live or shadow Lua script failed to load; the previous script keeps running. Check presenced logs for the parse error."

@@ -238,16 +238,17 @@ func TestImporterArgsSequence(t *testing.T) {
 	}
 }
 
-func TestRelayPlanCoversTheFourGeneratedValues(t *testing.T) {
+func TestRelayPlanCoversGeneratedValues(t *testing.T) {
 	plan := relayPlan()
-	if len(plan) != 4 {
-		t.Fatalf("relayPlan() has %d targets, want 4", len(plan))
+	if len(plan) != 5 {
+		t.Fatalf("relayPlan() has %d targets, want 5", len(plan))
 	}
 	wantPaths := map[string]string{
-		"kv/data/guardian/guardian-mgmt/guardian-analytics/clickhouse": "guardian-analytics",
-		"kv/data/guardian/guardian-mgmt/postflight-runner/postgres":    "postflight-runner",
-		"kv/data/guardian/guardian-mgmt/external-dns/cloudflare":       "external-dns",
-		"kv/data/guardian/guardian-mgmt/tenant-root/backups-r2":        "tenant-root",
+		"kv/data/guardian/guardian-mgmt/guardian-analytics/clickhouse":   "guardian-analytics",
+		"kv/data/guardian/guardian-mgmt/postflight-runner/postgres":      "postflight-runner",
+		"kv/data/guardian/guardian-mgmt/external-dns/cloudflare":         "external-dns",
+		"kv/data/guardian/guardian-mgmt/external-dns/codex-cloud-tunnel": "external-dns",
+		"kv/data/guardian/guardian-mgmt/tenant-root/backups-r2":          "tenant-root",
 	}
 	for _, target := range plan {
 		consumer, ok := wantPaths[target.APIPath]
@@ -279,10 +280,11 @@ func TestRelayPlanSources(t *testing.T) {
 		sources[target.APIPath] = [2]string{target.SourceNamespace, target.SourceSecret}
 	}
 	want := map[string][2]string{
-		"kv/data/guardian/guardian-mgmt/guardian-analytics/clickhouse": {"guardian-analytics", "analytics-ch-ingest"},
-		"kv/data/guardian/guardian-mgmt/postflight-runner/postgres":    {"tenant-root", "postgres-postflight-controlplane-app"},
-		"kv/data/guardian/guardian-mgmt/external-dns/cloudflare":       {"external-dns", "cloudflare-external-dns"},
-		"kv/data/guardian/guardian-mgmt/tenant-root/backups-r2":        {"tenant-root", "guardian-backups-creds"},
+		"kv/data/guardian/guardian-mgmt/guardian-analytics/clickhouse":   {"guardian-analytics", "analytics-ch-ingest"},
+		"kv/data/guardian/guardian-mgmt/postflight-runner/postgres":      {"tenant-root", "postgres-postflight-controlplane-app"},
+		"kv/data/guardian/guardian-mgmt/external-dns/cloudflare":         {"external-dns", "cloudflare-external-dns"},
+		"kv/data/guardian/guardian-mgmt/external-dns/codex-cloud-tunnel": {"external-dns", "guardian-codex-cloud-tunnel"},
+		"kv/data/guardian/guardian-mgmt/tenant-root/backups-r2":          {"tenant-root", "guardian-backups-creds"},
 	}
 	for path, wantSource := range want {
 		if sources[path] != wantSource {

@@ -7,6 +7,10 @@
   "scripts": {
     "dev": "vp dev",
     "build": "vp exec tsc -p tsconfig.json && vp test run && vp build",
+    "generate:hero-wordmark": "node scripts/generate-hero-wordmark.mjs",
+    "perf:company-intro": "node perf/company-home-intro-frames.mjs",
+    "perf:company-route": "node perf/company-home-route-continuity.mjs",
+    "perf:chrome-lockup": "node perf/chrome-lockup-continuity.mjs",
     "preview": "vp preview",
     "start": "node ./.output/server/index.mjs",
     "test": "vp test run",
@@ -21,29 +25,29 @@
     "@tanstack/react-start": "catalog:",
     "d3-scale": "catalog:",
     "d3-shape": "catalog:",
-    "gray-matter": "catalog:",
     "lucide-react": "catalog:",
     "marked": "catalog:",
     "nitro": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "three": "catalog:",
     "valibot": "catalog:",
     "web-vitals": "catalog:"
   },
   "devDependencies": {
+    "@playwright/test": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@types/d3-scale": "catalog:",
     "@types/d3-shape": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
-    "@types/three": "catalog:",
     "@vitejs/plugin-react": "catalog:",
+    "opentype.js": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "wawoff2": "catalog:"
   }
 }

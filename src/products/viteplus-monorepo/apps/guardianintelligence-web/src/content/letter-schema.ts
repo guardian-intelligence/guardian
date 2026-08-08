@@ -1,16 +1,16 @@
 import * as v from "valibot";
 
-// summary is the only frontmatter field allowed to be absent — that absence
-// is the publish gate. A letter with no summary is a draft: it parses, but
-// is filtered out of LETTERS so it does not show up on /letters or
-// /letters/$slug. Authors can leave a stub while drafting without breaking
-// the build, and ship by filling in the summary.
+// summary is the only field allowed to be absent — that absence is the
+// publish gate. A letter with no summary is a draft: it stays in Directus,
+// invisible to the anonymous role and to /letters, until the summary is
+// written. Authors can draft freely in the Studio and ship by filling in
+// the summary.
 export const LetterFrontmatterSchema = v.pipe(
   v.object({
     slug: v.pipe(v.string(), v.minLength(1)),
     title: v.pipe(v.string(), v.minLength(1)),
-    // YYYY-MM-DD only. The Vite plugin coerces YAML dates to this shape, so
-    // anything else here is an authoring mistake worth surfacing.
+    // YYYY-MM-DD only. Directus date fields serialize to this shape over the
+    // REST API, so anything else here is an authoring mistake worth surfacing.
     publishedAt: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
     flare: v.pipe(v.string(), v.minLength(1)),
     // dispatch: a letter from the author to a younger self — a titled

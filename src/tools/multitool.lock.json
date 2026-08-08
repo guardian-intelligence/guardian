@@ -102,6 +102,25 @@
       }
     ]
   },
+  "cloudflared": {
+    "binaries": [
+      {
+        "kind": "file",
+        "url": "https://github.com/cloudflare/cloudflared/releases/download/2026.7.2/cloudflared-linux-amd64",
+        "sha256": "ec905ea7b7e327ff8abdde8cb64697a2152de74dbcdbf6aec9db8364eb3886cd",
+        "os": "linux",
+        "cpu": "x86_64"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/cloudflare/cloudflared/releases/download/2026.7.2/cloudflared-darwin-arm64.tgz",
+        "sha256": "2086e51c61d6565781d84117a5007d0c826d03ffdc74acb91c08c167f9f8cd7c",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "cloudflared"
+      }
+    ]
+  },
   "doggo": {
     "binaries": [
       {
@@ -457,6 +476,26 @@
         "os": "macos",
         "cpu": "arm64",
         "file": "tofu"
+      }
+    ]
+  },
+  "uv": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.12.1/uv-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "uv-x86_64-unknown-linux-gnu/uv"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.12.1/uv-aarch64-apple-darwin.tar.gz",
+        "sha256": "77d2906988e8074fd43f2f329ec452ebbf9b0c257ba1c66451c71de70a6baf42",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "uv-aarch64-apple-darwin/uv"
       }
     ]
   },

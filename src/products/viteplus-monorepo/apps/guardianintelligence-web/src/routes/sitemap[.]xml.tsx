@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { LETTERS_META, sortedLetters } from "~/content/letters";
+import { LETTERS_META } from "~/content/letters";
+import { publishedLetters } from "~/content/letters.server";
 import { NEWSROOM_META, sortedNewsroomItems } from "~/content/newsroom";
 import { SITE_URL } from "~/lib/head";
 
@@ -31,8 +32,8 @@ const SITEMAP_HEADERS = {
   "cache-control": "public, max-age=600, s-maxage=600",
 } as const;
 
-function buildSitemap(): string {
-  const letterPaths = sortedLetters().map((letter) => ({
+async function buildSitemap(): Promise<string> {
+  const letterPaths = (await publishedLetters()).map((letter) => ({
     loc: `${LETTERS_META.siteURL}/letters/${letter.slug}`,
     lastmod: letter.publishedAt,
   }));
@@ -64,8 +65,8 @@ export const Route = createFileRoute("/sitemap.xml")({
   server: {
     handlers: {
       HEAD: () => new Response(null, { status: 200, headers: SITEMAP_HEADERS }),
-      GET: () => {
-        const xml = buildSitemap();
+      GET: async () => {
+        const xml = await buildSitemap();
         return new Response(xml, { status: 200, headers: SITEMAP_HEADERS });
       },
     },

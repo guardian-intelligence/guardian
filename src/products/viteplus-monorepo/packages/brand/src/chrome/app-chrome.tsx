@@ -36,6 +36,7 @@ export interface LinkLikeProps {
 
 export interface AppChromeProps {
   readonly treatment: Treatment;
+  readonly className?: string;
   readonly slotRight?: ReactNode;
   readonly wordmarkHref?: string;
   readonly route?: string;
@@ -66,6 +67,7 @@ function DefaultLink({ to, children, ...rest }: LinkLikeProps) {
 
 export function AppChrome({
   treatment,
+  className,
   slotRight,
   wordmarkHref = "/",
   route,
@@ -115,7 +117,7 @@ export function AppChrome({
   // reach the viewport edge.
   return (
     <header
-      className={`${sticky ? "sticky top-0" : "relative"} z-30 transition-colors duration-300 ease-out`}
+      className={`${sticky ? "sticky top-0" : "relative"} z-30 transition-colors duration-300 ease-out${className ? ` ${className}` : ""}`}
       style={{
         // Sticky chrome needs its own opaque ground to cover content scrolling
         // under it; non-sticky chrome sits at the top of the page where that
