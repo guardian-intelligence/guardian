@@ -47,4 +47,6 @@ metadata:
     kustomize.toolkit.fluxcd.io/substitute: disabled
 data:
   skins.json: |
-    {"default": "cell"}
+    {"default": "dog"}
+  dog.svg: |
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M2 10c0-3 2-5 5-5h3l2-2 2 1-1 3v3c0 2-2 4-5 4H6c-2 0-4-1-4-4z" fill="#111"/><path d="M12 3l1.6-.8.9 1.5-1.5 1z" fill="#111"/><circle cx="11.2" cy="7" r=".8" fill="#fff"/><path d="M3 13l-1 2h2z" fill="#111"/></svg>
