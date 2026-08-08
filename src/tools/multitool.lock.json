@@ -265,14 +265,14 @@
     "binaries": [
       {
         "kind": "file",
-        "url": "https://dl.k8s.io/release/v1.36.2/bin/linux/amd64/kubectl",
+        "url": "https://dl.k8s.io/release/v1.36.3/bin/linux/amd64/kubectl",
         "sha256": "1e9045ec32bea85da43de85f0065358529ea7c7a152eca78154fba5b58c27d82",
         "os": "linux",
         "cpu": "x86_64"
       },
       {
         "kind": "file",
-        "url": "https://dl.k8s.io/release/v1.36.2/bin/darwin/arm64/kubectl",
+        "url": "https://dl.k8s.io/release/v1.36.3/bin/darwin/arm64/kubectl",
         "sha256": "4408c85c83fd3a31adaa555bdf3c7a6c81f74b19449a9060ba31ab91926f023d",
         "os": "macos",
         "cpu": "arm64"
