@@ -95,6 +95,7 @@ go_test(
         "//src/infrastructure/deployments/payments/prod:manifests",
         "//src/infrastructure/deployments/presence/prod:manifests",
         "//src/infrastructure/deployments/products/prod:manifests",
+        "//src/infrastructure/deployments/guardian/tofu:manifests",
         "//src/infrastructure/deployments/tigerbeetle/system:manifests",
         "//src/infrastructure/edge:edge_health_targets",
         "//src/infrastructure/runbooks:docs",

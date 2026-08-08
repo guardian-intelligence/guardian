@@ -6,6 +6,7 @@ docker.io/renovate/
 ghcr.io/cloudnative-pg/
 ghcr.io/authzed/
 quay.io/authzed/
+ghcr.io/flux-iac/
 ghcr.io/fluxcd/
 ghcr.io/guardian-intelligence/
 ghcr.io/project-zot/

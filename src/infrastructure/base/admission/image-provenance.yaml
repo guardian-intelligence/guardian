@@ -103,3 +103,4 @@ spec:
             - guardian-analytics
             - guardian-imageops
             - postflight-runner
+            - tofu-system

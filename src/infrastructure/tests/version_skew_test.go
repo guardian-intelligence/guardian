@@ -231,6 +231,45 @@ func TestInstallCanaryReleaseContractMatchesCutter(t *testing.T) {
 	}
 }
 
+const tofuHelmReleaseRunfile = "src/infrastructure/deployments/guardian/tofu/tofu-controller-helmrelease.yaml"
+
+// The tofu-controller release rides three pins in one manifest: the chart
+// GitRepository tag, the controller image newTag+digest postRenderer, and
+// the runner image tag (digest embedded, because the controller uses the
+// composed repository:tag verbatim as the runner pod image). Renovate moves
+// them as one grouped PR; this holds a half-moved set red.
+func TestTofuControllerPinsMoveTogether(t *testing.T) {
+	raw := readText(t, runfilePath(tofuHelmReleaseRunfile))
+
+	re := regexp.MustCompile(`(?m)^\s*# renovate: tofu-controller-release\n\s*(?:tag|newTag): "?(v[0-9]+\.[0-9]+\.[0-9]+)`)
+	matches := re.FindAllStringSubmatch(raw, -1)
+	if len(matches) != 3 {
+		t.Fatalf("%s: expected 3 renovate-annotated tofu-controller-release pins (GitRepository tag, runner tag, postRenderers newTag), found %d", tofuHelmReleaseRunfile, len(matches))
+	}
+	want := matches[0][1]
+	for _, m := range matches[1:] {
+		if m[1] != want {
+			t.Fatalf("%s: tofu-controller release pins disagree: %q vs %q — move the GitRepository tag, runner image, and postRenderers digest together", tofuHelmReleaseRunfile, want, m[1])
+		}
+	}
+}
+
+// The runner image bundles its own OpenTofu (runner.Dockerfile
+// ARG TOFU_VERSION), declared next to the pin as a runner-bundled-tofu
+// comment. It must share a minor with the multitool tofu the break-glass
+// workstation path uses, or the two plan differently against the same
+// state. Patch drift within the minor is accepted — upstream pins its own
+// patch.
+func TestTofuRunnerTracksMultitoolPin(t *testing.T) {
+	runner := extractMinor(t, tofuHelmReleaseRunfile,
+		`# runner-bundled-tofu: ([0-9]+)\.([0-9]+)`)
+	multitool := extractMinor(t, toolLockRunfile,
+		`opentofu/releases/download/v([0-9]+)\.([0-9]+)\.[0-9]+/`)
+	if runner != multitool {
+		t.Fatalf("runner-bundled tofu %s and multitool tofu %s must share a minor: align the tf-runner release's bundled OpenTofu (runner.Dockerfile) with the multitool pin, and update the runner-bundled-tofu declaration when the images move", runner, multitool)
+	}
+}
+
 func scalarValue(t *testing.T, raw, path, key string, re *regexp.Regexp) string {
 	t.Helper()
 	match := re.FindStringSubmatch(raw)
