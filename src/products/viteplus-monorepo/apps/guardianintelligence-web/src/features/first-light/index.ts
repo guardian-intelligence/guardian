@@ -1,1 +1,0 @@
-export { FirstLight } from "./FirstLight";

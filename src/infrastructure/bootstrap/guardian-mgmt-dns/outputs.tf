@@ -44,3 +44,20 @@ output "codex_cloud_access_client_secret" {
   value       = cloudflare_zero_trust_access_service_token.guardian_codex_cloud.client_secret
   sensitive   = true
 }
+
+output "cloud_agent_access_client_ids" {
+  description = "Provider-specific Cloudflare Access transport client ids."
+  value = {
+    for provider, token in cloudflare_zero_trust_access_service_token.guardian_cloud_agent :
+    provider => token.client_id
+  }
+}
+
+output "cloud_agent_access_client_secrets" {
+  description = "Provider-specific Cloudflare Access transport secrets installed only in the matching provider."
+  value = {
+    for provider, token in cloudflare_zero_trust_access_service_token.guardian_cloud_agent :
+    provider => token.client_secret
+  }
+  sensitive = true
+}

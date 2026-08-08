@@ -1,7 +1,0 @@
-filegroup(
-    name = "manifests",
-    srcs = glob([
-        "*.yaml",
-    ]),
-    visibility = ["//visibility:public"],
-)

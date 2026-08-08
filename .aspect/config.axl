@@ -45,6 +45,8 @@ load(
 load(
     ".aspect/tasks/tools.axl",
     tools_install = "install",
+    tools_install_agent_cloud = "install_agent_cloud",
+    tools_install_codex_cloud = "install_codex_cloud",
     tools_path = "path",
     tools_uninstall = "uninstall",
 )
@@ -81,5 +83,7 @@ def config(ctx):
 
     # aspect tools ...
     ctx.tasks.add(tools_install)
+    ctx.tasks.add(tools_install_agent_cloud)
+    ctx.tasks.add(tools_install_codex_cloud)
     ctx.tasks.add(tools_path)
     ctx.tasks.add(tools_uninstall)

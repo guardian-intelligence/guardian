@@ -64,6 +64,45 @@ cases:
       metadata: {name: secrets-writer, namespace: tenant-root}
     user: {username: "keycloak:cozy#platform-write-basic", groups: ["system:authenticated"]}
     expect: deny
+  - name: mint Devin delivery-read token
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-cloud-agent-devin
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-cloud-agent-devin, namespace: tenant-root}
+      spec:
+        audiences: [https://10.8.0.250:6443]
+        expirationSeconds: 3600
+    user: {username: "keycloak:cozy#platform-write-basic", groups: ["system:authenticated"]}
+    expect: allow
+  - name: mint Cursor delivery-read token
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-cloud-agent-cursor
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-cloud-agent-cursor, namespace: tenant-root}
+      spec:
+        audiences: [https://10.8.0.250:6443]
+        expirationSeconds: 3600
+    user: {username: "keycloak:cozy#platform-write-basic", groups: ["system:authenticated"]}
+    expect: allow
+  - name: mint cloud agent token outside tenant-root
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-cloud-agent-devin
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-cloud-agent-devin, namespace: guardian-analytics}
+    user: {username: "keycloak:cozy#platform-write-basic", groups: ["system:authenticated"]}
+    expect: deny
   - name: mint secrets-reader token
     operation: CREATE
     resource: {group: "", version: v1, resource: serviceaccounts}

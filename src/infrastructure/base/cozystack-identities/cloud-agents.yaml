@@ -1,0 +1,289 @@
+# Provider-hosted development agents use short-lived ServiceAccount tokens
+# minted through Kubernetes TokenRequest. Cloudflare Access authenticates the
+# transport separately; these identities are the Kubernetes authority boundary.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: guardian-cloud-agent-devin
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: guardian-cloud-agents
+    app.kubernetes.io/part-of: guardian
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: guardian-cloud-agent-cursor
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: guardian-cloud-agents
+    app.kubernetes.io/part-of: guardian
+automountServiceAccountToken: false
+---
+# Enough state to follow source reconciliation, promotion, rollout, and the
+# workloads affected by a Git change. Deliberately excludes Secrets, RBAC,
+# admission, nodes, storage, Cilium, exec, attach, and port-forward.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: guardian-persona-delivery-read
+  labels:
+    app.kubernetes.io/name: guardian-cloud-agents
+    app.kubernetes.io/part-of: guardian
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - endpoints
+      - events
+      - namespaces
+      - pods
+      - replicationcontrollers
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods/log
+    verbs:
+      - get
+  - apiGroups:
+      - events.k8s.io
+    resources:
+      - events
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - controllerrevisions
+      - daemonsets
+      - deployments
+      - replicasets
+      - statefulsets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+      - jobs
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - source.toolkit.fluxcd.io
+    resources:
+      - buckets
+      - externalartifacts
+      - gitrepositories
+      - helmcharts
+      - helmrepositories
+      - ocirepositories
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - kustomize.toolkit.fluxcd.io
+    resources:
+      - kustomizations
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - helm.toolkit.fluxcd.io
+    resources:
+      - helmreleases
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - flagger.app
+    resources:
+      - alertproviders
+      - canaries
+      - metrictemplates
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - kargo.akuity.io
+    resources:
+      - freights
+      - promotions
+      - promotiontasks
+      - stages
+      - warehouses
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-persona-delivery-read
+  labels:
+    app.kubernetes.io/name: guardian-cloud-agents
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: guardian-persona-delivery-read
+subjects:
+  - kind: ServiceAccount
+    name: guardian-cloud-agent-devin
+    namespace: tenant-root
+  - kind: ServiceAccount
+    name: guardian-cloud-agent-cursor
+    namespace: tenant-root
+---
+# The unattended read persona may mint a strictly weaker provider token without
+# crossing a privilege boundary. write-basic retains the same lane for operator
+# workflows, and resourceNames prevents either persona from choosing a more
+# powerful ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: guardian-persona-cloud-agent-token
+  labels:
+    app.kubernetes.io/name: guardian-cloud-agents
+    app.kubernetes.io/part-of: guardian
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts/token
+    resourceNames:
+      - guardian-cloud-agent-cursor
+      - guardian-cloud-agent-devin
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: guardian-persona-cloud-agent-token
+  labels:
+    app.kubernetes.io/name: guardian-cloud-agents
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: guardian-persona-cloud-agent-token
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-persona-read
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-persona-write-basic
+---
+# Match the unattended identity by username as well as persona claim so a
+# missing or stale groups claim cannot bypass the read-only boundary.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-platform-agent-readonly
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - "*"
+        apiVersions:
+          - "*"
+        operations:
+          - CREATE
+          - UPDATE
+          - DELETE
+          - CONNECT
+        resources:
+          - "*/*"
+  matchConditions:
+    - name: platform-agent-identity
+      expression: >-
+        request.userInfo.username.endsWith("#platform-agent") ||
+        "guardian-platform-agent" in request.userInfo.groups
+  validations:
+    - expression: >-
+        (request.operation == "CONNECT" && request.resource.group == "" &&
+          request.resource.resource == "pods" &&
+          has(request.subResource) && request.subResource == "portforward") ||
+        (request.operation == "CREATE" && request.resource.group == "" &&
+          request.resource.resource == "serviceaccounts" &&
+          has(request.subResource) && request.subResource == "token" &&
+          has(request.name) &&
+          request.name in ["guardian-cloud-agent-cursor", "guardian-cloud-agent-devin"] &&
+          request.namespace == "tenant-root" &&
+          has(object.spec.expirationSeconds) &&
+          object.spec.expirationSeconds <= 3600 &&
+          size(object.spec.audiences) == 1 &&
+          object.spec.audiences[0] == "https://10.8.0.250:6443")
+      message: >-
+        platform-agent is read-only except for pod port-forwards and
+        one-hour-or-shorter delivery-read cloud-agent tokens
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-platform-agent-readonly
+spec:
+  policyName: guardian-platform-agent-readonly
+  validationActions:
+    - Deny
+---
+# RBAC already withholds every mutation. This fail-closed policy is the second
+# boundary and also covers future accidental RBAC expansion.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-persona-delivery-read
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - "*"
+        apiVersions:
+          - "*"
+        operations:
+          - CREATE
+          - UPDATE
+          - DELETE
+          - CONNECT
+        resources:
+          - "*/*"
+  matchConditions:
+    - name: cloud-agent-delivery-read-identity
+      expression: >-
+        request.userInfo.username == "system:serviceaccount:tenant-root:guardian-cloud-agent-devin" ||
+        request.userInfo.username == "system:serviceaccount:tenant-root:guardian-cloud-agent-cursor"
+  validations:
+    - expression: "false"
+      message: >-
+        cloud development agents are read-only; propose mutations through Git
+        and let Flux reconcile them
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-persona-delivery-read
+spec:
+  policyName: guardian-persona-delivery-read
+  validationActions:
+    - Deny

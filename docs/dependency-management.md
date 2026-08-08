@@ -9,7 +9,7 @@ Every pin has exactly one untrusted proposer; CI and the main-protection
 ruleset decide every merge:
 
 - **Renovate** owns source-plane pins configured in `renovate.json5` —
-  including the third-party workload images (Keycloak, Electric) its
+  including the third-party workload images (Keycloak, Directus) its
   kubernetes manager is scoped to.
 - **Flux image automation** (`deployments/guardian/imageops`) owns the
   first-party workload pins that carry `$imagepolicy` setter markers; it

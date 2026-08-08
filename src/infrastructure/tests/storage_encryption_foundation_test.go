@@ -122,17 +122,11 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 		"src/infrastructure/deployments/guardian/system/openbao-helmrelease.yaml": "storageClass: local-encrypted-retain",
 		"src/infrastructure/deployments/guardian/system/zot-helmrelease.yaml":     "storageClassName: replicated-encrypted",
 		"src/infrastructure/deployments/iam/prod/postgres.yaml":                   "storageClass: replicated-encrypted",
-		"src/infrastructure/deployments/products/prod/electric.yaml":              "storageClassName: replicated-encrypted",
 		"src/infrastructure/deployments/products/prod/postgres.yaml":              "storageClass: replicated-encrypted",
 	}
 	for workloadPath, want := range workloads {
 		raw := readText(t, runfilePath(workloadPath))
 		assertTextContains(t, raw, want, workloadPath)
-	}
-	electricPath := "src/infrastructure/deployments/products/prod/electric.yaml"
-	electric := readText(t, runfilePath(electricPath))
-	if got := strings.Count(electric, "electric-shape-log-encrypted"); got != 2 {
-		t.Fatalf("%s must declare and mount electric-shape-log-encrypted exactly twice, got %d", electricPath, got)
 	}
 }
 

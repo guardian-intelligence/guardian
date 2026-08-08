@@ -84,8 +84,8 @@ spec:
                 secretKeyRef:
                   name: postgres-products-credentials
                   key: directus
-            # Encrypt-without-CA-verification, the same posture as Electric's
-            # sslmode=require against the operator-minted CNPG server cert.
+            # Encrypt-without-CA-verification: the CNPG server cert is
+            # operator-minted from a CA this client does not carry.
             - name: DB_SSL__REJECT_UNAUTHORIZED
               value: "false"
             - name: DB_POOL__MAX
