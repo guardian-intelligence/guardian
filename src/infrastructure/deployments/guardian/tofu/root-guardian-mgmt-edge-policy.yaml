@@ -1,0 +1,34 @@
+# guardian-mgmt-edge-policy — second mover: its lane token writes zone
+# policy only (no DNS-record or LB permission), so the worst compromise
+# cannot move traffic. Same plan-only soak contract as the stripe root; the
+# flip to auto is its own PR after clean plans. Unblocks the Directus edge
+# cache rule that has been waiting on a workstation apply.
+apiVersion: infra.contrib.fluxcd.io/v1alpha2
+kind: Terraform
+metadata:
+  name: guardian-mgmt-edge-policy
+  namespace: tofu-system
+  labels:
+    app.kubernetes.io/name: tofu-controller
+    app.kubernetes.io/part-of: guardian
+spec:
+  interval: 1h
+  retryInterval: 2m
+  path: ./src/infrastructure/bootstrap/guardian-mgmt-edge-policy
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+    namespace: cozy-fluxcd
+  storeReadablePlan: json
+  varsFrom:
+    - kind: ConfigMap
+      name: tofu-vars
+  runnerPodTemplate:
+    spec:
+      envFrom:
+        - secretRef:
+            name: tofu-backend-r2
+        - secretRef:
+            name: tofu-state-encryption
+        - secretRef:
+            name: tofu-cloudflare-edge-policy
