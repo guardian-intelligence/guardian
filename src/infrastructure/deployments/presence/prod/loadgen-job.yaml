@@ -1,0 +1,77 @@
+# One-shot load run: ramp -> hold -> intent storm -> chat storm ->
+# reconnect storm -> drain. Applies once at merge; a re-run is a new Job name
+# in a follow-up commit. Results land in VictoriaMetrics via the loadgen's
+# vminsert text-import push (docs/loadtest.md: nothing important lives only
+# in pod logs). k6 cannot speak WebTransport, so the driver is the service's
+# own protocol client, shipped in the same digest-pinned image.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: presenced-loadgen-r1
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: presenced-loadgen
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: presenced-loadgen
+    guardian.dev/product: presence
+    guardian.dev/stage: prod
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1500
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: presenced-loadgen
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: presenced-loadgen
+        guardian.dev/product: presence
+        guardian.dev/stage: prod
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      priorityClassName: guardian-standard
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: loadgen
+          image: ghcr.io/guardian-intelligence/presenced:edge@sha256:388ef0e384e26d3286371deb37c5f77b36f4ced6f374286bfad2ac5edd2f8426
+          command: ["/app/loadgen"]
+          env:
+            - name: TARGET_URL
+              value: https://presenced.tenant-guardian-prod.svc:4433/wt
+            - name: VM_IMPORT_URL
+              value: http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus?extra_label=job=presenced-loadgen&extra_label=surface=presence&extra_label=scenario=stress&extra_label=stage=prod
+            - name: SESSIONS
+              value: "2000"
+            - name: ROOMS
+              value: "80"
+            - name: RAMP_RATE
+              value: "40"
+            - name: HOLD_SEC
+              value: "180"
+            - name: STORM_MOVE_MILLIHZ
+              value: "10000"
+            - name: STORM_SEC
+              value: "120"
+            - name: CHAT_MILLIHZ
+              value: "1000"
+            - name: CHAT_SEC
+              value: "120"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "6"
+              memory: 6Gi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: "6"
+              memory: 6Gi
+              ephemeral-storage: 512Mi
