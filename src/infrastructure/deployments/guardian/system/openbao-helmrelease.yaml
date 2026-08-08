@@ -696,6 +696,48 @@ spec:
                   }
                 }
 
+                request "write_reader_policy_tofu_system" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-reader-tofu-system"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tofu-system/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tofu-system/*\" {\n  capabilities = [\"read\"]\n}\n"
+                  }
+                }
+
+                request "write_reader_role_tofu_system" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-reader-tofu-system"
+                  data = {
+                    bound_service_account_names = ["secrets-reader"]
+                    bound_service_account_namespaces = ["tofu-system"]
+                    audience = "openbao"
+                    token_policies = ["guardian-reader-tofu-system"]
+                    token_ttl = "3600"
+                    token_max_ttl = "3600"
+                  }
+                }
+
+                request "write_writer_policy_tofu_system" {
+                  operation = "update"
+                  path = "sys/policies/acl/guardian-writer-tofu-system"
+                  data = {
+                    policy = "path \"kv/data/guardian/guardian-mgmt/tofu-system/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/tofu-system/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
+                  }
+                }
+
+                request "write_writer_role_tofu_system" {
+                  operation = "update"
+                  path = "auth/kubernetes/role/guardian-writer-tofu-system"
+                  data = {
+                    bound_service_account_names = ["secrets-writer"]
+                    bound_service_account_namespaces = ["tofu-system"]
+                    audience = "openbao"
+                    token_policies = ["guardian-writer-tofu-system"]
+                    token_ttl = "600"
+                    token_max_ttl = "600"
+                  }
+                }
+
                 # The image countersigner (the registry tier's first authenticated
                 # writer) signs first-party image digests with the transit key
                 # guardian-images. The KEY is deliberately not created here:

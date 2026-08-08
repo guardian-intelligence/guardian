@@ -8,19 +8,21 @@ terraform {
     }
   }
 
-  # State encryption: the R2 bucket holds ciphertext, custody holds the key.
-  # The pbkdf2 passphrase is the custody.env `tofu_state_encryption_passphrase`
-  # value, merged in at run time through TF_ENCRYPTION (cold-boot-bootstrap.md,
-  # "OpenTofu state encryption") — never a *.tf literal, never a tofu variable.
+  # State encryption: the R2 bucket holds ciphertext; the pbkdf2 passphrase
+  # lives in OpenBao (tofu-system/state-encryption, carried into runner env
+  # by ESO) with a disaster-recovery twin in the operator vault. Merged in at
+  # run time through TF_ENCRYPTION — never a *.tf literal, never a tofu
+  # variable (docs/tofu-gitops-design.md).
   encryption {
-    key_provider "pbkdf2" "custody" {}
+    key_provider "pbkdf2" "state" {}
 
-    method "aes_gcm" "custody" {
-      keys = key_provider.pbkdf2.custody
+    method "aes_gcm" "state" {
+      keys = key_provider.pbkdf2.state
     }
 
     state {
-      method = method.aes_gcm.custody
+      method   = method.aes_gcm.state
+      enforced = true
     }
   }
 
