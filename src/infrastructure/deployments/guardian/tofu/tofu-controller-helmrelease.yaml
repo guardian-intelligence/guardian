@@ -49,11 +49,20 @@ spec:
     # Break-glass bypasses the plan step entirely; the escape hatch is the
     # workstation recipe in the break-glass runbook, never a live flag.
     allowBreakTheGlass: false
+    # The chart defaults eventsAddress and the runner allowedNamespaces to a
+    # flux-system namespace this cluster does not have (Cozystack runs Flux
+    # in cozy-fluxcd), and the allowedNamespaces entry makes the install try
+    # to create runner RBAC there — "namespaces flux-system not found".
+    # Runners run only in this namespace; event forwarding to the
+    # notification controller is off.
+    eventsAddress: ""
     # The runner image the controller spawns. The digest rides inside the
     # tag on purpose: the controller uses the composed repository:tag string
     # verbatim as the pod image (getRunnerPodImage), so this is what makes
     # every spawned runner digest-pinned instead of a mutable tag ref.
     runner:
+      serviceAccount:
+        allowedNamespaces: []
       image:
         repository: ghcr.io/flux-iac/tf-runner
         # renovate: tofu-controller-release
