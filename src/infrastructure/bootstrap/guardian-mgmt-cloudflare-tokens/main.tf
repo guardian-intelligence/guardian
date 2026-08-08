@@ -8,7 +8,7 @@
 locals {
   zone_id              = "c952fb5989d232593ec9cca71030cb58" # guardianintelligence.org
   rumi_zone_id         = "034bf5d0a4ff33b0e9965f50be70d8d0" # rumi.engineering
-  mythra_zone_id       = "MYTHRA_ZONE_ID_PENDING_ONBOARD"   # wakeupmythra.com
+  mythra_zone_id       = "4bfa5c0e3d0183dc0e30b9c4cbc17d47"   # wakeupmythra.com
   account_resource     = "com.cloudflare.api.account.${var.cloudflare_account_id}"
   zone_resource        = "com.cloudflare.api.account.zone.${local.zone_id}"
   rumi_zone_resource   = "com.cloudflare.api.account.zone.${local.rumi_zone_id}"
