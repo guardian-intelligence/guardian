@@ -29,6 +29,26 @@ data:
       if r == 2 then return 0, 1 end
       return 0, -1
     end
+  shadow.lua: |
+    -- v2 candidate: walk to the nearest edge, then follow the wall clockwise.
+    function step(tick, dog, x, y, w, h)
+      if tick % 6 ~= 0 then
+        return 0, 0
+      end
+      local left, right, top, bottom = x, w - 1 - x, y, h - 1 - y
+      local on_edge = (x == 0 or x == w - 1 or y == 0 or y == h - 1)
+      if not on_edge then
+        local m = math.min(left, right, top, bottom)
+        if m == left then return -1, 0 end
+        if m == right then return 1, 0 end
+        if m == top then return 0, -1 end
+        return 0, 1
+      end
+      if y == 0 and x < w - 1 then return 1, 0 end
+      if x == w - 1 and y < h - 1 then return 0, 1 end
+      if y == h - 1 and x > 0 then return -1, 0 end
+      return 0, -1
+    end
 ---
 # Content-addressed dog skins. skins.json picks the default; a skin only
 # takes effect once its asset file is present, so snapshots can never
