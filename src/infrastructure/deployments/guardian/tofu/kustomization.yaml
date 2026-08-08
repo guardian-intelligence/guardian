@@ -6,3 +6,14 @@ resources:
   - tofu-controller-helmrelease.yaml
   - tofu-controller-networkpolicy.yaml
   - root-guardian-stripe-sandbox.yaml
+  - root-guardian-mgmt-edge-policy.yaml
+
+# One copy of the non-secret account id every Cloudflare root's CR consumes
+# via varsFrom; the workstation twin is bootstrap/backend.tfvars.
+configMapGenerator:
+  - name: tofu-vars
+    namespace: tofu-system
+    literals:
+      - cloudflare_account_id=c3eaeffaadf7d4847684d4775c16d598
+    options:
+      disableNameSuffixHash: true
