@@ -1,7 +1,15 @@
-# presenced: load-test deployment for the room presence/tick service.
-# Single replica with Guaranteed QoS (integer CPU, requests==limits): the
-# kubelet's static CPU manager pins exclusive cores, so tick-duration
-# measurements are not polluted by neighbours on the shared 3-node cluster.
+# presenced: the Wake Up Mythra presence plane (grid-world demo).
+#
+# hostNetwork with a node pin: WebTransport needs public UDP 4433 and the
+# edge (Cloudflare) cannot proxy it, so the pod binds the node's public IP
+# directly (TigerBeetle precedent). The browser page is served through the
+# normal proxied ingress; only the QUIC dial goes direct, authenticated by
+# the certificate hash the page fetches from /mythra/wt-info.
+#
+# Deliberately NO reloader annotation: behavior and asset ConfigMap changes
+# must reach the running process via the kubelet mount refresh (hot reload,
+# zero disconnects) - a pod restart here would defeat the update ladder this
+# service demonstrates.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,6 +24,14 @@ metadata:
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # hostNetwork ports cannot overlap, so never surge a second pod; expressed
+  # as a constrained RollingUpdate because flipping strategy type on a live
+  # Deployment trips server-side apply on the defaulted rollingUpdate block.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/component: presenced
@@ -31,6 +47,10 @@ spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
       priorityClassName: guardian-standard
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/hostname: ash-earth
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -39,20 +59,33 @@ spec:
           type: RuntimeDefault
       containers:
         - name: presenced
-          image: ghcr.io/guardian-intelligence/presenced:edge@sha256:388ef0e384e26d3286371deb37c5f77b36f4ced6f374286bfad2ac5edd2f8426
+          image: ghcr.io/guardian-intelligence/presenced:edge@sha256:c8d9b56cf867289d87f872cddfcd83420ad5176fd3625bc716ec32d8ae986ed7 # {"$imagepolicy": "guardian-imageops:presenced"}
           env:
             - name: TICK_HZ
               value: "24"
             - name: WT_PORT
               value: "4433"
+            - name: HTTP_PORT
+              value: "9634"
             - name: METRICS_PORT
-              value: "9090"
+              value: "9633"
+            - name: PUBLIC_ADDR
+              value: "206.223.228.101:4433" # ash-earth public IP
+            - name: ALLOWED_ORIGINS
+              value: "https://guardianintelligence.org"
+            - name: BEHAVIOR_DIR
+              value: /etc/mythra/behavior
+            - name: ASSET_DIR
+              value: /etc/mythra/assets
           ports:
             - name: wt
               containerPort: 4433
               protocol: UDP
+            - name: http
+              containerPort: 9634
+              protocol: TCP
             - name: metrics
-              containerPort: 9090
+              containerPort: 9633
               protocol: TCP
           readinessProbe:
             httpGet:
@@ -67,15 +100,29 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          volumeMounts:
+            - name: behavior
+              mountPath: /etc/mythra/behavior
+              readOnly: true
+            - name: assets
+              mountPath: /etc/mythra/assets
+              readOnly: true
           resources:
             requests:
-              cpu: "4"
-              memory: 4Gi
+              cpu: 500m
+              memory: 512Mi
               ephemeral-storage: 128Mi
             limits:
-              cpu: "4"
-              memory: 4Gi
+              cpu: "2"
+              memory: 1Gi
               ephemeral-storage: 512Mi
+      volumes:
+        - name: behavior
+          configMap:
+            name: mythra-behavior
+        - name: assets
+          configMap:
+            name: mythra-assets
 ---
 apiVersion: v1
 kind: Service
@@ -91,9 +138,13 @@ spec:
   selector:
     app.kubernetes.io/component: presenced
   ports:
+    - name: http
+      port: 80
+      targetPort: 9634
+      protocol: TCP
     - name: wt
       port: 4433
-      targetPort: wt
+      targetPort: 4433
       protocol: UDP
 ---
 apiVersion: v1
@@ -111,6 +162,33 @@ spec:
     app.kubernetes.io/component: presenced
   ports:
     - name: metrics
-      port: 9090
-      targetPort: metrics
+      port: 9633
+      targetPort: 9633
       protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: presenced
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: presenced
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 1m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "65"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "65"
+spec:
+  ingressClassName: tenant-root
+  rules:
+    - host: guardianintelligence.org
+      http:
+        paths:
+          - path: /mythra
+            pathType: Prefix
+            backend:
+              service:
+                name: presenced
+                port:
+                  number: 80
