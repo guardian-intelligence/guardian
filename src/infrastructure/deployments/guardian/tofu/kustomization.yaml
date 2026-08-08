@@ -5,3 +5,4 @@ resources:
   - secrets.yaml
   - tofu-controller-helmrelease.yaml
   - tofu-controller-networkpolicy.yaml
+  - root-guardian-stripe-sandbox.yaml
