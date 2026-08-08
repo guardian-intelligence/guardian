@@ -23,31 +23,35 @@ canary loop drives. Renaming either side fails at PR time.
 
 ## Credentials
 
-The provider reads `GITHUB_TOKEN`; it is never a tofu variable and never
-lands in state. It must be the custody-backed classic PAT with `repo` and
-`admin:org` on **both** organizations — `guardian-intelligence` for the
-ruleset, `digital-guardian-software` for the fleet. Export it explicitly:
-without `GITHUB_TOKEN`, the provider falls back to the OAuth-class token from
-`gh`, which GitHub refuses for App-installation repository writes. Fine-grained
-PATs and App tokens cannot perform that write either. The platform GitHub App
-is scoped to ghcr reads, and the release projector PAT is `write:packages`
-only; neither is a substitute.
+Two fine-grained personal access tokens, one per organization —
+fine-grained PATs are scoped to a single resource owner, and no broader
+credential exists for this root:
 
-Applying this root is an operator ceremony, not an agent task: it needs the
-state passphrase and a token no in-cluster identity holds. Assemble the
-environment once per session per
-[cold-boot-bootstrap.md](cold-boot-bootstrap.md), "OpenTofu state
-encryption", then `aspect infra tofu-init --root guardian-github`. That
-section is the only place the recipe lives; do not re-derive it here.
+- **guardian-intelligence**: repository Administration (read/write) plus
+  organization Repository creation — the ruleset and the tap repository.
+  Rides `GITHUB_TOKEN`.
+- **digital-guardian-software**: the same permission set, for the fleet
+  repositories. Rides `TF_VAR_github_customer_token` (the provider reads
+  only one env var, so the second org's token arrives as a sensitive
+  variable; provider configuration is not persisted to state).
 
-This root's state is encrypted from its first write, so `versions.tf` carries
-no `unencrypted` fallback — the migration ceremony in
-[cold-boot-bootstrap.md](cold-boot-bootstrap.md) does not apply to it.
+Both values live at `kv/guardian/guardian-mgmt/tofu-system/github` and
+reach the runner through the `tofu-github` ExternalSecret. Minting or
+rotating one is the GitHub UI (fine-grained PATs expire — set the maximum
+horizon and calendar the renewal) plus the routine writer-token relay
+(`docs/secrets.md`, "Adding a secret for a third-party integration"). No
+App token substitutes: the platform App is scoped to ghcr reads, and the
+release projector PAT is `write:packages` only.
 
-The ceremony is a known defect, not the target state: hand-run applies make
-this root a second control plane beside Flux, and the credentials it needs
-are what keep custody in routine circulation. The cutover to in-cluster
-reconciliation is designed in [`docs/tofu-gitops-design.md`](../../../docs/tofu-gitops-design.md).
+The write neither token can make — binding a repository to an App
+installation — is not managed here at all: the guardian-promotions ↔
+`homebrew-tap` grant is owner-UI-managed and recorded in
+[`docs/github-apps.md`](../../../docs/github-apps.md), the same class as
+App installations themselves.
+
+Routine changes to this root are PRs; the controller plans and applies them
+(docs/tofu-gitops-design.md). The workstation path is break-glass only:
+[tofu-controller-operations.md](tofu-controller-operations.md).
 
 ## First run is an import, not an apply
 
@@ -55,8 +59,7 @@ The ruleset and the fleet repositories predate this root. A plan that
 proposes to *create* any of them means the import did not happen — stop and
 fix that, never let it create a second `main-protection`. The Homebrew tap
 is the one object born here: a create for `github_repository.homebrew_tap`
-and its App grant is the expected plan until the first apply, and drift
-afterwards.
+is the expected plan until the first apply, and drift afterwards.
 
 ```sh
 cd src/infrastructure/bootstrap/guardian-github
@@ -110,20 +113,10 @@ gh api -X PUT repos/guardian-intelligence/homebrew-tap/contents/Formula/postflig
 The formula is machine-written: to change what it says, change
 `dist/homebrew/postflight.rb.tmpl` and cut a release, never the tap.
 
-If an organization owner had to add `homebrew-tap` in the GitHub UI because
-the custody classic PAT was unavailable, adopt that exact live relationship
-before planning:
-
-```sh
-tofu import \
-  github_app_installation_repository.promotions_homebrew_tap \
-  144138265:homebrew-tap
-tofu plan
-```
-
-The plan must be clean. A fallback `gh` OAuth token cannot read or write this
-resource reliably, so a 403 is an authentication error, not evidence that the
-grant is absent.
+The guardian-promotions installation must cover `homebrew-tap` or a stable
+cut fails at its `create-github-app-token` step naming the tap: that grant
+is owner-UI-managed (`docs/github-apps.md`), so the fix is the GitHub
+installation settings page, never this root.
 
 ## Changing the required check
 

@@ -43,8 +43,12 @@ terraform {
   }
 }
 
-# GITHUB_TOKEN carries the credential; it is never a tofu variable. The token
-# needs `repo` and `admin:org` on both organizations — see the runbook.
+# Two per-org fine-grained PATs — fine-grained PATs are scoped to a single
+# resource owner, so each organization gets its own (see the runbook for the
+# exact permission set). The guardian-intelligence token rides GITHUB_TOKEN;
+# the provider reads only that one env var, so the customer-org token
+# arrives as a sensitive variable through TF_VAR_github_customer_token.
+# Provider configuration is not persisted, so neither token lands in state.
 provider "github" {
   owner = "guardian-intelligence"
 }
@@ -54,4 +58,5 @@ provider "github" {
 provider "github" {
   alias = "customer"
   owner = "digital-guardian-software"
+  token = var.github_customer_token
 }
