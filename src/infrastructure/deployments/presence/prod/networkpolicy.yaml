@@ -1,0 +1,45 @@
+# presenced runs on the host network, so Cilium endpoint selectors do not
+# govern it: its exposure is controlled by the Talos ingress firewall (UDP
+# 4433 world rule in src/infrastructure/talm) and by which addresses the
+# process binds. Only the pod-network load generator keeps a policy here.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: presenced-loadgen
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: presenced-loadgen
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: presenced-loadgen
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # The target is a host-network pod: Cilium sees node identities, not pod
+    # labels (same reasoning as the payments -> TigerBeetle transport rule).
+    - toEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "4433"
+              protocol: UDP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP

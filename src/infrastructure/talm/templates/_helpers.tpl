@@ -555,6 +555,21 @@ ingress:
   {{- end }}
   - subnet: {{ $.Values.ingressFirewall.joinSubnet }}
 ---
+{{- if .Values.ingressFirewall.publicUDPPorts }}
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: public-game-plane-udp
+portSelector:
+  ports:
+  {{- range $.Values.ingressFirewall.publicUDPPorts }}
+    - {{ . }}
+  {{- end }}
+  protocol: udp
+ingress:
+  - subnet: 0.0.0.0/0
+  - subnet: ::/0
+---
+{{- end }}
 apiVersion: v1alpha1
 kind: NetworkRuleConfig
 name: operator-talos-api

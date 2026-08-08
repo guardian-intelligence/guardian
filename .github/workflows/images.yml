@@ -17,9 +17,9 @@ on:
     paths:
       - "src/services/alerting/**"
       - "src/services/authorization/**"
-      - "src/services/cockpit/**"
       - "src/services/payments/**"
       - "src/services/postflight/**"
+      - "src/services/presenced/**"
       - "src/products/analytics/**"
       - "src/products/viteplus-monorepo/**"
       - "src/proto/**"
@@ -58,17 +58,17 @@ jobs:
         id: classify
         run: |
           names=(alert-relay analytics-ingest authorization canary-journeys
-            cockpit payments payments-canary postflight-controlplane
+            payments payments-canary postflight-controlplane presenced
             company-site privatecut-web visual-harness)
           declare -A watch=(
             [alert-relay]='^src/services/alerting/'
             [analytics-ingest]='^src/products/analytics/|^src/proto/'
             [authorization]='^src/services/authorization/|^src/proto/guardian/authorization/|^src/proto/gen/go/guardian/authorization/'
             [canary-journeys]='^src/products/viteplus-monorepo/packages/canary-journeys/|^src/products/viteplus-monorepo/pnpm-(lock|workspace)\.yaml$'
-            [cockpit]='^src/services/cockpit/|^src/proto/'
             [payments]='^src/services/payments/'
             [payments-canary]='^src/services/payments/'
             [postflight-controlplane]='^src/services/postflight/'
+            [presenced]='^src/services/presenced/'
             [company-site]='^src/products/viteplus-monorepo/'
             [privatecut-web]='^src/products/viteplus-monorepo/'
             [visual-harness]='^src/products/viteplus-monorepo/packages/visual-harness/|^src/products/viteplus-monorepo/pnpm-(lock|workspace)\.yaml$'
@@ -78,15 +78,15 @@ jobs:
             [analytics-ingest]='//src/products/analytics/ingest:push'
             [authorization]='//src/services/authorization:push'
             [canary-journeys]='//src/products/viteplus-monorepo/packages/canary-journeys:push'
-            [cockpit]='//src/services/cockpit:push'
             [payments]='//src/services/payments:push'
             [payments-canary]='//src/services/payments/canary:push'
             [postflight-controlplane]='//src/services/postflight/controlplane:push'
+            [presenced]='//src/services/presenced:push'
             [company-site]='//src/products/viteplus-monorepo/apps/guardianintelligence-web/site:push'
             [privatecut-web]='//src/products/viteplus-monorepo/apps/privatecut-web/site:push'
             [visual-harness]='//src/products/viteplus-monorepo/packages/visual-harness:push'
           )
-          go_images=' alert-relay analytics-ingest authorization cockpit payments payments-canary postflight-controlplane '
+          go_images=' alert-relay analytics-ingest authorization payments payments-canary postflight-controlplane presenced '
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'
 
           all=false changed=""

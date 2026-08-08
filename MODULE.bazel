@@ -86,7 +86,7 @@ buf.toolchains(
 use_repo(buf, "rules_buf_toolchains")
 
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
-go_sdk.download(version = "1.26.4")
+go_sdk.download(version = "1.26.5")
 
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
 go_deps.from_file(go_mod = "//:go.mod")
@@ -112,7 +112,11 @@ use_repo(
     "com_github_mileusna_useragent",
     "com_github_openbao_openbao_api_v2",
     "com_github_prometheus_client_golang",
+    "com_github_prometheus_common",
+    "com_github_quic_go_quic_go",
+    "com_github_quic_go_webtransport_go",
     "com_github_stripe_stripe_go_v83",
+    "com_github_yuin_gopher_lua",
     "com_github_tigerbeetle_tigerbeetle_go",
     "io_k8s_api",
     "io_k8s_apimachinery",

@@ -457,12 +457,23 @@ spec:
         "guardian-persona-read" in request.userInfo.groups
   validations:
     - expression: >-
-        request.operation == "CONNECT" && request.resource.group == "" &&
-        request.resource.resource == "pods" &&
-        has(request.subResource) && request.subResource == "portforward"
+        (request.operation == "CONNECT" && request.resource.group == "" &&
+          request.resource.resource == "pods" &&
+          has(request.subResource) && request.subResource == "portforward") ||
+        (request.operation == "CREATE" && request.resource.group == "" &&
+          request.resource.resource == "serviceaccounts" &&
+          has(request.subResource) && request.subResource == "token" &&
+          has(request.name) &&
+          request.name in ["guardian-cloud-agent-cursor", "guardian-cloud-agent-devin"] &&
+          request.namespace == "tenant-root" &&
+          has(object.spec.expirationSeconds) &&
+          object.spec.expirationSeconds <= 3600 &&
+          size(object.spec.audiences) == 1 &&
+          object.spec.audiences[0] == "https://10.8.0.250:6443")
       message: >-
-        the read persona may only open pod port-forwards; every other write is
-        denied. Re-authenticate as a write persona for repair verbs
+        the read persona may only open pod port-forwards and mint one-hour-or-
+        shorter delivery-read cloud-agent tokens; every other write is denied.
+        Re-authenticate as a write persona for repair verbs
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -676,11 +687,18 @@ spec:
         (request.operation == "CREATE" && request.resource.group == "" &&
           request.resource.resource == "serviceaccounts" &&
           has(request.subResource) && request.subResource == "token" &&
-          has(request.name) && request.name == "secrets-writer" &&
-          request.namespace != "tenant-root")
+          has(request.name) &&
+          ((request.name == "secrets-writer" && request.namespace != "tenant-root") ||
+           (request.name in ["guardian-cloud-agent-cursor", "guardian-cloud-agent-devin"] &&
+            request.namespace == "tenant-root" &&
+            has(object.spec.expirationSeconds) &&
+            object.spec.expirationSeconds <= 3600 &&
+            size(object.spec.audiences) == 1 &&
+            object.spec.audiences[0] == "https://10.8.0.250:6443")))
       message: >-
         the write-basic persona may only delete pods and jobs, scale workloads,
-        open pod port-forwards, and mint non-root secrets-writer ServiceAccount tokens
+        open pod port-forwards, mint non-root secrets-writer tokens, and mint
+        short-lived delivery-read cloud-agent tokens
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

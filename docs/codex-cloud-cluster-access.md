@@ -1,5 +1,10 @@
 # Codex cloud cluster access
 
+For environment selection, authority comparison, and the preferred routes for
+local, provider-hosted, self-hosted, and in-cluster agents, start with
+[Agent environment authentication](agent-environment-authentication.md). This
+page is the setup and proof runbook for the current Codex Cloud route.
+
 Codex cloud reaches the Guardian management cluster through a dedicated
 Cloudflare Tunnel. Cloudflare Access authenticates the environment's transport
 with a service token; Kubernetes authenticates the agent as the existing
