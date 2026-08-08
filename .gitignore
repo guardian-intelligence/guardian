@@ -8,6 +8,7 @@
 # the golden-image pins file is versions and checksums, never credentials.
 !/src/services/postflight/image/pins.env
 /src/aisucks/aisucks
+/presenced
 /.guardian/
 
 # Local operator state that may remain after moving the ASH bootstrap tree.
