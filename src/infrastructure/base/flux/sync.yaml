@@ -674,6 +674,45 @@ spec:
       namespace: flagger
   timeout: 10m
 ---
+# tofu-controller — reconciles the bootstrap OpenTofu roots from Git
+# (docs/tofu-gitops-design.md). Terraform CRs land in this same slice as
+# roots migrate; like Flagger it ships no admission webhook, so
+# guardian-system ordering is the only dependency.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-tofu
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/guardian/tofu
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      # Required, not optional: Flux skips substitution entirely when the
+      # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
+      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # always create guardian-source; a missing one should fail loudly.
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-system
+  prune: true
+  wait: false
+  healthChecks:
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: tofu-controller
+      namespace: tofu-system
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: tofu-controller
+      namespace: tofu-system
+  timeout: 10m
+---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:

@@ -1,0 +1,74 @@
+# tofu-controller — reconciles the bootstrap OpenTofu roots from Git
+# (docs/tofu-gitops-design.md). Terraform CRs arrive per root as each
+# migrates; until then the controller idles with nothing to reconcile.
+#
+# The chart is pulled from the project's git repository at the release tag:
+# upstream's published Helm charts lag its application releases (newest
+# chart is a 0.16.0 rc while the app is on v0.16.5), and the git tag is the
+# only source that ships the release's own templates. The images that
+# actually run are digest-pinned regardless — the controller here via
+# postRenderers, the runner via images.declared.lock — so a re-pointed tag
+# can alter chart templates but never substitute an unpinned image.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: tofu-controller
+  namespace: tofu-system
+spec:
+  interval: 1h
+  url: https://github.com/flux-iac/tofu-controller
+  ref:
+    # renovate: tofu-controller-release
+    tag: v0.16.5
+  ignore: |
+    /*
+    !/charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tofu-controller
+  namespace: tofu-system
+spec:
+  interval: 10m
+  timeout: 5m
+  chart:
+    spec:
+      chart: charts/tofu-controller
+      sourceRef:
+        kind: GitRepository
+        name: tofu-controller
+      reconcileStrategy: Revision
+  install:
+    crds: Create
+    remediation:
+      retries: -1
+  upgrade:
+    crds: CreateReplace
+  values:
+    # Break-glass bypasses the plan step entirely; the escape hatch is the
+    # workstation recipe in the break-glass runbook, never a live flag.
+    allowBreakTheGlass: false
+    # The runner image the controller spawns. The digest rides inside the
+    # tag on purpose: the controller uses the composed repository:tag string
+    # verbatim as the pod image (getRunnerPodImage), so this is what makes
+    # every spawned runner digest-pinned instead of a mutable tag ref.
+    runner:
+      image:
+        repository: ghcr.io/flux-iac/tf-runner
+        # renovate: tofu-controller-release
+        tag: "v0.16.5@sha256:7209171093907ec1d0559c682949fcee4b625205a6a058c16fe0ce0017af5f41"
+      # tf-runner v0.16.5 bundles OpenTofu 1.12.1 (runner.Dockerfile
+      # ARG TOFU_VERSION). TestTofuRunnerTracksMultitoolPin holds this
+      # declaration to the multitool tofu minor; bump it from the
+      # runner.Dockerfile of the release when the images move.
+      # runner-bundled-tofu: 1.12.1
+      grpc:
+        maxMessageSize: 30
+  postRenderers:
+    - kustomize:
+        images:
+          - name: ghcr.io/flux-iac/tofu-controller
+            # renovate: tofu-controller-release
+            newTag: v0.16.5
+            digest: sha256:1d6ee0e34ee56a22827541b1ef44e5a3d65ff21bdb870f79103c4c5d5e6d4cba
