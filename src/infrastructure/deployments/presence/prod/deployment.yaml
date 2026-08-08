@@ -24,8 +24,14 @@ metadata:
 spec:
   replicas: 1
   revisionHistoryLimit: 3
+  # hostNetwork ports cannot overlap, so never surge a second pod; expressed
+  # as a constrained RollingUpdate because flipping strategy type on a live
+  # Deployment trips server-side apply on the defaulted rollingUpdate block.
   strategy:
-    type: Recreate # hostNetwork ports cannot overlap during a surge
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/component: presenced
