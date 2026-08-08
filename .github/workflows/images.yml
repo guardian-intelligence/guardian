@@ -17,7 +17,6 @@ on:
     paths:
       - "src/services/alerting/**"
       - "src/services/authorization/**"
-      - "src/services/cockpit/**"
       - "src/services/payments/**"
       - "src/services/postflight/**"
       - "src/products/analytics/**"
@@ -58,14 +57,13 @@ jobs:
         id: classify
         run: |
           names=(alert-relay analytics-ingest authorization canary-journeys
-            cockpit payments payments-canary postflight-controlplane
+            payments payments-canary postflight-controlplane
             company-site privatecut-web visual-harness)
           declare -A watch=(
             [alert-relay]='^src/services/alerting/'
             [analytics-ingest]='^src/products/analytics/|^src/proto/'
             [authorization]='^src/services/authorization/|^src/proto/guardian/authorization/|^src/proto/gen/go/guardian/authorization/'
             [canary-journeys]='^src/products/viteplus-monorepo/packages/canary-journeys/|^src/products/viteplus-monorepo/pnpm-(lock|workspace)\.yaml$'
-            [cockpit]='^src/services/cockpit/|^src/proto/'
             [payments]='^src/services/payments/'
             [payments-canary]='^src/services/payments/'
             [postflight-controlplane]='^src/services/postflight/'
@@ -78,7 +76,6 @@ jobs:
             [analytics-ingest]='//src/products/analytics/ingest:push'
             [authorization]='//src/services/authorization:push'
             [canary-journeys]='//src/products/viteplus-monorepo/packages/canary-journeys:push'
-            [cockpit]='//src/services/cockpit:push'
             [payments]='//src/services/payments:push'
             [payments-canary]='//src/services/payments/canary:push'
             [postflight-controlplane]='//src/services/postflight/controlplane:push'
@@ -86,7 +83,7 @@ jobs:
             [privatecut-web]='//src/products/viteplus-monorepo/apps/privatecut-web/site:push'
             [visual-harness]='//src/products/viteplus-monorepo/packages/visual-harness:push'
           )
-          go_images=' alert-relay analytics-ingest authorization cockpit payments payments-canary postflight-controlplane '
+          go_images=' alert-relay analytics-ingest authorization payments payments-canary postflight-controlplane '
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'
 
           all=false changed=""

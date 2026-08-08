@@ -293,32 +293,3 @@ spec:
       order: asc
   digestReflectionPolicy: Always
   interval: 1m0s
----
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImageRepository
-metadata:
-  name: cockpit
-  namespace: guardian-imageops
-  labels:
-    app.kubernetes.io/part-of: guardian
-spec:
-  image: ghcr.io/guardian-intelligence/cockpit
-  interval: 1m0s
----
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImagePolicy
-metadata:
-  name: cockpit
-  namespace: guardian-imageops
-  labels:
-    app.kubernetes.io/part-of: guardian
-spec:
-  imageRepositoryRef:
-    name: cockpit
-  filterTags:
-    pattern: '^edge$'
-  policy:
-    alphabetical:
-      order: asc
-  digestReflectionPolicy: Always
-  interval: 1m0s
