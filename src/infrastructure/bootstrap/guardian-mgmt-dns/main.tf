@@ -91,6 +91,25 @@ resource "cloudflare_load_balancer_pool" "guardian_mgmt_ash" {
   origin_steering = {
     policy = "random"
   }
+
+  # With auto-apply there is no human between merge and execution:
+  # prevent_destroy turns a would-be destroy of the ops-access path into a
+  # failed apply and an alert, and the structural invariants that used to be
+  # warn-only check blocks gate the plan itself here (checks block nothing
+  # in OpenTofu).
+  lifecycle {
+    prevent_destroy = true
+
+    precondition {
+      condition     = length(local.public_edge_hostnames) == 7
+      error_message = "Root public edge hostnames belong to Cloudflare Load Balancing."
+    }
+
+    precondition {
+      condition     = length(local.public_ingress_ipv4s) == 3
+      error_message = "Cloudflare Load Balancing must publish all three guardian-mgmt ASH control-plane origins."
+    }
+  }
 }
 
 resource "cloudflare_load_balancer" "guardian_mgmt_public" {
@@ -110,6 +129,10 @@ resource "cloudflare_load_balancer" "guardian_mgmt_public" {
   adaptive_routing = {
     failover_across_pools = false
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Must resolve while the cluster is down, so not in-cluster ExternalDNS;
@@ -124,6 +147,10 @@ resource "cloudflare_dns_record" "guardian_mgmt_k8s_api" {
   ttl     = 300
   proxied = false
   comment = "guardian-mgmt ${each.key} control-plane API"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Codex cloud reaches the private Kubernetes Service through a remotely
@@ -166,6 +193,10 @@ resource "cloudflare_dns_record" "guardian_codex_cloud_k8s_api" {
   ttl     = 1
   proxied = true
   comment = "Guardian Kubernetes API through the Codex cloud Tunnel"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "cloudflare_zero_trust_access_service_token" "guardian_codex_cloud" {
@@ -173,8 +204,17 @@ resource "cloudflare_zero_trust_access_service_token" "guardian_codex_cloud" {
   name       = "guardian-codex-cloud-kubernetes"
   duration   = "2160h"
 
+  # The expiry horizon blocks the plan instead of warning (checks block
+  # nothing in OpenTofu): under auto-apply, a reconcile that starts failing
+  # 21 days out is the rotation reminder, surfaced through the CR going
+  # red and the alert that follows.
   lifecycle {
     create_before_destroy = true
+
+    postcondition {
+      condition     = timecmp(timeadd(plantimestamp(), "504h"), self.expires_at) < 0
+      error_message = "The Codex cloud Access service token expires within 21 days. Rotate it by incrementing client_secret_version, update the Codex environment secrets, and prove the cloud canary."
+    }
   }
 }
 
@@ -190,23 +230,11 @@ resource "cloudflare_zero_trust_access_service_token" "guardian_cloud_agent" {
 
   lifecycle {
     create_before_destroy = true
-  }
-}
 
-check "codex_cloud_access_token_expiry_horizon" {
-  assert {
-    condition     = timecmp(timeadd(plantimestamp(), "504h"), cloudflare_zero_trust_access_service_token.guardian_codex_cloud.expires_at) < 0
-    error_message = "The Codex cloud Access service token expires within 21 days. Rotate it by incrementing client_secret_version, update the Codex environment secrets, and prove the cloud canary."
-  }
-}
-
-check "cloud_agent_access_token_expiry_horizon" {
-  assert {
-    condition = alltrue([
-      for token in cloudflare_zero_trust_access_service_token.guardian_cloud_agent :
-      timecmp(timeadd(plantimestamp(), "504h"), token.expires_at) < 0
-    ])
-    error_message = "A cloud-agent Access service token expires within 21 days. Rotate the affected provider token, update only that provider environment, and prove its cloud canary."
+    postcondition {
+      condition     = timecmp(timeadd(plantimestamp(), "504h"), self.expires_at) < 0
+      error_message = "A cloud-agent Access service token expires within 21 days. Rotate the affected provider token, update only that provider environment, and prove its cloud canary."
+    }
   }
 }
 
@@ -259,20 +287,6 @@ resource "cloudflare_zero_trust_access_application" "guardian_codex_cloud" {
   ]
 }
 
-check "cloudflare_load_balancer_hostnames" {
-  assert {
-    condition     = length(local.public_edge_hostnames) == 7
-    error_message = "Root public edge hostnames belong to Cloudflare Load Balancing."
-  }
-}
-
-check "cloudflare_load_balancer_origins" {
-  assert {
-    condition     = length(local.public_ingress_ipv4s) == 3
-    error_message = "Cloudflare Load Balancing must publish all three guardian-mgmt ASH control-plane origins."
-  }
-}
-
 # rumi.engineering — the PrivateCut product edge. Proxied A records straight to
 # the three ASH origins: no Cloudflare Load Balancer for this zone, so there
 # is no per-request origin health steering — an origin outage surfaces as
@@ -319,6 +333,10 @@ resource "cloudflare_dns_record" "rumi_engineering_caa" {
     value = each.value
   }
   comment = "privatecut edge certificate issuance policy"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 data "cloudflare_zone" "wakeupmythra_com" {
@@ -375,4 +393,8 @@ resource "cloudflare_dns_record" "wakeupmythra_com_caa" {
     value = each.value
   }
   comment = "wake up mythra certificate issuance policy"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
