@@ -65,6 +65,13 @@ Every other permission is disabled. The App has no webhook subscriptions.
 Pull requests write is a residue of the retired PR-based promotion path and
 can be dropped at the next owner pass over App permissions.
 
+The installation's selected repositories **must include `homebrew-tap`**, or
+a stable postflight-cli cut fails at its `create-github-app-token` step
+naming the tap. This binding is owner-UI-managed (App-installation
+repository writes accept only owner-class classic credentials, which no
+automation holds); treat this line as its record, and update it on any
+selected-repositories change.
+
 ## guardian-renovate
 
 The `guardian-imageops` CronJob mints a short-lived installation token from

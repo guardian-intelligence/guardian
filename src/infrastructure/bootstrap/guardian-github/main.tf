@@ -23,10 +23,6 @@ locals {
   # to main. It bypasses the ruleset by design — see the imageops runbook.
   promotions_app_id = 4206397
 
-  # The same App's installation on guardian-intelligence, which enumerates the
-  # selected repositories its tokens can be minted for.
-  promotions_installation_id = 144138265
-
   # The simulated customer fleet. A new language or framework is a new entry
   # here and nothing else: the ecosystem drives what Postflight has to cache,
   # restore, and bill, and each repository carries its own upstream patch that
@@ -119,13 +115,18 @@ resource "github_repository" "homebrew_tap" {
   }
 }
 
-# guardian-promotions is installed on selected repositories only, and the
-# cutter mints its tap token by repository name — which fails the release
-# before anything is published unless the installation covers the tap. The
-# grant is part of the tap's definition, not a ceremony to remember.
-resource "github_app_installation_repository" "promotions_homebrew_tap" {
-  installation_id = local.promotions_installation_id
-  repository      = github_repository.homebrew_tap.name
+# Binding a repository to an App installation is the one write GitHub
+# accepts only from an owner-class classic credential; keeping it here
+# forced an org-admin PAT onto this whole root. The guardian-promotions ↔
+# homebrew-tap binding is owner-UI-managed and recorded in
+# docs/github-apps.md, like App installations themselves; the resource is
+# forgotten from state, never destroyed — the grant stays live.
+removed {
+  from = github_app_installation_repository.promotions_homebrew_tap
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 # The fleet's pull requests are opened and merged by the canary loop, not by
