@@ -205,3 +205,46 @@ spec:
                 name: presenced
                 port:
                   number: 80
+---
+# The product apex. A dedicated Ingress (not another rule on the demo host's
+# object) keeps this zone's Origin CA cutover and AOP mTLS gate off the
+# working guardianintelligence.org/mythra route - same isolation as the
+# rumi.engineering ingress. The game is served at "/" here.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: presenced-mythra
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: presenced
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: presence
+    guardian.dev/stage: prod
+  annotations:
+    # Cloudflare terminates public TLS and proves itself to the origin via
+    # AOP mTLS; the origin-pull CA Secret already lives in this namespace
+    # (company kustomization). Only verified-edge fetches reach the backend.
+    nginx.ingress.kubernetes.io/auth-tls-secret: tenant-guardian-prod/cloudflare-origin-pull-ca
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+    nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  ingressClassName: tenant-root
+  # wakeupmythra.com is not covered by the controller's default certificate
+  # (the guardianintelligence.org Origin CA cert); this tls block registers
+  # the zone's ACME-issued leaf for SNI selection.
+  tls:
+    - hosts:
+        - wakeupmythra.com
+      secretName: mythra-origin-tls
+  rules:
+    - host: wakeupmythra.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: presenced
+                port:
+                  number: 80
