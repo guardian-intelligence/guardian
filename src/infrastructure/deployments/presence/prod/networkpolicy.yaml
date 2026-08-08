@@ -1,46 +1,7 @@
-# First pod-to-pod UDP flow in the cluster outside DNS: loadgen -> presenced
-# on 4433/UDP (QUIC). Default-deny holds; these are the only admitted flows.
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: presenced
-  namespace: tenant-guardian-prod
-  labels:
-    app.kubernetes.io/name: presenced
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/stage: prod
-spec:
-  endpointSelector:
-    matchLabels:
-      app.kubernetes.io/component: presenced
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            app.kubernetes.io/component: presenced-loadgen
-      toPorts:
-        - ports:
-            - port: "4433"
-              protocol: UDP
-    - fromEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: cozy-monitoring
-            app.kubernetes.io/name: vmagent
-      toPorts:
-        - ports:
-            - port: "9090"
-              protocol: TCP
-  egress:
-    - toEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: kube-system
-            k8s-app: kube-dns
-      toPorts:
-        - ports:
-            - port: "53"
-              protocol: UDP
-            - port: "53"
-              protocol: TCP
----
+# presenced runs on the host network, so Cilium endpoint selectors do not
+# govern it: its exposure is controlled by the Talos ingress firewall (UDP
+# 4433 world rule in src/infrastructure/talm) and by which addresses the
+# process binds. Only the pod-network load generator keeps a policy here.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -65,9 +26,11 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-    - toEndpoints:
-        - matchLabels:
-            app.kubernetes.io/component: presenced
+    # The target is a host-network pod: Cilium sees node identities, not pod
+    # labels (same reasoning as the payments -> TigerBeetle transport rule).
+    - toEntities:
+        - host
+        - remote-node
       toPorts:
         - ports:
             - port: "4433"

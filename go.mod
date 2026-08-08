@@ -87,6 +87,7 @@ require (
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
