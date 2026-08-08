@@ -56,6 +56,13 @@ spec:
     # Runners run only in this namespace; event forwarding to the
     # notification controller is off.
     eventsAddress: ""
+    # The Terraform CRs reference the one canonical guardian source in
+    # cozy-fluxcd — the same artifact every Flux Kustomization reconciles
+    # from, in both steady and dark overlays. Without this the controller
+    # refuses the reference outright ("cross-namespace references have been
+    # disabled"). CRs exist only in this namespace, so the isolation the
+    # flag guards is not in play.
+    allowCrossNamespaceRefs: true
     # The runner image the controller spawns. The digest rides inside the
     # tag on purpose: the controller uses the composed repository:tag string
     # verbatim as the pod image (getRunnerPodImage), so this is what makes

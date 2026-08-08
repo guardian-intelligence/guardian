@@ -50,8 +50,15 @@ resource "latitudesh_virtual_network" "management" {
   project     = local.project_id
   site        = data.latitudesh_region.ash.slug
 
+  # The VID invariant blocks the plan instead of warning (checks block
+  # nothing in OpenTofu; under unattended applies a warning is unread).
   lifecycle {
     prevent_destroy = true
+
+    postcondition {
+      condition     = self.vid == local.vlan.vid
+      error_message = "Latitude VLAN VID drifted; expected VID 2140 for the guardian-mgmt L2 fabric."
+    }
   }
 }
 
@@ -81,6 +88,11 @@ resource "latitudesh_server" "control_plane" {
       tags,
       user_data,
     ]
+
+    postcondition {
+      condition     = self.primary_ipv4 == local.control_plane_nodes[each.key].public_ipv4
+      error_message = "Latitude server public IPv4s drifted from the checked-in guardian-mgmt OpenTofu topology."
+    }
   }
 }
 
@@ -95,19 +107,3 @@ resource "latitudesh_vlan_assignment" "control_plane" {
   }
 }
 
-check "management_vlan_vid" {
-  assert {
-    condition     = latitudesh_virtual_network.management.vid == local.vlan.vid
-    error_message = "Latitude VLAN VID drifted; expected VID 2140 for the guardian-mgmt L2 fabric."
-  }
-}
-
-check "control_plane_public_ips" {
-  assert {
-    condition = alltrue([
-      for name, node in local.control_plane_nodes :
-      latitudesh_server.control_plane[name].primary_ipv4 == node.public_ipv4
-    ])
-    error_message = "Latitude server public IPv4s drifted from the checked-in guardian-mgmt OpenTofu topology."
-  }
-}

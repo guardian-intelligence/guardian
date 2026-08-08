@@ -111,7 +111,7 @@ leaves custody out of the tofu loop permanently. Single session, in order:
      argument).
    - `tofu-system/cloudflare-minter`: `CLOUDFLARE_API_TOKEN` from
      `cloudflare_token_minter_api_token`.
-   - `tofu-system/latitude`: `LATITUDE_AUTH_TOKEN` from `latitude.token`.
+   - `tofu-system/latitude`: `LATITUDESH_AUTH_TOKEN` from `latitude.token`.
 5. **Prove the R2 lockfile** before any state write: two concurrent
    `tofu plan` runs against `guardian-stripe-sandbox`; the second must fail
    to acquire the lock (`use_lockfile` rides S3 conditional writes). If

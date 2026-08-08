@@ -1,9 +1,11 @@
 # Lane-token minting for the guardianintelligence.org Cloudflare estate: every
-# operational token is declared here and re-derivable from the custody minter,
-# so custody carries one Cloudflare credential instead of one per lane.
-# Rotation is explicit, never a side effect: bump local.expires (and taint the
-# resource to re-mint), apply, then relay to the lane's consumer. The expiry
-# check below turns every routine plan into the renewal reminder.
+# operational token is declared here and re-derivable from the minter token
+# (OpenBao, tofu-system/cloudflare-minter; re-issued from the account console
+# at disaster recovery), so one Cloudflare credential exists instead of one
+# per lane. Rotation is explicit, never a side effect: bump local.expires
+# (and taint the resource to re-mint), apply, then relay to the lane's
+# consumer. The expiry gate below turns every routine plan into the renewal
+# reminder.
 
 locals {
   zone_id              = "c952fb5989d232593ec9cca71030cb58" # guardianintelligence.org
@@ -269,13 +271,19 @@ resource "cloudflare_account_token" "r2_state" {
   ]
 }
 
-check "token_expiry_horizon" {
-  assert {
-    condition = alltrue([
-      for name, expiry in local.expires :
-      timecmp(timeadd(plantimestamp(), "504h"), expiry) < 0
-    ])
-    error_message = "A lane token expires within 21 days. Rotate it: bump local.expires, taint the token resource, apply, relay to the lane's consumer."
+# The expiry horizon blocks the plan instead of warning (checks block
+# nothing in OpenTofu): under unattended applies, a reconcile that starts
+# failing 21 days out is the rotation reminder, surfaced as the CR going
+# red and the alert that follows.
+resource "terraform_data" "token_expiry_gate" {
+  lifecycle {
+    precondition {
+      condition = alltrue([
+        for name, expiry in local.expires :
+        timecmp(timeadd(plantimestamp(), "504h"), expiry) < 0
+      ])
+      error_message = "A lane token expires within 21 days. Rotate it: bump local.expires, taint the token resource, apply, relay to the lane's consumer."
+    }
   }
 }
 

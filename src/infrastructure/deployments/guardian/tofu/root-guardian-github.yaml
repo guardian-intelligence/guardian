@@ -1,0 +1,31 @@
+# guardian-github — post-split (two per-org fine-grained PATs; the
+# org-admin write left the root). Plan-only soak like every root; the flip
+# to auto is its own PR, in the ruled order, after clean plans. The first
+# plan forgets the removed App-installation binding from state — that
+# "forget" is the expected diff, not drift.
+apiVersion: infra.contrib.fluxcd.io/v1alpha2
+kind: Terraform
+metadata:
+  name: guardian-github
+  namespace: tofu-system
+  labels:
+    app.kubernetes.io/name: tofu-controller
+    app.kubernetes.io/part-of: guardian
+spec:
+  interval: 1h
+  retryInterval: 2m
+  path: ./src/infrastructure/bootstrap/guardian-github
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+    namespace: cozy-fluxcd
+  storeReadablePlan: json
+  runnerPodTemplate:
+    spec:
+      envFrom:
+        - secretRef:
+            name: tofu-backend-r2
+        - secretRef:
+            name: tofu-state-encryption
+        - secretRef:
+            name: tofu-github

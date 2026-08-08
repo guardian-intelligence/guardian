@@ -1,0 +1,16 @@
+# Terraform CRs joined the cluster after the persona ClusterRoles were cut,
+# so the view aggregate (and with it the read persona that babysits
+# reconciliation) cannot see them without this. Read-only; plans and state
+# stay in Secrets, which view excludes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tofu-terraform-view
+  labels:
+    app.kubernetes.io/name: tofu-controller
+    app.kubernetes.io/part-of: guardian
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+rules:
+  - apiGroups: ["infra.contrib.fluxcd.io"]
+    resources: ["terraforms", "terraforms/status"]
+    verbs: ["get", "list", "watch"]
