@@ -146,3 +146,55 @@ resource "cloudflare_zone_setting" "rumi_tls_client_auth" {
   setting_id = "tls_client_auth"
   value      = "on"
 }
+
+data "cloudflare_zone" "wakeupmythra_com" {
+  filter = {
+    name = "wakeupmythra.com"
+    account = {
+      id = var.cloudflare_account_id
+    }
+  }
+}
+
+resource "cloudflare_authenticated_origin_pulls_settings" "wakeupmythra_com" {
+  zone_id = data.cloudflare_zone.wakeupmythra_com.id
+  enabled = true
+}
+
+resource "cloudflare_zone_setting" "mythra_origin_ssl" {
+  zone_id    = data.cloudflare_zone.wakeupmythra_com.id
+  setting_id = "ssl"
+  value      = "strict"
+}
+
+resource "cloudflare_bot_management" "wakeupmythra_com" {
+  zone_id    = data.cloudflare_zone.wakeupmythra_com.id
+  fight_mode = false
+}
+
+resource "cloudflare_ruleset" "mythra_cache_policy" {
+  zone_id = data.cloudflare_zone.wakeupmythra_com.id
+  name    = "wake up mythra edge cache policy"
+  kind    = "zone"
+  phase   = "http_request_cache_settings"
+
+  rules = [
+    {
+      ref         = "bypass_api_cache"
+      description = "Never edge-cache /api/ or connect-info endpoints"
+      expression  = "(starts_with(http.request.uri.path, \"/api/\")) or (starts_with(http.request.uri.path, \"/mythra/wt-info\"))"
+      action      = "set_cache_settings"
+      enabled     = true
+
+      action_parameters = {
+        cache = false
+      }
+    },
+  ]
+}
+
+resource "cloudflare_zone_setting" "mythra_tls_client_auth" {
+  zone_id    = data.cloudflare_zone.wakeupmythra_com.id
+  setting_id = "tls_client_auth"
+  value      = "on"
+}

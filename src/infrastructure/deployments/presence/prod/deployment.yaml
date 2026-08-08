@@ -70,9 +70,13 @@ spec:
             - name: METRICS_PORT
               value: "9633"
             - name: PUBLIC_ADDR
-              value: "206.223.228.101:4433" # ash-earth public IP
+              value: "wt.wakeupmythra.com:4433" # DNS-only record -> ash-earth
+            - name: TLS_CERT_FILE
+              value: /etc/mythra/tls/tls.crt
+            - name: TLS_KEY_FILE
+              value: /etc/mythra/tls/tls.key
             - name: ALLOWED_ORIGINS
-              value: "https://guardianintelligence.org"
+              value: "https://guardianintelligence.org,https://wakeupmythra.com"
             - name: BEHAVIOR_DIR
               value: /etc/mythra/behavior
             - name: ASSET_DIR
@@ -107,6 +111,9 @@ spec:
             - name: assets
               mountPath: /etc/mythra/assets
               readOnly: true
+            - name: wt-tls
+              mountPath: /etc/mythra/tls
+              readOnly: true
           resources:
             requests:
               cpu: 500m
@@ -123,6 +130,12 @@ spec:
         - name: assets
           configMap:
             name: mythra-assets
+        # optional: the pod runs on the self-signed fallback until the first
+        # ACME issuance lands; the server hot-loads the real cert on arrival.
+        - name: wt-tls
+          secret:
+            secretName: mythra-wt-tls
+            optional: true
 ---
 apiVersion: v1
 kind: Service

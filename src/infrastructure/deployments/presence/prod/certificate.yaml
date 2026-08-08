@@ -1,0 +1,78 @@
+# The game-plane certificate. wt.wakeupmythra.com is dialed directly by
+# browsers over WebTransport/QUIC - Cloudflare cannot proxy it - so unlike
+# every proxied host (Origin CA certs trusted only by the edge), this cert
+# must chain to a public CA. First ACME lane in the repo: DNS-01 via a
+# custody-minted Cloudflare token scoped to DNS-write on the mythra zone
+# only. A namespaced Issuer (not ClusterIssuer) keeps the solver secret in
+# tenant-guardian-prod, inside an existing OpenBao reader scope.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: mythra-acme-dns
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: presenced
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: presence
+    guardian.dev/stage: prod
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: iam-prod-openbao
+  target:
+    name: mythra-acme-dns
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: CF_API_TOKEN
+      remoteRef:
+        key: guardian/guardian-mgmt/tenant-guardian-prod/mythra/acme-dns
+        property: CF_API_TOKEN
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: mythra-acme
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: presenced
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: presence
+    guardian.dev/stage: prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: im.shovonhasan@gmail.com
+    privateKeySecretRef:
+      name: mythra-acme-account
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: mythra-acme-dns
+              key: CF_API_TOKEN
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mythra-wt
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: presenced
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: presence
+    guardian.dev/stage: prod
+spec:
+  secretName: mythra-wt-tls
+  issuerRef:
+    name: mythra-acme
+    kind: Issuer
+  dnsNames:
+    - wt.wakeupmythra.com
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  duration: 2160h # 90d
+  renewBefore: 720h # 30d

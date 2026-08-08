@@ -78,3 +78,14 @@ output "r2_state_secret_access_key" {
   value       = sha256(cloudflare_account_token.r2_state.value)
   sensitive   = true
 }
+
+output "mythra_acme_dns_token_id" {
+  description = "Token id of the wakeupmythra ACME DNS-01 lane token."
+  value       = cloudflare_account_token.mythra_acme_dns.id
+}
+
+output "mythra_acme_dns_token_value" {
+  description = "Secret value of the wakeupmythra ACME DNS-01 lane token (relayed into OpenBao, never consumed directly)."
+  value       = cloudflare_account_token.mythra_acme_dns.value
+  sensitive   = true
+}
