@@ -1,8 +1,8 @@
 # OpenTofu through GitOps: retiring the workstation apply
 
-Status: ruled 2026-07-26 (auto-apply on main; root tiering), doc updated
-2026-08-08. Not built. Prerequisite for shrinking custody to its
-irreducible members.
+Status: ruled 2026-08-08 — all six roots reconcile in-cluster; build in
+progress. Supersedes the 2026-07-26 two-tier ruling (recorded below under
+"The tiering that was ruled out").
 
 Complements `secrets.md` (the tier model and why custody is sealed) and
 `../src/infrastructure/runbooks/github-as-code.md` (the root that motivated
@@ -32,7 +32,7 @@ show it because nothing diffed, and the failure surfaced as unmergeable
 branches rather than an alert. Moving the ruleset into tofu removed the
 excuse; it did not add the detection.
 
-## Decision: tofu-controller, auto-apply on main
+## Decision: tofu-controller, auto-apply on main, all six roots
 
 Use `flux-iac/tofu-controller` rather than building a reconciler. It is the
 Flux ecosystem's OpenTofu controller (the former Weave TF-Controller), so the
@@ -53,7 +53,7 @@ The mechanisms map onto the three failures directly:
 | Custody per apply | `runnerPodTemplate` env from an ESO-materialized Secret |
 | Approval is a shell session | `approvePlan: auto` — the merged PR is the approval |
 
-**The approval artifact is the merge to main.** Every migrated root runs
+**The approval artifact is the merge to main.** Every root runs
 `spec.approvePlan: auto`: a change to a root applies when its PR lands, the
 same way every other change to this repository takes effect. The PR is
 reviewable, attributable, revertable, and gated by the ruleset — the
@@ -79,96 +79,113 @@ Rejected, with reasons:
   drift scheduling, and the approval protocol. The standing directive is to
   use existing tooling; this is exactly the case it was written for.
 
-## Which roots move
+## All six roots move
 
-The split is by whether the cluster can safely reconcile something the
-cluster itself depends on.
-
-**GitOps tier — all four auto-applied:**
+Ruled 2026-08-08: there is no operator tier. Every root reconciles
+in-cluster, ordered by blast radius, each with the guards that make auto
+safe for it:
 
 - `guardian-stripe-sandbox` — sandbox blast radius; the first mover.
 - `guardian-mgmt-edge-policy` — its token cannot move traffic by
-  construction, which bounds the worst case.
-- `guardian-github` — no circularity and a loud, safe consumer, but its
-  token is ruleset-admin over the repository that defines the cluster: a
-  controller compromise could drop the ruleset, push, and let Flux apply
-  the result. **Open decision before this root migrates:** split it into a
-  fleet-repos root (in-cluster) and a guardian-repo ruleset root (operator
-  tier), or accept the exposure explicitly.
-- `guardian-mgmt-dns` — auto like the rest, migrated last. Auto is sound
-  here because the reconcile loop (Flux to github.com, the controller to
-  api.cloudflare.com) traverses nothing this root manages, so a bad apply
-  cannot sever its own revert path: the worst case is a minutes-long
-  ops-access window (the `guardian_mgmt_k8s_api` records and the edge LB
-  hostnames) while a git revert converges. When the cluster is truly down
-  the controller is down with it, so incident-time manual Cloudflare
-  changes stick exactly when they are needed. Zones are data sources, not
-  resources — the unrecoverable object is not managed here. The guards
-  that make this safe are listed under migration.
-
-**Operator tier — applied from a workstation, permanently:**
-
-- `guardian-mgmt-cloudflare-tokens` — the minter token is Account API Tokens
-  Write, root-equivalent, and doctrine is that it never exists in-cluster.
-- `guardian-mgmt` — provisions the metal the controller runs on. At cold boot
-  you need the Latitude token to build the substrate that would run the
-  controller that holds the Latitude token; reconciling the substrate from
-  inside the substrate is the circularity DR exists to break.
-
-**Where an apply runs and where its credential lives are separate
-questions.** These two roots are applied by an operator forever. That does
-not make them custody material, and treating the two axes as one is what put
-`custody.env` in the bundle in the first place.
-
-Their credentials belong in **tier 3, the bootstrap set** (`secrets.md`):
-one age-encrypted object per value in R2, encrypted to the repo-committed
-recipient key. Writing or rotating one is a blind write — encrypt to a public
-key and upload, no passphrase and no bundle open. Decryption happens at
-disaster recovery and drills, using the age identity from the operator vault,
-which is precisely why the minter still never exists in-cluster: the cluster
-can read the ciphertext and decrypt nothing.
-
-So no tofu root needs the custody bundle. The GitOps tier reads OpenBao, the
-operator tier reads the bootstrap set, and `custody.env` leaves the bundle
-entirely — which finishes the custody shrink to its irreducible members
-(Talos genesis, `talm.key`, `talosconfig`, the LINSTOR master passphrase, and
-the OpenBao seal metadata).
-
-**Prerequisite: tier 3 is documented but not built.** There is no age or
-bootstrap-set tooling in `src/infrastructure/cmd/`, and `custody.env` is
-still the only home for these values. Building it is a precondition for the
-operator tier's half of this design, not a config change. It gates nothing
-in the GitOps tier: the controller and all four migrated roots run entirely
-on OpenBao through ESO, the documented path for reissuable credentials.
+  construction.
+- `guardian-github` — **split before migration.** The root's classic
+  `repo`+`admin:org` PAT existed for exactly one resource:
+  `github_app_installation_repository.promotions_homebrew_tap`, the write
+  GitHub accepts from no App token and no fine-grained PAT. That binding
+  leaves OpenTofu and becomes an owner-UI-managed fact recorded in
+  `github-apps.md`, the same class as App installations themselves, which
+  were already UI-only. Everything else — main's ruleset, the tap
+  repository, the customer fleet — is managed in-cluster with **two
+  per-org fine-grained PATs** (fine-grained PATs are scoped to a single
+  resource owner): repository Administration on `guardian-intelligence`,
+  repository create/administer on `digital-guardian-software`. The
+  org-admin classic PAT dies with the split; cluster compromise no longer
+  reaches org administration.
+- `guardian-mgmt-dns` — auto like the rest. Sound because the reconcile
+  loop (Flux to github.com, the controller to api.cloudflare.com)
+  traverses nothing this root manages, so a bad apply cannot sever its own
+  revert path: the worst case is a minutes-long ops-access window while a
+  git revert converges. When the cluster is truly down the controller is
+  down with it, so incident-time manual Cloudflare changes stick exactly
+  when they are needed. Zones are data sources, not resources. Guards:
+  `lifecycle.prevent_destroy` on the k8s-API records, the LB pool and LBs,
+  and CAA; `check` blocks converted to preconditions (checks are warn-only
+  in OpenTofu); a written pause procedure; no automerge for Cloudflare
+  provider bumps touching this root.
+- `guardian-mgmt-cloudflare-tokens` — the minter root. **This is the
+  informed override of the never-in-cluster doctrine, ruled 2026-08-08**
+  with the cost stated: a controller compromise can mint Cloudflare tokens,
+  including R2-write credentials. Why it is acceptable: the minter token is
+  revocable in one console action from the account login, which stays in
+  the operator vault (tier 1) — the cluster holds a lever, not the root of
+  trust; every mint is a state change a drift plan surfaces; offline
+  custody pulls mean even an R2-wipe mint cannot destroy the recovery
+  path. Guards: the runner namespace is CNP-walled to the Cloudflare API,
+  drift detection runs on the shortest interval of any root (a hostile
+  mint shows up as drift), and the root's expiry `check` becomes a
+  precondition so a plan cannot silently pass a dead token forward.
+- `guardian-mgmt` — the metal. Last, because it is the substrate the
+  controller runs on. Auto is bounded by `lifecycle.prevent_destroy` on
+  every server resource — a destroy plan fails the apply and alerts — and
+  metal changes are rare, deliberate PRs. Cold boot is unaffected: with no
+  cluster there is no controller, and the disaster path applies this root
+  from a workstation per `cold-boot-bootstrap.md` with credentials from
+  the operator vault, not from custody.
 
 ## Credentials and state
 
-Each migrated root gets an `ExternalSecret` in the controller's namespace
-projecting its provider token and the R2 backend keypair, mounted into the
-runner pod as env. Those values move `custody.env` → OpenBao, which is
-correct independent of this design: all of them are reissuable from their
-owning console, and `secrets.md` already classes reissuable third-party
-credentials as OpenBao material.
+**Runtime (the controller): OpenBao, the documented path.** The controller
+namespace gets the standard `guardian-reader`/`guardian-writer` pair and a
+`ClusterSecretStore`; each root's `Terraform` CR mounts an
+ExternalSecret-materialized Secret into the runner pod: the root's provider
+token(s), the R2 backend keypair, and the state passphrase. All of it is
+reissuable third-party material — exactly what `secrets.md` classes as
+OpenBao content. Adding the namespace pair is a structural OpenBao change
+(self-init is the sole source of truth), so it rides the one migration
+ceremony below.
 
-State encryption takes **two passphrases, not one**, and this falls out of
-the tier boundary rather than a general rule about duplication:
+**Disaster recovery: the operator vault, not a new tier.** The bootstrap
+set (tier 3) is not built for tofu, and nothing here needs it. The only
+value that cannot be re-issued from a console is the state-encryption
+passphrase — ciphertext outlives every token — so the passphrase is
+**dual-homed**: OpenBao for runners, the operator vault for cold boot. The
+cluster never reads the vault, so dual-homing crosses no boundary; it is
+the same arrangement the custody repository passphrase already has. Every
+other input (Latitude token, Cloudflare minter, R2 keypair) is re-issuable
+from its console at DR time, which is the accepted worst case `secrets.md`
+already states.
 
-- GitOps tier — a new passphrase generated into OpenBao, recovered with the
-  rest of the estate by raft snapshot restore. It cannot live in the
-  bootstrap set, because reading that requires the operator age identity,
-  which decrypts root-equivalent tokens; the cluster must never hold it.
-- Operator tier — a bootstrap-set object. It cannot live in OpenBao, because
-  at cold boot there is no cluster to serve it.
+**One passphrase, not two.** The 2026-07-26 two-passphrase split existed
+only because the tier boundary put one passphrase where the cluster could
+never read it. With the tiering gone, a single fresh passphrase serves all
+six roots. Migration is a one-time rekey per root: state pull under the
+custody passphrase, push under the new one.
 
-Neither passphrase can be moved to the other's home, so one shared passphrase
-is not available even in principle. Migrating a root is a one-time rekey:
-state pull under the old passphrase, push under the new.
+**`custody.env`'s tofu values retire.** The custody bundle's third opener —
+the bootstrap-root apply — dies with the workstation path. Custody opens
+for disaster recovery and key rotation, as designed, and the tofu values
+(`tofu_state_encryption_passphrase`, provider tokens, R2 keypair) leave the
+bundle manifest.
 
-## Preconditions from review
+## The tiering that was ruled out
 
-Findings from the 2026-07-26 adversarial review, verified against the
-controller source and this repository; each must hold before the step it
-gates.
+The 2026-07-26 ruling kept `guardian-mgmt` and
+`guardian-mgmt-cloudflare-tokens` on a workstation forever: reconciling the
+substrate from inside the substrate breaks the circularity DR exists for,
+and the minter was doctrine-bound to never exist in-cluster. Their
+credentials were to move to a then-unbuilt tier-3 bootstrap set. Ruled out
+2026-08-08, deliberately: the circularity argument confused the routine
+path with the disaster path (cold boot always applies from a workstation —
+that recipe survives as the break-glass runbook, not as a tier), and the
+minter's risk is bounded by console revocation plus drift detection rather
+than by keeping a human in the loop of every routine apply. The tier-3
+build it required stays unbuilt; the operator vault covers DR with fewer
+moving parts.
+
+## Preconditions
+
+Each must hold before the step it gates; verified findings from the
+2026-07-26 adversarial review carry forward unchanged.
 
 - **R2 state locking, before the first migrated root.** No `versions.tf`
   sets `use_lockfile` today — safe while exactly one operator applies,
@@ -183,62 +200,69 @@ gates.
   excludes only Secrets. Use secret/json mode.
 - **Version lockstep.** The runner image defaults its own `TOFU_VERSION`
   (1.12.1 at last check) independent of the repo pin (1.12.5, multitool).
-  Assert the pair in `version_skew_test.go` or build a custom runner; a
-  silent skew plans differently than a workstation does.
+  Assert the pair in `version_skew_test.go`; a silent skew plans
+  differently than a workstation does.
 - **Provider API load.** Every reconcile plans with refresh, so each
   interval hits that root's provider APIs. Choose reconcile intervals with
   provider rate limits in mind.
 - **`allowBreakTheGlass` stays off.** Break-glass is the workstation apply
-  recipe — which must be written down as a runbook *before* the final step
-  deletes the routine workstation path, or the escape hatch dies with it.
+  recipe — written down as a runbook *before* the final step deletes the
+  routine workstation path, or the escape hatch dies with it.
 
 ## Migration
 
 0. Install the controller with no `Terraform` CRs. Verify runner TLS
    issuance and that nothing reconciles.
-1. Enable and verify R2 state locking across all roots, and land the runner
+1. Enable and verify R2 state locking across all roots; land the runner
    egress CNPs.
-2. `guardian-stripe-sandbox`: rekey to the OpenBao passphrase, soak
-   plan-only, then flip to auto.
-3. `guardian-mgmt-edge-policy`: same sequence.
-4. `guardian-github`: resolve the ruleset-split decision, then the same
-   sequence.
-5. `guardian-mgmt-dns`, last, with its guards in place first:
-   `lifecycle.prevent_destroy` on the k8s-API records, the LB pool and LBs,
-   and CAA, so a would-be destroy becomes a failed apply and an alert; the
-   root's `check` blocks converted to preconditions (checks are warn-only
-   in OpenTofu and block nothing); a written pause/suspend procedure for
-   incident-time manual changes; and no automerge for Cloudflare provider
-   bumps that touch this root. Then plan-only soak, then auto.
-6. Build the bootstrap set (tier 3), and move the operator tier's provider
-   tokens, R2 backend keypair, and state passphrase into it. Independent of
-   the controller — it can run in parallel with steps 0–5.
-7. Write the break-glass workstation recipe, then delete the workstation
-   path for migrated roots: drop their `TF_ENCRYPTION` references, empty
-   `custody.env` out of the bundle manifest, and narrow the cold-boot
-   runbook's "OpenTofu state encryption" section to the operator tier
-   reading its passphrase from the bootstrap set.
+2. **The one ceremony** (single operator session, then never again):
+   re-initialize OpenBao with the controller namespace pair
+   (`openbao-static-seal-self-init.md`); generate the new state passphrase
+   into the operator vault and OpenBao; per `custody.md`, open the bundle
+   once to rekey each root's state to the new passphrase and relay the
+   remaining credential values into OpenBao through scoped writer tokens;
+   mint the two fine-grained GitHub PATs in the org consoles.
+3. `guardian-stripe-sandbox`: plan-only soak, then flip to auto.
+4. `guardian-mgmt-edge-policy`: same sequence.
+5. `guardian-github`: land the split (the App-installation binding moves to
+   `github-apps.md` as a UI-managed fact), then the same sequence on the
+   two fine-grained PATs.
+6. `guardian-mgmt-dns`, with its guards landed first.
+7. `guardian-mgmt-cloudflare-tokens`, with its guards; then `guardian-mgmt`
+   with `prevent_destroy` across the metal.
+8. Write the break-glass workstation recipe, then delete the workstation
+   path: drop the `TF_ENCRYPTION` assembly from routine docs, remove the
+   tofu values from the custody manifest, and narrow the cold-boot
+   runbook to the operator-vault credential path.
 
-Steps 6 and 7 are the deliverable. Until they land this has added a system
-without removing one, and custody still opens for ordinary work.
+Step 8 is the deliverable. Until it lands this has added a system without
+removing one, and custody still opens for ordinary work.
 
-While `custody.env` is being emptied, the bundle's three optional reissuable
+While the custody manifest shrinks, the bundle's three optional reissuable
 GitHub App PEMs (`keys/*.private-key.pem`) belong in OpenBao by the same
-argument that moved them out of the provisioning skills. They are not part of
-this design; they are the obvious neighbouring cleanup.
+argument that moved them out of the provisioning skills. They are not part
+of this design; they are the obvious neighbouring cleanup.
 
 ## Risks
 
-- **The controller becomes privileged.** It holds provider tokens for four
-  roots. Mitigation is that the tokens are individually scoped — edge-policy
-  cannot move traffic, the GitHub token cannot reach Cloudflare — and its
-  ServiceAccount is not cluster-admin. The `guardian-github` token is the
-  outlier; that is why its migration waits on the ruleset-split decision.
-- **Auto-apply on a bad plan.** With no human between merge and apply, the
-  DNS `prevent_destroy` guards and preconditions are the backstop: a
-  destructive plan fails the apply and alerts instead of executing.
-- **Drift detection versus DR.** A manual change made during an incident on
-  `guardian-mgmt-dns` would be reverted by the next reconcile. The pause
-  procedure (suspend the CR) exists for exactly this and gates step 5 —
-  and when the cluster is down enough to force manual DNS work, the
-  controller is down too, so the change sticks until the cluster returns.
+- **The controller is the most privileged workload in the cluster.** It
+  holds every root's token, including the Cloudflare minter. Accepted by
+  the 2026-08-08 ruling with these bounds: per-root token scoping (the
+  GitHub PATs cannot reach Cloudflare; edge-policy cannot move traffic),
+  a non-cluster-admin ServiceAccount, a CNP-walled runner namespace,
+  secret-mode plan storage, and console-revocable credentials whose root
+  of trust (the account logins) never leaves the operator vault.
+- **Auto-apply on a bad plan.** With no human between merge and apply,
+  `prevent_destroy` on the irreplaceable resources (metal, k8s-API
+  records, LBs, CAA) is the backstop: a destructive plan fails the apply
+  and alerts instead of executing.
+- **Drift detection versus incident-time manual changes.** A manual
+  Cloudflare change made during an incident would be reverted by the next
+  reconcile. The pause procedure (suspend the CR) exists for exactly this
+  and gates the DNS migration — and when the cluster is down enough to
+  force manual DNS work, the controller is down too, so the change sticks
+  until the cluster returns.
+- **A hostile or accidental mint.** The minter root's drift plan is the
+  detector; the console revocation from the vault-held account login is
+  the response; offline custody pulls bound the damage of an R2-wipe
+  mint.
