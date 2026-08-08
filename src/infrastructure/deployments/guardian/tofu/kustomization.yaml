@@ -7,6 +7,11 @@ resources:
   - tofu-controller-networkpolicy.yaml
   - root-guardian-stripe-sandbox.yaml
   - root-guardian-mgmt-edge-policy.yaml
+  - root-guardian-github.yaml
+  - root-guardian-mgmt-dns.yaml
+  - root-guardian-mgmt-cloudflare-tokens.yaml
+  - root-guardian-mgmt.yaml
+  - rbac.yaml
 
 # One copy of the non-secret account id every Cloudflare root's CR consumes
 # via varsFrom; the workstation twin is bootstrap/backend.tfvars.

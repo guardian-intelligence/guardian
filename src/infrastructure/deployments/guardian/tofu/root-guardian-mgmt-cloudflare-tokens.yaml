@@ -1,0 +1,33 @@
+# guardian-mgmt-cloudflare-tokens — the minter, in-cluster by the informed
+# 2026-08-08 ruling. The short interval is deliberate: this root's drift
+# plan is the hostile-mint detector, so it re-plans more often than any
+# other root. Plan-only until its turn in the ruled order.
+apiVersion: infra.contrib.fluxcd.io/v1alpha2
+kind: Terraform
+metadata:
+  name: guardian-mgmt-cloudflare-tokens
+  namespace: tofu-system
+  labels:
+    app.kubernetes.io/name: tofu-controller
+    app.kubernetes.io/part-of: guardian
+spec:
+  interval: 15m
+  retryInterval: 2m
+  path: ./src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+    namespace: cozy-fluxcd
+  storeReadablePlan: json
+  varsFrom:
+    - kind: ConfigMap
+      name: tofu-vars
+  runnerPodTemplate:
+    spec:
+      envFrom:
+        - secretRef:
+            name: tofu-backend-r2
+        - secretRef:
+            name: tofu-state-encryption
+        - secretRef:
+            name: tofu-cloudflare-minter
