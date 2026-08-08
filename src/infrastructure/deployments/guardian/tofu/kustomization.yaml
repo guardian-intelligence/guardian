@@ -2,5 +2,6 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - namespace.yaml
+  - secrets.yaml
   - tofu-controller-helmrelease.yaml
   - tofu-controller-networkpolicy.yaml
