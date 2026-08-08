@@ -8,7 +8,7 @@
 locals {
   zone_id              = "c952fb5989d232593ec9cca71030cb58" # guardianintelligence.org
   rumi_zone_id         = "034bf5d0a4ff33b0e9965f50be70d8d0" # rumi.engineering
-  mythra_zone_id       = "4bfa5c0e3d0183dc0e30b9c4cbc17d47"   # wakeupmythra.com
+  mythra_zone_id       = "4bfa5c0e3d0183dc0e30b9c4cbc17d47" # wakeupmythra.com
   account_resource     = "com.cloudflare.api.account.${var.cloudflare_account_id}"
   zone_resource        = "com.cloudflare.api.account.zone.${local.zone_id}"
   rumi_zone_resource   = "com.cloudflare.api.account.zone.${local.rumi_zone_id}"
@@ -34,6 +34,8 @@ locals {
     firewall_services_write = "43137f8d07884d3198dc0ee77ca6e79b" # Firewall Services Write (zone)
     r2_bucket_item_read     = "6a018a9f2fc74eb6b293b0c548f38b39" # Workers R2 Storage Bucket Item Read (bucket)
     r2_bucket_item_write    = "2efd5506f9c8494dacb1fa10a3e7d5b6" # Workers R2 Storage Bucket Item Write (bucket)
+    r2_storage_read         = "b4992e1108244f5d8bfbd5744320c2e1" # Workers R2 Storage Read (account)
+    r2_storage_write        = "bf7481a1826f439697cb59a20b22293e" # Workers R2 Storage Write (account)
   }
 
   backups_bucket_resource          = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-backups"
@@ -46,6 +48,7 @@ locals {
     edge_policy_provision = "2026-10-06T00:00:00Z"
     payments_journal      = "2026-10-06T00:00:00Z"
     r2_backups            = "2026-10-06T00:00:00Z"
+    r2_bucket_provision   = "2026-10-06T00:00:00Z"
     r2_state              = "2026-10-06T00:00:00Z"
     mythra_acme_dns       = "2026-10-06T00:00:00Z"
   }
@@ -178,10 +181,41 @@ resource "cloudflare_account_token" "payments_journal" {
   ]
 }
 
+# Bucket-owning apply credential, minted like every other lane token so the
+# custody minter never carries R2 authority itself — creating or touching a
+# bucket always goes through this explicit, expiring credential. Bucket
+# resources apply through the aliased provider below; the one-time bootstrap
+# when this token does not yet exist is
+#   apply -target=cloudflare_account_token.r2_bucket_provisioner
+# followed by a normal apply (the alias then reads the value from state).
+resource "cloudflare_account_token" "r2_bucket_provisioner" {
+  account_id = var.cloudflare_account_id
+  name       = "guardian-r2-bucket-provisioner"
+  expires_on = local.expires.r2_bucket_provision
+
+  policies = [
+    {
+      effect = "allow"
+      permission_groups = [
+        { id = local.permission_groups.r2_storage_read },
+        { id = local.permission_groups.r2_storage_write },
+      ]
+      resources = jsonencode({ (local.account_resource) = "*" })
+    },
+  ]
+}
+
+provider "cloudflare" {
+  alias     = "r2"
+  api_token = cloudflare_account_token.r2_bucket_provisioner.value
+}
+
 # The isolated bucket and successor credential land before the workload switch.
 # Keeping the current credential alive lets the existing replicas continue
 # journaling while the successor is applied and relayed through OpenBao.
 resource "cloudflare_r2_bucket" "payments_journal" {
+  provider = cloudflare.r2
+
   account_id    = var.cloudflare_account_id
   name          = "guardian-payments-journal"
   location      = "enam"
