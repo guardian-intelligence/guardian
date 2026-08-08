@@ -1,0 +1,116 @@
+# presenced: load-test deployment for the room presence/tick service.
+# Single replica with Guaranteed QoS (integer CPU, requests==limits): the
+# kubelet's static CPU manager pins exclusive cores, so tick-duration
+# measurements are not polluted by neighbours on the shared 3-node cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: presenced
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: presenced
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: presenced
+    guardian.dev/product: presence
+    guardian.dev/stage: prod
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: presenced
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: presenced
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: presenced
+        guardian.dev/product: presence
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      priorityClassName: guardian-standard
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: presenced
+          image: ghcr.io/guardian-intelligence/presenced:edge@sha256:388ef0e384e26d3286371deb37c5f77b36f4ced6f374286bfad2ac5edd2f8426
+          env:
+            - name: TICK_HZ
+              value: "24"
+            - name: WT_PORT
+              value: "4433"
+            - name: METRICS_PORT
+              value: "9090"
+          ports:
+            - name: wt
+              containerPort: 4433
+              protocol: UDP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "4"
+              memory: 4Gi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: "4"
+              memory: 4Gi
+              ephemeral-storage: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: presenced
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: presenced
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: presence
+    guardian.dev/stage: prod
+spec:
+  selector:
+    app.kubernetes.io/component: presenced
+  ports:
+    - name: wt
+      port: 4433
+      targetPort: wt
+      protocol: UDP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: presenced-metrics
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: presenced
+    app.kubernetes.io/component: metrics
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  selector:
+    app.kubernetes.io/component: presenced
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP

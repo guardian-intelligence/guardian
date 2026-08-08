@@ -1143,3 +1143,29 @@ spec:
       kind: ExternalSecret
       current: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'True')
       failed: has(status.conditions) && status.conditions.exists(c, c.type == 'Ready' && c.status == 'False')
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: guardian-presence-prod
+  namespace: cozy-fluxcd
+spec:
+  interval: 10m
+  retryInterval: 1m
+  path: ./src/infrastructure/deployments/presence/prod
+  sourceRef:
+    kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+    name: ${GUARDIAN_SOURCE_NAME:=guardian}
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: guardian-source
+  dependsOn:
+    - name: guardian-mgmt-base
+  prune: true
+  wait: false
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: presenced
+      namespace: tenant-guardian-prod
