@@ -107,7 +107,7 @@ spec:
             - name: JOURNAL_S3_REGION
               value: auto
             - name: JOURNAL_S3_BUCKET
-              value: guardian-backups
+              value: guardian-payments-journal
             - name: JOURNAL_S3_PREFIX
               value: tenant-guardian-prod/payments-journal
             - name: JOURNAL_S3_ACCESS_KEY_ID
