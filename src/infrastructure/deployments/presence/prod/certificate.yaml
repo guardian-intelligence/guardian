@@ -56,6 +56,36 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
+  name: mythra-origin
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: presenced
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: presence
+    guardian.dev/stage: prod
+spec:
+  # The proxied apex origin cert. Other Guardian zones front their origin
+  # with a Cloudflare Origin CA cert minted at onboarding; this zone already
+  # runs an ACME/DNS-01 lane for the un-proxiable game plane, so the apex
+  # reuses it rather than introducing a second issuance mechanism and an
+  # operator-loaded secret. Cloudflare Full (Strict) trusts any public CA at
+  # the origin, so a Let's Encrypt leaf satisfies the edge fetch.
+  secretName: mythra-origin-tls
+  issuerRef:
+    name: mythra-acme
+    kind: Issuer
+  dnsNames:
+    - wakeupmythra.com
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  duration: 2160h # 90d
+  renewBefore: 720h # 30d
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
   name: mythra-wt
   namespace: tenant-guardian-prod
   labels:

@@ -843,12 +843,12 @@ func main() {
 	// normal Cloudflare-proxied ingress. The WebTransport dial goes direct to
 	// PUBLIC_ADDR with the cert hash from /wt-info.
 	pageMux := http.NewServeMux()
-	pageMux.HandleFunc("/mythra/", func(w http.ResponseWriter, r *http.Request) {
+	servePage := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Write(mythraHTML)
-	})
-	pageMux.HandleFunc("/mythra/wt-info", func(w http.ResponseWriter, r *http.Request) {
+	}
+	serveWTInfo := func(w http.ResponseWriter, r *http.Request) {
 		addr := publicAddr
 		if addr == "" {
 			addr = "127.0.0.1:" + strconv.Itoa(wtPort)
@@ -863,18 +863,29 @@ func main() {
 			info["certHashB64"] = base64.StdEncoding.EncodeToString(hash[:])
 		}
 		json.NewEncoder(w).Encode(info)
-	})
-	pageMux.HandleFunc("/mythra/assets/", func(w http.ResponseWriter, r *http.Request) {
-		ref := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/mythra/assets/"), ".svg")
-		body, ok := assets.get(ref)
-		if !ok {
-			http.NotFound(w, r)
-			return
+	}
+	serveAsset := func(prefix string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			ref := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), ".svg")
+			body, ok := assets.get(ref)
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "image/svg+xml")
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			w.Write(body)
 		}
-		w.Header().Set("Content-Type", "image/svg+xml")
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		w.Write(body)
-	})
+	}
+	// The game is the site at the product apex (wakeupmythra.com/); the
+	// /mythra prefix keeps the pre-purchase demo host (guardianintelligence.org
+	// /mythra) serving the same page through the transition. Exact and
+	// prefixed patterns win over the "/" catch-all by longest-match.
+	for _, base := range []string{"", "/mythra"} {
+		pageMux.HandleFunc(base+"/", servePage)
+		pageMux.HandleFunc(base+"/wt-info", serveWTInfo)
+		pageMux.HandleFunc(base+"/assets/", serveAsset(base+"/assets/"))
+	}
 
 	obsMux := http.NewServeMux()
 	obsMux.Handle("/metrics", promhttp.Handler())
