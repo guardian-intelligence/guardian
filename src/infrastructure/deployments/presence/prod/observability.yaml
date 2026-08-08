@@ -52,3 +52,11 @@ spec:
           annotations:
             summary: "presenced tick p99 above 35ms"
             description: "Tick p99 is converging on the 41.7ms budget at 24Hz; the simulation is close to missing ticks."
+        - alert: PresencedBehaviorReloadRejected
+          expr: increase(presence_behavior_reloads_total{result="error"}[10m]) > 0
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "presenced rejected a behavior script"
+            description: "A live or shadow Lua script failed to load; the previous script keeps running. Check presenced logs for the parse error."

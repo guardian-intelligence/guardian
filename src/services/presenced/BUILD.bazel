@@ -5,6 +5,10 @@ load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 go_library(
     name = "presenced_lib",
     srcs = ["main.go"],
+    embedsrcs = [
+        "behaviors/random_walk.lua",
+        "static/mythra.html",
+    ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/presenced",
     visibility = ["//visibility:private"],
     deps = [
@@ -13,6 +17,7 @@ go_library(
         "@com_github_prometheus_client_golang//prometheus/promhttp:go_default_library",
         "@com_github_quic_go_quic_go//http3:go_default_library",
         "@com_github_quic_go_webtransport_go//:go_default_library",
+        "@com_github_yuin_gopher_lua//:go_default_library",
     ],
 )
 

@@ -1,0 +1,204 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wake up mythra — presence demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #FFFFFF; color: #111111; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; padding: 16px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; border: 2px solid #111; padding: 8px 12px; margin-bottom: 12px; }
+  .pill { font-weight: 700; padding: 1px 10px; border: 2px solid #111; }
+  .pill.connected { background: #111; color: #fff; }
+  .stat b { font-variant-numeric: tabular-nums; }
+  .dim { color: #666; }
+  #grid { border: 2px solid #111; display: block; width: min(92vw, 640px); image-rendering: pixelated; touch-action: manipulation; }
+  #log { margin-top: 12px; border: 1px solid #999; padding: 8px 12px; height: 130px; overflow-y: auto; font-size: 12px; color: #444; }
+  #log .t { color: #999; }
+  .who { margin-top: 10px; font-size: 12px; color: #444; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <span id="status" class="pill">CONNECTING</span>
+  <span class="stat">tick <b id="tick">–</b></span>
+  <span class="stat">rtt <b id="rtt">–</b></span>
+  <span class="stat">sim behavior <b id="behavior">–</b></span>
+  <span class="stat">skin <b id="skin">cell</b></span>
+  <span class="stat dim" id="role"></span>
+</div>
+<canvas id="grid" width="100" height="100"></canvas>
+<div class="who" id="who"></div>
+<div id="log"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const store = sessionStorage;
+const spectate = new URLSearchParams(location.search).has("spectate");
+if (!store.getItem("name")) store.setItem("name", "walker-" + Math.random().toString(16).slice(2, 6));
+
+var transport = null, dgWriter = null, ctrlWriter = null;
+let backoff = 300, epoch = 0, pingTimer = null, myId = null;
+let lastBehavior = null, players = [];
+const assetCache = new Map();   // ref -> Image | "loading"
+
+function logLine(s) {
+  const el = document.createElement("div");
+  el.innerHTML = `<span class="t">${new Date().toTimeString().slice(0, 8)}</span> ${s}`;
+  $("log").prepend(el);
+  while ($("log").children.length > 80) $("log").lastChild.remove();
+}
+function setStatus(s) {
+  $("status").textContent = s.toUpperCase();
+  $("status").className = "pill" + (s === "connected" ? " connected" : "");
+}
+
+async function connect() {
+  const myEpoch = ++epoch;
+  try {
+    const info = await (await fetch("/mythra/wt-info", { cache: "no-store" })).json();
+    const hash = Uint8Array.from(atob(info.certHashB64), c => c.charCodeAt(0));
+    transport = new WebTransport(`https://${info.addr}/wt`, {
+      serverCertificateHashes: [{ algorithm: "sha-256", value: hash.buffer }],
+    });
+    await transport.ready;
+    if (myEpoch !== epoch) { transport.close(); return; }
+    backoff = 300;
+    setStatus("connected");
+
+    const ctrl = await transport.createBidirectionalStream();
+    ctrlWriter = ctrl.writable.getWriter();
+    dgWriter = transport.datagrams.writable.getWriter();
+    sendCtrl({ type: "hello", name: store.getItem("name"), device: deviceLabel(),
+               token: store.getItem("token") || "", spectate });
+    readLines(ctrl.readable);
+    readDatagrams(transport.datagrams.readable);
+    clearInterval(pingTimer);
+    pingTimer = setInterval(() => sendDg({ type: "ping", ct: Date.now() }), 1000);
+    transport.closed.catch(() => {}).finally(() => { if (myEpoch === epoch) onDead(); });
+  } catch (e) {
+    logLine(`connect failed: ${e.message ?? e}`);
+    if (myEpoch === epoch) onDead();
+  }
+}
+
+function deviceLabel() {
+  return /iPhone|Android|Mobile/.test(navigator.userAgent) ? "phone" : "desktop";
+}
+
+function onDead() {
+  clearInterval(pingTimer);
+  setStatus(store.getItem("token") ? "resuming" : "connecting");
+  const wait = backoff;
+  backoff = Math.min(backoff * 2, 5000);
+  logLine(`connection lost; redialing in ${wait}ms`);
+  setTimeout(connect, wait + Math.random() * 250);
+}
+
+function sendCtrl(o) { ctrlWriter?.write(new TextEncoder().encode(JSON.stringify(o) + "\n")).catch(() => {}); }
+function sendDg(o) { dgWriter?.write(new TextEncoder().encode(JSON.stringify(o))).catch(() => {}); }
+
+async function readLines(readable) {
+  const reader = readable.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i); buf = buf.slice(i + 1);
+        if (line.trim()) onCtrl(JSON.parse(line));
+      }
+    }
+  } catch {}
+}
+
+async function readDatagrams(readable) {
+  const reader = readable.getReader();
+  const dec = new TextDecoder();
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      onDg(JSON.parse(dec.decode(value)));
+    }
+  } catch {}
+}
+
+function onCtrl(m) {
+  if (m.type === "welcome") {
+    myId = m.you.id;
+    store.setItem("token", m.token);
+    $("role").textContent = m.you.role + " @ " + m.you.device;
+    logLine(`welcome: ${m.you.name} (${m.resumed ? "resumed" : "new"}), room ${m.you.room}`);
+  } else if (m.type === "presence") {
+    players = m.players;
+    const names = players.filter(p => p.role !== "spectator").map(p => p.name);
+    const specs = players.filter(p => p.role === "spectator").length;
+    $("who").textContent = `dogs here: ${names.join(", ") || "none"}` + (specs ? ` · ${specs} watching` : "");
+  }
+}
+
+function onDg(m) {
+  if (m.type === "pong") {
+    $("rtt").textContent = (Date.now() - m.ct) + "ms";
+    return;
+  }
+  if (m.type !== "tick") return;
+  $("tick").textContent = m.n;
+  if (m.behavior && m.behavior !== lastBehavior) {
+    if (lastBehavior) logLine(`sim behavior updated ${lastBehavior} → ${m.behavior} — no reload, same session`);
+    lastBehavior = m.behavior;
+    $("behavior").textContent = m.behavior;
+  }
+  render(m.dogs || []);
+}
+
+// asset streaming: unknown skin refs are fetched once by content address;
+// dogs render as a filled cell until the asset arrives.
+function skinImage(ref) {
+  if (ref === "cell") return null;
+  const cached = assetCache.get(ref);
+  if (cached instanceof Image) return cached;
+  if (cached === "loading") return null;
+  assetCache.set(ref, "loading");
+  logLine(`streaming asset ${ref}.svg…`);
+  fetch(`/mythra/assets/${ref}.svg`).then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.blob();
+  }).then(b => {
+    const img = new Image();
+    img.onload = () => { assetCache.set(ref, img); $("skin").textContent = ref; logLine(`asset ${ref} ready`); };
+    img.src = URL.createObjectURL(b);
+  }).catch(e => { assetCache.delete(ref); logLine(`asset ${ref} failed (${e.message}); retrying next tick`); });
+  return null;
+}
+
+const ctx = $("grid").getContext("2d");
+function render(dogs) {
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, 100, 100);
+  for (const [id, x, y, skin] of dogs) {
+    const img = skinImage(skin);
+    if (img) {
+      ctx.drawImage(img, x - 1.5, y - 1.5, 4, 4);
+    } else {
+      ctx.fillStyle = "#111111";
+      ctx.fillRect(x, y, 1.6, 1.6);
+    }
+    if (id === myId) {           // ring your own dog
+      ctx.strokeStyle = "#111111";
+      ctx.lineWidth = 0.4;
+      ctx.strokeRect(x - 1.6, y - 1.6, 4.8, 4.8);
+    }
+  }
+}
+
+logLine(spectate ? "spectating — your dog stays home" : "joining with your dog");
+connect();
+</script>
+</body>
+</html>
