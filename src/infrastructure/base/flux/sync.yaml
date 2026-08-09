@@ -1208,6 +1208,10 @@ spec:
       kind: Deployment
       name: flagd
       namespace: tenant-guardian-prod
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: feature-flags-notify
+      namespace: tenant-guardian-prod
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization

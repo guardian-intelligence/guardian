@@ -43,3 +43,58 @@ spec:
           annotations:
             summary: "flagd metrics scrape is down"
             description: "No flagd replica has been scrapeable for five minutes; client surfaces are serving code-default flag values."
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: feature-flags-notify
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: feature-flags-notify
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  namespaceSelector:
+    matchNames:
+      - tenant-guardian-prod
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: feature-flags-notify
+      app.kubernetes.io/component: feature-flags
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: feature-flags-notify
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: feature-flags-notify
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  groups:
+    - name: feature-flags-notify
+      rules:
+        - alert: FeatureFlagsNotifyScrapeDown
+          expr: sum(up{namespace="tenant-guardian-prod",job="feature-flags-notify"}) < 1 or absent(up{namespace="tenant-guardian-prod",job="feature-flags-notify"})
+          for: 5m
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "feature-flags-notify metrics scrape is down"
+            description: "No notify replica has been scrapeable for five minutes; open clients are not receiving flag-set change events and will only refresh on tab visibility."
+        - alert: FeatureFlagsNotifyReadErrors
+          expr: sum(rate(featureflags_notify_read_errors_total{namespace="tenant-guardian-prod"}[5m])) > 0
+          for: 10m
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "feature-flags-notify cannot read the flag file"
+            description: "The notify service has failed to read the mounted flags.json for ten minutes; the epoch is frozen and flag flips will not fan out."

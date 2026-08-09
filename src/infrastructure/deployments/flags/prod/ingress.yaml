@@ -41,3 +41,82 @@ spec:
                 name: flagd
                 port:
                   number: 80
+---
+# The /features contract, evaluation half: OFREP (the vendor-neutral
+# OpenFeature HTTP protocol) served by flagd, prefix-stripped so the
+# provider's baseUrl is simply /features. The regex is deliberately
+# anchored on ofrep/ so it can never shadow /features/events below —
+# rewrite-target puts every path on this host into regex matching, where
+# nginx takes the first (longest) match.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: flagd-ofrep-wakeupmythra
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: flagd
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+    guardian.dev/stage: prod
+  annotations:
+    nginx.ingress.kubernetes.io/auth-tls-secret: tenant-guardian-prod/cloudflare-origin-pull-ca
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+    nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+spec:
+  ingressClassName: tenant-root
+  tls:
+    - hosts:
+        - wakeupmythra.com
+      secretName: mythra-origin-tls
+  rules:
+    - host: wakeupmythra.com
+      http:
+        paths:
+          - path: /features/(ofrep/.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: flagd
+                port:
+                  number: 8016
+---
+# The /features contract, notification half: the read-only SSE epoch
+# stream. Forwarded verbatim (the service serves /features/events itself);
+# buffering off so events reach the browser as they happen.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: feature-flags-notify-wakeupmythra
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: feature-flags-notify
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+    guardian.dev/stage: prod
+  annotations:
+    nginx.ingress.kubernetes.io/auth-tls-secret: tenant-guardian-prod/cloudflare-origin-pull-ca
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+    nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: tenant-root
+  tls:
+    - hosts:
+        - wakeupmythra.com
+      secretName: mythra-origin-tls
+  rules:
+    - host: wakeupmythra.com
+      http:
+        paths:
+          - path: /features/events
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: feature-flags-notify
+                port:
+                  number: 80
