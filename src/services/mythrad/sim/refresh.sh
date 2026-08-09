@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Regenerates the committed wasm behavior artifacts from source. Run via:
-#   bazelisk run //src/services/presenced/sim:refresh
+#   bazelisk run //src/services/mythrad/sim:refresh
 set -euo pipefail
 
 if [[ -z "${BUILD_WORKSPACE_DIRECTORY:-}" ]]; then
-  echo "run this via: bazelisk run //src/services/presenced/sim:refresh" >&2
+  echo "run this via: bazelisk run //src/services/mythrad/sim:refresh" >&2
   exit 1
 fi
 
 here="$(dirname "${BASH_SOURCE[0]}")"
-svc="$BUILD_WORKSPACE_DIRECTORY/src/services/presenced/behaviors"
+svc="$BUILD_WORKSPACE_DIRECTORY/src/services/mythrad/behaviors"
 prod="$BUILD_WORKSPACE_DIRECTORY/src/infrastructure/deployments/presence/prod/behavior"
 
 install -m 0644 "$here/server.wasm" "$svc/server.wasm"

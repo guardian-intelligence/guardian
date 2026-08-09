@@ -1,4 +1,4 @@
-// loadgen drives presenced through scripted load phases and reports
+// loadgen drives mythrad through scripted load phases and reports
 // client-observed latencies. Each session is a webtransport client that
 // joins a room, moves, pings, chats, and (in the storm phase) mass-reconnects.
 //
@@ -47,7 +47,7 @@ var (
 	lgResumeGap = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name: "loadgen_resume_gap_seconds", Help: "Disconnect-to-welcome during reconnect storm.",
 		Buckets: []float64{.05, .1, .2, .3, .5, .75, 1, 2, 5, 10, 30}})
-	lgPresence = promauto.NewCounter(prometheus.CounterOpts{Name: "loadgen_presence_msgs_total"})
+	lgPresence = promauto.NewCounter(prometheus.CounterOpts{Name: "loadgen_mythra_msgs_total"})
 	lgChatRecv = promauto.NewCounter(prometheus.CounterOpts{Name: "loadgen_chat_received_total"})
 	lgPhase    = promauto.NewGauge(prometheus.GaugeOpts{Name: "loadgen_phase", Help: "0 idle,1 ramp,2 hold,3 intents,4 chat,5 reconnect,6 drain"})
 )
@@ -215,7 +215,7 @@ func (r *runner) oneConnection(ctx context.Context, b *sessionBot, dialStart tim
 
 func main() {
 	var (
-		url         = envStr("TARGET_URL", "https://presenced:4433/wt")
+		url         = envStr("TARGET_URL", "https://mythrad:4433/wt")
 		sessions    = envInt("SESSIONS", 500)
 		rooms       = envInt("ROOMS", 20)
 		rampRate    = envInt("RAMP_RATE", 25) // sessions/s

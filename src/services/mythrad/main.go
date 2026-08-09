@@ -1,4 +1,4 @@
-// Package main is presenced: the Wake Up Mythra game service — WebTransport
+// Package main is mythrad: the Wake Up Mythra game service — WebTransport
 // session gateway, dog-park world sim, and module/asset distribution. Rooms
 // are 100x100 grids; each connected player is represented by a dog stepped
 // by the behavior module. The page itself is served by wake-up-mythra-web;
@@ -84,34 +84,34 @@ const (
 
 var (
 	mTickDur = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "presence_tick_duration_seconds",
+		Name:    "mythra_tick_duration_seconds",
 		Help:    "Wall time of one full tick (all rooms): budget is 1/tickrate.",
 		Buckets: []float64{.0005, .001, .0025, .005, .01, .02, .03, .0417, .06, .1, .25},
 	})
 	mSessions = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "presence_sessions", Help: "Connected sessions."}, []string{"role"})
+		Name: "mythra_sessions", Help: "Connected sessions."}, []string{"role"})
 	mRooms = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "presence_rooms_occupied", Help: "Rooms with at least one occupant."})
+		Name: "mythra_rooms_occupied", Help: "Rooms with at least one occupant."})
 	mHandshakes = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "presence_handshakes_total", Help: "Session handshakes."}, []string{"result"})
+		Name: "mythra_handshakes_total", Help: "Session handshakes."}, []string{"result"})
 	mResumes = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "presence_resumes_total", Help: "Token-resumed sessions."}, []string{"result"})
+		Name: "mythra_resumes_total", Help: "Token-resumed sessions."}, []string{"result"})
 	mDgSent = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "presence_datagrams_sent_total", Help: "Datagrams sent."})
+		Name: "mythra_datagrams_sent_total", Help: "Datagrams sent."})
 	mDgErrors = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "presence_datagram_errors_total", Help: "SendDatagram failures."})
+		Name: "mythra_datagram_errors_total", Help: "SendDatagram failures."})
 	mDrops = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "presence_fanout_dropped_total", Help: "Stream messages dropped on stalled clients."})
+		Name: "mythra_fanout_dropped_total", Help: "Stream messages dropped on stalled clients."})
 	mBehaviorReloads = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "presence_behavior_reloads_total", Help: "Behavior script hot-reloads."}, []string{"slot", "result"})
+		Name: "mythra_behavior_reloads_total", Help: "Behavior script hot-reloads."}, []string{"slot", "result"})
 	mBehaviorInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "presence_behavior_script", Help: "1 for the currently loaded script hash per slot."}, []string{"slot", "hash"})
+		Name: "mythra_behavior_script", Help: "1 for the currently loaded script hash per slot."}, []string{"slot", "hash"})
 	mShadowSteps = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "presence_shadow_steps_total", Help: "Shadow behavior evaluations."})
+		Name: "mythra_shadow_steps_total", Help: "Shadow behavior evaluations."})
 	mShadowDivergence = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "presence_shadow_divergence_total", Help: "Shadow steps whose output differed from live."})
+		Name: "mythra_shadow_divergence_total", Help: "Shadow steps whose output differed from live."})
 	mShadowErrors = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "presence_shadow_errors_total", Help: "Shadow script eval errors."})
+		Name: "mythra_shadow_errors_total", Help: "Shadow script eval errors."})
 )
 
 func envInt(k string, d int) int {
@@ -130,7 +130,7 @@ func envStr(k, d string) string {
 // ---------- behavior engine ----------
 
 // A behavior is a wasm module over the shared sim core (built from
-// //src/services/presenced/sim), executed by wazero. Modules import nothing
+// //src/services/mythrad/sim), executed by wazero. Modules import nothing
 // - no WASI, no host functions - so a behavior can compute but never reach
 // out, and identical modules in the live and shadow slots diff to zero
 // divergence by construction. ABI: id_buf() -> ptr to a 64-byte scratch the
@@ -793,10 +793,10 @@ func (rc *rotatingCert) rotate() {
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
-		Subject:      pkix.Name{CommonName: "presenced"},
+		Subject:      pkix.Name{CommonName: "mythrad"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(10 * 24 * time.Hour),
-		DNSNames:     []string{"presenced", "localhost"},
+		DNSNames:     []string{"mythrad", "localhost"},
 		IPAddresses:  rc.sans,
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
@@ -1012,7 +1012,7 @@ func main() {
 	obsMux.Handle("/metrics", promhttp.Handler())
 	obsMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
 
-	log.Printf("presenced: wt=:%d http=:%d metrics=:%d tick=%dHz public=%s", wtPort, httpPort, metricsPort, tickHz, publicAddr)
+	log.Printf("mythrad: wt=:%d http=:%d metrics=:%d tick=%dHz public=%s", wtPort, httpPort, metricsPort, tickHz, publicAddr)
 	go func() { log.Fatal(wt.ListenAndServe()) }()
 	go func() { log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", httpPort), pageMux)) }()
 	go func() { log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", metricsPort), obsMux)) }()

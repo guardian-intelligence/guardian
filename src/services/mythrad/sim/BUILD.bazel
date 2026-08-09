@@ -75,7 +75,7 @@ sh_binary(
 )
 
 # Fixed-point invariant, layer 1: the float type tokens are banned from sim
-# sources. Layer 2 (wasm binary scan) lives in //src/services/presenced.
+# sources. Layer 2 (wasm binary scan) lives in //src/services/mythrad.
 sh_test(
     name = "no_float_test",
     srcs = ["no_float_test.sh"],
@@ -94,23 +94,23 @@ sh_test(
 diff_test(
     name = "server_artifact_current_test",
     file1 = ":server_wasm",
-    file2 = "//src/services/presenced:behaviors/server.wasm",
+    file2 = "//src/services/mythrad:behaviors/server.wasm",
 )
 
 diff_test(
     name = "client_artifact_current_test",
     file1 = ":client_wasm",
-    file2 = "//src/services/presenced:behaviors/client.wasm",
+    file2 = "//src/services/mythrad:behaviors/client.wasm",
 )
 
 diff_test(
     name = "server_configmap_lockstep_test",
-    file1 = "//src/services/presenced:behaviors/server.wasm",
+    file1 = "//src/services/mythrad:behaviors/server.wasm",
     file2 = "//src/infrastructure/deployments/presence/prod:behavior/live.wasm",
 )
 
 diff_test(
     name = "client_configmap_lockstep_test",
-    file1 = "//src/services/presenced:behaviors/client.wasm",
+    file1 = "//src/services/mythrad:behaviors/client.wasm",
     file2 = "//src/infrastructure/deployments/presence/prod:behavior/client.wasm",
 )

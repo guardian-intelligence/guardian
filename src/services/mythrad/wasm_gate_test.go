@@ -8,7 +8,7 @@ import (
 // Fixed-point invariant, layer 2: the embedded behavior modules must
 // declare no float value types anywhere wasm declares types - function
 // signatures, globals, or locals. Together with the source token gate in
-// //src/services/presenced/sim this keeps the sim integer-only at the
+// //src/services/mythrad/sim this keeps the sim integer-only at the
 // artifact level, so identical bytes behave identically under any runtime,
 // interpreter, or future native port.
 func TestBehaviorModulesDeclareNoFloats(t *testing.T) {
