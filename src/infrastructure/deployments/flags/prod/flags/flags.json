@@ -1,13 +1,13 @@
 {
   "$schema": "https://flagd.dev/schema/v0/flags.json",
   "flags": {
-    "wum-motd": {
+    "wum-flags-canary": {
       "state": "ENABLED",
       "variants": {
-        "none": "",
-        "message": "Mythra stirs \u2014 the dog park is open. Welcome, trainers!"
+        "on": true,
+        "off": false
       },
-      "defaultVariant": "message"
+      "defaultVariant": "on"
     }
   },
   "metadata": {

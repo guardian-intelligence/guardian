@@ -1,47 +1,8 @@
-# Same-origin /flags mount on the Wake Up Mythra apex. One of these exists
-# per product host; each strips the /flags prefix (flagd's connect handler
-# dispatches on paths starting with /flagd.evaluation...) and disables
-# response buffering so the change-notification stream actually reaches the
-# browser.
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: flagd-wakeupmythra
-  namespace: tenant-guardian-prod
-  labels:
-    app.kubernetes.io/name: flagd
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/product: mythra
-    guardian.dev/stage: prod
-  annotations:
-    # Same AOP mTLS gate as the host's main Ingress: annotations on the same
-    # host must agree or nginx picks one server-block config arbitrarily.
-    nginx.ingress.kubernetes.io/auth-tls-secret: tenant-guardian-prod/cloudflare-origin-pull-ca
-    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
-    nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
-    nginx.ingress.kubernetes.io/proxy-buffering: "off"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-spec:
-  ingressClassName: tenant-root
-  tls:
-    - hosts:
-        - wakeupmythra.com
-      secretName: mythra-origin-tls
-  rules:
-    - host: wakeupmythra.com
-      http:
-        paths:
-          - path: /flags(/|$)(.*)
-            pathType: ImplementationSpecific
-            backend:
-              service:
-                name: flagd
-                port:
-                  number: 80
----
+# Same-origin /features mount on the Wake Up Mythra apex. One pair of
+# these exists per product host. Annotations carry the same AOP mTLS gate
+# as the host's main Ingress: annotations on the same host must agree or
+# nginx picks one server-block config arbitrarily.
+#
 # The /features contract, evaluation half: OFREP (the vendor-neutral
 # OpenFeature HTTP protocol) served by flagd, prefix-stripped so the
 # provider's baseUrl is simply /features. The regex is deliberately

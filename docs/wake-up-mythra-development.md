@@ -166,10 +166,10 @@ sim ticks at 24Hz.
    simultaneous reconnect storm: resume gap p50 < 50ms, p99 < 500ms.
 
 6. **Feature flags are presentation and product gating — never sim inputs.**
-   Client-side flagging uses the OpenFeature SDK against our own flag
-   control-plane service; clients hold a streaming subscription (targeting
-   key: trainer id) so flips propagate live without reload, and cache last
-   values for offline/reconnect gaps. The hard rule: a flag must never
+   Client-side flagging uses the OpenFeature SDK evaluating over OFREP
+   against the same-origin /features mount, with a read-only SSE
+   subscription to the flag-set epoch so flips propagate live without
+   reload (docs/feature-flags.md). The hard rule: a flag must never
    influence a behavior module's step function or any server-side resource
    computation — sim changes go through the dark-launch/promotion ladder
    where divergence is measured, not through flags. Flags gate UI, features,

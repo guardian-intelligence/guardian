@@ -7,10 +7,10 @@ resources:
   - observability.yaml
 # Flag definitions ride the same GitOps hot-reload lane as the Mythra
 # behavior modules: committed JSON -> ConfigMap -> kubelet mount refresh ->
-# flagd's fsnotify sync pushes the change down every connected client's
-# stream. The name-suffix hash stays disabled: a suffixed name would ripple
-# into the Deployment and restart the pods, turning every flag flip into a
-# rollout — the opposite of a control plane.
+# flagd reloads the flag set and feature-flags-notify fans the new epoch
+# out to every subscribed client. The name-suffix hash stays disabled: a
+# suffixed name would ripple into the Deployments and restart the pods,
+# turning every flag flip into a rollout — the opposite of a control plane.
 configMapGenerator:
   - name: guardian-flags
     namespace: tenant-guardian-prod

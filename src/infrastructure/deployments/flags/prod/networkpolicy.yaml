@@ -56,8 +56,6 @@ spec:
         - remote-node
       toPorts:
         - ports:
-            - port: "8013"
-              protocol: TCP
             - port: "8016"
               protocol: TCP
     - fromEndpoints:
