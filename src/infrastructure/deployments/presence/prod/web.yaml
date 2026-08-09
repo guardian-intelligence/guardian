@@ -1,0 +1,132 @@
+# Wake Up Mythra web shell: the TanStack Start app serving the page at the
+# product apex. The game service keeps /wt-info, /behavior/, /assets/ and the
+# QUIC plane; this Deployment carries everything the browser loads first.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wake-up-mythra-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: wake-up-mythra-web
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: web
+    guardian.dev/product: presence
+    guardian.dev/stage: prod
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: wake-up-mythra-web
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: wake-up-mythra-web
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: web
+        guardian.dev/product: presence
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: wake-up-mythra-web
+              app.kubernetes.io/part-of: guardian
+              guardian.dev/stage: prod
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: ghcr.io/guardian-intelligence/wake-up-mythra-web:edge@sha256:b756b05c4cb90958bafd0c8441a4787f0bf8826d257ac9c6be6109f7c9afc8bd # {"$imagepolicy": "guardian-imageops:wake-up-mythra-web"}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+              ephemeral-storage: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wake-up-mythra-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: wake-up-mythra-web
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: web
+    guardian.dev/product: presence
+    guardian.dev/stage: prod
+spec:
+  type: ClusterIP
+  internalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: wake-up-mythra-web
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: wake-up-mythra-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: wake-up-mythra-web
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: presence
+    guardian.dev/stage: prod
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: wake-up-mythra-web
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod
