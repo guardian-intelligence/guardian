@@ -1,0 +1,45 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: flagd
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: flagd
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  namespaceSelector:
+    matchNames:
+      - tenant-guardian-prod
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flagd
+      app.kubernetes.io/component: feature-flags
+  endpoints:
+    - port: management
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: flagd
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: flagd
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  groups:
+    - name: flagd
+      rules:
+        - alert: FlagdScrapeDown
+          expr: sum(up{namespace="tenant-guardian-prod",job="flagd"}) < 1 or absent(up{namespace="tenant-guardian-prod",job="flagd"})
+          for: 5m
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "flagd metrics scrape is down"
+            description: "No flagd replica has been scrapeable for five minutes; client surfaces are serving code-default flag values."

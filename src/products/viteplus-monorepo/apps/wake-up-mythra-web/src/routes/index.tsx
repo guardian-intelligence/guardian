@@ -1,5 +1,8 @@
+import { OpenFeatureProvider } from "@openfeature/react-sdk";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { startFlags } from "~/flags/client";
+import { Motd } from "~/flags/motd";
 import { startPresence } from "~/game/presence";
 
 export const Route = createFileRoute("/")({
@@ -14,10 +17,12 @@ function Page() {
   useEffect(() => {
     if (started) return;
     started = true;
+    startFlags();
     startPresence();
   }, []);
   return (
-    <>
+    <OpenFeatureProvider>
+      <Motd />
       <div className="bar">
         <span id="status" className="pill">
           CONNECTING
@@ -45,6 +50,6 @@ function Page() {
       <canvas id="grid" width={100} height={100}></canvas>
       <div className="who" id="who"></div>
       <div id="log"></div>
-    </>
+    </OpenFeatureProvider>
   );
 }

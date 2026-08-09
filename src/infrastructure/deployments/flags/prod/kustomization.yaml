@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - ingress.yaml
+  - networkpolicy.yaml
+  - observability.yaml
+# Flag definitions ride the same GitOps hot-reload lane as the Mythra
+# behavior modules: committed JSON -> ConfigMap -> kubelet mount refresh ->
+# flagd's fsnotify sync pushes the change down every connected client's
+# stream. The name-suffix hash stays disabled: a suffixed name would ripple
+# into the Deployment and restart the pods, turning every flag flip into a
+# rollout — the opposite of a control plane.
+configMapGenerator:
+  - name: guardian-flags
+    namespace: tenant-guardian-prod
+    files:
+      - flags/flags.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        app.kubernetes.io/name: flagd
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/stage: prod
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled

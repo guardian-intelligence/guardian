@@ -13,6 +13,10 @@
     "typecheck": "vp exec tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@openfeature/core": "catalog:",
+    "@openfeature/flagd-web-provider": "catalog:",
+    "@openfeature/react-sdk": "catalog:",
+    "@openfeature/web-sdk": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-start": "catalog:",
     "nitro": "catalog:",

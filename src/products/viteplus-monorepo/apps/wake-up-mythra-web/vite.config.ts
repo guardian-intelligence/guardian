@@ -13,10 +13,7 @@ const stripRouteManifestPaths = {
   enforce: "post" as const,
   transform(code: string, id: string) {
     if (!id.includes("tanstack-start-manifest")) return null;
-    return code.replace(
-      /((?:"filePath"|filePath):\s*")[^"]*\/apps\/wake-up-mythra-web\//g,
-      "$1",
-    );
+    return code.replace(/((?:"filePath"|filePath):\s*")[^"]*\/apps\/wake-up-mythra-web\//g, "$1");
   },
 };
 
