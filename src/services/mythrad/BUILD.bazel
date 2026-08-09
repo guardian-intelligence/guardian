@@ -41,7 +41,10 @@ go_binary(
 # value-type declarations (layer 1 is the source token gate in ./sim).
 go_test(
     name = "mythrad_test",
-    srcs = ["wasm_gate_test.go"],
+    srcs = [
+        "delta_test.go",
+        "wasm_gate_test.go",
+    ],
     embed = [":mythrad_lib"],
 )
 

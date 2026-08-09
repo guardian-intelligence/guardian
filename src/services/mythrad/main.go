@@ -17,15 +17,22 @@
 //     module rides the same mount; its hash on every pong tells connected
 //     pages to hot-swap their smoothing logic mid-session.
 //
-// Protocol (JSON; binary delta encoding replaces this in the real build):
+// Protocol. The hello carries "proto"; sessions without it (proto 1) get
+// full-snapshot JSON tick datagrams, which stop fitting a QUIC datagram
+// above ~44 dogs/room. Proto 2 splits state into stream keyframes and
+// binary delta datagrams, sized so a 2000-dog park's tick is one datagram.
 //
-//	client -> server stream:   {"type":"hello","name","device","token","room","spectate"}
+//	client -> server stream:   {"type":"hello","name","device","token","room","spectate","proto":2}
 //	                           {"type":"join","room":"park-2"}
 //	server -> client stream:   {"type":"welcome","you":{...},"token":"...","grid":[w,h],"seed":".."}
-//	                           {"type":"presence","room":"...","players":[...],"seed":".."}
+//	                           {"type":"presence","room","players":[first 50],"count","watching","seed"}
+//	                           {"type":"keyframe","n","seq","off","st","behavior",
+//	                            "dogs":[[id,x,y,skin],...],"wh"}   (proto 2; dogs order = delta roster)
 //	client -> server datagram: {"type":"ping","ct":...}
-//	server -> client datagram: {"type":"tick","n":..,"st":..,"behavior":"..",
-//	                            "dogs":[[id,x,y,skin],...],"wh":".." (1/s)}
+//	server -> client datagram: proto 1: {"type":"tick","n","st","behavior","dogs":[...],"wh" (1/s)}
+//	                           proto 2: binary delta — [0xD7, seq u32, off u16, start u16,
+//	                            count u16, st u32] then 4-bit codes (dx+1)*3+(dy+1), 0xF=departed,
+//	                            two per byte low-nibble-first, dogs in keyframe roster order
 //	                           {"type":"pong","ct":...,"st":...,"addr":"...","cw":".."}
 //
 // "seed" is the room's shared randomness seed and "wh" the world-hash
@@ -112,6 +119,14 @@ var (
 		Name: "mythra_shadow_divergence_total", Help: "Shadow steps whose output differed from live."})
 	mShadowErrors = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "mythra_shadow_errors_total", Help: "Shadow script eval errors."})
+	mProtoSessions = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "mythra_proto_sessions", Help: "Connected sessions by tick protocol."}, []string{"proto"})
+	mKeyframes = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_keyframes_total", Help: "Keyframes broadcast (proto 2)."})
+	mKeyframeBytes = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_keyframe_bytes_total", Help: "Keyframe bytes across all recipients."})
+	mDeltaBytes = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_delta_bytes_total", Help: "Delta datagram bytes across all recipients."})
 )
 
 func envInt(k string, d int) int {
@@ -439,6 +454,19 @@ type Player struct {
 	token string
 	sess  *webtransport.Session
 	out   chan []byte
+	proto int
+	// This tick's effective (post-clamp) movement, read by the delta
+	// encoder inside the same locked tick pass that wrote it.
+	dX, dY int8
+}
+
+// roomKF is a room's delta epoch: the roster order binary delta datagrams
+// index into, established by the last keyframe broadcast.
+type roomKF struct {
+	seq    uint32
+	off    uint16    // ticks since the keyframe
+	roster []*Player // players (role=player) in keyframe order
+	dirty  bool      // membership changed since the last presence flush
 }
 
 type Hub struct {
@@ -446,8 +474,10 @@ type Hub struct {
 	players map[string]*Player
 	rooms   map[string]map[*Player]bool
 	seeds   map[string]uint64 // per-room shared randomness seed
+	kf      map[string]*roomKF
 	tick    uint64
 	tickHz  int
+	kfTicks int
 	live    *behaviorSlot
 	shadow  *behaviorSlot
 	assets  *assetCatalog
@@ -468,11 +498,11 @@ func spawnCoord(n int) int {
 	return int(binary.LittleEndian.Uint16(b[:])) % n
 }
 
-func newHub(tickHz int, live, shadow *behaviorSlot, assets *assetCatalog, client *clientModule) *Hub {
+func newHub(tickHz, kfTicks int, live, shadow *behaviorSlot, assets *assetCatalog, client *clientModule) *Hub {
 	return &Hub{
 		players: map[string]*Player{}, rooms: map[string]map[*Player]bool{},
-		seeds:  map[string]uint64{},
-		tickHz: tickHz, live: live, shadow: shadow, assets: assets, client: client,
+		seeds: map[string]uint64{}, kf: map[string]*roomKF{},
+		tickHz: tickHz, kfTicks: kfTicks, live: live, shadow: shadow, assets: assets, client: client,
 	}
 }
 
@@ -482,6 +512,7 @@ func (h *Hub) moveLocked(p *Player, room string) {
 		if len(cur) == 0 {
 			delete(h.rooms, p.Room)
 			delete(h.seeds, p.Room)
+			delete(h.kf, p.Room)
 		}
 	}
 	p.Room = room
@@ -500,22 +531,47 @@ func (h *Hub) moveLocked(p *Player, room string) {
 	mRooms.Set(float64(len(h.rooms)))
 }
 
-func (h *Hub) broadcastRoom(room string) {
-	h.mu.Lock()
+// presenceCap bounds the names carried per presence message. The full list
+// is O(occupancy) and goes to every occupant, so an uncapped flush is
+// O(n²) bytes — 2000 dogs would be a ~240MB broadcast. The page shows a
+// handful of names plus counts; 50 covers it.
+const presenceCap = 50
+
+// markDirtyLocked queues a presence flush (and roster refresh) for the
+// room; tickLoop flushes on keyframe cadence. Requires h.mu held.
+func (h *Hub) markDirtyLocked(room string) {
+	if room == "" {
+		return
+	}
+	kf := h.kf[room]
+	if kf == nil {
+		kf = &roomKF{}
+		h.kf[room] = kf
+	}
+	kf.dirty = true
+}
+
+// presenceMsgLocked builds the capped presence line. Requires h.mu held.
+func (h *Hub) presenceMsgLocked(room string) []byte {
 	occ := h.rooms[room]
-	list := make([]*Player, 0, len(occ))
+	list := make([]*Player, 0, presenceCap)
+	players, watching := 0, 0
 	for p := range occ {
-		list = append(list, p)
+		if p.Role == "spectator" {
+			watching++
+			continue
+		}
+		players++
+		if len(list) < presenceCap {
+			list = append(list, p)
+		}
 	}
 	msg, _ := json.Marshal(map[string]any{
-		"type": "presence", "room": room, "players": list, "st": nowMs(),
+		"type": "presence", "room": room, "players": list, "count": players,
+		"watching": watching, "st": nowMs(),
 		"seed": fmt.Sprintf("%016x", h.seeds[room]),
 	})
-	msg = append(msg, '\n')
-	for p := range occ {
-		h.sendLocked(p, msg)
-	}
-	h.mu.Unlock()
+	return append(msg, '\n')
 }
 
 func (h *Hub) sendLocked(p *Player, msg []byte) {
@@ -530,7 +586,9 @@ func (h *Hub) sendLocked(p *Player, msg []byte) {
 }
 
 // tickLoop advances every dog under the live behavior, runs the shadow
-// behavior for comparison when one is mounted, and snapshots each room.
+// behavior for comparison when one is mounted, and fans each room's state
+// out: proto-1 sessions get the full-snapshot JSON datagram, proto-2
+// sessions get binary movement deltas between stream keyframes.
 func (h *Hub) tickLoop() {
 	interval := time.Second / time.Duration(h.tickHz)
 	for range time.Tick(interval) {
@@ -543,7 +601,17 @@ func (h *Hub) tickLoop() {
 		skin := h.assets.defaultSkin()
 		for room, occ := range h.rooms {
 			seed := h.seeds[room]
-			dogs := make([][4]any, 0, len(occ))
+			hasV1, hasV2 := false, false
+			for p := range occ {
+				if p.sess == nil {
+					continue
+				}
+				if p.proto >= 2 {
+					hasV2 = true
+				} else {
+					hasV1 = true
+				}
+			}
 			for p := range occ {
 				if p.Role != "player" {
 					continue
@@ -562,35 +630,169 @@ func (h *Hub) tickLoop() {
 						mShadowDivergence.Inc()
 					}
 				}
-				p.X = clampInt(p.X+dx, 0, gridW-1)
-				p.Y = clampInt(p.Y+dy, 0, gridH-1)
-				dogs = append(dogs, [4]any{p.ID, p.X, p.Y, skin})
+				nx := clampInt(p.X+dx, 0, gridW-1)
+				ny := clampInt(p.Y+dy, 0, gridH-1)
+				p.dX, p.dY = int8(nx-p.X), int8(ny-p.Y)
+				p.X, p.Y = nx, ny
 			}
-			snapshot := map[string]any{
-				"type": "tick", "n": h.tick, "st": st, "behavior": liveHash, "dogs": dogs,
+
+			kf := h.kf[room]
+			if kf == nil {
+				kf = &roomKF{dirty: true}
+				h.kf[room] = kf
 			}
-			// Once a second, stamp the world-hash oracle so every client can
-			// verify its snapshot against the authoritative sim.
-			if h.tick%uint64(h.tickHz) == 0 {
-				if wh, ok := h.live.worldHash(h.tick, seed, dogs); ok {
-					snapshot["wh"] = fmt.Sprintf("%016x", wh)
+			isKF := h.tick%uint64(h.kfTicks) == 0 || kf.roster == nil || kf.off >= 0xFFFE
+
+			var dogs [][4]any
+			if hasV1 || (hasV2 && isKF) {
+				dogs = make([][4]any, 0, len(occ))
+				for p := range occ {
+					if p.Role == "player" {
+						dogs = append(dogs, [4]any{p.ID, p.X, p.Y, skin})
+					}
 				}
 			}
-			msg, _ := json.Marshal(snapshot)
-			for p := range occ {
-				if p.sess == nil {
-					continue
+
+			if hasV1 {
+				snapshot := map[string]any{
+					"type": "tick", "n": h.tick, "st": st, "behavior": liveHash, "dogs": dogs,
 				}
-				if err := p.sess.SendDatagram(msg); err != nil {
-					mDgErrors.Inc()
-				} else {
-					mDgSent.Inc()
+				if h.tick%uint64(h.tickHz) == 0 {
+					if wh, ok := h.live.worldHash(h.tick, seed, dogs); ok {
+						snapshot["wh"] = fmt.Sprintf("%016x", wh)
+					}
+				}
+				msg, _ := json.Marshal(snapshot)
+				for p := range occ {
+					if p.sess == nil || p.proto >= 2 {
+						continue
+					}
+					if err := p.sess.SendDatagram(msg); err != nil {
+						mDgErrors.Inc()
+					} else {
+						mDgSent.Inc()
+					}
+				}
+			}
+
+			if hasV2 {
+				// Every tick emits a delta — including keyframe ticks, whose
+				// delta lands just before the keyframe replaces the state.
+				// That makes "delta-accumulated state == keyframe state" an
+				// exact client-side invariant on a loss-free link, which the
+				// page exports as a continuous decode oracle.
+				if kf.roster != nil {
+					kf.off++
+					for _, chunk := range encodeDeltas(kf, uint32(st), room) {
+						n := 0
+						for p := range occ {
+							if p.sess == nil || p.proto < 2 {
+								continue
+							}
+							if err := p.sess.SendDatagram(chunk); err != nil {
+								mDgErrors.Inc()
+							} else {
+								mDgSent.Inc()
+								n++
+							}
+						}
+						mDeltaBytes.Add(float64(len(chunk) * n))
+					}
+				}
+				if isKF {
+					kf.seq++
+					kf.off = 0
+					kf.roster = kf.roster[:0]
+					// The keyframe's dogs array IS the delta roster: clients
+					// index subsequent 4-bit codes by this order.
+					ordered := make([][4]any, 0, len(dogs))
+					for p := range occ {
+						if p.Role == "player" {
+							kf.roster = append(kf.roster, p)
+							ordered = append(ordered, [4]any{p.ID, p.X, p.Y, skin})
+						}
+					}
+					msg := h.keyframeMsgLocked(room, kf, st, liveHash, seed, ordered)
+					n := 0
+					for p := range occ {
+						if p.sess == nil || p.proto < 2 {
+							continue
+						}
+						h.sendLocked(p, msg)
+						n++
+					}
+					mKeyframes.Inc()
+					mKeyframeBytes.Add(float64(len(msg) * n))
+				}
+			}
+
+			if kf.dirty && (isKF || !hasV2) {
+				kf.dirty = false
+				msg := h.presenceMsgLocked(room)
+				for p := range occ {
+					h.sendLocked(p, msg)
 				}
 			}
 		}
 		h.mu.Unlock()
 		mTickDur.Observe(time.Since(start).Seconds())
 	}
+}
+
+// keyframeMsgLocked marshals a room keyframe. dogs must be in kf.roster
+// order. Every keyframe carries the world-hash oracle. Requires h.mu held.
+func (h *Hub) keyframeMsgLocked(room string, kf *roomKF, st int64, behavior string, seed uint64, dogs [][4]any) []byte {
+	snapshot := map[string]any{
+		"type": "keyframe", "n": h.tick, "seq": kf.seq, "off": kf.off,
+		"st": st, "behavior": behavior, "dogs": dogs,
+	}
+	if wh, ok := h.live.worldHash(h.tick, seed, dogs); ok {
+		snapshot["wh"] = fmt.Sprintf("%016x", wh)
+	}
+	msg, _ := json.Marshal(snapshot)
+	return append(msg, '\n')
+}
+
+const (
+	deltaMagic     = 0xD7
+	deltaHeader    = 15
+	deltaChunkDogs = 2200 // (~1150B datagram budget - header) * 2 codes/byte
+	deltaGone      = 0xF  // roster slot whose player left the room
+)
+
+// encodeDeltas packs one tick of roster movement into datagrams:
+// [0xD7, seq u32, off u16, start u16, count u16, st u32] then 4-bit codes
+// (dx+1)*3+(dy+1) low-nibble-first. Movement is bounded to ±1/axis by the
+// behavior contract (asserted in sim core tests), so codes 0..8 cover it.
+func encodeDeltas(kf *roomKF, st uint32, room string) [][]byte {
+	var out [][]byte
+	for base := 0; base < len(kf.roster); base += deltaChunkDogs {
+		count := len(kf.roster) - base
+		if count > deltaChunkDogs {
+			count = deltaChunkDogs
+		}
+		buf := make([]byte, deltaHeader+(count+1)/2)
+		buf[0] = deltaMagic
+		binary.LittleEndian.PutUint32(buf[1:], kf.seq)
+		binary.LittleEndian.PutUint16(buf[5:], kf.off)
+		binary.LittleEndian.PutUint16(buf[7:], uint16(base))
+		binary.LittleEndian.PutUint16(buf[9:], uint16(count))
+		binary.LittleEndian.PutUint32(buf[11:], st)
+		for i := 0; i < count; i++ {
+			p := kf.roster[base+i]
+			code := byte(deltaGone)
+			if p.Room == room {
+				code = byte(p.dX+1)*3 + byte(p.dY+1)
+			}
+			if i%2 == 0 {
+				buf[deltaHeader+i/2] = code
+			} else {
+				buf[deltaHeader+i/2] |= code << 4
+			}
+		}
+		out = append(out, buf)
+	}
+	return out
 }
 
 func clampInt(v, lo, hi int) int {
@@ -605,13 +807,21 @@ func clampInt(v, lo, hi int) int {
 
 func (h *Hub) updateSessionGauges() {
 	counts := map[string]int{}
+	protos := map[string]int{}
 	for _, q := range h.players {
 		if q.sess != nil {
 			counts[q.Role]++
+			if q.proto >= 2 {
+				protos["2"]++
+			} else {
+				protos["1"]++
+			}
 		}
 	}
 	mSessions.WithLabelValues("player").Set(float64(counts["player"]))
 	mSessions.WithLabelValues("spectator").Set(float64(counts["spectator"]))
+	mProtoSessions.WithLabelValues("1").Set(float64(protos["1"]))
+	mProtoSessions.WithLabelValues("2").Set(float64(protos["2"]))
 }
 
 func (h *Hub) handleSession(sess *webtransport.Session, remote string) {
@@ -630,6 +840,7 @@ func (h *Hub) handleSession(sess *webtransport.Session, remote string) {
 	var hello struct {
 		Type, Name, Device, Token, Room string
 		Spectate                        bool
+		Proto                           int
 	}
 	if json.Unmarshal(sc.Bytes(), &hello) != nil || hello.Type != "hello" {
 		mHandshakes.WithLabelValues("bad_hello").Inc()
@@ -668,11 +879,33 @@ func (h *Hub) handleSession(sess *webtransport.Session, remote string) {
 		room = hello.Room
 	}
 	h.moveLocked(p, room)
+	h.markDirtyLocked(p.Room)
 	p.LastSeen = nowMs()
 	p.sess = sess
+	p.proto = hello.Proto
 	p.out = make(chan []byte, 64)
 	out := p.out
 	roomSeed := h.seeds[p.Room]
+	// Mid-window joiners get the room state now instead of waiting out the
+	// keyframe cadence: a unicast keyframe with current positions in the
+	// established roster order, so in-flight deltas keep applying.
+	var snap []byte
+	if p.proto >= 2 {
+		if kf := h.kf[p.Room]; kf != nil && kf.roster != nil {
+			liveHash, _ := h.live.loaded()
+			skin := h.assets.defaultSkin()
+			ordered := make([][4]any, 0, len(kf.roster))
+			for _, q := range kf.roster {
+				if q.Room == p.Room {
+					ordered = append(ordered, [4]any{q.ID, q.X, q.Y, skin})
+				} else {
+					// Hold the departed dog's roster slot so indices line up.
+					ordered = append(ordered, [4]any{q.ID, q.X, q.Y, "gone"})
+				}
+			}
+			snap = h.keyframeMsgLocked(p.Room, kf, nowMs(), liveHash, h.seeds[p.Room], ordered)
+		}
+	}
 	h.updateSessionGauges()
 	h.mu.Unlock()
 	mHandshakes.WithLabelValues("ok").Inc()
@@ -682,6 +915,9 @@ func (h *Hub) handleSession(sess *webtransport.Session, remote string) {
 		"grid": [2]int{gridW, gridH}, "seed": fmt.Sprintf("%016x", roomSeed),
 	})
 	stream.Write(append(welcome, '\n'))
+	if snap != nil {
+		stream.Write(snap)
+	}
 
 	go func() {
 		for {
@@ -698,7 +934,6 @@ func (h *Hub) handleSession(sess *webtransport.Session, remote string) {
 	}()
 
 	go h.datagramLoop(sess, p, remote)
-	h.broadcastRoom(p.Room)
 
 	for sc.Scan() {
 		var m struct{ Type, Room string }
@@ -709,24 +944,24 @@ func (h *Hub) handleSession(sess *webtransport.Session, remote string) {
 			h.mu.Lock()
 			old := p.Room
 			h.moveLocked(p, m.Room)
+			h.markDirtyLocked(old)
+			h.markDirtyLocked(p.Room)
 			p.LastSeen = nowMs()
 			h.mu.Unlock()
-			h.broadcastRoom(old)
-			h.broadcastRoom(m.Room)
 		}
 	}
 
 	h.mu.Lock()
 	if p.sess == sess {
+		room = p.Room
 		h.moveLocked(p, "")
+		h.markDirtyLocked(room)
 		p.sess = nil
 		p.out = nil
 		p.LastSeen = nowMs()
 	}
-	room = p.Room
 	h.updateSessionGauges()
 	h.mu.Unlock()
-	h.broadcastRoom(room)
 }
 
 func (h *Hub) datagramLoop(sess *webtransport.Session, p *Player, remote string) {
@@ -910,7 +1145,7 @@ func main() {
 	go watchBehaviors(behaviorDir, live, shadow, client)
 
 	assets := newAssetCatalog(assetDir)
-	hub := newHub(tickHz, live, shadow, assets, client)
+	hub := newHub(tickHz, envInt("KEYFRAME_TICKS", tickHz), live, shadow, assets, client)
 	go hub.tickLoop()
 	go hub.purgeLoop()
 

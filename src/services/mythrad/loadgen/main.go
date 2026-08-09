@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -47,8 +48,13 @@ var (
 	lgResumeGap = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name: "loadgen_resume_gap_seconds", Help: "Disconnect-to-welcome during reconnect storm.",
 		Buckets: []float64{.05, .1, .2, .3, .5, .75, 1, 2, 5, 10, 30}})
-	lgPresence = promauto.NewCounter(prometheus.CounterOpts{Name: "loadgen_mythra_msgs_total"})
-	lgChatRecv = promauto.NewCounter(prometheus.CounterOpts{Name: "loadgen_chat_received_total"})
+	lgPresence  = promauto.NewCounter(prometheus.CounterOpts{Name: "loadgen_mythra_msgs_total"})
+	lgChatRecv  = promauto.NewCounter(prometheus.CounterOpts{Name: "loadgen_chat_received_total"})
+	lgKeyframes = promauto.NewCounter(prometheus.CounterOpts{Name: "loadgen_keyframes_total"})
+	lgRoster    = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "loadgen_roster_dogs", Help: "Dogs in the last keyframe roster seen."})
+	lgDeltaDogs = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "loadgen_delta_dog_codes_total", Help: "Per-dog movement codes decoded from delta datagrams."})
 	lgPhase    = promauto.NewGauge(prometheus.GaugeOpts{Name: "loadgen_phase", Help: "0 idle,1 ramp,2 hold,3 intents,4 chat,5 reconnect,6 drain"})
 )
 
@@ -109,9 +115,9 @@ func (r *runner) oneConnection(ctx context.Context, b *sessionBot, dialStart tim
 		return err
 	}
 	tok, _ := b.token.Load().(string)
-	hello, _ := json.Marshal(map[string]string{
+	hello, _ := json.Marshal(map[string]any{
 		"type": "hello", "name": fmt.Sprintf("bot-%d", b.idx), "device": "loadgen",
-		"token": tok, "room": b.room})
+		"token": tok, "room": b.room, "proto": 2})
 	stream.Write(append(hello, '\n'))
 
 	welcomed := make(chan struct{})
@@ -136,6 +142,11 @@ func (r *runner) oneConnection(ctx context.Context, b *sessionBot, dialStart tim
 				}
 			case "presence":
 				lgPresence.Inc()
+			case "keyframe":
+				lgKeyframes.Inc()
+				if dogs, ok := m["dogs"].([]any); ok {
+					lgRoster.Set(float64(len(dogs)))
+				}
 			case "chat":
 				lgChatRecv.Inc()
 			}
@@ -162,6 +173,14 @@ func (r *runner) oneConnection(ctx context.Context, b *sessionBot, dialStart tim
 			data, err := sess.ReceiveDatagram(cctx)
 			if err != nil {
 				return
+			}
+			// Proto-2 binary movement delta: [0xD7, seq u32, off u16,
+			// start u16, count u16, st u32] + 4-bit codes.
+			if len(data) >= 15 && data[0] == 0xD7 {
+				lgTicks.Inc()
+				lgTickBytes.Add(float64(len(data)))
+				lgDeltaDogs.Add(float64(binary.LittleEndian.Uint16(data[9:])))
+				continue
 			}
 			var m struct {
 				Type string  `json:"type"`
