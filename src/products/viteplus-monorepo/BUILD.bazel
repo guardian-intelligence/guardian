@@ -53,6 +53,7 @@ filegroup(
         "pnpm-workspace.yaml",
         "//src/products/viteplus-monorepo/apps/guardianintelligence-web:package_manifest",
         "//src/products/viteplus-monorepo/apps/privatecut-web:package_manifest",
+        "//src/products/viteplus-monorepo/apps/wake-up-mythra-web:package_manifest",
         "//src/products/viteplus-monorepo/packages/brand:package_manifest",
         "//src/products/viteplus-monorepo/packages/canary-journeys:package_manifest",
         "//src/products/viteplus-monorepo/packages/postflight-checkout:package_manifest",
@@ -80,6 +81,7 @@ filegroup(
         "vite.config.ts",
         "//src/products/viteplus-monorepo/apps/guardianintelligence-web:sources",
         "//src/products/viteplus-monorepo/apps/privatecut-web:sources",
+        "//src/products/viteplus-monorepo/apps/wake-up-mythra-web:sources",
         "//src/products/viteplus-monorepo/packages/brand:sources",
         "//src/products/viteplus-monorepo/packages/canary-journeys:sources",
         "//src/products/viteplus-monorepo/packages/postflight-checkout:sources",
@@ -146,6 +148,7 @@ genrule(
         ":node_modules/vite-plus",
         "//src/products/viteplus-monorepo/apps/guardianintelligence-web:node_modules",
         "//src/products/viteplus-monorepo/apps/privatecut-web:node_modules",
+        "//src/products/viteplus-monorepo/apps/wake-up-mythra-web:node_modules",
         "//src/products/viteplus-monorepo/packages/brand:node_modules",
         "//src/products/viteplus-monorepo/packages/canary-journeys:node_modules",
         "//src/products/viteplus-monorepo/packages/postflight-checkout:node_modules",
@@ -171,9 +174,8 @@ test -n "$$vp"
 # Lint runs on a scratch copy of the workspace sources with the Bazel-linked
 # node_modules linked in at each package level: oxlint's type-aware rules
 # resolve @types/* by directory walk-up (NODE_PATH does not apply), and
-# linting the real source tree would both depend on whatever node_modules a
-# developer happens to have installed and race the image genrule's
-# node_modules symlink swap in apps/guardianintelligence-web.
+# linting the real source tree would depend on whatever node_modules a
+# developer happens to have installed.
 work="$$(mktemp -d)"
 trap 'rm -rf "$$work"' EXIT
 for f in $(locations :workspace_sources); do
@@ -192,6 +194,7 @@ link_node_modules() {
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/node_modules" "$$work/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/apps/guardianintelligence-web/node_modules" "$$work/apps/guardianintelligence-web/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/apps/privatecut-web/node_modules" "$$work/apps/privatecut-web/node_modules"
+link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/apps/wake-up-mythra-web/node_modules" "$$work/apps/wake-up-mythra-web/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/brand/node_modules" "$$work/packages/brand/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/canary-journeys/node_modules" "$$work/packages/canary-journeys/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/postflight-checkout/node_modules" "$$work/packages/postflight-checkout/node_modules"
