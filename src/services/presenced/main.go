@@ -1,7 +1,9 @@
-// Package main is presenced: the Wake Up Mythra presence plane. Rooms are
-// 100x100 grids; each connected player is represented by a dog that moves
-// autonomously under a Lua behavior script. The service demonstrates the
-// production update ladder end to end:
+// Package main is presenced: the Wake Up Mythra game service — WebTransport
+// session gateway, dog-park world sim, and module/asset distribution. Rooms
+// are 100x100 grids; each connected player is represented by a dog stepped
+// by the behavior module. The page itself is served by wake-up-mythra-web;
+// the apex Ingress routes only /wt-info, /behavior/, and /assets/ here.
+// The service carries the production update ladder end to end:
 //
 //   - tier 1 (content): dog skins are content-addressed assets mounted from a
 //     ConfigMap; the tick snapshot references them by name+hash and clients
@@ -68,9 +70,6 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 )
-
-//go:embed static/mythra.html
-var mythraHTML []byte
 
 //go:embed behaviors/server.wasm
 var defaultBehavior []byte
@@ -957,15 +956,11 @@ func main() {
 		go hub.handleSession(sess, r.RemoteAddr)
 	})
 
-	// Demo page + connect info + content-addressed assets, served through the
-	// normal Cloudflare-proxied ingress. The WebTransport dial goes direct to
-	// PUBLIC_ADDR with the cert hash from /wt-info.
+	// Connect info, game modules, and content-addressed assets, served
+	// through the normal Cloudflare-proxied ingress (the apex path-routes
+	// these here; the page itself is the web app's job). The WebTransport
+	// dial goes direct to PUBLIC_ADDR with the cert hash from /wt-info.
 	pageMux := http.NewServeMux()
-	servePage := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		w.Write(mythraHTML)
-	}
 	serveWTInfo := func(w http.ResponseWriter, r *http.Request) {
 		addr := publicAddr
 		if addr == "" {
@@ -1009,16 +1004,9 @@ func main() {
 			w.Write(body)
 		}
 	}
-	// The game is the site at the product apex (wakeupmythra.com/); the
-	// /mythra prefix keeps the pre-purchase demo host (guardianintelligence.org
-	// /mythra) serving the same page through the transition. Exact and
-	// prefixed patterns win over the "/" catch-all by longest-match.
-	for _, base := range []string{"", "/mythra"} {
-		pageMux.HandleFunc(base+"/", servePage)
-		pageMux.HandleFunc(base+"/wt-info", serveWTInfo)
-		pageMux.HandleFunc(base+"/assets/", serveAsset(base+"/assets/"))
-		pageMux.HandleFunc(base+"/behavior/client.wasm", serveClientModule)
-	}
+	pageMux.HandleFunc("/wt-info", serveWTInfo)
+	pageMux.HandleFunc("/assets/", serveAsset("/assets/"))
+	pageMux.HandleFunc("/behavior/client.wasm", serveClientModule)
 
 	obsMux := http.NewServeMux()
 	obsMux.Handle("/metrics", promhttp.Handler())

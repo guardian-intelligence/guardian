@@ -1,10 +1,11 @@
-# presenced: the Wake Up Mythra presence plane (grid-world demo).
+# presenced: the Wake Up Mythra game service (session gateway + world sim).
 #
 # hostNetwork with a node pin: WebTransport needs public UDP 4433 and the
 # edge (Cloudflare) cannot proxy it, so the pod binds the node's public IP
-# directly (TigerBeetle precedent). The browser page is served through the
-# normal proxied ingress; only the QUIC dial goes direct, authenticated by
-# the certificate hash the page fetches from /mythra/wt-info.
+# directly (TigerBeetle precedent). The game-service HTTP paths (/wt-info,
+# /behavior, /assets) are served through the normal proxied ingress; only
+# the QUIC dial goes direct, authenticated by the certificate hash the page
+# fetches from /wt-info.
 #
 # Deliberately NO reloader annotation: behavior and asset ConfigMap changes
 # must reach the running process via the kubelet mount refresh (hot reload,
@@ -76,7 +77,7 @@ spec:
             - name: TLS_KEY_FILE
               value: /etc/mythra/tls/tls.key
             - name: ALLOWED_ORIGINS
-              value: "https://guardianintelligence.org,https://wakeupmythra.com"
+              value: "https://wakeupmythra.com"
             - name: BEHAVIOR_DIR
               value: /etc/mythra/behavior
             - name: ASSET_DIR
@@ -179,38 +180,11 @@ spec:
       targetPort: 9633
       protocol: TCP
 ---
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: presenced
-  namespace: tenant-guardian-prod
-  labels:
-    app.kubernetes.io/name: presenced
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/stage: prod
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: 1m
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "65"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "65"
-spec:
-  ingressClassName: tenant-root
-  rules:
-    - host: guardianintelligence.org
-      http:
-        paths:
-          - path: /mythra
-            pathType: Prefix
-            backend:
-              service:
-                name: presenced
-                port:
-                  number: 80
----
 # The product apex, path-routed: the web app owns "/" (the page and its
 # /static/ chunks); the game service keeps only its API paths. Connected
 # sessions never touch "/" — flipping either backend never interrupts play.
-# A dedicated Ingress (not another rule on the demo host's object) keeps
-# this zone's Origin CA and AOP mTLS gate isolated - same as rumi.engineering.
+# A dedicated Ingress keeps this zone's Origin CA and AOP mTLS gate
+# isolated - same as rumi.engineering.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

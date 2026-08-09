@@ -16,7 +16,6 @@ go_library(
     embedsrcs = [
         "behaviors/client.wasm",
         "behaviors/server.wasm",
-        "static/mythra.html",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/presenced",
     visibility = ["//visibility:private"],
