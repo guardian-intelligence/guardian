@@ -43,3 +43,71 @@ spec:
         - ports:
             - port: "8480"
               protocol: TCP
+---
+# wake-up-mythra-web's own flows. The page's game traffic (QUIC dial,
+# wt-info, wasm modules) never touches this pod's egress — the browser does
+# all of it. Beyond DNS the server has nothing to say to anyone.
+# Public ingress arrives with node identity (hostNetwork root ingress) and is
+# admitted by the additive CCNP below; selecting only egress here leaves that
+# admit intact.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: wake-up-mythra-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: wake-up-mythra-web
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - wake-up-mythra-web
+          - wake-up-mythra-web-primary
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+---
+# The public edge is the tenant-root ingress controller on the node public
+# IPs (Cloudflare origins). It runs hostNetwork, so its traffic arrives with
+# the reserved host/remote-node identities — never a pod identity — and the
+# admit must be entity-based. The -primary value is listed so a future
+# Flagger takeover needs no policy change.
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-guardian-prod-allow-root-ingress-wake-up-mythra-web
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: presence
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: k8s:io.kubernetes.pod.namespace
+        operator: In
+        values:
+          - tenant-guardian-prod
+      - key: k8s:app.kubernetes.io/name
+        operator: In
+        values:
+          - wake-up-mythra-web
+          - wake-up-mythra-web-primary
+  ingress:
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

@@ -6,6 +6,7 @@ resources:
   - deployment.yaml
   - networkpolicy.yaml
   - observability.yaml
+  - web.yaml
 # The world-sim behavior modules, hot-loaded by presenced from the mount
 # without a restart. live.wasm is the running behavior; adding shadow.wasm
 # starts a shadow launch (evaluated every tick, outputs diffed, divergence
