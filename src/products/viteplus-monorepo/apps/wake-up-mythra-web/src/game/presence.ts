@@ -116,6 +116,9 @@ export function startPresence(): void {
         name: store.getItem("name"),
         device: deviceLabel(),
         token: store.getItem("token") || "",
+        // ?room= picks the park on a fresh session; resumed sessions keep
+        // their server-side room, same as every other hello field.
+        room: new URLSearchParams(location.search).get("room") || "",
         spectate,
         proto: 2,
       });
