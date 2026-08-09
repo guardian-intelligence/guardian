@@ -21,7 +21,6 @@ configMapGenerator:
   - name: mythra-behavior
     namespace: tenant-guardian-prod
     files:
-      - behavior/live.lua
       - behavior/live.wasm
       - behavior/client.wasm
     options:
