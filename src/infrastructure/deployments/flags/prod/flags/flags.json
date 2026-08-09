@@ -1,0 +1,16 @@
+{
+  "$schema": "https://flagd.dev/schema/v0/flags.json",
+  "flags": {
+    "wum-motd": {
+      "state": "ENABLED",
+      "variants": {
+        "none": "",
+        "message": ""
+      },
+      "defaultVariant": "none"
+    }
+  },
+  "metadata": {
+    "flagSetId": "guardian-prod"
+  }
+}

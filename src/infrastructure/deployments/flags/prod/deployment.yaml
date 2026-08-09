@@ -1,0 +1,173 @@
+# The client feature-flag control plane: flagd (OpenFeature's daemon) serving
+# streamed flag evaluation to every product web surface.
+#
+# House philosophy: feature flags are for CLIENTS ONLY. Server binaries are
+# never runtime-reconfigured — it is impossible to reason about how a running
+# service behaves under a config flip; services change by rolling restart with
+# a different OCI, shadow launch, and traffic re-routing. Clients are the
+# opposite: they hold UI state that must react live (a banner, a hint, a
+# rollout percentage), so they subscribe to this control plane and re-render
+# on flips.
+#
+# Delivery is the same GitOps hot-reload lane as the Mythra behavior modules:
+# flag definitions are committed JSON -> ConfigMap -> kubelet mount refresh ->
+# flagd's fsnotify sync detects the symlink swap and pushes the change down
+# every connected client's stream. No pod restart, no reloader annotation.
+#
+# Each product surface mounts flagd same-origin at /flags (per-host Ingress
+# with a prefix-strip rewrite): the flagd-web provider speaks the Connect
+# protocol over plain HTTP/1.1 fetch, so ordinary nginx carries the stream --
+# no gRPC-Web, no CORS, no preflights.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flagd
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: flagd
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: feature-flags
+    guardian.dev/stage: prod
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flagd
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: flagd
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: feature-flags
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: flagd
+              app.kubernetes.io/part-of: guardian
+              guardian.dev/stage: prod
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: flagd
+          image: ghcr.io/open-feature/flagd:v0.16.1@sha256:9525b3c2916183810f93f0a72774c1dfad48d1ae22852c753719c46db80af5e7
+          imagePullPolicy: IfNotPresent
+          args:
+            - start
+            # fsnotify pinned explicitly: the bare `file` provider would pick
+            # it by autodetecting Kubernetes, but the ConfigMap symlink-swap
+            # reload is the load-bearing mechanism here, not an optimization.
+            - --sources
+            - '[{"uri":"/etc/flagd/flags.json","provider":"fsnotify"}]'
+            - --log-format=json
+          ports:
+            - name: evaluation
+              containerPort: 8013
+              protocol: TCP
+            - name: management
+              containerPort: 8014
+              protocol: TCP
+            - name: ofrep
+              containerPort: 8016
+              protocol: TCP
+          readinessProbe:
+            # 412 until the first flag sync lands: a pod never takes traffic
+            # with an empty flag store.
+            httpGet:
+              path: /readyz
+              port: management
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: management
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+              ephemeral-storage: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+              ephemeral-storage: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # Never subPath: kubelet does not refresh subPath mounts, which
+            # would silently freeze the flag lane.
+            - name: flags
+              mountPath: /etc/flagd
+              readOnly: true
+      volumes:
+        - name: flags
+          configMap:
+            name: guardian-flags
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flagd
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: flagd
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: feature-flags
+    guardian.dev/stage: prod
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: flagd
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  ports:
+    - name: evaluation
+      port: 80
+      targetPort: evaluation
+      protocol: TCP
+    - name: management
+      port: 8014
+      targetPort: management
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: flagd
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: flagd
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flagd
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod

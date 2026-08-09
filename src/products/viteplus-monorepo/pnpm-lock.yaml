@@ -24,6 +24,18 @@ catalogs:
     '@manypkg/get-packages':
       specifier: 1.1.3
       version: 1.1.3
+    '@openfeature/core':
+      specifier: 1.12.0
+      version: 1.12.0
+    '@openfeature/flagd-web-provider':
+      specifier: 0.7.4
+      version: 0.7.4
+    '@openfeature/react-sdk':
+      specifier: 1.4.1
+      version: 1.4.1
+    '@openfeature/web-sdk':
+      specifier: 1.10.0
+      version: 1.10.0
     '@opentelemetry/api':
       specifier: 1.9.1
       version: 1.9.1
@@ -337,6 +349,18 @@ importers:
 
   apps/wake-up-mythra-web:
     dependencies:
+      '@openfeature/core':
+        specifier: 'catalog:'
+        version: 1.12.0
+      '@openfeature/flagd-web-provider':
+        specifier: 'catalog:'
+        version: 0.7.4(@openfeature/web-sdk@1.10.0(@openfeature/core@1.12.0))
+      '@openfeature/react-sdk':
+        specifier: 'catalog:'
+        version: 1.4.1(@openfeature/web-sdk@1.10.0(@openfeature/core@1.12.0))(react@19.2.8)
+      '@openfeature/web-sdk':
+        specifier: 'catalog:'
+        version: 1.10.0(@openfeature/core@1.12.0)
       '@tanstack/react-router':
         specifier: 'catalog:'
         version: 1.170.19(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -563,6 +587,9 @@ packages:
   '@blazediff/core@1.9.1':
     resolution: {integrity: sha512-ehg3jIkYKulZh+8om/O25vkvSsXXwC+skXmyA87FFx6A/45eqOkZsBltMw/TVteb0mloiGT8oGRTcjRAz66zaA==}
 
+  '@bufbuild/protobuf@1.10.1':
+    resolution: {integrity: sha512-wJ8ReQbHxsAfXhrf9ixl0aYbZorRuOWpBNzm8pL8ftmSxQx/wnJD5Eg861NwJU/czy2VXFIebCeZnZrI9rktIQ==}
+
   '@bufbuild/protobuf@2.12.1':
     resolution: {integrity: sha512-BvAMfS6LrgZiryOAZ4pBYucu4wG/Ei/9o9DZ9akbREnMLbPJiom2i8b9C8IsKErQoiKqVhrerzt3kOT/RrzLHg==}
 
@@ -636,6 +663,17 @@ packages:
 
   '@chenglou/pretext@0.0.8':
     resolution: {integrity: sha512-yqm2GMxnPI7VHcHwe84P8ZF0JK/2d2DMKPqMN+s95jQhwDMYYXKVFVJUMEaVWckQStdsjdLav/0Vu+d9YbtGxA==}
+
+  '@connectrpc/connect-web@1.7.0':
+    resolution: {integrity: sha512-qyP0YOnUPRWwCc/VfsoydMJvkb7EyUPr2q9sHgBuJzbADjiqck1gKH5V5ZPzPhTLBvmz5UvG+wiZ5sMRQHU1MQ==}
+    peerDependencies:
+      '@bufbuild/protobuf': ^1.10.0
+      '@connectrpc/connect': 1.7.0
+
+  '@connectrpc/connect@1.7.0':
+    resolution: {integrity: sha512-iNKdJRi69YP3mq6AePRT8F/HrxWCewrhxnLMNm0vpqXAR8biwzRtO6Hjx80C6UvtKJ5sFmffQT7I4Baecz389w==}
+    peerDependencies:
+      '@bufbuild/protobuf': ^1.10.0
 
   '@emnapi/core@1.11.1':
     resolution: {integrity: sha512-RSvbQmHzdKzNsLYa/wHrbc3KN4sYLKAdPZxqiM2HATqv/SBk2/ENSHpvXGaLOMcsAyz0poEGqkmmKYG3OWiJEQ==}
@@ -866,6 +904,25 @@ packages:
   '@oozcitak/util@10.0.0':
     resolution: {integrity: sha512-hAX0pT/73190NLqBPPWSdBVGtbY6VOhWYK3qqHqtXQ1gK7kS2yz4+ivsN07hpJ6I3aeMtKP6J6npsEKOAzuTLA==}
     engines: {node: '>=20.0'}
+
+  '@openfeature/core@1.12.0':
+    resolution: {integrity: sha512-7PCPzyd1OC19begz30+CRknFB0ChtyaZUhk7YWrk+Bov1fpVw0HYkTXtoxxsvPfDZB9P9WsT7uixN+Z8f9+bcA==}
+
+  '@openfeature/flagd-web-provider@0.7.4':
+    resolution: {integrity: sha512-YxouxSJ9yqHQskHS4Vif8IXWX6gvLWub2ZbL2Oovf6oDG/I4rSpJw1J6oprsyOrIMT22z8ycXPGnwuX9gri0bQ==}
+    peerDependencies:
+      '@openfeature/web-sdk': ^1.0.0
+
+  '@openfeature/react-sdk@1.4.1':
+    resolution: {integrity: sha512-xKpXBXVT0w9CIrhl6IzGkIuxmsqy7At+eYUW1XtaZbk+odKW424ZnmmjqiQMrbu31pfAhQrzww36QokTQaIf7g==}
+    peerDependencies:
+      '@openfeature/web-sdk': ^1.9.0
+      react: '>=16.8.0'
+
+  '@openfeature/web-sdk@1.10.0':
+    resolution: {integrity: sha512-qf+JmJSnaslhegNwoDDLn2Cf72P6cIobuAQPUb61MSkzJOZuVLU6f9pv/90FlLcK6UDtp6od//xZHW712rBrmg==}
+    peerDependencies:
+      '@openfeature/core': ^1.12.0
 
   '@opentelemetry/api-logs@0.220.0':
     resolution: {integrity: sha512-CmVa4ImJ+ynfrPMNaAXHET6Bhb44SwzmfyVJFq9ni2jgXJR/l7C6gfVFddNmHP+ZOkP9cf4f9DBe68qVLTHc9w==}
@@ -3518,6 +3575,8 @@ snapshots:
 
   '@blazediff/core@1.9.1': {}
 
+  '@bufbuild/protobuf@1.10.1': {}
+
   '@bufbuild/protobuf@2.12.1': {}
 
   '@bufbuild/protoc-gen-es@2.12.1(@bufbuild/protobuf@2.12.1)':
@@ -3680,6 +3739,15 @@ snapshots:
       prettier: 2.8.8
 
   '@chenglou/pretext@0.0.8': {}
+
+  '@connectrpc/connect-web@1.7.0(@bufbuild/protobuf@1.10.1)(@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.1))':
+    dependencies:
+      '@bufbuild/protobuf': 1.10.1
+      '@connectrpc/connect': 1.7.0(@bufbuild/protobuf@1.10.1)
+
+  '@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.1)':
+    dependencies:
+      '@bufbuild/protobuf': 1.10.1
 
   '@emnapi/core@1.11.1':
     dependencies:
@@ -3852,6 +3920,24 @@ snapshots:
       '@oozcitak/util': 10.0.0
 
   '@oozcitak/util@10.0.0': {}
+
+  '@openfeature/core@1.12.0': {}
+
+  '@openfeature/flagd-web-provider@0.7.4(@openfeature/web-sdk@1.10.0(@openfeature/core@1.12.0))':
+    dependencies:
+      '@bufbuild/protobuf': 1.10.1
+      '@connectrpc/connect': 1.7.0(@bufbuild/protobuf@1.10.1)
+      '@connectrpc/connect-web': 1.7.0(@bufbuild/protobuf@1.10.1)(@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.1))
+      '@openfeature/web-sdk': 1.10.0(@openfeature/core@1.12.0)
+
+  '@openfeature/react-sdk@1.4.1(@openfeature/web-sdk@1.10.0(@openfeature/core@1.12.0))(react@19.2.8)':
+    dependencies:
+      '@openfeature/web-sdk': 1.10.0(@openfeature/core@1.12.0)
+      react: 19.2.8
+
+  '@openfeature/web-sdk@1.10.0(@openfeature/core@1.12.0)':
+    dependencies:
+      '@openfeature/core': 1.12.0
 
   '@opentelemetry/api-logs@0.220.0':
     dependencies:
