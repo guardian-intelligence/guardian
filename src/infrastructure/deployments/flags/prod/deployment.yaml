@@ -1,23 +1,20 @@
-# The client feature-flag control plane: flagd (OpenFeature's daemon) serving
-# streamed flag evaluation to every product web surface.
+# The client feature-flag control plane: flagd serving OFREP — the
+# vendor-neutral OpenFeature HTTP protocol — behind the same-origin
+# /features mount. flagd is an implementation detail behind that contract;
+# swap it and no client changes. See docs/feature-flags.md.
 #
 # House philosophy: feature flags are for CLIENTS ONLY. Server binaries are
 # never runtime-reconfigured — it is impossible to reason about how a running
 # service behaves under a config flip; services change by rolling restart with
 # a different OCI, shadow launch, and traffic re-routing. Clients are the
-# opposite: they hold UI state that must react live (a banner, a hint, a
-# rollout percentage), so they subscribe to this control plane and re-render
-# on flips.
+# opposite: they gate UI and pre-GA code paths, so they evaluate against
+# this control plane and re-render on flips.
 #
 # Delivery is the same GitOps hot-reload lane as the Mythra behavior modules:
 # flag definitions are committed JSON -> ConfigMap -> kubelet mount refresh ->
-# flagd's fsnotify sync detects the symlink swap and pushes the change down
-# every connected client's stream. No pod restart, no reloader annotation.
-#
-# Each product surface mounts flagd same-origin at /flags (per-host Ingress
-# with a prefix-strip rewrite): the flagd-web provider speaks the Connect
-# protocol over plain HTTP/1.1 fetch, so ordinary nginx carries the stream --
-# no gRPC-Web, no CORS, no preflights.
+# flagd's fsnotify sync reloads the flag set while feature-flags-notify
+# (below) fans the new epoch out to every subscribed client, which
+# re-evaluates over OFREP. No pod restart, no reloader annotation.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -155,10 +152,6 @@ spec:
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
   ports:
-    - name: evaluation
-      port: 80
-      targetPort: evaluation
-      protocol: TCP
     - name: management
       port: 8014
       targetPort: management
