@@ -5,7 +5,7 @@
 
 def _wasm_transition_impl(settings, attr):
     return {
-        "//command_line_option:platforms": [Label("//src/services/presenced/sim:wasm32")],
+        "//command_line_option:platforms": [Label("//src/services/mythrad/sim:wasm32")],
         "//command_line_option:compilation_mode": "opt",
     }
 

@@ -19,7 +19,7 @@ on:
       - "src/services/authorization/**"
       - "src/services/payments/**"
       - "src/services/postflight/**"
-      - "src/services/presenced/**"
+      - "src/services/mythrad/**"
       - "src/products/analytics/**"
       - "src/products/viteplus-monorepo/**"
       - "src/proto/**"
@@ -58,7 +58,7 @@ jobs:
         id: classify
         run: |
           names=(alert-relay analytics-ingest authorization canary-journeys
-            payments payments-canary postflight-controlplane presenced
+            mythrad payments payments-canary postflight-controlplane
             company-site privatecut-web visual-harness wake-up-mythra-web)
           declare -A watch=(
             [alert-relay]='^src/services/alerting/'
@@ -68,7 +68,7 @@ jobs:
             [payments]='^src/services/payments/'
             [payments-canary]='^src/services/payments/'
             [postflight-controlplane]='^src/services/postflight/'
-            [presenced]='^src/services/presenced/'
+            [mythrad]='^src/services/mythrad/'
             [company-site]='^src/products/viteplus-monorepo/'
             [privatecut-web]='^src/products/viteplus-monorepo/'
             [wake-up-mythra-web]='^src/products/viteplus-monorepo/'
@@ -82,13 +82,13 @@ jobs:
             [payments]='//src/services/payments:push'
             [payments-canary]='//src/services/payments/canary:push'
             [postflight-controlplane]='//src/services/postflight/controlplane:push'
-            [presenced]='//src/services/presenced:push'
+            [mythrad]='//src/services/mythrad:push'
             [company-site]='//src/products/viteplus-monorepo/apps/guardianintelligence-web/site:push'
             [privatecut-web]='//src/products/viteplus-monorepo/apps/privatecut-web/site:push'
             [wake-up-mythra-web]='//src/products/viteplus-monorepo/apps/wake-up-mythra-web/site:push'
             [visual-harness]='//src/products/viteplus-monorepo/packages/visual-harness:push'
           )
-          go_images=' alert-relay analytics-ingest authorization payments payments-canary postflight-controlplane presenced '
+          go_images=' alert-relay analytics-ingest authorization mythrad payments payments-canary postflight-controlplane '
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'
 
           all=false changed=""

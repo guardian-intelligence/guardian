@@ -7,17 +7,17 @@ exports_files(
         "behaviors/client.wasm",
         "behaviors/server.wasm",
     ],
-    visibility = ["//src/services/presenced/sim:__pkg__"],
+    visibility = ["//src/services/mythrad/sim:__pkg__"],
 )
 
 go_library(
-    name = "presenced_lib",
+    name = "mythrad_lib",
     srcs = ["main.go"],
     embedsrcs = [
         "behaviors/client.wasm",
         "behaviors/server.wasm",
     ],
-    importpath = "github.com/guardian-intelligence/guardian/src/services/presenced",
+    importpath = "github.com/guardian-intelligence/guardian/src/services/mythrad",
     visibility = ["//visibility:private"],
     deps = [
         "@com_github_prometheus_client_golang//prometheus:go_default_library",
@@ -31,8 +31,8 @@ go_library(
 )
 
 go_binary(
-    name = "presenced",
-    embed = [":presenced_lib"],
+    name = "mythrad",
+    embed = [":mythrad_lib"],
     pure = "on",
     visibility = ["//visibility:public"],
 )
@@ -40,9 +40,9 @@ go_binary(
 # Fixed-point invariant, layer 2: scans the embedded wasm modules for float
 # value-type declarations (layer 1 is the source token gate in ./sim).
 go_test(
-    name = "presenced_test",
+    name = "mythrad_test",
     srcs = ["wasm_gate_test.go"],
-    embed = [":presenced_lib"],
+    embed = [":mythrad_lib"],
 )
 
 # The image carries both the service and its protocol load driver; the
@@ -50,13 +50,13 @@ go_test(
 # driver ships here rather than as a k6 script (docs/loadtest.md conventions
 # still apply: results land in VictoriaMetrics, never only pod logs).
 pkg_tar(
-    name = "presenced_layer",
+    name = "mythrad_layer",
     files = {
-        ":presenced": "app/presenced",
-        "//src/services/presenced/loadgen": "app/loadgen",
+        ":mythrad": "app/mythrad",
+        "//src/services/mythrad/loadgen": "app/loadgen",
     },
     modes = {
-        "app/presenced": "0755",
+        "app/mythrad": "0755",
         "app/loadgen": "0755",
     },
 )
@@ -66,23 +66,23 @@ oci_image(
     annotations = {
         "org.opencontainers.image.description": "Room presence and tick service over WebTransport, with its load driver",
         "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
-        "org.opencontainers.image.title": "guardian-presenced",
+        "org.opencontainers.image.title": "guardian-mythrad",
     },
     architecture = "amd64",
     os = "linux",
-    entrypoint = ["/app/presenced"],
+    entrypoint = ["/app/mythrad"],
     exposed_ports = [
         "4433/udp",
         "9090/tcp",
     ],
-    tars = [":presenced_layer"],
+    tars = [":mythrad_layer"],
     visibility = ["//visibility:public"],
 )
 
 oci_load(
     name = "load",
     image = ":image",
-    repo_tags = ["guardian/presenced:dev"],
+    repo_tags = ["guardian/mythrad:dev"],
 )
 
 # Pushed by CI (.github/workflows/images.yml) on merges to main.
@@ -90,6 +90,6 @@ oci_push(
     name = "push",
     image = ":image",
     remote_tags = ["edge"],
-    repository = "ghcr.io/guardian-intelligence/presenced",
+    repository = "ghcr.io/guardian-intelligence/mythrad",
     visibility = ["//visibility:public"],
 )

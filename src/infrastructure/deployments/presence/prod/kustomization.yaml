@@ -14,8 +14,8 @@ resources:
 # into live.wasm. client.wasm is the presentation module browsers fetch;
 # its hash rides every pong so pages hot-swap smoothing mid-session. The
 # committed .wasm files are kept in lockstep with their Rust sources by
-# //src/services/presenced/sim diff tests; regenerate via
-# `bazelisk run //src/services/presenced/sim:refresh`. The name-suffix hash
+# //src/services/mythrad/sim diff tests; regenerate via
+# `bazelisk run //src/services/mythrad/sim:refresh`. The name-suffix hash
 # stays disabled: a suffixed name would ripple into the Deployment and
 # restart the pod, defeating the hot-reload lane this service demonstrates.
 configMapGenerator:

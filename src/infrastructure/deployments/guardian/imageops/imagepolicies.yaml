@@ -351,3 +351,32 @@ spec:
       order: asc
   digestReflectionPolicy: Always
   interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: mythrad
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  image: ghcr.io/guardian-intelligence/mythrad
+  interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: mythrad
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  imageRepositoryRef:
+    name: mythrad
+  filterTags:
+    pattern: '^edge$'
+  policy:
+    alphabetical:
+      order: asc
+  digestReflectionPolicy: Always
+  interval: 1m0s

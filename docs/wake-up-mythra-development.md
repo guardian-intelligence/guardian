@@ -120,14 +120,14 @@ sim ticks at 24Hz.
    trivially consistent.
 
 3. **One deterministic core, unchanged, on every surface.** Game logic
-   compiles from the shared Rust structural core (`//src/services/presenced/sim`)
+   compiles from the shared Rust structural core (`//src/services/mythrad/sim`)
    to wasm. The module bytes are the portability contract. Three rules keep
    the determinism absolute:
    - **Fixed-point only.** The sim is integer arithmetic throughout
      (fractional values in Q16.16); float types are banned from the wasm
      modules and enforced at build time twice — a source token gate
      (`sim:no_float_test`) and a wasm binary scan for float value-type
-     declarations (`presenced_test`). No FPU, rounding mode, or NaN payload
+     declarations (`mythrad_test`). No FPU, rounding mode, or NaN payload
      on any surface can ever matter.
    - **Shared randomness seed.** Each dog park gets a server-minted seed,
      broadcast in `welcome`/`presence`; every roll is `det_rand(seed, tick,
@@ -210,16 +210,16 @@ The honest current decomposition, including what is *not* yet separated.
 
 | Artifact | Status | Notes |
 |---|---|---|
-| `presenced` | live, **deliberately monolithic** | One binary currently carries four layers: QUIC/WebTransport termination + session/token handling; room hub + tick fanout; behavior engine (wazero slots); page/module/asset HTTP serving. It has *not* been split. Split boundary when scale demands: gateway (transport/sessions) vs world-sim (rooms/ticks/behaviors), so parks can shard across nodes. Do not split before sharding forces it |
+| `mythrad` | live, **deliberately monolithic** | One binary currently carries four layers: QUIC/WebTransport termination + session/token handling; room hub + tick fanout; behavior engine (wazero slots); page/module/asset HTTP serving. It has *not* been split. Split boundary when scale demands: gateway (transport/sessions) vs world-sim (rooms/ticks/behaviors), so parks can shard across nodes. Do not split before sharding forces it |
 | Control plane | planned | Authentication (Guardian customer identity realm; Game Center / Play Games bridging), entitlements (SpiceDB-backed, purchase-source-neutral), billing normalization (IAP / Play / MoR / Steam → ledger), friends/social graph, dog-park registry (geo metadata + manual petition queue), feature-flag service (OpenFeature control plane with streaming subscriptions) |
 | Data plane | planned | Persistent game state, distinct from the in-memory world sim: economy ledgers (TigerBeetle), check-in service (geo attestation, 5-minute sessions, presence-bonus windows), pack membership + inventory + mood scheduler, event feed fanout (the p99 ≤ 2s SLA), month-cycle orchestrator (22/6 clock, prize distribution, Fur grants, reset) |
-| `loadgen` | live | Protocol load driver; ships in the presenced image |
+| `loadgen` | live | Protocol load driver; ships in the mythrad image |
 
 ### Tooling / QA
 
 | Artifact | Status | Notes |
 |---|---|---|
-| `//src/services/presenced/sim:refresh` + lockstep diff tests | live | Committed wasm bytes provably match Rust source |
+| `//src/services/mythrad/sim:refresh` + lockstep diff tests | live | Committed wasm bytes provably match Rust source |
 | `world_hash` oracle | live | Core export, stamped on ticks 1/s, re-derived and verified by every client (world ✓ pill); the cross-surface determinism assertion |
 | `//qa:surfaces` runner | planned | One command: build → local server → scripted taps on every surface → all `world_hash` values equal at a barrier tick. `--devices` adds simulators + the physical rack |
 | Device rack | planned (~$2.4k) | Mac mini controller (iOS automation host + simulators + macOS surface), iPhone (have), base iPad, Pixel, mid-tier Samsung, low-end MediaTek (the floor gate), powered hub, scrcpy/QuickTime mirror wall |
@@ -227,7 +227,7 @@ The honest current decomposition, including what is *not* yet separated.
 ## Gaps and sequencing
 
 1. **iOS web is blocked by Apple, not by us**: iOS 26.4 Safari ships
-   WebTransport, but dialing presenced trips a Network.framework
+   WebTransport, but dialing mythrad trips a Network.framework
    recursive-lock crash (repro captured; applies to all iOS browsers and
    WKWebView — they share the stack). File the Feedback, track betas. The
    native app with its own QUIC stack is the hedge, not a WKWebView wrapper.

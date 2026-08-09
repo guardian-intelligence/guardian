@@ -5,11 +5,11 @@ filegroup(
 )
 
 # Kept in lockstep with the service's committed sim modules by the diff
-# tests in //src/services/presenced/sim.
+# tests in //src/services/mythrad/sim.
 exports_files(
     [
         "behavior/client.wasm",
         "behavior/live.wasm",
     ],
-    visibility = ["//src/services/presenced/sim:__pkg__"],
+    visibility = ["//src/services/mythrad/sim:__pkg__"],
 )
