@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@openfeature/core": "catalog:",
-    "@openfeature/flagd-web-provider": "catalog:",
+    "@openfeature/ofrep-web-provider": "catalog:",
     "@openfeature/react-sdk": "catalog:",
     "@openfeature/web-sdk": "catalog:",
     "@tanstack/react-router": "catalog:",
