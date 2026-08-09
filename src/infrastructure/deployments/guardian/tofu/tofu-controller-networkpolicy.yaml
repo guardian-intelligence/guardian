@@ -69,6 +69,12 @@ spec:
             - port: "30000"
               protocol: TCP
   egress:
+    # The runner uses in-cluster config: it dials the Kubernetes API for its
+    # gRPC mTLS secret and pod identity. The API ClusterIP is not `world`, so
+    # it needs the kube-apiserver entity explicitly or the runner wedges at
+    # "dial tcp 10.96.0.1:443: i/o timeout" before it ever plans.
+    - toEntities:
+        - kube-apiserver
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: kube-system
