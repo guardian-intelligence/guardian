@@ -58,10 +58,73 @@ spec:
         - ports:
             - port: "8013"
               protocol: TCP
+            - port: "8016"
+              protocol: TCP
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: tenant-root
       toPorts:
         - ports:
             - port: "8014"
+              protocol: TCP
+---
+# feature-flags-notify: same shape as flagd — the epoch arrives via the
+# ConfigMap mount, so beyond DNS there is no egress. 8080 carries the SSE
+# stream (public edge, node identity) and the metrics scrape (vmagent).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: feature-flags-notify
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: feature-flags-notify
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: feature-flags-notify
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: tenant-guardian-prod-allow-root-ingress-feature-flags-notify
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: k8s:io.kubernetes.pod.namespace
+        operator: In
+        values:
+          - tenant-guardian-prod
+      - key: k8s:app.kubernetes.io/name
+        operator: In
+        values:
+          - feature-flags-notify
+  ingress:
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+      toPorts:
+        - ports:
+            - port: "8080"
               protocol: TCP

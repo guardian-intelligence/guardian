@@ -163,6 +163,10 @@ spec:
       port: 8014
       targetPort: management
       protocol: TCP
+    - name: ofrep
+      port: 8016
+      targetPort: ofrep
+      protocol: TCP
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -178,5 +182,150 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: flagd
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod
+---
+# feature-flags-notify: the change-notification half of the /features
+# contract. Serves a read-only SSE stream of the flag-set epoch (content
+# hash of flags.json) at /features/events; clients re-evaluate through
+# OFREP on a change. It watches the same guardian-flags ConfigMap flagd
+# syncs from, so both halves observe one source of truth.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feature-flags-notify
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: feature-flags-notify
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: feature-flags
+    guardian.dev/stage: prod
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: feature-flags-notify
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: feature-flags-notify
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: feature-flags
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: feature-flags-notify
+              app.kubernetes.io/part-of: guardian
+              guardian.dev/stage: prod
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: notify
+          image: ghcr.io/guardian-intelligence/feature-flags-notify:edge@sha256:6d2a10d96576cfe552b101bc48c791c315c87a6feb2d8a09e015263d97435677 # {"$imagepolicy": "guardian-imageops:feature-flags-notify"}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NOTIFY_FLAGS_PATH
+              value: /etc/flags/flags.json
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            # 412 until the first successful hash of the flag file: a pod
+            # that cannot see the flag set must not hold subscriptions.
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+              ephemeral-storage: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+              ephemeral-storage: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # Never subPath: kubelet does not refresh subPath mounts, which
+            # would silently freeze the epoch.
+            - name: flags
+              mountPath: /etc/flags
+              readOnly: true
+      volumes:
+        - name: flags
+          configMap:
+            name: guardian-flags
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: feature-flags-notify
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: feature-flags-notify
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: feature-flags
+    guardian.dev/stage: prod
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: feature-flags-notify
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: feature-flags-notify
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: feature-flags-notify
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: feature-flags-notify
       app.kubernetes.io/part-of: guardian
       guardian.dev/stage: prod
