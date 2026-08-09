@@ -9,6 +9,7 @@ quay.io/authzed/
 ghcr.io/flux-iac/
 ghcr.io/fluxcd/
 ghcr.io/guardian-intelligence/
+ghcr.io/open-feature/
 ghcr.io/project-zot/
 ghcr.io/tigerbeetle/
 quay.io/keycloak/
