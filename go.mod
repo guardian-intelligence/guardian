@@ -13,7 +13,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.29
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.105.2
 	github.com/bazelbuild/rules_go v0.61.1
-	github.com/chromedp/cdproto v0.0.0-20260719223732-95f6af754cfe
+	github.com/chromedp/cdproto v0.0.0-20260804232424-e85f50dbfd32
 	github.com/chromedp/chromedp v0.16.0
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/jackc/pgx/v5 v5.10.0
@@ -23,6 +23,7 @@ require (
 	github.com/quic-go/webtransport-go v0.12.0
 	github.com/stripe/stripe-go/v83 v83.2.1
 	github.com/tigerbeetle/tigerbeetle-go v0.17.9
+	github.com/yuin/gopher-lua v1.1.1
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0
@@ -87,7 +88,6 @@ require (
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
