@@ -60,7 +60,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: mythrad
-          image: ghcr.io/guardian-intelligence/mythrad:edge@sha256:17b8e914c082a07476e17d8673a48d08c060cf45b069f1431d8ae3b4367c5537 # {"$imagepolicy": "guardian-imageops:mythrad"}
+          image: ghcr.io/guardian-intelligence/mythrad:edge@sha256:e9eb67afab6aecb073594401618a106eea80b21af5081501ed1cec88b924e8a4 # {"$imagepolicy": "guardian-imageops:mythrad"}
           env:
             - name: TICK_HZ
               value: "24"
