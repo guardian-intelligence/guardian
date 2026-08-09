@@ -19,12 +19,16 @@
 //
 //	client -> server stream:   {"type":"hello","name","device","token","room","spectate"}
 //	                           {"type":"join","room":"park-2"}
-//	server -> client stream:   {"type":"welcome","you":{...},"token":"...","grid":[w,h]}
-//	                           {"type":"presence","room":"...","players":[...]}
+//	server -> client stream:   {"type":"welcome","you":{...},"token":"...","grid":[w,h],"seed":".."}
+//	                           {"type":"presence","room":"...","players":[...],"seed":".."}
 //	client -> server datagram: {"type":"ping","ct":...}
 //	server -> client datagram: {"type":"tick","n":..,"st":..,"behavior":"..",
-//	                            "dogs":[[id,x,y,skin],...]}
+//	                            "dogs":[[id,x,y,skin],...],"wh":".." (1/s)}
 //	                           {"type":"pong","ct":...,"st":...,"addr":"...","cw":".."}
+//
+// "seed" is the room's shared randomness seed and "wh" the world-hash
+// oracle: any client holding the seed recomputes the hash from its own
+// snapshot via the client module and verifies it matches the sim.
 package main
 
 import (
@@ -134,13 +138,18 @@ func envStr(k, d string) string {
 // host writes the dog id into; step(tick, id_len, x, y, w, h) -> packed
 // (dx << 32 | dy) as two i32s.
 type behaviorSlot struct {
-	mu     sync.Mutex
-	name   string // "live" | "shadow"
-	hash   string
-	rt     wazero.Runtime
-	mem    api.Memory
-	stepFn api.Function
-	idPtr  uint32
+	mu      sync.Mutex
+	name    string // "live" | "shadow"
+	hash    string
+	rt      wazero.Runtime
+	mem     api.Memory
+	stepFn  api.Function
+	seedFn  api.Function // optional set_seed export
+	whReset api.Function // optional world-hash exports
+	whAdd   api.Function
+	whGet   api.Function
+	idPtr   uint32
+	seed    uint64 // last seed pushed via set_seed
 }
 
 func newBehaviorSlot(name string) *behaviorSlot { return &behaviorSlot{name: name} }
@@ -180,6 +189,11 @@ func (b *behaviorSlot) load(module []byte) error {
 	mBehaviorInfo.WithLabelValues(b.name, hash).Set(1)
 	mBehaviorReloads.WithLabelValues(b.name, "ok").Inc()
 	b.hash, b.rt, b.mem, b.stepFn, b.idPtr = hash, rt, mod.Memory(), stepFn, uint32(res[0])
+	b.seedFn = mod.ExportedFunction("set_seed")
+	b.whReset = mod.ExportedFunction("wh_reset")
+	b.whAdd = mod.ExportedFunction("wh_add")
+	b.whGet = mod.ExportedFunction("wh_get")
+	b.seed = 0
 	log.Printf("behavior %s loaded: %s", b.name, hash)
 	return nil
 }
@@ -201,11 +215,18 @@ func (b *behaviorSlot) loaded() (string, bool) {
 	return b.hash, b.rt != nil
 }
 
-func (b *behaviorSlot) step(tick uint64, dogID string, x, y int) (dx, dy int, err error) {
+func (b *behaviorSlot) step(tick, seed uint64, dogID string, x, y int) (dx, dy int, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.rt == nil {
 		return 0, 0, nil
+	}
+	ctx := context.Background()
+	if b.seedFn != nil && seed != b.seed {
+		if _, err := b.seedFn.Call(ctx, seed); err != nil {
+			return 0, 0, err
+		}
+		b.seed = seed
 	}
 	id := []byte(dogID)
 	if len(id) > 64 {
@@ -214,7 +235,7 @@ func (b *behaviorSlot) step(tick uint64, dogID string, x, y int) (dx, dy int, er
 	if !b.mem.Write(b.idPtr, id) {
 		return 0, 0, fmt.Errorf("%s: id write out of bounds", b.name)
 	}
-	res, err := b.stepFn.Call(context.Background(), tick, uint64(len(id)),
+	res, err := b.stepFn.Call(ctx, tick, uint64(len(id)),
 		uint64(uint32(int32(x))), uint64(uint32(int32(y))),
 		uint64(uint32(gridW)), uint64(uint32(gridH)))
 	if err != nil {
@@ -224,6 +245,39 @@ func (b *behaviorSlot) step(tick uint64, dogID string, x, y int) (dx, dy int, er
 		return int(max(-1, min(1, v)))
 	}
 	return clamp(int32(res[0] >> 32)), clamp(int32(res[0])), nil
+}
+
+// worldHash computes the cross-surface oracle over one room's dogs via the
+// module's wh_* exports. Returns ok=false when the loaded module predates
+// the oracle ABI.
+func (b *behaviorSlot) worldHash(tick, seed uint64, dogs [][4]any) (uint64, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.rt == nil || b.whReset == nil || b.whAdd == nil || b.whGet == nil {
+		return 0, false
+	}
+	ctx := context.Background()
+	if _, err := b.whReset.Call(ctx, tick, seed); err != nil {
+		return 0, false
+	}
+	for _, d := range dogs {
+		id := []byte(d[0].(string))
+		if len(id) > 64 {
+			id = id[:64]
+		}
+		if !b.mem.Write(b.idPtr, id) {
+			return 0, false
+		}
+		if _, err := b.whAdd.Call(ctx, uint64(len(id)),
+			uint64(uint32(int32(d[1].(int)))), uint64(uint32(int32(d[2].(int))))); err != nil {
+			return 0, false
+		}
+	}
+	res, err := b.whGet.Call(ctx)
+	if err != nil {
+		return 0, false
+	}
+	return res[0], true
 }
 
 // clientModule tracks the presentation module served to browsers: raw bytes
@@ -392,6 +446,7 @@ type Hub struct {
 	mu      sync.Mutex
 	players map[string]*Player
 	rooms   map[string]map[*Player]bool
+	seeds   map[string]uint64 // per-room shared randomness seed
 	tick    uint64
 	tickHz  int
 	live    *behaviorSlot
@@ -417,6 +472,7 @@ func spawnCoord(n int) int {
 func newHub(tickHz int, live, shadow *behaviorSlot, assets *assetCatalog, client *clientModule) *Hub {
 	return &Hub{
 		players: map[string]*Player{}, rooms: map[string]map[*Player]bool{},
+		seeds:  map[string]uint64{},
 		tickHz: tickHz, live: live, shadow: shadow, assets: assets, client: client,
 	}
 }
@@ -426,12 +482,19 @@ func (h *Hub) moveLocked(p *Player, room string) {
 		delete(cur, p)
 		if len(cur) == 0 {
 			delete(h.rooms, p.Room)
+			delete(h.seeds, p.Room)
 		}
 	}
 	p.Room = room
 	if room != "" {
 		if h.rooms[room] == nil {
 			h.rooms[room] = map[*Player]bool{}
+			// The park's shared randomness seed: broadcast to every client
+			// (welcome/presence) so any surface reproduces the server's
+			// dice and world hash for this room's timeline.
+			var b [8]byte
+			rand.Read(b[:])
+			h.seeds[room] = binary.LittleEndian.Uint64(b[:])
 		}
 		h.rooms[room][p] = true
 	}
@@ -445,7 +508,10 @@ func (h *Hub) broadcastRoom(room string) {
 	for p := range occ {
 		list = append(list, p)
 	}
-	msg, _ := json.Marshal(map[string]any{"type": "presence", "room": room, "players": list, "st": nowMs()})
+	msg, _ := json.Marshal(map[string]any{
+		"type": "presence", "room": room, "players": list, "st": nowMs(),
+		"seed": fmt.Sprintf("%016x", h.seeds[room]),
+	})
 	msg = append(msg, '\n')
 	for p := range occ {
 		h.sendLocked(p, msg)
@@ -476,19 +542,20 @@ func (h *Hub) tickLoop() {
 		liveHash, _ := h.live.loaded()
 		_, shadowLoaded := h.shadow.loaded()
 		skin := h.assets.defaultSkin()
-		for _, occ := range h.rooms {
+		for room, occ := range h.rooms {
+			seed := h.seeds[room]
 			dogs := make([][4]any, 0, len(occ))
 			for p := range occ {
 				if p.Role != "player" {
 					continue
 				}
-				dx, dy, err := h.live.step(h.tick, p.ID, p.X, p.Y)
+				dx, dy, err := h.live.step(h.tick, seed, p.ID, p.X, p.Y)
 				if err != nil {
 					log.Printf("live behavior error (dog %s frozen this tick): %v", p.ID, err)
 					dx, dy = 0, 0
 				}
 				if shadowLoaded {
-					sdx, sdy, serr := h.shadow.step(h.tick, p.ID, p.X, p.Y)
+					sdx, sdy, serr := h.shadow.step(h.tick, seed, p.ID, p.X, p.Y)
 					mShadowSteps.Inc()
 					if serr != nil {
 						mShadowErrors.Inc()
@@ -500,9 +567,17 @@ func (h *Hub) tickLoop() {
 				p.Y = clampInt(p.Y+dy, 0, gridH-1)
 				dogs = append(dogs, [4]any{p.ID, p.X, p.Y, skin})
 			}
-			msg, _ := json.Marshal(map[string]any{
+			snapshot := map[string]any{
 				"type": "tick", "n": h.tick, "st": st, "behavior": liveHash, "dogs": dogs,
-			})
+			}
+			// Once a second, stamp the world-hash oracle so every client can
+			// verify its snapshot against the authoritative sim.
+			if h.tick%uint64(h.tickHz) == 0 {
+				if wh, ok := h.live.worldHash(h.tick, seed, dogs); ok {
+					snapshot["wh"] = fmt.Sprintf("%016x", wh)
+				}
+			}
+			msg, _ := json.Marshal(snapshot)
 			for p := range occ {
 				if p.sess == nil {
 					continue
@@ -598,13 +673,14 @@ func (h *Hub) handleSession(sess *webtransport.Session, remote string) {
 	p.sess = sess
 	p.out = make(chan []byte, 64)
 	out := p.out
+	roomSeed := h.seeds[p.Room]
 	h.updateSessionGauges()
 	h.mu.Unlock()
 	mHandshakes.WithLabelValues("ok").Inc()
 
 	welcome, _ := json.Marshal(map[string]any{
 		"type": "welcome", "you": p, "token": p.token, "resumed": resumed,
-		"grid": [2]int{gridW, gridH},
+		"grid": [2]int{gridW, gridH}, "seed": fmt.Sprintf("%016x", roomSeed),
 	})
 	stream.Write(append(welcome, '\n'))
 

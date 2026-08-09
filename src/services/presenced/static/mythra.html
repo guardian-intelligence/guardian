@@ -25,6 +25,7 @@
   <span class="stat">rtt <b id="rtt">–</b></span>
   <span class="stat">sim behavior <b id="behavior">–</b></span>
   <span class="stat">client sim <b id="client">–</b></span>
+  <span class="stat">world <b id="world">–</b></span>
   <span class="stat">skin <b id="skin">cell</b></span>
   <span class="stat dim" id="role"></span>
 </div>
@@ -53,7 +54,9 @@ const assetCache = new Map();   // ref -> Image | "loading"
 // hot-swaps the module mid-session.
 let sim = null, simHash = null, simLoading = false;
 let prevDogs = new Map(), currDogs = [], currAt = 0, tickMs = 1000 / 24, lastSt = 0;
-const SNAP_CELLS = 8.0;
+let roomSeed = null, lastWorldOk = null;
+const Q16 = 65536;                 // the sim is fixed-point Q16.16
+const SNAP_Q16 = 8 * Q16;          // teleport threshold, cells
 
 async function loadClientSim(hash) {
   if (!hash || hash === simHash || simLoading) return;
@@ -172,9 +175,11 @@ function onCtrl(m) {
   if (m.type === "welcome") {
     myId = m.you.id;
     store.setItem("token", m.token);
+    if (m.seed) roomSeed = m.seed;
     $("role").textContent = m.you.role + " @ " + m.you.device;
     logLine(`welcome: ${m.you.name} (${m.resumed ? "resumed" : "new"}), room ${m.you.room}`);
   } else if (m.type === "presence") {
+    if (m.seed) roomSeed = m.seed;
     players = m.players;
     const names = players.filter(p => p.role !== "spectator").map(p => p.name);
     const specs = players.filter(p => p.role === "spectator").length;
@@ -203,6 +208,29 @@ function onDg(m) {
     if (dt > 20 && dt < 200) tickMs = 0.9 * tickMs + 0.1 * dt;
   }
   if (m.st) lastSt = m.st;
+  if (m.wh) verifyWorld(m);
+}
+
+// The cross-surface oracle: recompute the world hash from our own snapshot
+// through the client module (the same core the server hashed with) and
+// verify it against the sim's stamp. A ✓ here proves this surface holds
+// bit-identical world state.
+function verifyWorld(m) {
+  if (!sim?.wh_reset || !roomSeed) return;
+  sim.wh_reset(BigInt(m.n), BigInt("0x" + roomSeed));
+  const mem = new Uint8Array(sim.memory.buffer);
+  const idPtr = sim.id_buf();
+  for (const [id, x, y] of m.dogs || []) {
+    const bytes = new TextEncoder().encode(String(id)).slice(0, 64);
+    mem.set(bytes, idPtr);
+    sim.wh_add(bytes.length, x, y);
+  }
+  const local = BigInt.asUintN(64, sim.wh_get()).toString(16).padStart(16, "0");
+  const ok = local === m.wh;
+  $("world").textContent = m.wh.slice(0, 8) + (ok ? " ✓" : " ✗");
+  if (!ok && lastWorldOk !== false) logLine(`world hash MISMATCH at tick ${m.n}: sim ${m.wh}, local ${local}`);
+  if (ok && lastWorldOk === false) logLine(`world hash re-verified at tick ${m.n}`);
+  lastWorldOk = ok;
 }
 
 // asset streaming: unknown skin refs are fetched once by content address;
@@ -238,22 +266,23 @@ function frame() {
   let pos = null;
   if (sim) {
     const n = Math.min(dogs.length, sim.frame_cap());
-    const buf = new Float32Array(sim.memory.buffer, sim.frame_buf(), n * 4);
+    const buf = new Int32Array(sim.memory.buffer, sim.frame_buf(), n * 4);
     for (let i = 0; i < n; i++) {
       const [id, x, y] = dogs[i];
       const prev = prevDogs.get(id);
-      buf[i * 4] = prev ? prev[1] : x;
-      buf[i * 4 + 1] = prev ? prev[2] : y;
-      buf[i * 4 + 2] = x;
-      buf[i * 4 + 3] = y;
+      buf[i * 4] = (prev ? prev[1] : x) * Q16;
+      buf[i * 4 + 1] = (prev ? prev[2] : y) * Q16;
+      buf[i * 4 + 2] = x * Q16;
+      buf[i * 4 + 3] = y * Q16;
     }
-    sim.smooth_frame(n, (performance.now() - currAt) / tickMs, SNAP_CELLS);
+    const alpha = Math.min(2 * Q16, Math.max(0, ((performance.now() - currAt) / tickMs) * Q16)) | 0;
+    sim.smooth_frame(n, alpha, SNAP_Q16);
     pos = buf;
   }
   for (let i = 0; i < dogs.length; i++) {
     const [id, tx, ty, skin] = dogs[i];
-    const x = pos && i * 4 < pos.length ? pos[i * 4] : tx;
-    const y = pos && i * 4 < pos.length ? pos[i * 4 + 1] : ty;
+    const x = pos && i * 4 < pos.length ? pos[i * 4] / Q16 : tx;
+    const y = pos && i * 4 < pos.length ? pos[i * 4 + 1] / Q16 : ty;
     const img = skinImage(skin);
     if (img) {
       ctx.drawImage(img, x - 1.5, y - 1.5, 4, 4);
