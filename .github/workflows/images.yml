@@ -59,7 +59,7 @@ jobs:
         run: |
           names=(alert-relay analytics-ingest authorization canary-journeys
             payments payments-canary postflight-controlplane presenced
-            company-site privatecut-web visual-harness)
+            company-site privatecut-web visual-harness wake-up-mythra-web)
           declare -A watch=(
             [alert-relay]='^src/services/alerting/'
             [analytics-ingest]='^src/products/analytics/|^src/proto/'
@@ -71,6 +71,7 @@ jobs:
             [presenced]='^src/services/presenced/'
             [company-site]='^src/products/viteplus-monorepo/'
             [privatecut-web]='^src/products/viteplus-monorepo/'
+            [wake-up-mythra-web]='^src/products/viteplus-monorepo/'
             [visual-harness]='^src/products/viteplus-monorepo/packages/visual-harness/|^src/products/viteplus-monorepo/pnpm-(lock|workspace)\.yaml$'
           )
           declare -A push_target=(
@@ -84,6 +85,7 @@ jobs:
             [presenced]='//src/services/presenced:push'
             [company-site]='//src/products/viteplus-monorepo/apps/guardianintelligence-web/site:push'
             [privatecut-web]='//src/products/viteplus-monorepo/apps/privatecut-web/site:push'
+            [wake-up-mythra-web]='//src/products/viteplus-monorepo/apps/wake-up-mythra-web/site:push'
             [visual-harness]='//src/products/viteplus-monorepo/packages/visual-harness:push'
           )
           go_images=' alert-relay analytics-ingest authorization payments payments-canary postflight-controlplane presenced '

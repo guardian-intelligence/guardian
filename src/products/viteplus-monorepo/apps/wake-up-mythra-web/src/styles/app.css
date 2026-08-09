@@ -1,0 +1,62 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+body {
+  background: #ffffff;
+  color: #111111;
+  font:
+    13px/1.5 ui-monospace,
+    "SF Mono",
+    Menlo,
+    monospace;
+  padding: 16px;
+}
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: center;
+  border: 2px solid #111;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+.pill {
+  font-weight: 700;
+  padding: 1px 10px;
+  border: 2px solid #111;
+}
+.pill.connected {
+  background: #111;
+  color: #fff;
+}
+.stat b {
+  font-variant-numeric: tabular-nums;
+}
+.dim {
+  color: #666;
+}
+#grid {
+  border: 2px solid #111;
+  display: block;
+  width: min(92vw, 640px);
+  image-rendering: pixelated;
+  touch-action: manipulation;
+}
+#log {
+  margin-top: 12px;
+  border: 1px solid #999;
+  padding: 8px 12px;
+  height: 130px;
+  overflow-y: auto;
+  font-size: 12px;
+  color: #444;
+}
+#log .t {
+  color: #999;
+}
+.who {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #444;
+}

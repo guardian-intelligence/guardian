@@ -15,7 +15,7 @@ const stripRouteManifestPaths = {
   transform(code: string, id: string) {
     if (!id.includes("tanstack-start-manifest")) return null;
     return code.replace(
-      /("filePath":\s*")[^"]*\/src\/products\/viteplus-monorepo\/apps\/privatecut-web\//g,
+      /((?:"filePath"|filePath):\s*")[^"]*\/apps\/privatecut-web\//g,
       "$1",
     );
   },
