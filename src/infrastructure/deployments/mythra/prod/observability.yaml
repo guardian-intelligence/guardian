@@ -60,3 +60,12 @@ spec:
           annotations:
             summary: "mythrad rejected a behavior script"
             description: "A live or shadow Lua script failed to load; the previous script keeps running. Check mythrad logs for the parse error."
+        - alert: MythradDatagramErrors
+          expr: sum(rate(mythra_datagram_errors_total[5m])) > 1
+          for: 5m
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "mythrad datagram sends are failing"
+            description: "Sustained SendDatagram failures — the #1328 signature was ticks silently exceeding the QUIC datagram budget while sessions stayed connected. Check room sizes and mythra_delta_bytes_total; a per-chunk payload must stay under the path MTU."
