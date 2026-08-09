@@ -1,0 +1,68 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
+go_library(
+    name = "feature-flags-notify_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/feature-flags-notify",
+    visibility = ["//visibility:private"],
+    deps = [
+        "@com_github_prometheus_client_golang//prometheus:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus/promauto:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus/promhttp:go_default_library",
+    ],
+)
+
+go_binary(
+    name = "feature-flags-notify",
+    embed = [":feature-flags-notify_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "feature-flags-notify_test",
+    srcs = ["main_test.go"],
+    embed = [":feature-flags-notify_lib"],
+)
+
+pkg_tar(
+    name = "feature-flags-notify_layer",
+    files = {
+        ":feature-flags-notify": "app/feature-flags-notify",
+    },
+    modes = {
+        "app/feature-flags-notify": "0755",
+    },
+)
+
+oci_image(
+    name = "image",
+    annotations = {
+        "org.opencontainers.image.description": "SSE flag-set epoch notifier for the client feature-flag contract",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "guardian-feature-flags-notify",
+    },
+    architecture = "amd64",
+    os = "linux",
+    entrypoint = ["/app/feature-flags-notify"],
+    exposed_ports = ["8080/tcp"],
+    tars = [":feature-flags-notify_layer"],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/feature-flags-notify:dev"],
+)
+
+# Pushed by CI (.github/workflows/images.yml) on merges to main.
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/feature-flags-notify",
+    visibility = ["//visibility:public"],
+)
