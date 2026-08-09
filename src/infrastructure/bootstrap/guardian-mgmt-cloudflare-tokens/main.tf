@@ -163,26 +163,6 @@ resource "cloudflare_account_token" "r2_backups" {
   ]
 }
 
-# Current payment-ledger recovery journal credential. Its object-key prefix is
-# a naming convention, not an authorization boundary, so this token remains
-# only to keep existing replicas healthy during the isolated-bucket rollout.
-resource "cloudflare_account_token" "payments_journal" {
-  account_id = var.cloudflare_account_id
-  name       = "guardian-payments-journal"
-  expires_on = local.expires.payments_journal
-
-  policies = [
-    {
-      effect = "allow"
-      permission_groups = [
-        { id = local.permission_groups.r2_bucket_item_read },
-        { id = local.permission_groups.r2_bucket_item_write },
-      ]
-      resources = jsonencode({ (local.backups_bucket_resource) = "*" })
-    },
-  ]
-}
-
 # Bucket-owning apply credential, minted like every other lane token so the
 # custody minter never carries R2 authority itself — creating or touching a
 # bucket always goes through this explicit, expiring credential. Bucket
@@ -212,9 +192,8 @@ provider "cloudflare" {
   api_token = cloudflare_account_token.r2_bucket_provisioner.value
 }
 
-# The isolated bucket and successor credential land before the workload switch.
-# Keeping the current credential alive lets the existing replicas continue
-# journaling while the successor is applied and relayed through OpenBao.
+# Payment-ledger recovery journal: its own bucket so the journal credential
+# is an authorization boundary, not a key-prefix convention.
 resource "cloudflare_r2_bucket" "payments_journal" {
   provider = cloudflare.r2
 
