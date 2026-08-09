@@ -9,9 +9,9 @@ metadata:
   name: mythra-assets
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: presenced
+    app.kubernetes.io/name: mythrad
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: presence
+    guardian.dev/product: mythra
     guardian.dev/stage: prod
   annotations:
     kustomize.toolkit.fluxcd.io/substitute: disabled

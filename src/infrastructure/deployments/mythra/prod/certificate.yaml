@@ -11,9 +11,9 @@ metadata:
   name: mythra-acme-dns
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: presenced
+    app.kubernetes.io/name: mythrad
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: presence
+    guardian.dev/product: mythra
     guardian.dev/stage: prod
 spec:
   refreshInterval: 1h
@@ -36,9 +36,9 @@ metadata:
   name: mythra-acme
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: presenced
+    app.kubernetes.io/name: mythrad
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: presence
+    guardian.dev/product: mythra
     guardian.dev/stage: prod
 spec:
   acme:
@@ -59,9 +59,9 @@ metadata:
   name: mythra-origin
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: presenced
+    app.kubernetes.io/name: mythrad
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: presence
+    guardian.dev/product: mythra
     guardian.dev/stage: prod
 spec:
   # The proxied apex origin cert. Other Guardian zones front their origin
@@ -89,9 +89,9 @@ metadata:
   name: mythra-wt
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: presenced
+    app.kubernetes.io/name: mythrad
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: presence
+    guardian.dev/product: mythra
     guardian.dev/stage: prod
 spec:
   secretName: mythra-wt-tls

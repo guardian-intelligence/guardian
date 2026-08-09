@@ -10,7 +10,7 @@ fi
 
 here="$(dirname "${BASH_SOURCE[0]}")"
 svc="$BUILD_WORKSPACE_DIRECTORY/src/services/mythrad/behaviors"
-prod="$BUILD_WORKSPACE_DIRECTORY/src/infrastructure/deployments/presence/prod/behavior"
+prod="$BUILD_WORKSPACE_DIRECTORY/src/infrastructure/deployments/mythra/prod/behavior"
 
 install -m 0644 "$here/server.wasm" "$svc/server.wasm"
 install -m 0644 "$here/client.wasm" "$svc/client.wasm"

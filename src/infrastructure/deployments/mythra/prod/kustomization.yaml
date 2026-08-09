@@ -7,7 +7,7 @@ resources:
   - networkpolicy.yaml
   - observability.yaml
   - web.yaml
-# The world-sim behavior modules, hot-loaded by presenced from the mount
+# The world-sim behavior modules, hot-loaded by mythrad from the mount
 # without a restart. live.wasm is the running behavior; adding shadow.wasm
 # starts a shadow launch (evaluated every tick, outputs diffed, divergence
 # exported as metrics, world untouched); promotion = move shadow's bytes
@@ -27,9 +27,9 @@ configMapGenerator:
     options:
       disableNameSuffixHash: true
       labels:
-        app.kubernetes.io/name: presenced
+        app.kubernetes.io/name: mythrad
         app.kubernetes.io/part-of: guardian
-        guardian.dev/product: presence
+        guardian.dev/product: mythra
         guardian.dev/stage: prod
       annotations:
         kustomize.toolkit.fluxcd.io/substitute: disabled

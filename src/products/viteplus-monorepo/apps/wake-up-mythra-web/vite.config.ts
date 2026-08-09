@@ -38,7 +38,7 @@ export default defineConfig({
     strictPort: true,
     // File-suffixed paths (.wasm, .svg) traverse vite's middleware in dev;
     // extension-less paths go to nitro (see devProxy below). Both proxies
-    // point at a locally running presenced, mirroring the prod Ingress split.
+    // point at a locally running mythrad, mirroring the prod Ingress split.
     proxy: {
       "/assets": "http://127.0.0.1:9634",
       "/behavior": "http://127.0.0.1:9634",
@@ -51,7 +51,7 @@ export default defineConfig({
     stripRouteManifestPaths,
     tanstackStart({ srcDirectory: "src" }),
     viteReact(),
-    // Local loop: run presenced locally (HTTP_PORT 9634) and the dev server
+    // Local loop: run mythrad locally (HTTP_PORT 9634) and the dev server
     // forwards the game-service paths, mirroring the prod Ingress split.
     // Nitro's dev server fronts every request, so the forwarding must be its
     // devProxy — vite's server.proxy never sees these paths.
