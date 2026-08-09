@@ -1,0 +1,98 @@
+load("@aspect_bazel_lib//lib:diff_test.bzl", "diff_test")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_shared_library", "rust_test")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load(":wasm.bzl", "wasm_module")
+
+# The world-sim behavior stack: a shared structural core compiled into two
+# wasm modules - the server's authoritative step (run by wazero) and the
+# client's presentation smoothing (run by the browser). Built artifacts are
+# committed (embed default + ConfigMap delivery both need bytes in git);
+# `bazel run :refresh` regenerates them and diff tests fail the build when
+# source and committed bytes drift.
+
+platform(
+    name = "wasm32",
+    constraint_values = [
+        "@platforms//cpu:wasm32",
+        "@platforms//os:none",
+    ],
+)
+
+rust_library(
+    name = "core",
+    srcs = ["core/src/lib.rs"],
+    crate_name = "mythra_sim_core",
+    edition = "2024",
+    visibility = ["//visibility:private"],
+)
+
+rust_test(
+    name = "core_test",
+    crate = ":core",
+    edition = "2024",
+)
+
+rust_shared_library(
+    name = "server_cdylib",
+    srcs = ["server/src/lib.rs"],
+    crate_name = "mythra_sim_server",
+    edition = "2024",
+    target_compatible_with = ["@platforms//cpu:wasm32"],
+    deps = [":core"],
+)
+
+rust_shared_library(
+    name = "client_cdylib",
+    srcs = ["client/src/lib.rs"],
+    crate_name = "mythra_sim_client",
+    edition = "2024",
+    target_compatible_with = ["@platforms//cpu:wasm32"],
+    deps = [":core"],
+)
+
+wasm_module(
+    name = "server_wasm",
+    lib = ":server_cdylib",
+    out = "server.wasm",
+)
+
+wasm_module(
+    name = "client_wasm",
+    lib = ":client_cdylib",
+    out = "client.wasm",
+)
+
+# Copies freshly built modules over the committed artifacts (service embed
+# copy + the prod ConfigMap copy).
+sh_binary(
+    name = "refresh",
+    srcs = ["refresh.sh"],
+    data = [
+        ":client_wasm",
+        ":server_wasm",
+    ],
+)
+
+diff_test(
+    name = "server_artifact_current_test",
+    file1 = ":server_wasm",
+    file2 = "//src/services/presenced:behaviors/server.wasm",
+)
+
+diff_test(
+    name = "client_artifact_current_test",
+    file1 = ":client_wasm",
+    file2 = "//src/services/presenced:behaviors/client.wasm",
+)
+
+diff_test(
+    name = "server_configmap_lockstep_test",
+    file1 = "//src/services/presenced:behaviors/server.wasm",
+    file2 = "//src/infrastructure/deployments/presence/prod:behavior/live.wasm",
+)
+
+diff_test(
+    name = "client_configmap_lockstep_test",
+    file1 = "//src/services/presenced:behaviors/client.wasm",
+    file2 = "//src/infrastructure/deployments/presence/prod:behavior/client.wasm",
+)

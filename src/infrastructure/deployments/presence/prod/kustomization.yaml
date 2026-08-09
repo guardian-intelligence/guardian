@@ -6,3 +6,30 @@ resources:
   - deployment.yaml
   - networkpolicy.yaml
   - observability.yaml
+# The world-sim behavior modules, hot-loaded by presenced from the mount
+# without a restart. live.wasm is the running behavior; adding shadow.wasm
+# starts a shadow launch (evaluated every tick, outputs diffed, divergence
+# exported as metrics, world untouched); promotion = move shadow's bytes
+# into live.wasm. client.wasm is the presentation module browsers fetch;
+# its hash rides every pong so pages hot-swap smoothing mid-session. The
+# committed .wasm files are kept in lockstep with their Rust sources by
+# //src/services/presenced/sim diff tests; regenerate via
+# `bazelisk run //src/services/presenced/sim:refresh`. The name-suffix hash
+# stays disabled: a suffixed name would ripple into the Deployment and
+# restart the pod, defeating the hot-reload lane this service demonstrates.
+configMapGenerator:
+  - name: mythra-behavior
+    namespace: tenant-guardian-prod
+    files:
+      - behavior/live.lua
+      - behavior/live.wasm
+      - behavior/client.wasm
+    options:
+      disableNameSuffixHash: true
+      labels:
+        app.kubernetes.io/name: presenced
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/product: presence
+        guardian.dev/stage: prod
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled

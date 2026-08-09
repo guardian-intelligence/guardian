@@ -24,6 +24,7 @@
   <span class="stat">tick <b id="tick">–</b></span>
   <span class="stat">rtt <b id="rtt">–</b></span>
   <span class="stat">sim behavior <b id="behavior">–</b></span>
+  <span class="stat">client sim <b id="client">–</b></span>
   <span class="stat">skin <b id="skin">cell</b></span>
   <span class="stat dim" id="role"></span>
 </div>
@@ -45,6 +46,35 @@ let backoff = 300, epoch = 0, pingTimer = null, myId = null;
 let lastBehavior = null, players = [];
 const assetCache = new Map();   // ref -> Image | "loading"
 
+// The client presentation module (Rust -> wasm, same structural core as the
+// server sim): smooths raw 24Hz tick positions to the display's frame rate
+// and absorbs device quirks (frame jank, tick jitter, resume teleports).
+// Delivered like server behaviors - a hash rides every pong, and a flip
+// hot-swaps the module mid-session.
+let sim = null, simHash = null, simLoading = false;
+let prevDogs = new Map(), currDogs = [], currAt = 0, tickMs = 1000 / 24, lastSt = 0;
+const SNAP_CELLS = 8.0;
+
+async function loadClientSim(hash) {
+  if (!hash || hash === simHash || simLoading) return;
+  simLoading = true;
+  try {
+    const r = await fetch(`${API}/behavior/client.wasm?v=${hash}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const { instance } = await WebAssembly.instantiate(await r.arrayBuffer());
+    const prev = simHash;
+    sim = instance.exports;
+    simHash = hash;
+    $("client").textContent = hash;
+    if (prev) logLine(`client sim updated ${prev} → ${hash} — no reload, same session`);
+    else logLine(`client sim ${hash} ready — smoothing at display rate`);
+  } catch (e) {
+    logLine(`client sim load failed (${e.message}); rendering raw ticks`);
+  } finally {
+    simLoading = false;
+  }
+}
+
 function logLine(s) {
   const el = document.createElement("div");
   el.innerHTML = `<span class="t">${new Date().toTimeString().slice(0, 8)}</span> ${s}`;
@@ -60,6 +90,7 @@ async function connect() {
   const myEpoch = ++epoch;
   try {
     const info = await (await fetch(API + "/wt-info", { cache: "no-store" })).json();
+    loadClientSim(info.clientWasm);
     if (info.certHashB64) {
       // self-signed fallback: hash-pinned dial (Chromium-only)
       const hash = Uint8Array.from(atob(info.certHashB64), c => c.charCodeAt(0));
@@ -154,6 +185,7 @@ function onCtrl(m) {
 function onDg(m) {
   if (m.type === "pong") {
     $("rtt").textContent = (Date.now() - m.ct) + "ms";
+    loadClientSim(m.cw);
     return;
   }
   if (m.type !== "tick") return;
@@ -163,7 +195,14 @@ function onDg(m) {
     lastBehavior = m.behavior;
     $("behavior").textContent = m.behavior;
   }
-  render(m.dogs || []);
+  prevDogs = new Map(currDogs.map(d => [d[0], d]));
+  currDogs = m.dogs || [];
+  currAt = performance.now();
+  if (m.st && lastSt) {
+    const dt = m.st - lastSt;
+    if (dt > 20 && dt < 200) tickMs = 0.9 * tickMs + 0.1 * dt;
+  }
+  if (m.st) lastSt = m.st;
 }
 
 // asset streaming: unknown skin refs are fetched once by content address;
@@ -187,10 +226,34 @@ function skinImage(ref) {
 }
 
 const ctx = $("grid").getContext("2d");
-function render(dogs) {
+
+// One frame: positions come from the client sim when it's loaded (one
+// smooth_frame call over the whole dog buffer), raw ticks otherwise.
+function frame() {
+  requestAnimationFrame(frame);
+  const dogs = currDogs;
   ctx.fillStyle = "#FFFFFF";
   ctx.fillRect(0, 0, 100, 100);
-  for (const [id, x, y, skin] of dogs) {
+  if (!dogs.length) return;
+  let pos = null;
+  if (sim) {
+    const n = Math.min(dogs.length, sim.frame_cap());
+    const buf = new Float32Array(sim.memory.buffer, sim.frame_buf(), n * 4);
+    for (let i = 0; i < n; i++) {
+      const [id, x, y] = dogs[i];
+      const prev = prevDogs.get(id);
+      buf[i * 4] = prev ? prev[1] : x;
+      buf[i * 4 + 1] = prev ? prev[2] : y;
+      buf[i * 4 + 2] = x;
+      buf[i * 4 + 3] = y;
+    }
+    sim.smooth_frame(n, (performance.now() - currAt) / tickMs, SNAP_CELLS);
+    pos = buf;
+  }
+  for (let i = 0; i < dogs.length; i++) {
+    const [id, tx, ty, skin] = dogs[i];
+    const x = pos && i * 4 < pos.length ? pos[i * 4] : tx;
+    const y = pos && i * 4 < pos.length ? pos[i * 4 + 1] : ty;
     const img = skinImage(skin);
     if (img) {
       ctx.drawImage(img, x - 1.5, y - 1.5, 4, 4);
@@ -205,6 +268,7 @@ function render(dogs) {
     }
   }
 }
+requestAnimationFrame(frame);
 
 if (typeof WebTransport === "undefined") {
   setStatus("unsupported");

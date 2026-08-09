@@ -1,46 +1,8 @@
-# The world-sim behavior scripts, hot-loaded by presenced without a restart.
-# live.lua is the running behavior; adding shadow.lua starts a shadow launch
-# (evaluated every tick, outputs diffed, divergence exported as metrics,
-# world untouched). Promotion = move shadow's content into live.lua.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: mythra-behavior
-  namespace: tenant-guardian-prod
-  labels:
-    app.kubernetes.io/name: presenced
-    app.kubernetes.io/part-of: guardian
-    guardian.dev/product: presence
-    guardian.dev/stage: prod
-  annotations:
-    kustomize.toolkit.fluxcd.io/substitute: disabled
-data:
-  live.lua: |
-    -- v3: orbit with a breathing ring - each dog circles the park center on
-    -- its id-derived ring, and the ring swells and contracts +-4 cells on a
-    -- ~10s cycle. Pure function of the inputs - a shadow copy diffs to zero
-    -- divergence by construction.
-    function step(tick, dog, x, y, w, h)
-      if tick % 2 ~= 0 then
-        return 0, 0
-      end
-      local rx, ry = x - w / 2, y - h / 2
-      local r = math.sqrt(rx * rx + ry * ry)
-      if r < 0.5 then return 1, 0 end
-      local ring = 10 + ((string.byte(dog, 1) or 0) + (string.byte(dog, 2) or 0)) % 28
-      ring = ring + 4 * math.sin(tick / 40)
-      local g = (ring - r) * 0.25
-      if g > 1 then g = 1 elseif g < -1 then g = -1 end
-      local vx = -ry / r + g * rx / r
-      local vy = rx / r + g * ry / r
-      local sx = vx > 0.35 and 1 or (vx < -0.35 and -1 or 0)
-      local sy = vy > 0.35 and 1 or (vy < -0.35 and -1 or 0)
-      return sx, sy
-    end
----
 # Content-addressed dog skins. skins.json picks the default; a skin only
 # takes effect once its asset file is present, so snapshots can never
-# reference an asset the server cannot serve.
+# reference an asset the server cannot serve. (The behavior modules live in
+# behavior/ and are assembled by the configMapGenerator in kustomization.yaml
+# - wasm bytes can't be inlined as YAML text.)
 apiVersion: v1
 kind: ConfigMap
 metadata:

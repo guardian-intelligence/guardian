@@ -3,3 +3,13 @@ filegroup(
     srcs = glob(["*.yaml"]),
     visibility = ["//visibility:public"],
 )
+
+# Kept in lockstep with the service's committed sim modules by the diff
+# tests in //src/services/presenced/sim.
+exports_files(
+    [
+        "behavior/client.wasm",
+        "behavior/live.wasm",
+    ],
+    visibility = ["//src/services/presenced/sim:__pkg__"],
+)
