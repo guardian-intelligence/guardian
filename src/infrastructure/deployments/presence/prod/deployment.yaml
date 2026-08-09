@@ -60,7 +60,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: presenced
-          image: ghcr.io/guardian-intelligence/presenced:edge@sha256:56510fa98e8cbbf103c512ab256c4d9aa707b0478db83392579b165668168ff8 # {"$imagepolicy": "guardian-imageops:presenced"}
+          image: ghcr.io/guardian-intelligence/presenced:edge@sha256:e1f9a6ffdd55c3443b167966564abe8058e2e192764ddff45f33d6f37b9f53f0 # {"$imagepolicy": "guardian-imageops:presenced"}
           env:
             - name: TICK_HZ
               value: "24"
