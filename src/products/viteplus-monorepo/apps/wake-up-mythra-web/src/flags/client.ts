@@ -34,6 +34,9 @@ export function startFlags(): void {
 
   const events = new EventSource("/features/events");
   let epoch: string | null = null;
+  let settle: ReturnType<typeof setTimeout> | undefined;
+  const reevaluate = (tag: string) =>
+    void OpenFeature.setContext({ ...OpenFeature.getContext(), flagSetEpoch: tag });
   events.addEventListener("epoch", (e) => {
     const next = (e as MessageEvent<string>).data;
     if (epoch === next) return;
@@ -42,6 +45,14 @@ export function startFlags(): void {
     // first event also lands here on purpose: it closes the race where the
     // flag set changed between the provider's initial fetch and the stream
     // opening, at the cost of one extra evaluation per page load.
-    void OpenFeature.setContext({ ...OpenFeature.getContext(), flagSetEpoch: next });
+    reevaluate(next);
+    // The notify pod that announced this epoch and the flagd pod that
+    // serves the re-evaluation refresh their ConfigMap mounts on
+    // independent kubelet sync ticks (measured ~1 min apart across nodes),
+    // so the fetch can race a still-stale evaluator and quietly keep old
+    // values. One settling re-evaluation after the worst-case skew makes
+    // the flip durable.
+    clearTimeout(settle);
+    settle = setTimeout(() => reevaluate(`${next}-settled`), 90_000);
   });
 }
