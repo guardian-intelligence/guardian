@@ -5,9 +5,9 @@
       "state": "ENABLED",
       "variants": {
         "none": "",
-        "message": ""
+        "message": "Mythra stirs \u2014 the dog park is open. Welcome, trainers!"
       },
-      "defaultVariant": "none"
+      "defaultVariant": "message"
     }
   },
   "metadata": {
