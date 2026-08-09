@@ -1,6 +1,7 @@
 load("@aspect_bazel_lib//lib:diff_test.bzl", "diff_test")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_shared_library", "rust_test")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load(":wasm.bzl", "wasm_module")
 
 # The world-sim behavior stack: a shared structural core compiled into two
@@ -70,6 +71,23 @@ sh_binary(
     data = [
         ":client_wasm",
         ":server_wasm",
+    ],
+)
+
+# Fixed-point invariant, layer 1: the float type tokens are banned from sim
+# sources. Layer 2 (wasm binary scan) lives in //src/services/presenced.
+sh_test(
+    name = "no_float_test",
+    srcs = ["no_float_test.sh"],
+    args = ["$(location %s)" % s for s in [
+        "core/src/lib.rs",
+        "server/src/lib.rs",
+        "client/src/lib.rs",
+    ]],
+    data = [
+        "client/src/lib.rs",
+        "core/src/lib.rs",
+        "server/src/lib.rs",
     ],
 )
 
