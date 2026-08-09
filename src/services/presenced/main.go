@@ -6,11 +6,14 @@
 //   - tier 1 (content): dog skins are content-addressed assets mounted from a
 //     ConfigMap; the tick snapshot references them by name+hash and clients
 //     stream them in on first sight. Shipping a new skin is a data change.
-//   - tier 2 (behavior): the live behavior script and an optional shadow
-//     script are mounted from a ConfigMap and hot-reloaded without a restart.
-//     The shadow script runs every tick against the same inputs, its outputs
-//     are compared, and divergence is exported as a metric - a shadow launch
-//     of the world sim. Promotion moves the shadow file into the live slot.
+//   - tier 2 (behavior): the live behavior module and an optional shadow
+//     module (Rust -> wasm, executed by wazero) are mounted from a ConfigMap
+//     and hot-reloaded without a restart. The shadow module runs every tick
+//     against the same inputs, its outputs are compared, and divergence is
+//     exported as a metric - a shadow launch of the world sim. Promotion
+//     moves the shadow file into the live slot. The client's presentation
+//     module rides the same mount; its hash on every pong tells connected
+//     pages to hot-swap their smoothing logic mid-session.
 //
 // Protocol (JSON; binary delta encoding replaces this in the real build):
 //
@@ -21,11 +24,12 @@
 //	client -> server datagram: {"type":"ping","ct":...}
 //	server -> client datagram: {"type":"tick","n":..,"st":..,"behavior":"..",
 //	                            "dogs":[[id,x,y,skin],...]}
-//	                           {"type":"pong","ct":...,"st":...,"addr":"..."}
+//	                           {"type":"pong","ct":...,"st":...,"addr":"...","cw":".."}
 package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -57,14 +61,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/quic-go/quic-go/http3"
 	webtransport "github.com/quic-go/webtransport-go"
-	lua "github.com/yuin/gopher-lua"
+	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
 )
 
 //go:embed static/mythra.html
 var mythraHTML []byte
 
-//go:embed behaviors/random_walk.lua
-var defaultBehavior string
+//go:embed behaviors/server.wasm
+var defaultBehavior []byte
+
+//go:embed behaviors/client.wasm
+var defaultClientModule []byte
 
 const (
 	gridW = 100
@@ -116,67 +124,62 @@ func envStr(k, d string) string {
 	return d
 }
 
-// ---------- deterministic per-(dog,tick) randomness ----------
-
-// detRand hashes (dog id, tick, live salt) so identical scripts in live and
-// shadow slots see identical rolls and diff to zero divergence.
-func detRand(dogID string, tick uint64, n int) int {
-	var b [8]byte
-	binary.LittleEndian.PutUint64(b[:], tick)
-	h := sha256.Sum256(append([]byte(dogID), b[:]...))
-	return int(binary.LittleEndian.Uint32(h[:4]) % uint32(n))
-}
-
 // ---------- behavior engine ----------
 
+// A behavior is a wasm module over the shared sim core (built from
+// //src/services/presenced/sim), executed by wazero. Modules import nothing
+// - no WASI, no host functions - so a behavior can compute but never reach
+// out, and identical modules in the live and shadow slots diff to zero
+// divergence by construction. ABI: id_buf() -> ptr to a 64-byte scratch the
+// host writes the dog id into; step(tick, id_len, x, y, w, h) -> packed
+// (dx << 32 | dy) as two i32s.
 type behaviorSlot struct {
 	mu     sync.Mutex
 	name   string // "live" | "shadow"
-	src    string
 	hash   string
-	vm     *lua.LState
-	stepFn lua.LValue
-	dogID  string // ambient args for the rand() host fn during a step call
-	tick   uint64
+	rt     wazero.Runtime
+	mem    api.Memory
+	stepFn api.Function
+	idPtr  uint32
 }
 
 func newBehaviorSlot(name string) *behaviorSlot { return &behaviorSlot{name: name} }
 
-func (b *behaviorSlot) load(src string) error {
+func (b *behaviorSlot) load(module []byte) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	sum := sha256.Sum256([]byte(src))
+	sum := sha256.Sum256(module)
 	hash := hex.EncodeToString(sum[:4])
 	if hash == b.hash {
 		return nil
 	}
-	vm := lua.NewState(lua.Options{SkipOpenLibs: false})
-	vm.SetGlobal("rand", vm.NewFunction(func(L *lua.LState) int {
-		n := L.CheckInt(1)
-		if n < 1 {
-			n = 1
-		}
-		L.Push(lua.LNumber(detRand(b.dogID, b.tick, n)))
-		return 1
-	}))
-	if err := vm.DoString(src); err != nil {
-		vm.Close()
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	fail := func(err error) error {
+		rt.Close(ctx)
 		mBehaviorReloads.WithLabelValues(b.name, "error").Inc()
 		return fmt.Errorf("%s: %w", b.name, err)
 	}
-	stepFn := vm.GetGlobal("step")
-	if stepFn.Type() != lua.LTFunction {
-		vm.Close()
-		mBehaviorReloads.WithLabelValues(b.name, "error").Inc()
-		return fmt.Errorf("%s: script defines no step()", b.name)
+	mod, err := rt.Instantiate(ctx, module)
+	if err != nil {
+		return fail(err)
 	}
-	if b.vm != nil {
-		b.vm.Close()
+	stepFn := mod.ExportedFunction("step")
+	idBuf := mod.ExportedFunction("id_buf")
+	if stepFn == nil || idBuf == nil || mod.Memory() == nil {
+		return fail(fmt.Errorf("module must export step, id_buf, and memory"))
+	}
+	res, err := idBuf.Call(ctx)
+	if err != nil {
+		return fail(fmt.Errorf("id_buf: %w", err))
+	}
+	if b.rt != nil {
+		b.rt.Close(ctx)
 	}
 	mBehaviorInfo.DeletePartialMatch(prometheus.Labels{"slot": b.name})
 	mBehaviorInfo.WithLabelValues(b.name, hash).Set(1)
 	mBehaviorReloads.WithLabelValues(b.name, "ok").Inc()
-	b.src, b.hash, b.vm, b.stepFn = src, hash, vm, stepFn
+	b.hash, b.rt, b.mem, b.stepFn, b.idPtr = hash, rt, mod.Memory(), stepFn, uint32(res[0])
 	log.Printf("behavior %s loaded: %s", b.name, hash)
 	return nil
 }
@@ -184,9 +187,9 @@ func (b *behaviorSlot) load(src string) error {
 func (b *behaviorSlot) unload() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.vm != nil {
-		b.vm.Close()
-		b.vm, b.stepFn, b.src, b.hash = nil, nil, "", ""
+	if b.rt != nil {
+		b.rt.Close(context.Background())
+		b.rt, b.mem, b.stepFn, b.hash = nil, nil, nil, ""
 		mBehaviorInfo.DeletePartialMatch(prometheus.Labels{"slot": b.name})
 		log.Printf("behavior %s unloaded", b.name)
 	}
@@ -195,53 +198,82 @@ func (b *behaviorSlot) unload() {
 func (b *behaviorSlot) loaded() (string, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.hash, b.vm != nil
+	return b.hash, b.rt != nil
 }
 
 func (b *behaviorSlot) step(tick uint64, dogID string, x, y int) (dx, dy int, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.vm == nil {
+	if b.rt == nil {
 		return 0, 0, nil
 	}
-	b.dogID, b.tick = dogID, tick
-	if err := b.vm.CallByParam(lua.P{Fn: b.stepFn, NRet: 2, Protect: true},
-		lua.LNumber(tick), lua.LString(dogID), lua.LNumber(x), lua.LNumber(y),
-		lua.LNumber(gridW), lua.LNumber(gridH)); err != nil {
+	id := []byte(dogID)
+	if len(id) > 64 {
+		id = id[:64]
+	}
+	if !b.mem.Write(b.idPtr, id) {
+		return 0, 0, fmt.Errorf("%s: id write out of bounds", b.name)
+	}
+	res, err := b.stepFn.Call(context.Background(), tick, uint64(len(id)),
+		uint64(uint32(int32(x))), uint64(uint32(int32(y))),
+		uint64(uint32(gridW)), uint64(uint32(gridH)))
+	if err != nil {
 		return 0, 0, err
 	}
-	dyv := b.vm.Get(-1)
-	dxv := b.vm.Get(-2)
-	b.vm.Pop(2)
-	clamp := func(v lua.LValue) int {
-		n, _ := v.(lua.LNumber)
-		i := int(n)
-		if i > 1 {
-			i = 1
-		}
-		if i < -1 {
-			i = -1
-		}
-		return i
+	clamp := func(v int32) int {
+		return int(max(-1, min(1, v)))
 	}
-	return clamp(dxv), clamp(dyv), nil
+	return clamp(int32(res[0] >> 32)), clamp(int32(res[0])), nil
+}
+
+// clientModule tracks the presentation module served to browsers: raw bytes
+// plus a short content hash. The hash rides every pong, so connected pages
+// hot-swap their smoothing logic mid-session the same way the server swaps
+// behaviors.
+type clientModule struct {
+	mu    sync.Mutex
+	bytes []byte
+	hash  string
+}
+
+func (c *clientModule) set(module []byte) {
+	sum := sha256.Sum256(module)
+	hash := hex.EncodeToString(sum[:4])
+	c.mu.Lock()
+	changed := hash != c.hash
+	c.bytes, c.hash = module, hash
+	c.mu.Unlock()
+	if changed {
+		mBehaviorInfo.DeletePartialMatch(prometheus.Labels{"slot": "client"})
+		mBehaviorInfo.WithLabelValues("client", hash).Set(1)
+		log.Printf("client module loaded: %s", hash)
+	}
+}
+
+func (c *clientModule) get() ([]byte, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bytes, c.hash
 }
 
 // watchBehaviors polls the mounted behavior dir; ConfigMap edits land on the
 // mount within ~a minute of Flux applying them, with no pod restart.
-func watchBehaviors(dir string, live, shadow *behaviorSlot) {
+func watchBehaviors(dir string, live, shadow *behaviorSlot, client *clientModule) {
 	load := func() {
-		if src, err := os.ReadFile(filepath.Join(dir, "live.lua")); err == nil {
-			if err := live.load(string(src)); err != nil {
+		if module, err := os.ReadFile(filepath.Join(dir, "live.wasm")); err == nil {
+			if err := live.load(module); err != nil {
 				log.Printf("behavior live reload rejected (keeping current): %v", err)
 			}
 		}
-		if src, err := os.ReadFile(filepath.Join(dir, "shadow.lua")); err == nil {
-			if err := shadow.load(string(src)); err != nil {
+		if module, err := os.ReadFile(filepath.Join(dir, "shadow.wasm")); err == nil {
+			if err := shadow.load(module); err != nil {
 				log.Printf("behavior shadow reload rejected: %v", err)
 			}
 		} else if _, ok := shadow.loaded(); ok {
 			shadow.unload()
+		}
+		if module, err := os.ReadFile(filepath.Join(dir, "client.wasm")); err == nil && len(module) > 8 {
+			client.set(module)
 		}
 	}
 	load()
@@ -365,6 +397,7 @@ type Hub struct {
 	live    *behaviorSlot
 	shadow  *behaviorSlot
 	assets  *assetCatalog
+	client  *clientModule
 }
 
 func nowMs() int64 { return time.Now().UnixMilli() }
@@ -375,10 +408,16 @@ func randHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-func newHub(tickHz int, live, shadow *behaviorSlot, assets *assetCatalog) *Hub {
+func spawnCoord(n int) int {
+	var b [2]byte
+	rand.Read(b[:])
+	return int(binary.LittleEndian.Uint16(b[:])) % n
+}
+
+func newHub(tickHz int, live, shadow *behaviorSlot, assets *assetCatalog, client *clientModule) *Hub {
 	return &Hub{
 		players: map[string]*Player{}, rooms: map[string]map[*Player]bool{},
-		tickHz: tickHz, live: live, shadow: shadow, assets: assets,
+		tickHz: tickHz, live: live, shadow: shadow, assets: assets, client: client,
 	}
 }
 
@@ -530,7 +569,7 @@ func (h *Hub) handleSession(sess *webtransport.Session, remote string) {
 	} else {
 		p = &Player{
 			ID: randHex(4), token: randHex(16),
-			X: detRand(randHex(4), 0, gridW), Y: detRand(randHex(4), 1, gridH),
+			X: spawnCoord(gridW), Y: spawnCoord(gridH),
 		}
 		h.players[p.token] = p
 		if hello.Token != "" {
@@ -628,7 +667,8 @@ func (h *Hub) datagramLoop(sess *webtransport.Session, p *Player, remote string)
 		if json.Unmarshal(data, &m) != nil || m.Type != "ping" {
 			continue
 		}
-		pong, _ := json.Marshal(map[string]any{"type": "pong", "ct": m.CT, "st": nowMs(), "addr": remote})
+		_, cw := h.client.get()
+		pong, _ := json.Marshal(map[string]any{"type": "pong", "ct": m.CT, "st": nowMs(), "addr": remote, "cw": cw})
 		if sess.SendDatagram(pong) == nil {
 			mDgSent.Inc()
 		}
@@ -790,10 +830,12 @@ func main() {
 	if err := live.load(defaultBehavior); err != nil {
 		log.Fatalf("embedded default behavior invalid: %v", err)
 	}
-	go watchBehaviors(behaviorDir, live, shadow)
+	client := &clientModule{}
+	client.set(defaultClientModule)
+	go watchBehaviors(behaviorDir, live, shadow, client)
 
 	assets := newAssetCatalog(assetDir)
-	hub := newHub(tickHz, live, shadow, assets)
+	hub := newHub(tickHz, live, shadow, assets, client)
 	go hub.tickLoop()
 	go hub.purgeLoop()
 
@@ -855,7 +897,8 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		info := map[string]any{"addr": addr}
+		_, cw := client.get()
+		info := map[string]any{"addr": addr, "clientWasm": cw}
 		// The hash rides only while the self-signed fallback serves: with a
 		// CA-issued cert the dial is the standards path (WebKit-compatible).
 		if !fc.loaded() {
@@ -863,6 +906,19 @@ func main() {
 			info["certHashB64"] = base64.StdEncoding.EncodeToString(hash[:])
 		}
 		json.NewEncoder(w).Encode(info)
+	}
+	serveClientModule := func(w http.ResponseWriter, r *http.Request) {
+		module, hash := client.get()
+		if len(module) == 0 {
+			http.NotFound(w, r)
+			return
+		}
+		// Pages fetch ?v=<hash> from wt-info/pong, so the bytes are immutable
+		// per URL; a hash flip in a pong is the update signal.
+		w.Header().Set("Content-Type", "application/wasm")
+		w.Header().Set("ETag", `"`+hash+`"`)
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		w.Write(module)
 	}
 	serveAsset := func(prefix string) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -885,6 +941,7 @@ func main() {
 		pageMux.HandleFunc(base+"/", servePage)
 		pageMux.HandleFunc(base+"/wt-info", serveWTInfo)
 		pageMux.HandleFunc(base+"/assets/", serveAsset(base+"/assets/"))
+		pageMux.HandleFunc(base+"/behavior/client.wasm", serveClientModule)
 	}
 
 	obsMux := http.NewServeMux()
