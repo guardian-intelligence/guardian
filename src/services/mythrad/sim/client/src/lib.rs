@@ -26,7 +26,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable()
 }
 
-const MAX_DOGS: usize = 512;
+const MAX_DOGS: usize = 2048;
 static mut FRAME: [i32; MAX_DOGS * 4] = [0; MAX_DOGS * 4];
 
 const ID_CAP: usize = 64;
