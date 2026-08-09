@@ -362,7 +362,7 @@ resource "cloudflare_dns_record" "wakeupmythra_com_apex" {
 
 # The game plane: browsers dial WebTransport/QUIC on this name directly -
 # Cloudflare cannot proxy it - so the record is DNS-only and points at the
-# node that binds UDP 4433 (the presenced hostNetwork pin). Multi-node game
+# node that binds UDP 4433 (the mythrad hostNetwork pin). Multi-node game
 # fleets later mean more records here, not a proxy.
 resource "cloudflare_dns_record" "wakeupmythra_com_wt" {
   zone_id = data.cloudflare_zone.wakeupmythra_com.id

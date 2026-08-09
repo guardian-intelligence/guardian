@@ -1212,12 +1212,12 @@ spec:
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: guardian-presence-prod
+  name: guardian-mythra-prod
   namespace: cozy-fluxcd
 spec:
   interval: 10m
   retryInterval: 1m
-  path: ./src/infrastructure/deployments/presence/prod
+  path: ./src/infrastructure/deployments/mythra/prod
   sourceRef:
     kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
@@ -1232,7 +1232,7 @@ spec:
   healthChecks:
     - apiVersion: apps/v1
       kind: Deployment
-      name: presenced
+      name: mythrad
       namespace: tenant-guardian-prod
     - apiVersion: apps/v1
       kind: Deployment

@@ -1,20 +1,20 @@
-# presenced runs on the host network, so Cilium endpoint selectors do not
+# mythrad runs on the host network, so Cilium endpoint selectors do not
 # govern it: its exposure is controlled by the Talos ingress firewall (UDP
 # 4433 world rule in src/infrastructure/talm) and by which addresses the
 # process binds. Only the pod-network load generator keeps a policy here.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: presenced-loadgen
+  name: mythrad-loadgen
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: presenced-loadgen
+    app.kubernetes.io/name: mythrad-loadgen
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
 spec:
   endpointSelector:
     matchLabels:
-      app.kubernetes.io/component: presenced-loadgen
+      app.kubernetes.io/component: mythrad-loadgen
   egress:
     - toEndpoints:
         - matchLabels:
@@ -90,7 +90,7 @@ metadata:
   name: tenant-guardian-prod-allow-root-ingress-wake-up-mythra-web
   labels:
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: presence
+    guardian.dev/product: mythra
 spec:
   endpointSelector:
     matchExpressions:

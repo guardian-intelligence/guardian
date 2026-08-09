@@ -106,11 +106,11 @@ diff_test(
 diff_test(
     name = "server_configmap_lockstep_test",
     file1 = "//src/services/mythrad:behaviors/server.wasm",
-    file2 = "//src/infrastructure/deployments/presence/prod:behavior/live.wasm",
+    file2 = "//src/infrastructure/deployments/mythra/prod:behavior/live.wasm",
 )
 
 diff_test(
     name = "client_configmap_lockstep_test",
     file1 = "//src/services/mythrad:behaviors/client.wasm",
-    file2 = "//src/infrastructure/deployments/presence/prod:behavior/client.wasm",
+    file2 = "//src/infrastructure/deployments/mythra/prod:behavior/client.wasm",
 )

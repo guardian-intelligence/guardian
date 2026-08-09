@@ -1,10 +1,10 @@
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMServiceScrape
 metadata:
-  name: presenced
+  name: mythrad
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: presenced
+    app.kubernetes.io/name: mythrad
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
 spec:
@@ -13,7 +13,7 @@ spec:
       - tenant-guardian-prod
   selector:
     matchLabels:
-      app.kubernetes.io/name: presenced
+      app.kubernetes.io/name: mythrad
       app.kubernetes.io/component: metrics
   endpoints:
     - port: metrics
@@ -24,39 +24,39 @@ spec:
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMRule
 metadata:
-  name: presenced
+  name: mythrad
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: presenced
+    app.kubernetes.io/name: mythrad
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
 spec:
   groups:
-    - name: presenced
+    - name: mythrad
       rules:
-        - alert: PresencedScrapeDown
-          expr: sum(up{namespace="tenant-guardian-prod",job="presenced-metrics"}) < 1 or absent(up{namespace="tenant-guardian-prod",job="presenced-metrics"})
+        - alert: MythradScrapeDown
+          expr: sum(up{namespace="tenant-guardian-prod",job="mythrad-metrics"}) < 1 or absent(up{namespace="tenant-guardian-prod",job="mythrad-metrics"})
           for: 5m
           labels:
             severity: warning
             guardian_stage: prod
           annotations:
-            summary: "presenced metrics scrape is down"
-            description: "No presenced replica has been scrapeable for five minutes; every other presenced rule is blind while this fires."
-        - alert: PresencedTickBudgetExceeded
-          expr: histogram_quantile(0.99, sum(rate(presence_tick_duration_seconds_bucket[5m])) by (le)) > 0.035
+            summary: "mythrad metrics scrape is down"
+            description: "No mythrad replica has been scrapeable for five minutes; every other mythrad rule is blind while this fires."
+        - alert: MythradTickBudgetExceeded
+          expr: histogram_quantile(0.99, sum(rate(mythra_tick_duration_seconds_bucket[5m])) by (le)) > 0.035
           for: 10m
           labels:
             severity: warning
             guardian_stage: prod
           annotations:
-            summary: "presenced tick p99 above 35ms"
+            summary: "mythrad tick p99 above 35ms"
             description: "Tick p99 is converging on the 41.7ms budget at 24Hz; the simulation is close to missing ticks."
-        - alert: PresencedBehaviorReloadRejected
-          expr: increase(presence_behavior_reloads_total{result="error"}[10m]) > 0
+        - alert: MythradBehaviorReloadRejected
+          expr: increase(mythra_behavior_reloads_total{result="error"}[10m]) > 0
           labels:
             severity: warning
             guardian_stage: prod
           annotations:
-            summary: "presenced rejected a behavior script"
-            description: "A live or shadow Lua script failed to load; the previous script keeps running. Check presenced logs for the parse error."
+            summary: "mythrad rejected a behavior script"
+            description: "A live or shadow Lua script failed to load; the previous script keeps running. Check mythrad logs for the parse error."

@@ -1,4 +1,4 @@
-# presenced: the Wake Up Mythra game service (session gateway + world sim).
+# mythrad: the Wake Up Mythra game service (session gateway + world sim).
 #
 # hostNetwork with a node pin: WebTransport needs public UDP 4433 and the
 # edge (Cloudflare) cannot proxy it, so the pod binds the node's public IP
@@ -14,13 +14,13 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: presenced
+  name: mythrad
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: presenced
+    app.kubernetes.io/name: mythrad
     app.kubernetes.io/part-of: guardian
-    app.kubernetes.io/component: presenced
-    guardian.dev/product: presence
+    app.kubernetes.io/component: mythrad
+    guardian.dev/product: mythra
     guardian.dev/stage: prod
 spec:
   replicas: 1
@@ -35,14 +35,14 @@ spec:
       maxUnavailable: 1
   selector:
     matchLabels:
-      app.kubernetes.io/component: presenced
+      app.kubernetes.io/component: mythrad
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: presenced
+        app.kubernetes.io/name: mythrad
         app.kubernetes.io/part-of: guardian
-        app.kubernetes.io/component: presenced
-        guardian.dev/product: presence
+        app.kubernetes.io/component: mythrad
+        guardian.dev/product: mythra
         guardian.dev/stage: prod
     spec:
       automountServiceAccountToken: false
@@ -59,8 +59,8 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: presenced
-          image: ghcr.io/guardian-intelligence/presenced:edge@sha256:e1f9a6ffdd55c3443b167966564abe8058e2e192764ddff45f33d6f37b9f53f0 # {"$imagepolicy": "guardian-imageops:presenced"}
+        - name: mythrad
+          image: ghcr.io/guardian-intelligence/mythrad:edge@sha256:cc9d974cfc2307deb268b42fc7347a86530b14a611fee8b58809afdf6dbcf19c # {"$imagepolicy": "guardian-imageops:mythrad"}
           env:
             - name: TICK_HZ
               value: "24"
@@ -141,16 +141,16 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: presenced
+  name: mythrad
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: presenced
+    app.kubernetes.io/name: mythrad
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: presence
+    guardian.dev/product: mythra
     guardian.dev/stage: prod
 spec:
   selector:
-    app.kubernetes.io/component: presenced
+    app.kubernetes.io/component: mythrad
   ports:
     - name: http
       port: 80
@@ -164,16 +164,16 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: presenced-metrics
+  name: mythrad-metrics
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: presenced
+    app.kubernetes.io/name: mythrad
     app.kubernetes.io/component: metrics
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
 spec:
   selector:
-    app.kubernetes.io/component: presenced
+    app.kubernetes.io/component: mythrad
   ports:
     - name: metrics
       port: 9633
@@ -188,12 +188,12 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: presenced-mythra
+  name: mythrad-mythra
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: presenced
+    app.kubernetes.io/name: mythrad
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: presence
+    guardian.dev/product: mythra
     guardian.dev/stage: prod
   annotations:
     # Cloudflare terminates public TLS and proves itself to the origin via
@@ -220,21 +220,21 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: presenced
+                name: mythrad
                 port:
                   number: 80
           - path: /behavior
             pathType: Prefix
             backend:
               service:
-                name: presenced
+                name: mythrad
                 port:
                   number: 80
           - path: /assets
             pathType: Prefix
             backend:
               service:
-                name: presenced
+                name: mythrad
                 port:
                   number: 80
           - path: /

@@ -11,7 +11,7 @@ metadata:
   labels:
     app.kubernetes.io/name: flagd
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: presence
+    guardian.dev/product: mythra
     guardian.dev/stage: prod
   annotations:
     # Same AOP mTLS gate as the host's main Ingress: annotations on the same

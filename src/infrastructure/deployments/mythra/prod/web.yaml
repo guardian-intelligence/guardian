@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: wake-up-mythra-web
     app.kubernetes.io/part-of: guardian
     app.kubernetes.io/component: web
-    guardian.dev/product: presence
+    guardian.dev/product: mythra
     guardian.dev/stage: prod
 spec:
   replicas: 2
@@ -31,7 +31,7 @@ spec:
         app.kubernetes.io/name: wake-up-mythra-web
         app.kubernetes.io/part-of: guardian
         app.kubernetes.io/component: web
-        guardian.dev/product: presence
+        guardian.dev/product: mythra
         guardian.dev/stage: prod
     spec:
       automountServiceAccountToken: false
@@ -98,7 +98,7 @@ metadata:
     app.kubernetes.io/name: wake-up-mythra-web
     app.kubernetes.io/part-of: guardian
     app.kubernetes.io/component: web
-    guardian.dev/product: presence
+    guardian.dev/product: mythra
     guardian.dev/stage: prod
 spec:
   type: ClusterIP
@@ -121,7 +121,7 @@ metadata:
   labels:
     app.kubernetes.io/name: wake-up-mythra-web
     app.kubernetes.io/part-of: guardian
-    guardian.dev/product: presence
+    guardian.dev/product: mythra
     guardian.dev/stage: prod
 spec:
   minAvailable: 1
