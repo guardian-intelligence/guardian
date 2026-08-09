@@ -50,6 +50,11 @@ spec:
         guardian.dev/stage: prod
     spec:
       automountServiceAccountToken: false
+      # Never inject docker-link service env vars: the Service is named
+      # flagd, so kubelet would set FLAGD_PORT=tcp://... — and flagd's viper
+      # config reads FLAGD_* env as its own flags, failing to parse the URL
+      # and binding the evaluation listener to a random port.
+      enableServiceLinks: false
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
@@ -76,6 +81,10 @@ spec:
             # reload is the load-bearing mechanism here, not an optimization.
             - --sources
             - '[{"uri":"/etc/flagd/flags.json","provider":"fsnotify"}]'
+            # Ports pinned as args: CLI beats any environment noise.
+            - --port=8013
+            - --management-port=8014
+            - --ofrep-port=8016
             - --log-format=json
           ports:
             - name: evaluation
