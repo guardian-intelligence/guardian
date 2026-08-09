@@ -206,10 +206,11 @@ spec:
                 port:
                   number: 80
 ---
-# The product apex. A dedicated Ingress (not another rule on the demo host's
-# object) keeps this zone's Origin CA cutover and AOP mTLS gate off the
-# working guardianintelligence.org/mythra route - same isolation as the
-# rumi.engineering ingress. The game is served at "/" here.
+# The product apex, path-routed: the web app owns "/" (the page and its
+# /static/ chunks); the game service keeps only its API paths. Connected
+# sessions never touch "/" — flipping either backend never interrupts play.
+# A dedicated Ingress (not another rule on the demo host's object) keeps
+# this zone's Origin CA and AOP mTLS gate isolated - same as rumi.engineering.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -241,10 +242,31 @@ spec:
     - host: wakeupmythra.com
       http:
         paths:
-          - path: /
+          - path: /wt-info
             pathType: Prefix
             backend:
               service:
                 name: presenced
+                port:
+                  number: 80
+          - path: /behavior
+            pathType: Prefix
+            backend:
+              service:
+                name: presenced
+                port:
+                  number: 80
+          - path: /assets
+            pathType: Prefix
+            backend:
+              service:
+                name: presenced
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wake-up-mythra-web
                 port:
                   number: 80
