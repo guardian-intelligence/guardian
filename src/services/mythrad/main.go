@@ -676,6 +676,29 @@ func (h *Hub) tickLoop() {
 			}
 
 			if hasV2 {
+				// Every tick emits a delta — including keyframe ticks, whose
+				// delta lands just before the keyframe replaces the state.
+				// That makes "delta-accumulated state == keyframe state" an
+				// exact client-side invariant on a loss-free link, which the
+				// page exports as a continuous decode oracle.
+				if kf.roster != nil {
+					kf.off++
+					for _, chunk := range encodeDeltas(kf, uint32(st), room) {
+						n := 0
+						for p := range occ {
+							if p.sess == nil || p.proto < 2 {
+								continue
+							}
+							if err := p.sess.SendDatagram(chunk); err != nil {
+								mDgErrors.Inc()
+							} else {
+								mDgSent.Inc()
+								n++
+							}
+						}
+						mDeltaBytes.Add(float64(len(chunk) * n))
+					}
+				}
 				if isKF {
 					kf.seq++
 					kf.off = 0
@@ -700,23 +723,6 @@ func (h *Hub) tickLoop() {
 					}
 					mKeyframes.Inc()
 					mKeyframeBytes.Add(float64(len(msg) * n))
-				} else {
-					kf.off++
-					for _, chunk := range encodeDeltas(kf, uint32(st), room) {
-						n := 0
-						for p := range occ {
-							if p.sess == nil || p.proto < 2 {
-								continue
-							}
-							if err := p.sess.SendDatagram(chunk); err != nil {
-								mDgErrors.Inc()
-							} else {
-								mDgSent.Inc()
-								n++
-							}
-						}
-						mDeltaBytes.Add(float64(len(chunk) * n))
-					}
 				}
 			}
 
