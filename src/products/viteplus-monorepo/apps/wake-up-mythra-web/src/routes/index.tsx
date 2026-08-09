@@ -2,7 +2,7 @@ import { OpenFeatureProvider } from "@openfeature/react-sdk";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { startFlags } from "~/flags/client";
-import { Motd } from "~/flags/motd";
+import { FlagsCanary } from "~/flags/canary";
 import { startPresence } from "~/game/presence";
 
 export const Route = createFileRoute("/")({
@@ -22,7 +22,7 @@ function Page() {
   }, []);
   return (
     <OpenFeatureProvider>
-      <Motd />
+      <FlagsCanary />
       <div className="bar">
         <span id="status" className="pill">
           CONNECTING

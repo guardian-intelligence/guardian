@@ -12,14 +12,6 @@ body {
     monospace;
   padding: 16px;
 }
-.motd {
-  border: 2px solid #111;
-  background: #111;
-  color: #fff;
-  font-weight: 700;
-  padding: 6px 12px;
-  margin-bottom: 12px;
-}
 .bar {
   display: flex;
   flex-wrap: wrap;

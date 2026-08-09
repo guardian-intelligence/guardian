@@ -27,9 +27,9 @@ catalogs:
     '@openfeature/core':
       specifier: 1.12.0
       version: 1.12.0
-    '@openfeature/flagd-web-provider':
-      specifier: 0.7.4
-      version: 0.7.4
+    '@openfeature/ofrep-web-provider':
+      specifier: 0.4.2
+      version: 0.4.2
     '@openfeature/react-sdk':
       specifier: 1.4.1
       version: 1.4.1
@@ -352,9 +352,9 @@ importers:
       '@openfeature/core':
         specifier: 'catalog:'
         version: 1.12.0
-      '@openfeature/flagd-web-provider':
+      '@openfeature/ofrep-web-provider':
         specifier: 'catalog:'
-        version: 0.7.4(@openfeature/web-sdk@1.10.0(@openfeature/core@1.12.0))
+        version: 0.4.2(@openfeature/core@1.12.0)(@openfeature/web-sdk@1.10.0(@openfeature/core@1.12.0))
       '@openfeature/react-sdk':
         specifier: 'catalog:'
         version: 1.4.1(@openfeature/web-sdk@1.10.0(@openfeature/core@1.12.0))(react@19.2.8)
@@ -587,9 +587,6 @@ packages:
   '@blazediff/core@1.9.1':
     resolution: {integrity: sha512-ehg3jIkYKulZh+8om/O25vkvSsXXwC+skXmyA87FFx6A/45eqOkZsBltMw/TVteb0mloiGT8oGRTcjRAz66zaA==}
 
-  '@bufbuild/protobuf@1.10.1':
-    resolution: {integrity: sha512-wJ8ReQbHxsAfXhrf9ixl0aYbZorRuOWpBNzm8pL8ftmSxQx/wnJD5Eg861NwJU/czy2VXFIebCeZnZrI9rktIQ==}
-
   '@bufbuild/protobuf@2.12.1':
     resolution: {integrity: sha512-BvAMfS6LrgZiryOAZ4pBYucu4wG/Ei/9o9DZ9akbREnMLbPJiom2i8b9C8IsKErQoiKqVhrerzt3kOT/RrzLHg==}
 
@@ -663,17 +660,6 @@ packages:
 
   '@chenglou/pretext@0.0.8':
     resolution: {integrity: sha512-yqm2GMxnPI7VHcHwe84P8ZF0JK/2d2DMKPqMN+s95jQhwDMYYXKVFVJUMEaVWckQStdsjdLav/0Vu+d9YbtGxA==}
-
-  '@connectrpc/connect-web@1.7.0':
-    resolution: {integrity: sha512-qyP0YOnUPRWwCc/VfsoydMJvkb7EyUPr2q9sHgBuJzbADjiqck1gKH5V5ZPzPhTLBvmz5UvG+wiZ5sMRQHU1MQ==}
-    peerDependencies:
-      '@bufbuild/protobuf': ^1.10.0
-      '@connectrpc/connect': 1.7.0
-
-  '@connectrpc/connect@1.7.0':
-    resolution: {integrity: sha512-iNKdJRi69YP3mq6AePRT8F/HrxWCewrhxnLMNm0vpqXAR8biwzRtO6Hjx80C6UvtKJ5sFmffQT7I4Baecz389w==}
-    peerDependencies:
-      '@bufbuild/protobuf': ^1.10.0
 
   '@emnapi/core@1.11.1':
     resolution: {integrity: sha512-RSvbQmHzdKzNsLYa/wHrbc3KN4sYLKAdPZxqiM2HATqv/SBk2/ENSHpvXGaLOMcsAyz0poEGqkmmKYG3OWiJEQ==}
@@ -908,10 +894,15 @@ packages:
   '@openfeature/core@1.12.0':
     resolution: {integrity: sha512-7PCPzyd1OC19begz30+CRknFB0ChtyaZUhk7YWrk+Bov1fpVw0HYkTXtoxxsvPfDZB9P9WsT7uixN+Z8f9+bcA==}
 
-  '@openfeature/flagd-web-provider@0.7.4':
-    resolution: {integrity: sha512-YxouxSJ9yqHQskHS4Vif8IXWX6gvLWub2ZbL2Oovf6oDG/I4rSpJw1J6oprsyOrIMT22z8ycXPGnwuX9gri0bQ==}
+  '@openfeature/ofrep-core@2.3.0':
+    resolution: {integrity: sha512-PgUoEp0nGDYUeZ2fIU2IczEe/5B+gQVDpGXc5o05wpo3sj69pbcpq/a3p8MT/mhv9fqODiqqwu29g/YEq/huaw==}
     peerDependencies:
-      '@openfeature/web-sdk': ^1.0.0
+      '@openfeature/core': ^1.6.0
+
+  '@openfeature/ofrep-web-provider@0.4.2':
+    resolution: {integrity: sha512-yPK1VZ7iAe3P1/n6DJ1/COLkd3NUFE2F4naKjF8TSx9DtD+2V2hdStw6+Daab/1Ysh3IXxkLu6hgtG07J4Pxww==}
+    peerDependencies:
+      '@openfeature/web-sdk': ^1.4.0
 
   '@openfeature/react-sdk@1.4.1':
     resolution: {integrity: sha512-xKpXBXVT0w9CIrhl6IzGkIuxmsqy7At+eYUW1XtaZbk+odKW424ZnmmjqiQMrbu31pfAhQrzww36QokTQaIf7g==}
@@ -3575,8 +3566,6 @@ snapshots:
 
   '@blazediff/core@1.9.1': {}
 
-  '@bufbuild/protobuf@1.10.1': {}
-
   '@bufbuild/protobuf@2.12.1': {}
 
   '@bufbuild/protoc-gen-es@2.12.1(@bufbuild/protobuf@2.12.1)':
@@ -3739,15 +3728,6 @@ snapshots:
       prettier: 2.8.8
 
   '@chenglou/pretext@0.0.8': {}
-
-  '@connectrpc/connect-web@1.7.0(@bufbuild/protobuf@1.10.1)(@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.1))':
-    dependencies:
-      '@bufbuild/protobuf': 1.10.1
-      '@connectrpc/connect': 1.7.0(@bufbuild/protobuf@1.10.1)
-
-  '@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.1)':
-    dependencies:
-      '@bufbuild/protobuf': 1.10.1
 
   '@emnapi/core@1.11.1':
     dependencies:
@@ -3923,12 +3903,16 @@ snapshots:
 
   '@openfeature/core@1.12.0': {}
 
-  '@openfeature/flagd-web-provider@0.7.4(@openfeature/web-sdk@1.10.0(@openfeature/core@1.12.0))':
+  '@openfeature/ofrep-core@2.3.0(@openfeature/core@1.12.0)':
     dependencies:
-      '@bufbuild/protobuf': 1.10.1
-      '@connectrpc/connect': 1.7.0(@bufbuild/protobuf@1.10.1)
-      '@connectrpc/connect-web': 1.7.0(@bufbuild/protobuf@1.10.1)(@connectrpc/connect@1.7.0(@bufbuild/protobuf@1.10.1))
+      '@openfeature/core': 1.12.0
+
+  '@openfeature/ofrep-web-provider@0.4.2(@openfeature/core@1.12.0)(@openfeature/web-sdk@1.10.0(@openfeature/core@1.12.0))':
+    dependencies:
+      '@openfeature/ofrep-core': 2.3.0(@openfeature/core@1.12.0)
       '@openfeature/web-sdk': 1.10.0(@openfeature/core@1.12.0)
+    transitivePeerDependencies:
+      - '@openfeature/core'
 
   '@openfeature/react-sdk@1.4.1(@openfeature/web-sdk@1.10.0(@openfeature/core@1.12.0))(react@19.2.8)':
     dependencies:
