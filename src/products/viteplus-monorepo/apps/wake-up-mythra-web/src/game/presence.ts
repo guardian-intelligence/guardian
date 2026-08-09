@@ -43,6 +43,13 @@ export function startPresence(): void {
   let lastSt = 0;
   let roomSeed: string | null = null;
   let lastWorldOk: boolean | null = null;
+  // Tick protocol v2: keyframes on the control stream establish the delta
+  // roster (currDogs order); binary datagrams apply 4-bit movement codes
+  // against it. kfSeq/kfOff gate stale or out-of-order deltas.
+  let kfSeq: number | null = null;
+  let kfOff = 0;
+  let kfN = 0;
+  const hiddenDogs = new Set<any>();
   const Q16 = 65536; // the sim is fixed-point Q16.16
   const SNAP_Q16 = 8 * Q16; // teleport threshold, cells
 
@@ -110,6 +117,7 @@ export function startPresence(): void {
         device: deviceLabel(),
         token: store.getItem("token") || "",
         spectate,
+        proto: 2,
       });
       readLines(ctrl.readable);
       readDatagrams(transport.datagrams.readable);
@@ -174,11 +182,94 @@ export function startPresence(): void {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) return;
-        onDg(JSON.parse(dec.decode(value)));
+        if (value[0] === 0xd7) onDelta(value);
+        else onDg(JSON.parse(dec.decode(value)));
       }
     } catch {
       /* stream torn down; the transport.closed handler redials */
     }
+  }
+
+  // Binary movement delta: [0xD7, seq u32, off u16, start u16, count u16,
+  // st u32] then 4-bit codes (dx+1)*3+(dy+1) low-nibble-first, indexed by
+  // the keyframe roster order. 0xF marks a dog that left the room.
+  function onDelta(buf: Uint8Array) {
+    if (buf.length < 15 || kfSeq === null) return;
+    const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const seq = v.getUint32(1, true);
+    const off = v.getUint16(5, true);
+    const start = v.getUint16(7, true);
+    const count = v.getUint16(9, true);
+    const st = v.getUint32(11, true);
+    if (seq !== kfSeq || off < kfOff) return;
+    diag.deltas++;
+    if (off > kfOff) {
+      // First chunk of a new tick: snapshot previous positions for the
+      // smoother, advance the clock. Later chunks of the same off skip this.
+      prevDogs = new Map(currDogs.map((d) => [d[0], [d[0], d[1], d[2]]]));
+      kfOff = off;
+      currAt = performance.now();
+      const lo = lastSt >>> 0;
+      const dt = (st - lo + 0x1_0000_0000) % 0x1_0000_0000;
+      if (dt > 20 && dt < 200) tickMs = 0.9 * tickMs + 0.1 * dt;
+      lastSt = st;
+      $("tick").textContent = String(kfN + off);
+    }
+    for (let i = 0; i < count && start + i < currDogs.length; i++) {
+      const byte = buf[15 + (i >> 1)]!;
+      const code = i % 2 === 0 ? byte & 0x0f : byte >> 4;
+      const dog = currDogs[start + i];
+      if (code === 0x0f) {
+        hiddenDogs.add(dog[0]);
+        continue;
+      }
+      hiddenDogs.delete(dog[0]);
+      dog[1] += ((code / 3) | 0) - 1;
+      dog[2] += (code % 3) - 1;
+    }
+  }
+
+  // Delta-lane diagnostics, exposed for harnesses and QA: every keyframe
+  // is compared against the delta-accumulated state it replaces. On a
+  // loss-free link the drift must be zero; sustained drift means the
+  // decode disagrees with the sim.
+  const diag = { kfChecks: 0, kfDrifted: 0, maxDrift: 0, deltas: 0 };
+  (globalThis as any).__mythraDiag = diag;
+
+  // A keyframe (control stream) is the authoritative snapshot: its dogs
+  // array order is the roster deltas index into until the next keyframe.
+  function onKeyframe(m: any) {
+    if (kfSeq !== null && currDogs.length) {
+      const prevById = new Map(currDogs.map((d) => [d[0], d]));
+      let drift = 0;
+      for (const d of m.dogs || []) {
+        const o = prevById.get(d[0]);
+        if (o && !hiddenDogs.has(d[0])) {
+          drift = Math.max(drift, Math.abs(o[1] - d[1]) + Math.abs(o[2] - d[2]));
+        }
+      }
+      diag.kfChecks++;
+      if (drift > 0) diag.kfDrifted++;
+      diag.maxDrift = Math.max(diag.maxDrift, drift);
+    }
+    if (m.behavior && m.behavior !== lastBehavior) {
+      if (lastBehavior) {
+        logLine(`sim behavior updated ${lastBehavior} → ${m.behavior} — no reload, same session`);
+      }
+      lastBehavior = m.behavior;
+      $("behavior").textContent = m.behavior;
+    }
+    prevDogs = new Map(currDogs.map((d) => [d[0], [d[0], d[1], d[2]]]));
+    currDogs = m.dogs || [];
+    hiddenDogs.clear();
+    for (const d of currDogs) if (d[3] === "gone") hiddenDogs.add(d[0]);
+    kfSeq = m.seq;
+    kfOff = m.off ?? 0;
+    kfN = m.n - kfOff;
+    currAt = performance.now();
+    if (m.st) lastSt = m.st;
+    $("tick").textContent = String(m.n);
+    if (m.wh) verifyWorld(m);
   }
 
   function onCtrl(m: any) {
@@ -192,9 +283,14 @@ export function startPresence(): void {
       if (m.seed) roomSeed = m.seed;
       players = m.players;
       const names = players.filter((p) => p.role !== "spectator").map((p) => p.name);
-      const specs = players.filter((p) => p.role === "spectator").length;
+      // The list is capped server-side; count/watching carry the totals.
+      const total = m.count ?? names.length;
+      const specs = m.watching ?? players.filter((p) => p.role === "spectator").length;
+      const more = total > names.length ? ` +${total - names.length} more` : "";
       $("who").textContent =
-        `dogs here: ${names.join(", ") || "none"}` + (specs ? ` · ${specs} watching` : "");
+        `dogs here: ${names.join(", ") || "none"}${more}` + (specs ? ` · ${specs} watching` : "");
+    } else if (m.type === "keyframe") {
+      onKeyframe(m);
     }
   }
 
@@ -307,6 +403,7 @@ export function startPresence(): void {
     }
     for (let i = 0; i < dogs.length; i++) {
       const [id, tx, ty, skin] = dogs[i];
+      if (hiddenDogs.has(id)) continue;
       const x = pos && i * 4 < pos.length ? pos[i * 4]! / Q16 : tx;
       const y = pos && i * 4 < pos.length ? pos[i * 4 + 1]! / Q16 : ty;
       const img = skinImage(skin);
