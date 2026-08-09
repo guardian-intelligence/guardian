@@ -11,6 +11,7 @@
     }
   },
   "metadata": {
-    "flagSetId": "guardian-prod"
+    "flagSetId": "guardian-prod",
+    "revision": "2"
   }
 }
