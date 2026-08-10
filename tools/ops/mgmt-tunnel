@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# Keep the guardian-mgmt apiserver reachable from a macOS workstation.
+#
+# The apiserver firewall admits only the operations VPS (operatorSubnets in
+# src/infrastructure/talm/values.yaml). Every other workstation reaches it
+# through an SSH tunnel that binds https://127.0.0.1:16443 to the stable API
+# endpoint via a host that IS allowlisted. guardian_auth probes that loopback
+# port automatically, so once this launchd agent is installed, `aspect infra
+# auth` and kubectl need no flags and no manual tunnel management: launchd
+# restarts the tunnel on boot, wake, and network changes.
+#
+# Usage: tools/ops/mgmt-tunnel install [--via <ssh-host>]
+#        tools/ops/mgmt-tunnel uninstall
+#        tools/ops/mgmt-tunnel status
+#
+# The ssh host (default: rust-forge-01) must be connectable non-interactively;
+# its address and identity live in your ~/.ssh/config, never in this repo.
+set -euo pipefail
+
+LABEL="org.guardianintelligence.mgmt-tunnel"
+LOCAL_PORT=16443
+API_HOST="k8s.guardianintelligence.org"
+API_PORT=6443
+PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
+LOG="${HOME}/Library/Logs/${LABEL}.log"
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+require_darwin() {
+  [[ "$(uname -s)" == "Darwin" ]] || die "launchd tunnel management is macOS-only; on the operations VPS the apiserver is reachable directly"
+}
+
+install() {
+  local via="rust-forge-01"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --via)
+        [[ $# -ge 2 ]] || die "--via requires an ssh host"
+        via="$2"
+        shift 2
+        ;;
+      *)
+        die "unknown argument: $1"
+        ;;
+    esac
+  done
+
+  echo "checking non-interactive ssh to ${via}..."
+  ssh -o BatchMode=yes -o ConnectTimeout=10 "${via}" true ||
+    die "cannot reach ${via} non-interactively; add it to ~/.ssh/config with a key identity first"
+
+  mkdir -p "$(dirname "${PLIST}")"
+  cat >"${PLIST}" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/ssh</string>
+    <string>-N</string>
+    <string>-o</string><string>BatchMode=yes</string>
+    <string>-o</string><string>ExitOnForwardFailure=yes</string>
+    <string>-o</string><string>ConnectTimeout=10</string>
+    <string>-o</string><string>ServerAliveInterval=15</string>
+    <string>-o</string><string>ServerAliveCountMax=4</string>
+    <string>-L</string><string>127.0.0.1:${LOCAL_PORT}:${API_HOST}:${API_PORT}</string>
+    <string>${via}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+  <key>StandardOutPath</key>
+  <string>${LOG}</string>
+  <key>StandardErrorPath</key>
+  <string>${LOG}</string>
+</dict>
+</plist>
+EOF
+
+  launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "${PLIST}"
+  echo "installed ${LABEL} (via ${via}); waiting for the tunnel..."
+  for _ in $(seq 1 20); do
+    if nc -z 127.0.0.1 "${LOCAL_PORT}" 2>/dev/null; then
+      echo "tunnel is listening on 127.0.0.1:${LOCAL_PORT}"
+      return 0
+    fi
+    sleep 1
+  done
+  die "tunnel did not come up within 20s; check ${LOG}"
+}
+
+uninstall() {
+  launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
+  rm -f "${PLIST}"
+  echo "removed ${LABEL}"
+}
+
+status() {
+  if launchctl print "gui/$(id -u)/${LABEL}" >/dev/null 2>&1; then
+    echo "launchd agent: loaded"
+  else
+    echo "launchd agent: not loaded"
+  fi
+  if nc -z 127.0.0.1 "${LOCAL_PORT}" 2>/dev/null; then
+    echo "tunnel: listening on 127.0.0.1:${LOCAL_PORT}"
+  else
+    echo "tunnel: not listening on 127.0.0.1:${LOCAL_PORT}"
+  fi
+}
+
+main() {
+  [[ $# -ge 1 ]] || die "usage: tools/ops/mgmt-tunnel install [--via <ssh-host>] | uninstall | status"
+  local action="$1"
+  shift
+  case "${action}" in
+    install)
+      require_darwin
+      install "$@"
+      ;;
+    uninstall)
+      require_darwin
+      uninstall
+      ;;
+    status)
+      status
+      ;;
+    *)
+      die "unknown action: ${action}"
+      ;;
+  esac
+}
+
+main "$@"

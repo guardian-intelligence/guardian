@@ -15,6 +15,13 @@ User must pay $10/mo to enable CloudFlare LB with 3 endpoints (1 for each ingres
   first line of each `src/infrastructure/talm/nodes/*.yaml` — that is the
   source of truth and it changes on reimage. Port 50000 is open on those
   IPs from the operator workstation.
+- The apiserver firewall admits only the operations VPS (`operatorSubnets`
+  in `src/infrastructure/talm/values.yaml`). Any other workstation (e.g. a
+  macOS dev machine) runs `tools/ops/mgmt-tunnel install` once: launchd then
+  keeps an SSH tunnel on `127.0.0.1:16443` through the VPS, and both
+  `aspect infra auth` and kubectl use it automatically — guardian_auth probes
+  the loopback port before the direct endpoint, so no flags are needed on
+  either kind of machine.
 - The kube API is reachable via the default `~/.kube/config`, whose only
   standing identity is the `read` persona (the `platform-agent` OIDC context,
   set up with `aspect infra auth`): cluster-wide read plus port-forward, and the
