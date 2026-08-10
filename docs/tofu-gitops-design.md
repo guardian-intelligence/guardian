@@ -1,12 +1,140 @@
 # OpenTofu through GitOps: retiring the workstation apply
 
-Status: ruled 2026-08-08 — all six roots reconcile in-cluster; build in
-progress. Supersedes the 2026-07-26 two-tier ruling (recorded below under
-"The tiering that was ruled out").
+Status: **the credential/state cutover is built and verified; the chosen
+runtime (flux-iac/tofu-controller) is not viable here — see "Runtime
+reassessment (2026-08-09)".** All six roots reconcile-ready in-cluster: state
+is uniformly encrypted, every credential is in OpenBao, R2 state locking is
+proven, and each root plans cleanly. What does not work is the driver — the
+controller never completes a plan. This document now carries the original
+design (unchanged below the reassessment) plus the reassessment and its
+recommendation, which awaits a ruling before anything replaces the
+controller.
 
 Complements `secrets.md` (the tier model and why custody is sealed) and
 `../src/infrastructure/runbooks/github-as-code.md` (the root that motivated
 this).
+
+## Runtime reassessment (2026-08-09)
+
+### What is built and proven
+
+The hard, irreversible half of the cutover is done and independently
+verified — none of it depends on the controller:
+
+- **State encryption normalized.** All six roots' R2 state is encrypted
+  under one pbkdf2 key provider named `state` with a single passphrase,
+  dual-homed in OpenBao (`tofu-system/state-encryption`) and the operator
+  vault. (En route we found #1307's `custody`→`state` provider rename had
+  orphaned the ciphertext — a parallel session had already re-encrypted five
+  roots; the sixth, stripe-sandbox, was still plaintext and is now
+  encrypted. See the [[tofu-state-encryption]] note: never rename a key
+  provider without a same-ceremony re-encrypt.)
+- **Credentials in OpenBao via ESO.** The `tofu-system` reader/writer pair,
+  `ClusterSecretStore`, and ExternalSecrets serve every root's provider
+  token, the R2 backend keypair, and the state passphrase. All eight report
+  `Ready`.
+- **R2 state locking** (`use_lockfile`) is enabled on every root and behaves
+  correctly.
+- **A workstation `tofu plan` on every root is clean** ("No changes"),
+  proving state, decryption, backend, locking, provider auth, and the
+  OpenBao relays are all correct.
+- **guardian-github is split**: the org-admin classic PAT is retired in
+  favor of two per-org fine-grained PATs; the single App-installation write
+  is a UI-managed fact in `github-apps.md`.
+
+The one-time ceremony (OpenBao re-init, credential relays, state rekey) ran
+successfully and does not need to run again.
+
+### Why flux-iac/tofu-controller is not viable here
+
+The controller reconciles a `Terraform` CR right up to "setting up
+terraform", issues its first gRPC RPC to the per-CR runner pod, and blocks
+forever — the RPC uses gRPC `WaitForReady`, so a handshake that never
+completes surfaces as an indefinite hang with no error, no timeout, no
+dropped packet.
+
+Root cause (trace-confirmed, then matched to upstream): the controller's
+**cert-rotation renames the runner mTLS secret on its rotation cycle**
+(secret names are timestamps — observed `terraform-runner.tls-1786871100`
+rotating to `-1786903825`, ~9h apart), but the already-running runner pods
+keep referencing the *previous* name. The old secret is garbage-collected,
+so every runner ends up referencing a TLS secret that no longer exists; its
+TLS server never loads a cert; every controller→runner handshake hangs. On
+restart, the startup GC deletes the current secret while an in-memory
+"TLS already generated" flag (keyed, in the logs, on an empty namespace)
+suppresses recreation — so a restart alone does not durably fix it.
+
+This is not our configuration. Ruled out empirically: runner egress to the
+API server (fixed in the runner CNP), all other egress (providers download
+fine), CNP (zero policy drops, labels match), cert readability (the runner
+SA can read secrets), L4 reachability (runner listens dual-stack, accepts
+the controller's IPv4 dial), read-only rootfs (runners have writable
+`/tmp` and `/home/runner`), and `RUNTIME_NAMESPACE` (resolves correctly).
+It is an upstream defect family — flux-iac/tofu-controller **#641** (TLS
+secret not regenerating after delete; "log says the secret is there despite
+it's not"), **#589** (a different TLS secret each day — the name churn),
+**#1017** (resources in some namespaces never get runners). The behavior
+dates to v0.14.2 and is **not fixed in the newest release (v0.16.5)**, so a
+version change does not escape it. The design is sound; this specific
+implementation couples runner pods to a rotating secret *name*, which is
+structurally fragile.
+
+### Re-evaluation of the alternatives
+
+The 2026-07-26 rejections were written before the plane above existed. Two
+of the scary parts of "build our own" have since evaporated, which changes
+the comparison:
+
+- **State locking** is solved — `use_lockfile` on R2, proven.
+- **The approval protocol is nothing** — we ruled `approvePlan: auto`, i.e.
+  "the merge to main is the approval." There is no plan to store for a human
+  to approve, so plan-storage and an approval RPC are both unnecessary.
+
+That leaves only **drift scheduling** and **apply-on-merge** as things a
+runtime must do — both of which are ordinary Kubernetes primitives.
+
+| Option | Verdict now |
+| --- | --- |
+| **flux-iac/tofu-controller** | Not viable — the mTLS runner defect above. |
+| **Atlantis** | Still rejected — PR-comment-driven applies hairpin cluster administration through GitHub, the exact coding-guideline violation. |
+| **Crossplane `provider-terraform`** | Still disproportionate — a second controller and resource model to run the tool we already run; its own runner/credential surface to secure. |
+| **A first-party Job/CronJob runner** | **Now the small option, and recommended.** |
+
+### Recommendation: a first-party Job/CronJob runner
+
+Reuse everything already built and drop only the controller. Per root:
+
+- **Apply on merge.** Flux already reconciles this repo. A `Kustomization`
+  (or a Flux `ImageUpdateAutomation`-adjacent hook) triggers, per root, a
+  Kubernetes `Job` that runs `tofu init && tofu apply -auto-approve` in a
+  pinned tofu image, with the root's ESO-materialized Secrets as `envFrom`
+  (identical to the runner pod template we already wrote) and the R2 backend
+  + `TF_ENCRYPTION` it already consumes. No gRPC, no per-pod mTLS, no
+  controller.
+- **Drift detection.** One `CronJob` per root runs `tofu plan
+  -detailed-exitcode`; a non-zero "changes present" exit posts an Alerta
+  event (the same alert path the rest of the estate uses). This is the drift
+  detection the whole cutover was for, delivered by a cron and an exit code.
+- **State/locking/creds/encryption:** unchanged — the exact plane already
+  merged and verified.
+- **Concurrency:** `use_lockfile` already prevents a Job and a break-glass
+  workstation apply from colliding.
+
+What we would own is small and boring: a Job/CronJob manifest per root and a
+~30-line wrapper image (tofu + a plan-exit-code-to-Alerta shell). No state
+locking (R2), no plan storage (auto-apply), no approval protocol (the
+merge), no drift scheduler (CronJob), no bespoke mTLS. The design doc's
+original fear — "we'd own state locking, plan storage, drift scheduling, and
+the approval protocol" — is no longer true; three of those four are already
+solved and the fourth is a CronJob.
+
+**This needs a ruling before it is built.** Until then the merged plumbing
+stays in place, the roots plan cleanly from a workstation (the break-glass
+path in `tofu-controller-operations.md`), and nothing auto-applies — the
+same state as before the cutover, with no production risk. If the answer is
+"build the Job runner," the controller install (namespace, HelmRelease,
+`GitRepository`, CNP, the `Terraform` CRs) is removed in the same change
+that adds the Jobs.
 
 ## The problem
 
