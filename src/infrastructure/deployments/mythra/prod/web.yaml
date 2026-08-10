@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web
-          image: ghcr.io/guardian-intelligence/wake-up-mythra-web:edge@sha256:3f20f6662523a1f48f630076b1a71e18808fe64944371075c1df5ef617667b0c # {"$imagepolicy": "guardian-imageops:wake-up-mythra-web"}
+          image: ghcr.io/guardian-intelligence/wake-up-mythra-web:edge@sha256:9c867d9bf3d4edbb6acab9a84553e1446352b40dd41d78553aada1fe1fee2f1a # {"$imagepolicy": "guardian-imageops:wake-up-mythra-web"}
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
