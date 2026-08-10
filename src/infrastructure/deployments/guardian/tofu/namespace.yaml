@@ -3,7 +3,7 @@ kind: Namespace
 metadata:
   name: tofu-system
   labels:
-    app.kubernetes.io/name: tofu-controller
+    app.kubernetes.io/name: tofu-runner
     app.kubernetes.io/part-of: guardian
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted

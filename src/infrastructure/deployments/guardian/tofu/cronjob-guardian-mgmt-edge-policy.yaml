@@ -1,0 +1,88 @@
+# guardian-mgmt-edge-policy — second mover: its lane token writes zone
+# policy only (no DNS-record or LB permission), so the worst compromise
+# cannot move traffic. Same plan-mode soak as the stripe root; the flip to
+# apply is its own PR after clean plans. Unblocks the Directus edge cache
+# rule that has been waiting on a workstation apply. The pod shape mirrors
+# cronjob-guardian-stripe-sandbox.yaml; this root also passes the account id
+# tofu variable (the controller's varsFrom, now TF_VAR_ env).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tofu-guardian-mgmt-edge-policy
+  namespace: tofu-system
+  labels:
+    app.kubernetes.io/name: tofu-runner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tofu-root: guardian-mgmt-edge-policy
+spec:
+  schedule: "17 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3000
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: tofu-runner
+            guardian.dev/tofu-root: guardian-mgmt-edge-policy
+        spec:
+          serviceAccountName: tofu-runner
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: tofu
+              image: ghcr.io/guardian-intelligence/tofu-runner:edge@sha256:e213585f3dbe09312c058118b6574e56af1ff54486cba03734d7670e6f5e3dc2 # {"$imagepolicy": "guardian-imageops:tofu-runner"}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: ROOT_NAME
+                  value: guardian-mgmt-edge-policy
+                - name: ROOT_PATH
+                  value: ./src/infrastructure/bootstrap/guardian-mgmt-edge-policy
+                - name: SOURCE_KIND
+                  value: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+                - name: SOURCE_NAME
+                  value: ${GUARDIAN_SOURCE_NAME:=guardian}
+                - name: TF_VAR_cloudflare_account_id
+                  valueFrom:
+                    configMapKeyRef:
+                      name: tofu-vars
+                      key: cloudflare_account_id
+              envFrom:
+                - secretRef:
+                    name: tofu-backend-r2
+                - secretRef:
+                    name: tofu-state-encryption
+                - secretRef:
+                    name: tofu-cloudflare-edge-policy
+              volumeMounts:
+                - name: workspace
+                  mountPath: /workspace
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+          volumes:
+            - name: workspace
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}

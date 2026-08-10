@@ -68,6 +68,21 @@ http_file(
     url = "https://curl.se/ca/cacert-2026-05-14.pem",
 )
 
+# The OpenTofu binary the in-cluster tofu-runner image ships. It is pinned to
+# the same version as the multitool tofu (src/tools/multitool.lock.json) that
+# the break-glass workstation runs — the runner that reconciles a root
+# in-cluster and the one an operator runs by hand must be the same tofu, or a
+# plan could differ between the two paths. TestTofuRunnerTracksMultitoolPin
+# binds the two. Renovate bumps the multitool pin but cannot recompute this
+# archive's sha256, so that test is the doorbell: a multitool tofu bump turns
+# it red until this version and hash are moved to match by hand.
+http_archive(
+    name = "opentofu_linux_amd64",
+    build_file_content = 'exports_files(["tofu"])',
+    sha256 = "dade9650e6b74fc7a8b986bd8717497d32f9e09cf82e479afef4977fa3085536",
+    url = "https://github.com/opentofu/opentofu/releases/download/v1.12.5/tofu_1.12.5_linux_amd64.zip",
+)
+
 # BGP-derived IP->ASN ranges (public routing data), mirrored from
 # iptoasn.com as a repo release because the upstream URL is mutable.
 # Refresh: src/infrastructure/runbooks/ip2asn-refresh.md.

@@ -674,10 +674,13 @@ spec:
       namespace: flagger
   timeout: 10m
 ---
-# tofu-controller — reconciles the bootstrap OpenTofu roots from Git
-# (docs/tofu-gitops-design.md). Terraform CRs land in this same slice as
-# roots migrate; like Flagger it ships no admission webhook, so
-# guardian-system ordering is the only dependency.
+# guardian-tofu — the in-cluster OpenTofu reconcile plane
+# (docs/tofu-gitops-design.md): one CronJob per bootstrap root, plus the
+# credentials, RBAC, network policy, and health rules they share. The
+# ${GUARDIAN_SOURCE_*} placeholders reach the CronJob env, where the runner
+# uses them to resolve the source artifact it reconciles. No health checks:
+# the objects are CronJobs with no readiness of their own, and the runner's
+# health is the tofu-runner-health VMRule, not a Flux gate.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -694,7 +697,7 @@ spec:
     substituteFrom:
       # Required, not optional: Flux skips substitution entirely when the
       # variable map is empty, which would leave the ${GUARDIAN_SOURCE_*}
-      # placeholders literal and fail the CRD enum. The bootstrap overlays
+      # placeholders literal in the CronJob env. The bootstrap overlays
       # always create guardian-source; a missing one should fail loudly.
       - kind: ConfigMap
         name: guardian-source
@@ -702,15 +705,6 @@ spec:
     - name: guardian-system
   prune: true
   wait: false
-  healthChecks:
-    - apiVersion: helm.toolkit.fluxcd.io/v2
-      kind: HelmRelease
-      name: tofu-controller
-      namespace: tofu-system
-    - apiVersion: apps/v1
-      kind: Deployment
-      name: tofu-controller
-      namespace: tofu-system
   timeout: 10m
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
