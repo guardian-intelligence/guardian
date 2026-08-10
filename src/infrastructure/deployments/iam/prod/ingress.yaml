@@ -39,3 +39,52 @@ spec:
                 name: keycloak
                 port:
                   number: 80
+---
+# The Wake Up Mythra realm's public face: the same Keycloak, addressed as
+# auth.wakeupmythra.com so no Guardian hostname appears in player-facing
+# redirects or tokens (the realm's frontendUrl generates all its URLs on
+# this host). A dedicated Ingress because the wakeupmythra.com zone carries
+# its own edge trust: the zone's ACME-issued leaf for SNI and its AOP mTLS
+# gate, same as the product apex.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak-wum
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+    guardian.dev/stage: prod
+  annotations:
+    nginx.ingress.kubernetes.io/auth-tls-secret: tenant-guardian-prod/cloudflare-origin-pull-ca
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+    nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/affinity: cookie
+    nginx.ingress.kubernetes.io/session-cookie-name: WUM_IAM_AFFINITY
+    nginx.ingress.kubernetes.io/session-cookie-secure: "true"
+spec:
+  ingressClassName: tenant-root
+  tls:
+    - hosts:
+        - auth.wakeupmythra.com
+      secretName: mythra-origin-tls
+  rules:
+    - host: auth.wakeupmythra.com
+      http:
+        paths:
+          - path: /realms
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 80
+          - path: /resources
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 80

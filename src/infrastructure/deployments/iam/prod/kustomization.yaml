@@ -4,8 +4,11 @@ resources:
   - postgres.yaml
   - secrets.yaml
   - realm-configmap.yaml
+  - realm-wum-configmap.yaml
   - bounce-theme.yaml
+  - wum-bounce-theme.yaml
   - realm-reconciler.yaml
+  - realm-reconciler-wum.yaml
   - keycloak.yaml
   - canary.yaml
   - loadtester.yaml

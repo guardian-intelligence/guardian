@@ -149,10 +149,23 @@ type attachReq struct {
 	done      chan attachResult
 }
 
+// attachResult carries the raw catch-up material out of the tick
+// goroutine: the attach position and an uncompressed snapshot capture. The
+// journal read and the deflate pass happen on the session's own goroutine
+// (catchupLines), so the tick loop never blocks on a client's history.
 type attachResult struct {
 	welcome []byte
-	catchup [][]byte
+	seq     int64
+	tick    uint64
+	epoch   uint32
+	wh      uint64
+	state   []byte
 	err     error
+}
+
+type snapCacheEntry struct {
+	tick uint64
+	line []byte
 }
 
 type ringEntry struct {
@@ -189,6 +202,7 @@ type authority struct {
 	attach chan attachReq
 	stop   chan struct{}
 
+	snapCache       snapCacheEntry
 	eventsSinceSnap int
 	lastSnapAt      time.Time
 	utcDay          uint32
@@ -422,10 +436,13 @@ func (a *authority) tickOnce() {
 	mTickDur.Observe(time.Since(start).Seconds())
 }
 
-// handleAttach builds catch-up material atomically with the live stream
-// position (docs/netcode.md: one machine, three entrances). Divergence
-// resyncs always get a fresh snapshot; rejoins get min-cost with the
-// ring-depth compute bound; fresh joins get the snapshot.
+// handleAttach registers the subscription atomically with the live stream
+// position (docs/netcode.md: one machine, three entrances) and captures
+// the raw snapshot state; everything expensive happens later in
+// catchupLines on the session goroutine. A mid-session resync stays
+// in-stream — the snapshot must land between the events around it, so it
+// is queued here — but its deflate pass is cached per tick, bounding a
+// resync storm to one compression per tick.
 func (a *authority) handleAttach(req attachReq) attachResult {
 	s := req.sess
 	if req.resync {
@@ -437,30 +454,13 @@ func (a *authority) handleAttach(req attachReq) attachResult {
 		"type": "welcome", "park": a.name, "role": s.role, "epoch": a.host.Epoch(),
 		"seq": a.lastSeq, "tick": a.host.Tick(), "grid": [2]int{100, 100},
 	})
-
-	var catchup [][]byte
-	sendSnapshot := true
-	withinComputeBound := req.sinceTick+hashRingTicks >= a.host.Tick()
-	if req.sinceSeq > 0 && req.sinceSeq <= a.lastSeq && withinComputeBound {
-		var events [][]byte
-		eventBytes := 0
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		err := a.j.Read(ctx, a.id, req.sinceSeq+1, func(ev journal.Event) error {
-			line := eventLine(&ev)
-			events = append(events, line)
-			eventBytes += len(line)
-			return nil
-		})
-		cancel()
-		if err == nil && eventBytes < len(a.snapshotLine()) {
-			catchup = events
-			sendSnapshot = false
-			mCatchup.WithLabelValues("events").Inc()
-		}
-	}
-	if sendSnapshot {
-		catchup = [][]byte{a.snapshotLine()}
-		mCatchup.WithLabelValues("snapshot").Inc()
+	res := attachResult{
+		welcome: append(welcome, '\n'),
+		seq:     a.lastSeq,
+		tick:    a.host.Tick(),
+		epoch:   a.host.Epoch(),
+		wh:      a.host.Hash(),
+		state:   a.host.Snapshot(),
 	}
 
 	a.mu.Lock()
@@ -470,20 +470,69 @@ func (a *authority) handleAttach(req attachReq) attachResult {
 	}
 	a.subs[s] = true
 	a.mu.Unlock()
-	return attachResult{welcome: append(welcome, '\n'), catchup: catchup}
+	return res
 }
 
-// snapshotLine builds a fresh on-demand snapshot message from live
-// authority state, deflate-compressed for the wire.
+var errPastAttach = errors.New("past attach position")
+
+// catchupLines builds the catch-up material on the caller's goroutine.
+// Divergence resyncs and fresh joins get the snapshot; rejoins get
+// min-cost with the ring-depth compute bound. Live events queued after the
+// attach position follow on the session channel, so the journal read stops
+// at the attach seq — anything newer is already on its way.
+func (a *authority) catchupLines(sinceSeq int64, sinceTick uint64, res attachResult) [][]byte {
+	snapLine := snapshotLineFrom(res.seq, res.tick, res.epoch, res.wh, res.state)
+	if sinceSeq > 0 && sinceSeq <= res.seq && sinceTick+hashRingTicks >= res.tick {
+		var events [][]byte
+		eventBytes := 0
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := a.j.Read(ctx, a.id, sinceSeq+1, func(ev journal.Event) error {
+			if ev.Seq > res.seq {
+				return errPastAttach
+			}
+			line := eventLine(&ev)
+			events = append(events, line)
+			eventBytes += len(line)
+			return nil
+		})
+		cancel()
+		if errors.Is(err, errPastAttach) {
+			err = nil
+		}
+		if err == nil && eventBytes < len(snapLine) {
+			mCatchup.WithLabelValues("events").Inc()
+			return events
+		}
+	}
+	mCatchup.WithLabelValues("snapshot").Inc()
+	return [][]byte{snapLine}
+}
+
+// snapshotLine serves the resync path from the tick goroutine, cached per
+// tick so concurrent resyncs share one deflate pass.
 func (a *authority) snapshotLine() []byte {
-	state := a.host.Snapshot()
+	t := a.host.Tick()
+	a.mu.Lock()
+	cached := a.snapCache
+	a.mu.Unlock()
+	if cached.tick == t && cached.line != nil {
+		return cached.line
+	}
+	line := snapshotLineFrom(a.lastSeq, t, a.host.Epoch(), a.host.Hash(), a.host.Snapshot())
+	a.mu.Lock()
+	a.snapCache = snapCacheEntry{tick: t, line: line}
+	a.mu.Unlock()
+	return line
+}
+
+func snapshotLineFrom(seq int64, tick uint64, epoch uint32, wh uint64, state []byte) []byte {
 	var z bytes.Buffer
 	w, _ := flate.NewWriter(&z, flate.BestCompression)
 	w.Write(state)
 	w.Close()
 	msg, _ := json.Marshal(map[string]any{
-		"type": "snapshot", "seq": a.lastSeq, "tick": a.host.Tick(),
-		"epoch": a.host.Epoch(), "wh": fmt.Sprintf("%016x", a.host.Hash()),
+		"type": "snapshot", "seq": seq, "tick": tick,
+		"epoch": epoch, "wh": fmt.Sprintf("%016x", wh),
 		"z": z.Bytes(), // json encodes []byte as base64
 	})
 	return append(msg, '\n')

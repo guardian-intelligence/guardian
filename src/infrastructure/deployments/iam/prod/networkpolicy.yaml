@@ -66,6 +66,16 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
+    # The mythra load driver mints WUM-realm client-credentials tokens over
+    # the in-cluster service (a pod identity — the host-entity admit that
+    # covers hostNetwork mythrad does not extend to it).
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: mythrad-loadgen
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:
@@ -97,8 +107,9 @@ spec:
         - ports:
             - port: "7800"
               protocol: TCP
-    # GitHub token/userinfo exchange for the github identity provider: the
-    # server-side broker calls github.com / api.github.com during login.
+    # Broker token/userinfo exchanges: the server-side GitHub broker calls
+    # github.com / api.github.com, the Google broker calls
+    # oauth2.googleapis.com during login.
     - toEntities:
         - world
       toPorts:

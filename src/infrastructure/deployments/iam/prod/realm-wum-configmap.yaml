@@ -1,0 +1,288 @@
+# The Wake Up Mythra customer identity realm. The game is its own product
+# with its own account model: login creates a stable WUM account; Google
+# (and later Apple / platform game services) are brokered connections, never
+# the account identifier. The realm presents as auth.wakeupmythra.com via
+# its frontendUrl so no Guardian hostname ever appears in a player-facing
+# redirect or token. Session lifetimes are game-shaped: a returning player
+# resumes silently from a rotating refresh token instead of re-consenting.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm-wum
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  wakeupmythra.com-realm.json: |
+    {
+      "realm": "wakeupmythra.com",
+      "displayName": "Wake Up Mythra",
+      "loginTheme": "wum-bounce",
+      "enabled": true,
+      "sslRequired": "external",
+      "registrationAllowed": false,
+      "resetPasswordAllowed": false,
+      "rememberMe": false,
+      "loginWithEmailAllowed": false,
+      "duplicateEmailsAllowed": false,
+      "bruteForceProtected": true,
+      "permanentLockout": false,
+      "failureFactor": 10,
+      "waitIncrementSeconds": 60,
+      "maxFailureWaitSeconds": 900,
+      "accessTokenLifespan": 300,
+      "ssoSessionIdleTimeout": 2592000,
+      "ssoSessionMaxLifespan": 7776000,
+      "revokeRefreshToken": true,
+      "refreshTokenMaxReuse": 0,
+      "eventsEnabled": true,
+      "adminEventsEnabled": true,
+      "adminEventsDetailsEnabled": true,
+      "attributes": {
+        "frontendUrl": "https://auth.wakeupmythra.com"
+      },
+      "authenticationFlows": [
+        {
+          "alias": "broker-create-user-only",
+          "description": "First broker login with no user-facing steps: create the WUM account, fail closed on any collision.",
+          "providerId": "basic-flow",
+          "topLevel": true,
+          "builtIn": false,
+          "authenticationExecutions": [
+            {
+              "authenticator": "idp-create-user-if-unique",
+              "requirement": "REQUIRED",
+              "priority": 10,
+              "authenticatorFlow": false,
+              "userSetupAllowed": false
+            }
+          ]
+        }
+      ],
+      "clients": [
+        {
+          "clientId": "wake-up-mythra",
+          "name": "Wake Up Mythra web",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "directAccessGrantsEnabled": false,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": false,
+          "redirectUris": [
+            "https://wakeupmythra.com/*"
+          ],
+          "webOrigins": [
+            "https://wakeupmythra.com"
+          ],
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "post.logout.redirect.uris": "https://wakeupmythra.com/"
+          }
+        },
+        {
+          "clientId": "mythra-loadgen",
+          "name": "Wake Up Mythra load driver",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "clientAuthenticatorType": "client-secret",
+          "secret": "${WUM_MYTHRA_LOADGEN_CLIENT_SECRET}",
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": true,
+          "fullScopeAllowed": false,
+          "redirectUris": [],
+          "webOrigins": []
+        },
+        {
+          "clientId": "wum-realm-reconciler",
+          "name": "WUM realm reconciler",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "clientAuthenticatorType": "client-secret",
+          "secret": "${WUM_REALM_RECONCILER_CLIENT_SECRET}",
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": true,
+          "fullScopeAllowed": true,
+          "redirectUris": [],
+          "webOrigins": []
+        }
+      ],
+      "users": [
+        {
+          "username": "service-account-wum-realm-reconciler",
+          "enabled": true,
+          "serviceAccountClientId": "wum-realm-reconciler",
+          "clientRoles": {
+            "realm-management": [
+              "realm-admin"
+            ]
+          }
+        }
+      ]
+    }
+---
+# Startup import creates the complete realm on an empty database; the
+# settings document is the steady-state Admin REST payload because a realm
+# update does not reconcile its nested clients or users.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-wum-realm-settings
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  wakeupmythra.com.json: |
+    {
+      "realm": "wakeupmythra.com",
+      "displayName": "Wake Up Mythra",
+      "loginTheme": "wum-bounce",
+      "enabled": true,
+      "sslRequired": "external",
+      "registrationAllowed": false,
+      "resetPasswordAllowed": false,
+      "rememberMe": false,
+      "loginWithEmailAllowed": false,
+      "duplicateEmailsAllowed": false,
+      "bruteForceProtected": true,
+      "permanentLockout": false,
+      "failureFactor": 10,
+      "waitIncrementSeconds": 60,
+      "maxFailureWaitSeconds": 900,
+      "accessTokenLifespan": 300,
+      "ssoSessionIdleTimeout": 2592000,
+      "ssoSessionMaxLifespan": 7776000,
+      "revokeRefreshToken": true,
+      "refreshTokenMaxReuse": 0,
+      "eventsEnabled": true,
+      "adminEventsEnabled": true,
+      "adminEventsDetailsEnabled": true,
+      "attributes": {
+        "frontendUrl": "https://auth.wakeupmythra.com"
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-wum-clients
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  wake-up-mythra.json: |
+    {
+      "clientId": "wake-up-mythra",
+      "name": "Wake Up Mythra web",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "https://wakeupmythra.com/*"
+      ],
+      "webOrigins": [
+        "https://wakeupmythra.com"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://wakeupmythra.com/"
+      }
+    }
+  mythra-loadgen.json: |
+    {
+      "clientId": "mythra-loadgen",
+      "name": "Wake Up Mythra load driver",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${vault.mythra-loadgen-client-secret}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "redirectUris": [],
+      "webOrigins": []
+    }
+  wum-realm-reconciler.json: |
+    {
+      "clientId": "wum-realm-reconciler",
+      "name": "WUM realm reconciler",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${vault.realm-reconciler-client-secret}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": true,
+      "redirectUris": [],
+      "webOrigins": []
+    }
+---
+# The Google clientId below is the OAuth client from the wakeupmythra
+# Google Cloud project; its authorized redirect URI must be exactly
+# https://auth.wakeupmythra.com/realms/wakeupmythra.com/broker/google/endpoint.
+# trustEmail is deliberate: Google only asserts addresses it has verified,
+# which lets the email_verified admission gate work without realm SMTP.
+# Account linking still fails closed — duplicateEmailsAllowed is off and
+# first broker login is create-if-unique.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-wum-identity-providers
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  google.json: |
+    {
+      "alias": "google",
+      "displayName": "Google",
+      "providerId": "google",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "linkOnly": false,
+      "firstBrokerLoginFlowAlias": "broker-create-user-only",
+      "config": {
+        "clientId": "PENDING-GOOGLE-OAUTH-REGISTRATION.apps.googleusercontent.com",
+        "clientSecret": "${vault.google-client-secret}",
+        "defaultScope": "openid email",
+        "syncMode": "IMPORT"
+      }
+    }

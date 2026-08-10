@@ -9,7 +9,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { OpenFeature } from "@openfeature/web-sdk";
-import { accessToken, beginSignIn, completeSignIn, subjectOf } from "./auth";
+import {
+  accessToken,
+  beginSignIn,
+  completeSignIn,
+  deviceId,
+  popupRelay,
+  subjectOf,
+  type SignInOutcome,
+} from "./auth";
 
 type Wasm = any;
 
@@ -41,8 +49,10 @@ async function inflate(b64: string): Promise<Uint8Array> {
 
 export function startGame(): void {
   const $ = (id: string) => document.getElementById(id) as HTMLElement;
-  const spectate = new URLSearchParams(location.search).has("spectate");
-  const parkName = new URLSearchParams(location.search).get("park") || "park-mythra";
+  // Read after completeSignIn restores the pre-sign-in query, so ?park=
+  // and ?spectate survive a redirect-flow round trip.
+  let spectate = false;
+  let parkName = "park-mythra";
 
   const diag = {
     bytesDown: 0,
@@ -75,7 +85,8 @@ export function startGame(): void {
   let myDog = 0n;
   let seq = 0; // last applied journal seq
   let connected = false;
-  let role = spectate ? "spectator" : "player";
+  let anon = true; // anonymous spectator until a token proves otherwise
+  let role = "spectator";
 
   // event queue (by seq), hash ring, snapshot ring, recent events for
   // rollback replay
@@ -224,7 +235,7 @@ export function startGame(): void {
 
   function onVerdict(m: any) {
     rttMs = 0.8 * rttMs + 0.2 * Math.max(1, Date.now() - m.ct);
-    serverTick = m.now + (rttMs / 2) / TICK_MS;
+    serverTick = m.now + rttMs / 2 / TICK_MS;
     serverTickAt = performance.now();
     $("rtt").textContent = `${rttMs.toFixed(0)}ms`;
     if (m.ok === undefined) {
@@ -288,7 +299,9 @@ export function startGame(): void {
     if (m.type === "welcome") {
       role = m.role;
       $("role").textContent = `${role} @ ${m.park}`;
-      logLine(`welcome: ${role}, park ${m.park}, epoch ${m.epoch}, journal seq ${m.seq}, tick ${m.tick}`);
+      logLine(
+        `welcome: ${role}, park ${m.park}, epoch ${m.epoch}, journal seq ${m.seq}, tick ${m.tick}`,
+      );
       serverTick = m.tick;
       serverTickAt = performance.now();
     } else if (m.type === "snapshot") {
@@ -309,7 +322,9 @@ export function startGame(): void {
       const local = simHashHex();
       const okTxt = local === m.wh ? "✓" : "✗";
       $("world").textContent = okTxt;
-      logLine(`state at seq ${seq}, tick ${m.tick}, wh ${m.wh.slice(0, 8)} ${okTxt} (${state.length}B raw)`);
+      logLine(
+        `state at seq ${seq}, tick ${m.tick}, wh ${m.wh.slice(0, 8)} ${okTxt} (${state.length}B raw)`,
+      );
       // resend intents the journal has not answered
       for (const [id, it] of pendingIntents) {
         sendCtrl({ type: "intent", id, kind: it.kind, p: b64(it.p) });
@@ -331,17 +346,25 @@ export function startGame(): void {
   async function connect() {
     const myEpoch = ++dialEpoch;
     try {
-      const token = await accessToken();
-      if (!token) {
-        setStatus("signed out");
-        return;
-      }
       const q = new URLSearchParams({ park: parkName });
-      if (spectate) q.set("spectate", "1");
-      const mint = await fetch(`/session?${q}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const headers: Record<string, string> = {};
+      if (!anon) {
+        const token = await accessToken();
+        if (!token) {
+          // The refresh token aged out mid-session: degrade to anonymous
+          // spectating and surface the way back in.
+          logLine("session expired — spectating; sign in to rejoin with your dog");
+          await setIdentity();
+        } else {
+          headers.Authorization = `Bearer ${token}`;
+          if (spectate) q.set("spectate", "1");
+        }
+      }
+      if (anon) {
+        q.set("spectate", "1");
+        q.set("device", deviceId());
+      }
+      const mint = await fetch(`/session?${q}`, { method: "POST", headers });
       if (!mint.ok) throw new Error(`/session ${mint.status}`);
       const sess = await mint.json();
       const WT = (globalThis as any).WebTransport;
@@ -529,53 +552,96 @@ export function startGame(): void {
   }
 
   // ---- boot ----
-  async function boot() {
-    await completeSignIn();
+  // setIdentity resolves who is at the keyboard: a WUM account (player) or
+  // the anonymous device pseudonym (spectator). Both get deterministic
+  // feature flags and trace identity keyed on the sub; the device id rides
+  // along after sign-in so the acquisition-funnel join survives the
+  // upgrade.
+  async function setIdentity(): Promise<void> {
     const token = await accessToken();
-    if (!token) {
-      setStatus("signed out");
-      $("who").textContent = spectate
-        ? "Spectating needs a (free) account — the park is real, sign in to watch it."
-        : "Sign in to bring your dog to the park.";
-      $("signin").style.display = "";
-      $("signin").onclick = () => void beginSignIn();
-      return;
-    }
-    $("signin").style.display = "none";
-    sub = subjectOf(token);
+    anon = !token;
+    sub = token ? subjectOf(token) : `anon:${deviceId()}`;
+    role = anon || spectate ? "spectator" : "player";
     myDog = fnv64(sub);
-    await OpenFeature.setContext({ ...OpenFeature.getContext(), targetingKey: sub });
+    await OpenFeature.setContext({
+      ...OpenFeature.getContext(),
+      targetingKey: sub,
+      device: deviceId(),
+    });
+    $("signin").style.display = anon ? "" : "none";
+    $("checkin").style.display = role === "player" ? "" : "none";
+    ($("chat") as HTMLInputElement).style.display = role === "player" ? "" : "none";
+  }
 
-    const info = await (await fetch("/wt-info", { cache: "no-store" })).json();
-    const [parkBytes, clientBytes] = await Promise.all([
-      fetch(`/behavior/park.wasm?v=${info.parkWasm}`).then((r) => r.arrayBuffer()),
-      fetch(`/behavior/client.wasm?v=${info.clientWasm}`).then((r) => r.arrayBuffer()),
-    ]);
-    sim = (await WebAssembly.instantiate(parkBytes)).instance.exports;
-    smoother = (await WebAssembly.instantiate(clientBytes)).instance.exports;
-    logLine(`park module ${info.parkWasm}, presentation ${info.clientWasm}`);
-
-    $("checkin").onclick = () => sendIntent(EV_CHECK_IN, dogPayload());
-    ($("chat") as HTMLInputElement).onkeydown = (e) => {
-      if (e.key !== "Enter") return;
-      const input = e.target as HTMLInputElement;
-      const text = new TextEncoder().encode(input.value.slice(0, 140));
-      if (!text.length) return;
-      const p = new Uint8Array(10 + text.length);
-      new DataView(p.buffer).setBigUint64(0, myDog, true);
-      new DataView(p.buffer).setUint16(8, text.length, true);
-      p.set(text, 10);
-      sendIntent(EV_CHAT, p);
-      input.value = "";
-    };
-
-    if (typeof (globalThis as any).WebTransport === "undefined") {
-      setStatus("unsupported");
-      $("who").textContent = "This browser can't reach the dog park (no WebTransport).";
+  async function onSignInOutcome(outcome: SignInOutcome): Promise<void> {
+    if (outcome.status === "error") {
+      logLine(`sign-in failed: ${outcome.reason}`);
       return;
     }
-    logLine(spectate ? "spectating — your dog stays home" : "joining with your dog");
-    connect();
+    if (outcome.status !== "signed-in") return;
+    await setIdentity();
+    logLine("signed in — bringing your dog to the park");
+    // Redial under the new identity; the replica state carries over, so
+    // the upgrade is a reconnect, not a reload.
+    dialEpoch++;
+    try {
+      transport?.close();
+    } catch {
+      /* already closed */
+    }
+    void connect();
+  }
+
+  async function boot() {
+    if (popupRelay()) return;
+    try {
+      const outcome = await completeSignIn();
+      spectate = new URLSearchParams(location.search).has("spectate");
+      parkName = new URLSearchParams(location.search).get("park") || "park-mythra";
+      if (outcome.status === "error") {
+        logLine(`sign-in failed: ${outcome.reason}`);
+      }
+      $("signin").onclick = () => beginSignIn("google", (o) => void onSignInOutcome(o));
+      await setIdentity();
+      if (anon) {
+        $("who").textContent = "You're watching the park live — sign in to bring your dog.";
+      }
+
+      const info = await (await fetch("/wt-info", { cache: "no-store" })).json();
+      const [parkBytes, clientBytes] = await Promise.all([
+        fetch(`/behavior/park.wasm?v=${info.parkWasm}`).then((r) => r.arrayBuffer()),
+        fetch(`/behavior/client.wasm?v=${info.clientWasm}`).then((r) => r.arrayBuffer()),
+      ]);
+      sim = (await WebAssembly.instantiate(parkBytes)).instance.exports;
+      smoother = (await WebAssembly.instantiate(clientBytes)).instance.exports;
+      logLine(`park module ${info.parkWasm}, presentation ${info.clientWasm}`);
+
+      $("checkin").onclick = () => sendIntent(EV_CHECK_IN, dogPayload());
+      ($("chat") as HTMLInputElement).onkeydown = (e) => {
+        if (e.key !== "Enter") return;
+        const input = e.target as HTMLInputElement;
+        const text = new TextEncoder().encode(input.value.slice(0, 140));
+        if (!text.length) return;
+        const p = new Uint8Array(10 + text.length);
+        new DataView(p.buffer).setBigUint64(0, myDog, true);
+        new DataView(p.buffer).setUint16(8, text.length, true);
+        p.set(text, 10);
+        sendIntent(EV_CHAT, p);
+        input.value = "";
+      };
+
+      if (typeof (globalThis as any).WebTransport === "undefined") {
+        setStatus("unsupported");
+        $("who").textContent = "This browser can't reach the dog park (no WebTransport).";
+        return;
+      }
+      logLine(role === "player" ? "joining with your dog" : "spectating — sign in to join");
+      void connect();
+    } catch (e: any) {
+      setStatus("error");
+      $("who").textContent = `The park didn't load (${e?.message ?? e}) — refresh to retry.`;
+      logLine(`boot failed: ${e?.message ?? e}`);
+    }
   }
 
   requestAnimationFrame((t) => {

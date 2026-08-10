@@ -151,6 +151,10 @@ func (h *gameHandlers) handleSession(sess *webtransport.Session) {
 	defer s.closeSession("bye")
 
 	// Writer: welcome, catch-up material, then the live ordered stream.
+	// Catch-up is built here — journal read and compression on this
+	// session's time, never the park's tick loop; events that land in
+	// s.out meanwhile are all newer than the attach position and drain
+	// after, preserving order.
 	go func() {
 		write := func(b []byte) bool {
 			stream.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -160,7 +164,7 @@ func (h *gameHandlers) handleSession(sess *webtransport.Session) {
 		if !write(res.welcome) {
 			return
 		}
-		for _, m := range res.catchup {
+		for _, m := range park.catchupLines(hello.SinceSeq, hello.SinceTick, res) {
 			if !write(m) {
 				return
 			}
@@ -286,7 +290,9 @@ func (s *session) datagramLoop(ctx context.Context) {
 
 // gameHandlers wires transport to parks and tickets.
 type gameHandlers struct {
-	parks       *parks
-	tickets     *ticketMint
-	maxSessions int
+	parks        *parks
+	tickets      *ticketMint
+	maxSessions  int
+	allowedParks map[string]bool
+	anonMints    *anonLimiter
 }

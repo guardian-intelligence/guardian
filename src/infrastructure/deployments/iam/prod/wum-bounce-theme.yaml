@@ -1,0 +1,66 @@
+# wum-bounce: the Wake Up Mythra realm's login theme, same doctrine as
+# guardian-bounce — Keycloak never renders a visible page of its own. The
+# game page is the provider chooser (every authorization request arrives
+# pre-hinted to a broker), so login.ftl is reached only when a flow loses
+# its way back to the product; it returns the visitor to wakeupmythra.com,
+# which can start a fresh hinted sign-in. Every other template falls
+# through parent=keycloak.
+#
+# Keycloak caches compiled templates: edits here must also bump the
+# guardian.dev/wum-bounce-theme-checksum annotation in keycloak.yaml so the
+# Deployment rolls.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-wum-bounce-theme
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+data:
+  theme.properties: |
+    parent=keycloak
+  login.ftl: |
+    <#-- Reached only when a flow loses its way back to the game: a Google
+         authorize denial forwarded into the browser flow, an auth session
+         that went missing mid-flow, or a Keycloak URL visited without a
+         kc_idp_hint. The realm has no password or registration path, so
+         there is nothing to render here. The loginTimeout comparison
+         renders through the request's own bundle, so the discriminator is
+         locale-proof: an interrupted flow must not read as a denial. -->
+    <#if message?? && message.summary == msg("loginTimeout")>
+    <#assign bounce = "https://wakeupmythra.com/?auth_error=interrupted">
+    <#else>
+    <#assign bounce = "https://wakeupmythra.com/?auth_error=access_denied">
+    </#if>
+    <!DOCTYPE html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">
+    <meta http-equiv="refresh" content="0;url=${bounce}">
+    <title>wake up mythra</title></head>
+    <body><a href="${bounce}">Continue</a></body></html>
+  error.ftl: |
+    <#-- Malformed or replayed callbacks (bad state, missing cookies) land
+         here; stock Keycloak renders "We are sorry..." with its own chrome.
+         Render the message with a way back to the park. No auto-bounce:
+         unlike login.ftl there is no restarted session to resume, and the
+         message is the only clue the visitor gets. -->
+    <!DOCTYPE html>
+    <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex">
+    <title>wake up mythra</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: flex; align-items: center;
+        justify-content: center; font-family: system-ui, sans-serif;
+        background: radial-gradient(120% 90% at 15% 0%, #1c3a5e 0%, #12263f 55%, #0b1a2e 100%); }
+      .card { width: min(92vw, 390px); padding: 34px; border-radius: 14px;
+        background: #fcfcfd; color: #17141d; box-shadow: 0 35px 90px rgb(7 28 58 / 0.42); }
+      .card p { color: #5e5871; line-height: 1.5; }
+    </style></head>
+    <body><div class="card">
+      <h2>That didn't work</h2>
+      <#if message??><p>${kcSanitize(message.summary)?no_esc}</p></#if>
+      <p><a href="https://wakeupmythra.com/">Back to the dog park</a></p>
+    </div></body></html>

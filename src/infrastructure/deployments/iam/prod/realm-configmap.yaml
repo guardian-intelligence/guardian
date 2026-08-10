@@ -179,43 +179,6 @@ data:
           "fullScopeAllowed": false,
           "redirectUris": [],
           "webOrigins": []
-        },
-        {
-          "clientId": "wake-up-mythra",
-          "name": "Wake Up Mythra web",
-          "enabled": true,
-          "protocol": "openid-connect",
-          "publicClient": true,
-          "standardFlowEnabled": true,
-          "directAccessGrantsEnabled": false,
-          "implicitFlowEnabled": false,
-          "serviceAccountsEnabled": false,
-          "redirectUris": [
-            "https://wakeupmythra.com/*"
-          ],
-          "webOrigins": [
-            "https://wakeupmythra.com"
-          ],
-          "attributes": {
-            "pkce.code.challenge.method": "S256",
-            "post.logout.redirect.uris": "https://wakeupmythra.com/"
-          }
-        },
-        {
-          "clientId": "mythra-loadgen",
-          "name": "Wake Up Mythra load driver",
-          "enabled": true,
-          "protocol": "openid-connect",
-          "publicClient": false,
-          "clientAuthenticatorType": "client-secret",
-          "secret": "${MYTHRA_LOADGEN_CLIENT_SECRET}",
-          "standardFlowEnabled": false,
-          "directAccessGrantsEnabled": false,
-          "implicitFlowEnabled": false,
-          "serviceAccountsEnabled": true,
-          "fullScopeAllowed": false,
-          "redirectUris": [],
-          "webOrigins": []
         }
       ],
       "users": [
@@ -441,45 +404,6 @@ data:
       "publicClient": false,
       "clientAuthenticatorType": "client-secret",
       "secret": "${vault.canary-janitor-client-secret}",
-      "standardFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
-      "implicitFlowEnabled": false,
-      "serviceAccountsEnabled": true,
-      "fullScopeAllowed": false,
-      "redirectUris": [],
-      "webOrigins": []
-    }
-  wake-up-mythra.json: |
-    {
-      "clientId": "wake-up-mythra",
-      "name": "Wake Up Mythra web",
-      "enabled": true,
-      "protocol": "openid-connect",
-      "publicClient": true,
-      "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": false,
-      "implicitFlowEnabled": false,
-      "serviceAccountsEnabled": false,
-      "redirectUris": [
-        "https://wakeupmythra.com/*"
-      ],
-      "webOrigins": [
-        "https://wakeupmythra.com"
-      ],
-      "attributes": {
-        "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "https://wakeupmythra.com/"
-      }
-    }
-  mythra-loadgen.json: |
-    {
-      "clientId": "mythra-loadgen",
-      "name": "Wake Up Mythra load driver",
-      "enabled": true,
-      "protocol": "openid-connect",
-      "publicClient": false,
-      "clientAuthenticatorType": "client-secret",
-      "secret": "${vault.mythra-loadgen-client-secret}",
       "standardFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "implicitFlowEnabled": false,
