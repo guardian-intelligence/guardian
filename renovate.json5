@@ -252,22 +252,6 @@
       ],
     },
 
-    // tofu-controller: chart GitRepository tag + controller digest + runner
-    // tag-embedded digest move as one PR; TestTofuControllerPinsMoveTogether
-    // holds a half-moved set red, TestTofuRunnerTracksMultitoolPin binds the
-    // runner's bundled OpenTofu minor to the multitool pin.
-    {
-      matchPackageNames: [
-        "ghcr.io/flux-iac/tofu-controller",
-        "ghcr.io/flux-iac/tf-runner",
-      ],
-      groupName: "tofu-controller release",
-      automerge: false,
-      prBodyNotes: [
-        "All three tofu-controller-release pins in deployments/guardian/tofu/tofu-controller-helmrelease.yaml move together (chart GitRepository tag, controller postRenderers digest, runner tag@digest), and the runner-bundled-tofu declaration must be refreshed from the release's runner.Dockerfile ARG TOFU_VERSION — TestTofuControllerPinsMoveTogether and TestTofuRunnerTracksMultitoolPin keep this PR red until they do.",
-      ],
-    },
-
     // Cluster-coupled tools: one grouped PR, merged only alongside the
     // substrate move the version-skew conformance test demands.
     {
@@ -410,37 +394,6 @@
       matchStrings: [
         "(?<packageName>ghcr\\.io/cozystack/cozystack/talos):(?<currentValue>v[0-9.]+)@(?<currentDigest>sha256:[a-f0-9]{64})",
       ],
-      datasourceTemplate: "docker",
-    },
-
-    // tofu-controller release pins (deployments/guardian/tofu). Three
-    // spellings of one release in the helmrelease manifest: the chart
-    // GitRepository tag (marker-annotated, no digest — the images carry the
-    // pinning), the controller image postRenderers newTag+digest, and the
-    // runner image tag with the digest embedded (the controller uses the
-    // composed repository:tag verbatim as the runner pod image, so the
-    // embedded digest is what pins the spawned pods).
-    {
-      customType: "regex",
-      managerFilePatterns: [
-        "/^src/infrastructure/deployments/guardian/tofu/tofu-controller-helmrelease\\.yaml$/",
-      ],
-      matchStrings: [
-        "ref:\\n\\s*# renovate: tofu-controller-release\\n\\s*tag: (?<currentValue>v[0-9.]+)\\n",
-        "# renovate: tofu-controller-release\\n\\s*newTag: (?<currentValue>v[0-9.]+)\\n\\s*digest: (?<currentDigest>sha256:[a-f0-9]{64})",
-      ],
-      depNameTemplate: "ghcr.io/flux-iac/tofu-controller",
-      datasourceTemplate: "docker",
-    },
-    {
-      customType: "regex",
-      managerFilePatterns: [
-        "/^src/infrastructure/deployments/guardian/tofu/tofu-controller-helmrelease\\.yaml$/",
-      ],
-      matchStrings: [
-        'tag: "(?<currentValue>v[0-9.]+)@(?<currentDigest>sha256:[a-f0-9]{64})"',
-      ],
-      depNameTemplate: "ghcr.io/flux-iac/tf-runner",
       datasourceTemplate: "docker",
     },
 

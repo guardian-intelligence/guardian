@@ -1,0 +1,88 @@
+# guardian-mgmt-dns — flips to apply last of the lane roots in the ruled
+# order; its guards (prevent_destroy on the ops-access surface, blocking
+# conditions, the pause procedure in tofu-runner-operations.md) landed first.
+# Apply is sound because the reconcile traverses nothing this root manages; a
+# bad apply cannot sever its own revert path. Plan-mode until the earlier
+# movers' flips are done. Pod shape mirrors
+# cronjob-guardian-stripe-sandbox.yaml; passes the account id tofu variable.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tofu-guardian-mgmt-dns
+  namespace: tofu-system
+  labels:
+    app.kubernetes.io/name: tofu-runner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tofu-root: guardian-mgmt-dns
+spec:
+  schedule: "37 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3000
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: tofu-runner
+            guardian.dev/tofu-root: guardian-mgmt-dns
+        spec:
+          serviceAccountName: tofu-runner
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: tofu
+              image: ghcr.io/guardian-intelligence/tofu-runner:edge@sha256:e213585f3dbe09312c058118b6574e56af1ff54486cba03734d7670e6f5e3dc2 # {"$imagepolicy": "guardian-imageops:tofu-runner"}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: ROOT_NAME
+                  value: guardian-mgmt-dns
+                - name: ROOT_PATH
+                  value: ./src/infrastructure/bootstrap/guardian-mgmt-dns
+                - name: SOURCE_KIND
+                  value: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+                - name: SOURCE_NAME
+                  value: ${GUARDIAN_SOURCE_NAME:=guardian}
+                - name: TF_VAR_cloudflare_account_id
+                  valueFrom:
+                    configMapKeyRef:
+                      name: tofu-vars
+                      key: cloudflare_account_id
+              envFrom:
+                - secretRef:
+                    name: tofu-backend-r2
+                - secretRef:
+                    name: tofu-state-encryption
+                - secretRef:
+                    name: tofu-cloudflare-dns
+              volumeMounts:
+                - name: workspace
+                  mountPath: /workspace
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+          volumes:
+            - name: workspace
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}

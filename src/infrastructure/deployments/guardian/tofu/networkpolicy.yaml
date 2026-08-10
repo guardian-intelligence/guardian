@@ -1,0 +1,49 @@
+# Egress for the per-root runner pods. Each pod resolves the Flux source
+# object from the apiserver, fetches the source artifact from
+# source-controller, then runs tofu against its providers and the R2 state
+# backend. There is no ingress rule: the runner is a batch job, not a server,
+# and nothing dials it.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tofu-runner
+  namespace: tofu-system
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: tofu-runner
+  egress:
+    # resolveArtifact reads one Flux source object; the apiserver ClusterIP
+    # is not `world`, so it needs the entity explicitly.
+    - toEntities:
+        - kube-apiserver
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Source artifact tarballs. Cozystack's all-in-one Flux pod runs
+    # hostNetwork, and Cilium gives node addresses the host/remote-node
+    # reserved identities — an endpoint selector can never match them, so
+    # source-controller's http-sc (9790) is reached by entity.
+    - toEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "9790"
+              protocol: TCP
+    # tofu providers, GitHub, and the R2 state backend are all TLS on 443.
+    # world:443 rather than an FQDN allowlist because toFQDNs needs the L7
+    # DNS proxy the chained datapath rules out (same as the promotion lane).
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

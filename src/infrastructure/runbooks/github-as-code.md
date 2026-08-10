@@ -49,9 +49,10 @@ installation — is not managed here at all: the guardian-promotions ↔
 [`docs/github-apps.md`](../../../docs/github-apps.md), the same class as
 App installations themselves.
 
-Routine changes to this root are PRs; the controller plans and applies them
-(docs/tofu-gitops-design.md). The workstation path is break-glass only:
-[tofu-controller-operations.md](tofu-controller-operations.md).
+Routine changes to this root are PRs; the root's CronJob runner plans and
+applies them (docs/tofu-gitops-design.md). The workstation path is
+break-glass only:
+[tofu-runner-operations.md](tofu-runner-operations.md).
 
 ## First run is an import, not an apply
 

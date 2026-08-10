@@ -1,0 +1,82 @@
+# guardian-mgmt — the metal, last of all. prevent_destroy spans every server
+# resource, so a destroy plan fails and alerts instead of executing; cold
+# boot never meets this CronJob (no cluster, no runner — the disaster path
+# applies from a workstation with operator-vault credentials). Plan-mode
+# until its turn in the ruled order. Pod shape mirrors
+# cronjob-guardian-stripe-sandbox.yaml.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tofu-guardian-mgmt
+  namespace: tofu-system
+  labels:
+    app.kubernetes.io/name: tofu-runner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tofu-root: guardian-mgmt
+spec:
+  schedule: "47 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3000
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: tofu-runner
+            guardian.dev/tofu-root: guardian-mgmt
+        spec:
+          serviceAccountName: tofu-runner
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: tofu
+              image: ghcr.io/guardian-intelligence/tofu-runner:edge@sha256:e213585f3dbe09312c058118b6574e56af1ff54486cba03734d7670e6f5e3dc2 # {"$imagepolicy": "guardian-imageops:tofu-runner"}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: ROOT_NAME
+                  value: guardian-mgmt
+                - name: ROOT_PATH
+                  value: ./src/infrastructure/bootstrap/guardian-mgmt
+                - name: SOURCE_KIND
+                  value: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+                - name: SOURCE_NAME
+                  value: ${GUARDIAN_SOURCE_NAME:=guardian}
+              envFrom:
+                - secretRef:
+                    name: tofu-backend-r2
+                - secretRef:
+                    name: tofu-state-encryption
+                - secretRef:
+                    name: tofu-latitude
+              volumeMounts:
+                - name: workspace
+                  mountPath: /workspace
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+          volumes:
+            - name: workspace
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
