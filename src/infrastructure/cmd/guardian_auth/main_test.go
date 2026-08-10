@@ -90,7 +90,10 @@ func TestResolveCandidatesDefaultsToStableEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveCandidates() error = %v", err)
 	}
-	want := []accessCandidate{{Name: clusterName, KubernetesAPI: defaultKubeAPIServer}}
+	want := []accessCandidate{
+		{Name: tunnelCandidateName, KubernetesAPI: tunnelKubeAPIServer},
+		{Name: clusterName, KubernetesAPI: defaultKubeAPIServer},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolveCandidates(agent) = %#v, want %#v", got, want)
 	}
@@ -108,6 +111,19 @@ func TestResolveCandidatesDefaultsToStableEndpoint(t *testing.T) {
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolveCandidates(admin) = %#v, want %#v", got, want)
+	}
+}
+
+func TestResolveCandidatesExplicitServerSuppressesTunnel(t *testing.T) {
+	cfg := baseAgentConfig(t.TempDir())
+	cfg.KubeAPIServer = "https://203.0.113.9:6443"
+	got, err := resolveCandidates(cfg)
+	if err != nil {
+		t.Fatalf("resolveCandidates() error = %v", err)
+	}
+	want := []accessCandidate{{Name: clusterName, KubernetesAPI: "https://203.0.113.9:6443"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolveCandidates() = %#v, want %#v", got, want)
 	}
 }
 

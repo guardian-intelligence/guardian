@@ -2192,7 +2192,7 @@ auth = task(
     implementation = _auth_impl,
     name = "auth",
     group = ["infra"],
-    summary = "Authenticate kubectl to guardian-mgmt as a persona, through the tested guardian_auth binary against the stable API endpoint " + GUARDIAN_MGMT_KUBE_API + " with the committed cluster CA. Every persona verifies a staged kubeconfig before atomically installing it. read, write-basic, and write-all are OIDC device logins against the platform Keycloak; root mints breakglass x509 credentials from the Talos custody bundle and retains the audit behavior.",
+    summary = "Authenticate kubectl to guardian-mgmt as a persona, through the tested guardian_auth binary with the committed cluster CA, probing the local mgmt-tunnel loopback (tools/ops/mgmt-tunnel) before the stable API endpoint " + GUARDIAN_MGMT_KUBE_API + " so workstations outside the apiserver allowlist work with no flags. Every persona verifies a staged kubeconfig before atomically installing it. read, write-basic, and write-all are OIDC device logins against the platform Keycloak; root mints breakglass x509 credentials from the Talos custody bundle and retains the audit behavior.",
     args = {
         "audit_ntfy_url": args.string(default = BREAKGLASS_NTFY_URL, description = "ntfy URL paged with the breakglass reason."),
         "endpoints": args.string(default = "", description = "Optional comma-separated Talos endpoint overrides for --persona=root disaster recovery. Must be paired one-for-one with --nodes; defaults to " + GUARDIAN_MGMT_API_HOST + "."),

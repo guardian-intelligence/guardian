@@ -27,6 +27,15 @@ const (
 
 	defaultKubeAPIServer = "https://k8s.guardianintelligence.org:6443"
 	defaultTalosEndpoint = "k8s.guardianintelligence.org"
+
+	// The apiserver firewall admits only the operations VPS
+	// (operatorSubnets in src/infrastructure/talm/values.yaml); every other
+	// operator workstation reaches it through the SSH tunnel that
+	// tools/ops/mgmt-tunnel keeps bound to this loopback port. Probed before
+	// the direct endpoint because a missing listener refuses in microseconds
+	// while the firewalled direct path burns the whole probe timeout.
+	tunnelKubeAPIServer = "https://127.0.0.1:16443"
+	tunnelCandidateName = clusterName + "-tunnel"
 )
 
 // personas is the whole authentication surface: a rung of the ladder in
@@ -372,10 +381,19 @@ func resolveCandidates(cfg config) ([]accessCandidate, error) {
 	}
 	candidate := accessCandidate{Name: clusterName, KubernetesAPI: cfg.KubeAPIServer}
 	if personaFor(cfg.Persona).breakglass {
+		// Breakglass needs Talos port 50000, which the tunnel does not
+		// carry, so it stays pinned to the direct endpoint.
 		candidate.TalosEndpoint = defaultTalosEndpoint
 		candidate.TalosTarget = defaultTalosEndpoint
+		return []accessCandidate{candidate}, nil
 	}
-	return []accessCandidate{candidate}, nil
+	if cfg.KubeAPIServer != defaultKubeAPIServer {
+		return []accessCandidate{candidate}, nil
+	}
+	return []accessCandidate{
+		{Name: tunnelCandidateName, KubernetesAPI: tunnelKubeAPIServer},
+		candidate,
+	}, nil
 }
 
 func candidatesFromOverrides(endpointCSV, nodeCSV string) ([]accessCandidate, error) {
@@ -548,7 +566,14 @@ func (a *application) selectAgentCandidate(ctx context.Context, candidates []acc
 			break
 		}
 	}
-	return accessCandidate{}, fmt.Errorf("no reachable Kubernetes API candidate; attempts: %s", strings.Join(failures, "; "))
+	hint := ""
+	for _, candidate := range candidates {
+		if candidate.Name == tunnelCandidateName {
+			hint = "; workstations outside the apiserver allowlist connect through the tunnel: tools/ops/mgmt-tunnel install"
+			break
+		}
+	}
+	return accessCandidate{}, fmt.Errorf("no reachable Kubernetes API candidate; attempts: %s%s", strings.Join(failures, "; "), hint)
 }
 
 func (a *application) runBreakglass(ctx context.Context, candidates []accessCandidate) error {
