@@ -1,23 +1,30 @@
-// Package main is mythrad: the Wake Up Mythra game service. The netcode
-// architecture is journaled deterministic simulation — every surface runs
-// the identical fixed-point wasm sim and the server streams an ordered
-// event journal, never state (docs/netcode.md is the contract).
-//
-// This binary is currently the doorman shell of that design: it terminates
-// WebTransport, distributes the wasm modules and content-addressed assets,
-// and serves /wt-info. Sessions are accepted and immediately closed with
-// code 4503 while the journal protocol lands; the page renders a
-// construction notice. The behavior distribution ladder (live/shadow slots,
-// hot reload, client module hash) stays fully operational because module
-// distribution is unchanged by the protocol.
+// Package main is mythrad: the Wake Up Mythra game service — journal
+// authority, ticketed WebTransport session gateway, and module/asset
+// distribution. The netcode contract is docs/netcode.md: every surface
+// runs the identical fixed-point park module (Rust -> wasm); this binary
+// is the journal's writer, validator, and doorman, never a state streamer.
 //
 //   - tier 1 (content): dog skins are content-addressed assets mounted from a
-//     ConfigMap; clients stream them in on first sight. Shipping a new skin
-//     is a data change.
-//   - tier 2 (behavior): the live behavior module and an optional shadow
-//     module (Rust -> wasm, executed by wazero) are mounted from a ConfigMap
-//     and hot-reloaded without a restart. The client presentation module
-//     rides the same mount, addressed by content hash.
+//     ConfigMap; clients stream them in on first sight.
+//   - tier 2 (modules): the park module (game state machine), the live/shadow
+//     behavior slots, and the client presentation module are mounted from a
+//     ConfigMap and hot-reloaded without a restart; hashes ride every verdict
+//     so connected pages fetch updates mid-session. Authorities instantiate
+//     the park module at open; an epoch_advance journal event is how a swap
+//     becomes effective for a running park.
+//
+// Wire protocol (JSON lines on one bidi stream + JSON datagrams):
+//
+//	POST /session (OIDC bearer)          -> { ticket, endpoint, certHashB64? }
+//	client -> server stream:   {"type":"hello","proto":3,"ticket","since_seq","since_tick"}
+//	                           {"type":"intent","id","kind","p":base64}
+//	                           {"type":"resync","have"}
+//	server -> client stream:   {"type":"welcome","park","role","epoch","seq","tick","grid"}
+//	                           {"type":"event","seq","tick","kind","actor","intent","p"}
+//	                           {"type":"reject","intent","reason"}
+//	                           {"type":"snapshot","seq","tick","epoch","wh","z":deflate}
+//	client -> server datagram: {"type":"check","tick","wh","ct"}
+//	server -> client datagram: {"type":"verdict","tick","now","ok?","ct","cw","pw"}
 package main
 
 import (
@@ -38,22 +45,27 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	webtransport "github.com/quic-go/webtransport-go"
 	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
+
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/journal"
 )
 
 //go:embed behaviors/server.wasm
@@ -62,20 +74,48 @@ var defaultBehavior []byte
 //go:embed behaviors/client.wasm
 var defaultClientModule []byte
 
-// The park module is the complete game state machine (docs/netcode.md);
-// the authority loop instantiates it as the journal's validator.
-//
 //go:embed behaviors/park.wasm
 var defaultParkModule []byte
 
-// closeRebuilding is the application error code sessions receive while the
-// journal protocol is being built: the dial path (certs, UDP, H3 upgrade)
-// stays verifiable end to end in prod even though no game session exists.
-const closeRebuilding = 4503
-
 var (
+	mTickDur = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "mythra_tick_duration_seconds",
+		Help:    "Wall time of one authority tick incl. validation, batch append, and fan-out.",
+		Buckets: []float64{.0005, .001, .0025, .005, .01, .02, .03, .0417, .06, .1, .25},
+	})
+	mAppendDur = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "mythra_journal_append_seconds",
+		Help:    "Tick-batched journal append commit time.",
+		Buckets: []float64{.0005, .001, .0025, .005, .01, .02, .0417, .1, .5},
+	})
+	mSessions = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "mythra_sessions", Help: "Connected sessions."}, []string{"role"})
+	mParks = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "mythra_parks_open", Help: "Open park authorities."})
 	mHandshakes = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "mythra_handshakes_total", Help: "Session handshakes."}, []string{"result"})
+	mMints = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "mythra_session_mints_total", Help: "POST /session ticket mints."}, []string{"result"})
+	mEventsAppended = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_journal_events_total", Help: "Events appended to the journal."})
+	mAppendErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_journal_append_errors_total", Help: "Failed journal appends (authority closes on each)."})
+	mSnapshots = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_snapshots_total", Help: "Durable snapshots written."})
+	mIntentsRejected = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_intents_rejected_total", Help: "Intents rejected by validation or authorization."})
+	mChecks = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "mythra_checks_total", Help: "Client hash checks answered."}, []string{"result"})
+	mResyncs = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_resyncs_total", Help: "Client-requested divergence resyncs."})
+	mCatchup = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "mythra_catchup_total", Help: "Catch-up material served, by kind."}, []string{"kind"})
+	mDgSent = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_datagrams_sent_total", Help: "Datagrams sent."})
+	mDgErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_datagram_errors_total", Help: "SendDatagram failures."})
+	mDrops = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_fanout_dropped_total", Help: "Sessions closed for stream backlog."})
 	mBehaviorReloads = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "mythra_behavior_reloads_total", Help: "Behavior module hot-reloads."}, []string{"slot", "result"})
 	mBehaviorInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -95,19 +135,15 @@ func envStr(k, d string) string {
 	return d
 }
 
-// ---------- behavior engine ----------
+// ---------- module distribution ----------
 
-// A behavior is a wasm module over the shared sim core (built from
-// //src/services/mythrad/sim), executed by wazero. Modules import nothing
-// - no WASI, no host functions - so a behavior can compute but never reach
-// out, and identical modules in the live and shadow slots diff to zero
-// divergence by construction.
+// A behaviorSlot holds a wazero-instantiated module for the shadow-launch
+// lane; the park module's live instances belong to their authorities.
 type behaviorSlot struct {
 	mu   sync.Mutex
-	name string // "live" | "shadow"
+	name string
 	hash string
 	rt   wazero.Runtime
-	mem  api.Memory
 }
 
 func newBehaviorSlot(name string) *behaviorSlot { return &behaviorSlot{name: name} }
@@ -123,15 +159,13 @@ func (b *behaviorSlot) load(module []byte) error {
 	ctx := context.Background()
 	rt := wazero.NewRuntime(ctx)
 	mod, err := rt.Instantiate(ctx, module)
-	if err != nil {
+	if err != nil || mod.Memory() == nil {
 		rt.Close(ctx)
 		mBehaviorReloads.WithLabelValues(b.name, "error").Inc()
+		if err == nil {
+			err = fmt.Errorf("module must export memory")
+		}
 		return fmt.Errorf("%s: %w", b.name, err)
-	}
-	if mod.Memory() == nil {
-		rt.Close(ctx)
-		mBehaviorReloads.WithLabelValues(b.name, "error").Inc()
-		return fmt.Errorf("%s: module must export memory", b.name)
 	}
 	if b.rt != nil {
 		b.rt.Close(ctx)
@@ -139,7 +173,7 @@ func (b *behaviorSlot) load(module []byte) error {
 	mBehaviorInfo.DeletePartialMatch(prometheus.Labels{"slot": b.name})
 	mBehaviorInfo.WithLabelValues(b.name, hash).Set(1)
 	mBehaviorReloads.WithLabelValues(b.name, "ok").Inc()
-	b.hash, b.rt, b.mem = hash, rt, mod.Memory()
+	b.hash, b.rt = hash, rt
 	log.Printf("behavior %s loaded: %s", b.name, hash)
 	return nil
 }
@@ -149,7 +183,7 @@ func (b *behaviorSlot) unload() {
 	defer b.mu.Unlock()
 	if b.rt != nil {
 		b.rt.Close(context.Background())
-		b.rt, b.mem, b.hash = nil, nil, ""
+		b.rt, b.hash = nil, ""
 		mBehaviorInfo.DeletePartialMatch(prometheus.Labels{"slot": b.name})
 		log.Printf("behavior %s unloaded", b.name)
 	}
@@ -161,11 +195,12 @@ func (b *behaviorSlot) loaded() (string, bool) {
 	return b.hash, b.rt != nil
 }
 
-// clientModule tracks the presentation module served to browsers: raw bytes
-// plus a short content hash. Pages fetch by hash, so the bytes are
-// immutable per URL and a hash flip is the update signal.
+// clientModule tracks a distributed module's bytes plus content hash:
+// pages fetch by hash, so bytes are immutable per URL and a hash flip on a
+// verdict is the update signal.
 type clientModule struct {
 	mu    sync.Mutex
+	slot  string
 	bytes []byte
 	hash  string
 }
@@ -178,9 +213,9 @@ func (c *clientModule) set(module []byte) {
 	c.bytes, c.hash = module, hash
 	c.mu.Unlock()
 	if changed {
-		mBehaviorInfo.DeletePartialMatch(prometheus.Labels{"slot": "client"})
-		mBehaviorInfo.WithLabelValues("client", hash).Set(1)
-		log.Printf("client module loaded: %s", hash)
+		mBehaviorInfo.DeletePartialMatch(prometheus.Labels{"slot": c.slot})
+		mBehaviorInfo.WithLabelValues(c.slot, hash).Set(1)
+		log.Printf("%s module loaded: %s", c.slot, hash)
 	}
 }
 
@@ -190,9 +225,9 @@ func (c *clientModule) get() ([]byte, string) {
 	return c.bytes, c.hash
 }
 
-// watchBehaviors polls the mounted behavior dir; ConfigMap edits land on the
-// mount within ~a minute of Flux applying them, with no pod restart.
-func watchBehaviors(dir string, live, shadow *behaviorSlot, client *clientModule) {
+// watchBehaviors polls the mounted behavior dir; ConfigMap edits land on
+// the mount within ~a minute of Flux applying them, with no pod restart.
+func watchBehaviors(dir string, live, shadow *behaviorSlot, client, park *clientModule) {
 	load := func() {
 		if module, err := os.ReadFile(filepath.Join(dir, "live.wasm")); err == nil {
 			if err := live.load(module); err != nil {
@@ -208,6 +243,9 @@ func watchBehaviors(dir string, live, shadow *behaviorSlot, client *clientModule
 		}
 		if module, err := os.ReadFile(filepath.Join(dir, "client.wasm")); err == nil && len(module) > 8 {
 			client.set(module)
+		}
+		if module, err := os.ReadFile(filepath.Join(dir, "park.wasm")); err == nil && len(module) > 8 {
+			park.set(module)
 		}
 	}
 	load()
@@ -227,12 +265,11 @@ type asset struct {
 type assetCatalog struct {
 	mu    sync.Mutex
 	byRef map[string]*asset // "name.hash" -> asset
-	skin  string            // current default skin ref: "cell" or "name.hash"
 	dir   string
 }
 
 func newAssetCatalog(dir string) *assetCatalog {
-	c := &assetCatalog{byRef: map[string]*asset{}, skin: "cell", dir: dir}
+	c := &assetCatalog{byRef: map[string]*asset{}, dir: dir}
 	c.reload()
 	go func() {
 		for range time.Tick(2 * time.Second) {
@@ -246,18 +283,8 @@ func (c *assetCatalog) reload() {
 	entries, _ := os.ReadDir(c.dir)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	skin := "cell"
 	for _, e := range entries {
 		name := e.Name()
-		if name == "skins.json" {
-			if raw, err := os.ReadFile(filepath.Join(c.dir, name)); err == nil {
-				var m map[string]string
-				if json.Unmarshal(raw, &m) == nil && m["default"] != "" {
-					skin = m["default"]
-				}
-			}
-			continue
-		}
 		if !strings.HasSuffix(name, ".svg") {
 			continue
 		}
@@ -272,16 +299,6 @@ func (c *assetCatalog) reload() {
 		if _, ok := c.byRef[ref]; !ok {
 			c.byRef[ref] = &asset{name: base, hash: h, body: body}
 			log.Printf("asset loaded: %s (%d bytes)", ref, len(body))
-		}
-	}
-	// The default skin only takes effect once the referenced asset exists,
-	// so state can never reference an asset the server cannot serve.
-	c.skin = "cell"
-	if skin != "cell" {
-		for ref, a := range c.byRef {
-			if a.name == skin {
-				c.skin = ref
-			}
 		}
 	}
 }
@@ -300,7 +317,7 @@ func (c *assetCatalog) get(ref string) ([]byte, bool) {
 
 // rotatingCert regenerates the self-signed ECDSA cert at half-life so the
 // serverCertificateHashes contract (<=14 days validity) holds for a
-// long-running pod; /wt-info always serves the current hash.
+// long-running pod; /session always serves the current hash.
 type rotatingCert struct {
 	mu   sync.Mutex
 	cert tls.Certificate
@@ -349,8 +366,7 @@ func (rc *rotatingCert) get() (tls.Certificate, [32]byte) {
 }
 
 // fileCert serves a CA-issued cert from mounted Secret files, re-reading on
-// change so cert-manager renewals land without a restart. loaded() reports
-// whether a real cert is being served (vs the self-signed fallback).
+// change so cert-manager renewals land without a restart.
 type fileCert struct {
 	mu       sync.Mutex
 	certFile string
@@ -404,6 +420,31 @@ func (fc *fileCert) get() *tls.Certificate {
 	return fc.cert
 }
 
+// ---------- database ----------
+
+// databaseURL builds the journal DSN. DATABASE_URL wins (local dev); in
+// the cluster the password arrives as a mounted Secret file so rotation
+// rides the kubelet sync, keeping this Deployment reloader-free (the
+// behavior hot-reload doctrine).
+func databaseURL() (string, error) {
+	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
+		return dsn, nil
+	}
+	pwFile := os.Getenv("PG_PASSWORD_FILE")
+	if pwFile == "" {
+		return "", fmt.Errorf("neither DATABASE_URL nor PG_PASSWORD_FILE set")
+	}
+	pw, err := os.ReadFile(pwFile)
+	if err != nil {
+		return "", err
+	}
+	host := envStr("PG_HOST", "postgres-products-rw.tenant-guardian-prod.svc:5432")
+	db := envStr("PG_DATABASE", "mythra")
+	user := envStr("PG_USER", "mythra")
+	return fmt.Sprintf("postgresql://%s:%s@%s/%s?sslmode=require&pool_max_conns=4",
+		user, url.QueryEscape(strings.TrimSpace(string(pw))), host, db), nil
+}
+
 func main() {
 	wtPort := envInt("WT_PORT", 4433)
 	httpPort := envInt("HTTP_PORT", 9634)
@@ -412,6 +453,10 @@ func main() {
 	assetDir := envStr("ASSET_DIR", "/etc/mythra/assets")
 	publicAddr := envStr("PUBLIC_ADDR", "") // "host:port" advertised to clients
 	allowedOrigins := envStr("ALLOWED_ORIGINS", "")
+	maxSessions := envInt("MAX_SESSIONS", 4000)
+	issuer := envStr("OIDC_ISSUER", "https://guardianintelligence.org/realms/guardianintelligence.org")
+	clientIDs := envStr("OIDC_CLIENT_IDS", "wake-up-mythra,mythra-loadgen")
+	requireEmail := envStr("REQUIRE_EMAIL_VERIFIED", "false") == "true"
 
 	sans := []net.IP{net.ParseIP("127.0.0.1")}
 	if host, _, err := net.SplitHostPort(publicAddr); err == nil {
@@ -434,19 +479,52 @@ func main() {
 	if err := live.load(defaultBehavior); err != nil {
 		log.Fatalf("embedded default behavior invalid: %v", err)
 	}
-	client := &clientModule{}
+	client := &clientModule{slot: "client"}
 	client.set(defaultClientModule)
-	go watchBehaviors(behaviorDir, live, shadow, client)
+	parkMod := &clientModule{slot: "park"}
+	parkMod.set(defaultParkModule)
+	go watchBehaviors(behaviorDir, live, shadow, client, parkMod)
 
 	assets := newAssetCatalog(assetDir)
+
+	// The journal comes up lazily: pool creation is offline, the schema
+	// migration retries in the background, and hellos are refused with
+	// "park unavailable" until the truth store is writable.
+	dsn, err := databaseURL()
+	if err != nil {
+		log.Fatalf("journal database: %v", err)
+	}
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		log.Fatalf("journal pool: %v", err)
+	}
+	j := journal.NewPg(pool)
+	var journalReady atomic.Bool
+	go func() {
+		for {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			err := j.Migrate(ctx)
+			cancel()
+			if err == nil {
+				journalReady.Store(true)
+				log.Print("journal ready")
+				return
+			}
+			log.Printf("journal not ready (retrying in 5s): %v", err)
+			time.Sleep(5 * time.Second)
+		}
+	}()
+
+	mods := &modules{client: client, park: parkMod}
+	registry := newParks(func() []byte { b, _ := parkMod.get(); return b }, j, mods)
+	handlers := &gameHandlers{parks: registry, tickets: newTicketMint(), maxSessions: maxSessions}
+	gate := newOIDCGate(issuer, clientIDs, requireEmail)
 
 	wtMux := http.NewServeMux()
 	wt := webtransport.Server{
 		H3: &http3.Server{
 			Addr: fmt.Sprintf(":%d", wtPort),
 			TLSConfig: &tls.Config{
-				// CA-issued cert when the mounted Secret has one; self-signed
-				// fallback (hash-pinned dial) until then.
 				GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 					if c := fc.get(); c != nil {
 						return c, nil
@@ -455,6 +533,20 @@ func main() {
 					return &c, nil
 				},
 				NextProtos: []string{http3.NextProtoH3},
+			},
+			// Sessions carry an event log at human action rate plus tiny
+			// datagrams: small flow-control windows bound per-session
+			// buffer memory so the session cap, not buffer growth, is the
+			// memory envelope. Snapshots stream fine through the maximums.
+			QUICConfig: &quic.Config{
+				EnableDatagrams:                true,
+				MaxIncomingStreams:             16,
+				MaxIncomingUniStreams:          16,
+				InitialStreamReceiveWindow:     16 * 1024,
+				MaxStreamReceiveWindow:         256 * 1024,
+				InitialConnectionReceiveWindow: 32 * 1024,
+				MaxConnectionReceiveWindow:     512 * 1024,
+				MaxIdleTimeout:                 60 * time.Second,
 			},
 			Handler:         wtMux,
 			EnableDatagrams: true,
@@ -473,21 +565,31 @@ func main() {
 		},
 	}
 	wtMux.HandleFunc("/wt", func(w http.ResponseWriter, r *http.Request) {
+		if !journalReady.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		sess, err := wt.Upgrade(w, r)
 		if err != nil {
 			mHandshakes.WithLabelValues("upgrade_failed").Inc()
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		mHandshakes.WithLabelValues("rebuilding").Inc()
-		sess.CloseWithError(closeRebuilding, "rebuilding: journal protocol landing")
+		go handlers.handleSession(sess)
 	})
 
-	// Connect info, game modules, and content-addressed assets, served
-	// through the normal Cloudflare-proxied ingress (the apex path-routes
-	// these here; the page itself is the web app's job). The WebTransport
-	// dial goes direct to PUBLIC_ADDR with the cert hash from /wt-info.
+	// Ticket mint, game modules, and content-addressed assets ride the
+	// Cloudflare-proxied ingress; only the QUIC dial goes direct to
+	// PUBLIC_ADDR, pinned by the hash from /session while self-signed.
+	certHash := func() (string, bool) {
+		if fc.loaded() {
+			return "", false
+		}
+		_, hash := rc.get()
+		return base64.StdEncoding.EncodeToString(hash[:]), true
+	}
 	pageMux := http.NewServeMux()
+	pageMux.HandleFunc("/session", handlers.handleSessionMint(gate, publicAddr, certHash))
 	pageMux.HandleFunc("/wt-info", func(w http.ResponseWriter, r *http.Request) {
 		addr := publicAddr
 		if addr == "" {
@@ -496,26 +598,28 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		_, cw := client.get()
-		info := map[string]any{"addr": addr, "clientWasm": cw}
-		// The hash rides only while the self-signed fallback serves: with a
-		// CA-issued cert the dial is the standards path (WebKit-compatible).
-		if !fc.loaded() {
-			_, hash := rc.get()
-			info["certHashB64"] = base64.StdEncoding.EncodeToString(hash[:])
+		_, pw := parkMod.get()
+		info := map[string]any{"addr": addr, "clientWasm": cw, "parkWasm": pw}
+		if hash, selfSigned := certHash(); selfSigned {
+			info["certHashB64"] = hash
 		}
 		json.NewEncoder(w).Encode(info)
 	})
-	pageMux.HandleFunc("/behavior/client.wasm", func(w http.ResponseWriter, r *http.Request) {
-		module, hash := client.get()
-		if len(module) == 0 {
-			http.NotFound(w, r)
-			return
+	serveModule := func(mod *clientModule) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			module, hash := mod.get()
+			if len(module) == 0 {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/wasm")
+			w.Header().Set("ETag", `"`+hash+`"`)
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			w.Write(module)
 		}
-		w.Header().Set("Content-Type", "application/wasm")
-		w.Header().Set("ETag", `"`+hash+`"`)
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		w.Write(module)
-	})
+	}
+	pageMux.HandleFunc("/behavior/client.wasm", serveModule(client))
+	pageMux.HandleFunc("/behavior/park.wasm", serveModule(parkMod))
 	pageMux.HandleFunc("/assets/", func(w http.ResponseWriter, r *http.Request) {
 		ref := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/assets/"), ".svg")
 		body, ok := assets.get(ref)
@@ -532,7 +636,7 @@ func main() {
 	obsMux.Handle("/metrics", promhttp.Handler())
 	obsMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
 
-	log.Printf("mythrad: wt=:%d http=:%d metrics=:%d public=%s", wtPort, httpPort, metricsPort, publicAddr)
+	log.Printf("mythrad: wt=:%d http=:%d metrics=:%d public=%s issuer=%s", wtPort, httpPort, metricsPort, publicAddr, issuer)
 	go func() { log.Fatal(wt.ListenAndServe()) }()
 	go func() { log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", httpPort), pageMux)) }()
 	go func() { log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", metricsPort), obsMux)) }()
@@ -540,6 +644,6 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	<-sig
-	log.Print("SIGTERM: closing sessions (clients redial against the replacement)")
+	log.Print("SIGTERM: closing sessions (clients rejoin the replacement by journal catch-up)")
 	wt.Close()
 }

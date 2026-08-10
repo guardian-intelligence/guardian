@@ -43,6 +43,23 @@ spec:
           annotations:
             summary: "mythrad metrics scrape is down"
             description: "No mythrad replica has been scrapeable for five minutes; every other mythrad rule is blind while this fires."
+        - alert: MythradTickBudgetExceeded
+          expr: histogram_quantile(0.99, sum(rate(mythra_tick_duration_seconds_bucket[5m])) by (le)) > 0.035
+          for: 10m
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "mythrad tick p99 above 35ms"
+            description: "Authority tick p99 (validation + batch append + fan-out) is converging on the 41.7ms budget at 24Hz."
+        - alert: MythradJournalAppendErrors
+          expr: increase(mythra_journal_append_errors_total[10m]) > 0
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "mythrad journal appends are failing"
+            description: "Each failure closes the affected park authority for a journal-clean reopen (durable-before-visible); sustained failures mean the products Postgres is unhealthy or the mythra credentials are wrong."
         - alert: MythradBehaviorReloadRejected
           expr: increase(mythra_behavior_reloads_total{result="error"}[10m]) > 0
           labels:

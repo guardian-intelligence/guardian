@@ -45,16 +45,18 @@ type Snapshot struct {
 	State []byte
 }
 
-// ErrConflict reports a lost single-writer race: another writer appended
-// at the same seq. The caller is not the park's authority anymore (or a
-// second authority exists); it must not retry blindly.
+// ErrConflict reports a lost single-writer race: the log has moved past
+// afterSeq, so another writer exists (or this caller is stale). The caller
+// is not the park's authority anymore; it must not retry blindly.
 var ErrConflict = errors.New("journal: append conflict (second writer?)")
 
 type Journal interface {
-	// Append atomically appends events in order, assigning dense seqs
-	// starting at the park's last seq + 1, and returns the first assigned
-	// seq. Either every event lands or none do.
-	Append(ctx context.Context, parkID int64, events []Event) (int64, error)
+	// Append atomically appends events at afterSeq+1..afterSeq+len,
+	// returning the first assigned seq. afterSeq is the caller's cached
+	// log position — the single-writer enforcement: if the log has moved,
+	// the append fails with ErrConflict instead of interleaving. Either
+	// every event lands or none do.
+	Append(ctx context.Context, parkID int64, afterSeq int64, events []Event) (int64, error)
 	// Read streams events with Seq >= fromSeq in seq order.
 	Read(ctx context.Context, parkID int64, fromSeq int64, fn func(Event) error) error
 	PutSnapshot(ctx context.Context, parkID int64, s Snapshot) error
@@ -133,7 +135,7 @@ func (p *Pg) Migrate(ctx context.Context) error {
 	return nil
 }
 
-func (p *Pg) Append(ctx context.Context, parkID int64, events []Event) (int64, error) {
+func (p *Pg) Append(ctx context.Context, parkID int64, afterSeq int64, events []Event) (int64, error) {
 	if len(events) == 0 {
 		return 0, errors.New("journal: empty append")
 	}
@@ -142,35 +144,41 @@ func (p *Pg) Append(ctx context.Context, parkID int64, events []Event) (int64, e
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
-	var last int64
-	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(MAX(seq), 0) FROM park_events WHERE park_id = $1`,
-		parkID,
-	).Scan(&last); err != nil {
-		return 0, err
-	}
 	batch := &pgx.Batch{}
 	for i, ev := range events {
 		batch.Queue(
 			`INSERT INTO park_events
 			   (park_id, seq, tick, epoch, kind, actor, intent_id, payload)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-			parkID, last+1+int64(i), int64(ev.Tick), int32(ev.Epoch),
+			parkID, afterSeq+1+int64(i), int64(ev.Tick), int32(ev.Epoch),
 			int16(ev.Kind), ev.Actor, int64(ev.IntentID), ev.Payload)
 	}
 	if err := tx.SendBatch(ctx, batch).Close(); err != nil {
 		// The (park_id, seq) primary key is the single-writer enforcement:
-		// a concurrent writer computed the same base and one of us loses.
+		// a log that moved past afterSeq collides here and the stale
+		// writer loses instead of interleaving.
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return 0, ErrConflict
 		}
 		return 0, err
 	}
+	// A gap (afterSeq ahead of the log) must also fail: seqs are dense.
+	var prior bool
+	if err := tx.QueryRow(ctx,
+		`SELECT $2 = 0 OR EXISTS (
+		   SELECT 1 FROM park_events WHERE park_id = $1 AND seq = $2
+		 )`, parkID, afterSeq,
+	).Scan(&prior); err != nil {
+		return 0, err
+	}
+	if !prior {
+		return 0, ErrConflict
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, err
 	}
-	return last + 1, nil
+	return afterSeq + 1, nil
 }
 
 func (p *Pg) Read(ctx context.Context, parkID int64, fromSeq int64, fn func(Event) error) error {
