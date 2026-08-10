@@ -8,10 +8,26 @@
         "off": false
       },
       "defaultVariant": "on"
+    },
+    "netcode-check-seconds": {
+      "state": "ENABLED",
+      "variants": {
+        "eager": 2,
+        "default": 5,
+        "relaxed": 15
+      },
+      "defaultVariant": "default",
+      "targeting": {
+        "fractional": [
+          ["eager", 33],
+          ["default", 34],
+          ["relaxed", 33]
+        ]
+      }
     }
   },
   "metadata": {
     "flagSetId": "guardian-prod",
-    "revision": "2"
+    "revision": "3"
   }
 }
