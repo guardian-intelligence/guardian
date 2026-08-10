@@ -60,7 +60,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: mythrad
-          image: ghcr.io/guardian-intelligence/mythrad:edge@sha256:e9eb67afab6aecb073594401618a106eea80b21af5081501ed1cec88b924e8a4 # {"$imagepolicy": "guardian-imageops:mythrad"}
+          image: ghcr.io/guardian-intelligence/mythrad:edge@sha256:2a729c51df22cda74bcdf13c8da7c02a839ed4f9b4d648e63ca1cc2074eba1ae # {"$imagepolicy": "guardian-imageops:mythrad"}
           env:
             - name: WT_PORT
               value: "4433"
