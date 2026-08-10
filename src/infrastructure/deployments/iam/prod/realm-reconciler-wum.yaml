@@ -20,7 +20,11 @@ metadata:
     kustomize.toolkit.fluxcd.io/substitute: disabled
 spec:
   backoffLimit: 20
-  activeDeadlineSeconds: 600
+  # Generous: the Job is applied in the same reconcile as a Keycloak roll,
+  # so its clock can start many minutes before there is a healthy endpoint
+  # to reconcile against — and an exceeded deadline is terminal, holding
+  # the whole stage (wait: true) until a spec change recreates the Job.
+  activeDeadlineSeconds: 1800
   template:
     metadata:
       annotations:
