@@ -334,6 +334,10 @@ type bot struct {
 	sub       string
 }
 
+// errLog rate-limits connect-error logging to one line per few seconds
+// across the fleet: enough to diagnose, not enough to flood.
+var lastErrLog atomic.Int64
+
 func (b *bot) runForever(ctx context.Context) {
 	backoff := 300 * time.Millisecond
 	for ctx.Err() == nil {
@@ -342,9 +346,15 @@ func (b *bot) runForever(ctx context.Context) {
 			continue
 		}
 		err := b.runOnce(ctx)
-		breakerReport(false)
+		// Report the outcome exactly once: a clean return (session held then
+		// closed) is a success, only an error trips the breaker.
+		breakerReport(err == nil)
 		if err != nil {
 			counter(&lgConnects, "error").Add(1)
+			now := time.Now().Unix()
+			if prev := lastErrLog.Load(); now-prev >= 3 && lastErrLog.CompareAndSwap(prev, now) {
+				log.Printf("bot %d connect error: %v", b.idx, err)
+			}
 		}
 		time.Sleep(backoff + time.Duration(rand.Int63n(int64(backoff))))
 		backoff = min(backoff*2, 10*time.Second)
@@ -354,6 +364,7 @@ func (b *bot) runForever(ctx context.Context) {
 func (b *bot) runOnce(ctx context.Context) error {
 	bearer, sub, err := b.toks.get(ctx)
 	if err != nil {
+		counter(&lgConnects, "err_token").Add(1)
 		return fmt.Errorf("token: %w", err)
 	}
 	b.sub = sub + "/bot-" + strconv.Itoa(b.idx)
@@ -362,11 +373,13 @@ func (b *bot) runOnce(ctx context.Context) error {
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		counter(&lgConnects, "err_mint_net").Add(1)
 		return fmt.Errorf("mint: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		counter(&lgConnects, "err_mint_"+strconv.Itoa(resp.StatusCode)).Add(1)
 		return fmt.Errorf("mint %d: %s", resp.StatusCode, body)
 	}
 	var sess struct {
@@ -384,6 +397,7 @@ func (b *bot) runOnce(ctx context.Context) error {
 	_, wtSess, err := d.Dial(dialCtx, b.targetURL, nil)
 	cancel()
 	if err != nil {
+		counter(&lgConnects, "err_dial").Add(1)
 		return fmt.Errorf("dial: %w", err)
 	}
 	defer wtSess.CloseWithError(0, "bye")

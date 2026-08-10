@@ -455,6 +455,7 @@ func main() {
 	allowedOrigins := envStr("ALLOWED_ORIGINS", "")
 	maxSessions := envInt("MAX_SESSIONS", 4000)
 	issuer := envStr("OIDC_ISSUER", "https://guardianintelligence.org/realms/guardianintelligence.org")
+	jwksURL := envStr("OIDC_JWKS_URL", "")
 	clientIDs := envStr("OIDC_CLIENT_IDS", "wake-up-mythra,mythra-loadgen")
 	requireEmail := envStr("REQUIRE_EMAIL_VERIFIED", "false") == "true"
 
@@ -518,7 +519,7 @@ func main() {
 	mods := &modules{client: client, park: parkMod}
 	registry := newParks(func() []byte { b, _ := parkMod.get(); return b }, j, mods)
 	handlers := &gameHandlers{parks: registry, tickets: newTicketMint(), maxSessions: maxSessions}
-	gate := newOIDCGate(issuer, clientIDs, requireEmail)
+	gate := newOIDCGate(issuer, jwksURL, clientIDs, requireEmail)
 
 	wtMux := http.NewServeMux()
 	wt := webtransport.Server{

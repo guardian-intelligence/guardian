@@ -52,6 +52,9 @@ spec:
               value: https://mythrad:4433/wt
             - name: SESSION_URL
               value: http://mythrad.tenant-guardian-prod.svc/session
+            # Internal Keycloak over HTTP: the driver has no CA bundle.
+            - name: TOKEN_URL
+              value: http://keycloak.tenant-guardian-prod.svc/realms/guardianintelligence.org/protocol/openid-connect/token
             - name: PARK_WASM
               value: http://mythrad.tenant-guardian-prod.svc/behavior/park.wasm
             - name: CLIENT_SECRET_FILE
