@@ -1,8 +1,8 @@
 # guardian-mgmt-edge-policy — second mover: its lane token writes zone
 # policy only (no DNS-record or LB permission), so the worst compromise
-# cannot move traffic. Same plan-only soak contract as the stripe root; the
-# flip to auto is its own PR after clean plans. Unblocks the Directus edge
-# cache rule that has been waiting on a workstation apply.
+# cannot move traffic. approvePlan is auto: the merged PR is the approval,
+# which also delivers the Directus edge cache rule that had been waiting on
+# a workstation apply.
 apiVersion: infra.contrib.fluxcd.io/v1alpha2
 kind: Terraform
 metadata:
@@ -12,6 +12,7 @@ metadata:
     app.kubernetes.io/name: tofu-controller
     app.kubernetes.io/part-of: guardian
 spec:
+  approvePlan: auto
   interval: 1h
   retryInterval: 2m
   path: ./src/infrastructure/bootstrap/guardian-mgmt-edge-policy
