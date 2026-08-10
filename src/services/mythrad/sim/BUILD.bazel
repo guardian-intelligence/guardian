@@ -153,3 +153,9 @@ diff_test(
     file1 = "//src/services/mythrad:behaviors/client.wasm",
     file2 = "//src/infrastructure/deployments/mythra/prod:behavior/client.wasm",
 )
+
+diff_test(
+    name = "park_configmap_lockstep_test",
+    file1 = "//src/services/mythrad:behaviors/park.wasm",
+    file2 = "//src/infrastructure/deployments/mythra/prod:behavior/park.wasm",
+)

@@ -62,6 +62,25 @@ spec:
         - name: mythrad
           image: ghcr.io/guardian-intelligence/mythrad:edge@sha256:7577f0fe1b760061578e4dcfdada0ac4d0510f94a322517942604a626856f02d # {"$imagepolicy": "guardian-imageops:mythrad"}
           env:
+            # The memory envelope: session cap × small QUIC flow-control
+            # windows, with the Go runtime held below the container limit.
+            - name: MAX_SESSIONS
+              value: "4000"
+            - name: GOMEMLIMIT
+              value: "750MiB"
+            - name: OIDC_ISSUER
+              value: "https://guardianintelligence.org/realms/guardianintelligence.org"
+            - name: OIDC_CLIENT_IDS
+              value: "wake-up-mythra,mythra-loadgen"
+            # Flips to "true" once the realm can issue email_verified
+            # (needs SMTP — docs/wake-up-mythra-development.md gaps).
+            - name: REQUIRE_EMAIL_VERIFIED
+              value: "false"
+            # Journal credentials arrive as a mounted file, not env, so
+            # rotation rides the kubelet Secret sync and this Deployment
+            # stays reloader-free (the hot-reload doctrine above).
+            - name: PG_PASSWORD_FILE
+              value: /etc/mythra/pg/mythra
             - name: WT_PORT
               value: "4433"
             - name: HTTP_PORT
@@ -113,6 +132,9 @@ spec:
             - name: wt-tls
               mountPath: /etc/mythra/tls
               readOnly: true
+            - name: pg-credentials
+              mountPath: /etc/mythra/pg
+              readOnly: true
           resources:
             requests:
               cpu: 500m
@@ -134,6 +156,15 @@ spec:
         - name: wt-tls
           secret:
             secretName: mythra-wt-tls
+            optional: true
+        # optional: hellos answer "park unavailable" until the products
+        # Postgres mints the mythra credentials; the journal retries.
+        - name: pg-credentials
+          secret:
+            secretName: postgres-products-credentials
+            items:
+              - key: mythra
+                path: mythra
             optional: true
 ---
 apiVersion: v1
@@ -214,6 +245,13 @@ spec:
     - host: wakeupmythra.com
       http:
         paths:
+          - path: /session
+            pathType: Prefix
+            backend:
+              service:
+                name: mythrad
+                port:
+                  number: 80
           - path: /wt-info
             pathType: Prefix
             backend:

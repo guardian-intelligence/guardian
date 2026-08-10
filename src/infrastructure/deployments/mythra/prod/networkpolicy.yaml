@@ -1,8 +1,60 @@
 # mythrad runs on the host network, so Cilium endpoint selectors do not
 # govern it: its exposure is controlled by the Talos ingress firewall (UDP
 # 4433 world rule in src/infrastructure/talm) and by which addresses the
-# process binds.
-#
+# process binds. Only the pod-network load generator keeps a policy here.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: mythrad-loadgen
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: mythrad-loadgen
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: mythrad-loadgen
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # The Keycloak token endpoint is fetched through the public edge like
+    # any external caller (same reasoning as the directus egress).
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # The game service is a host-network pod: Cilium sees node identities,
+    # not pod labels. 4433/udp is the QUIC dial; 9634/tcp is /session and
+    # module fetch (the Service's targetPort).
+    - toEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "4433"
+              protocol: UDP
+            - port: "9634"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-root
+            app.kubernetes.io/name: vminsert
+      toPorts:
+        - ports:
+            - port: "8480"
+              protocol: TCP
+---
 # wake-up-mythra-web's own flows. The page's game traffic (QUIC dial,
 # wt-info, wasm modules) never touches this pod's egress — the browser does
 # all of it. Beyond DNS the server has nothing to say to anyone.
