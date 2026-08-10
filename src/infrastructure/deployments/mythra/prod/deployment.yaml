@@ -69,18 +69,21 @@ spec:
             - name: GOMEMLIMIT
               value: "750MiB"
             - name: OIDC_ISSUER
-              value: "https://guardianintelligence.org/realms/guardianintelligence.org"
+              value: "https://auth.wakeupmythra.com/realms/wakeupmythra.com"
             # Tokens carry the public iss, but this hostNetwork distroless
             # pod fetches signing keys from Keycloak in-cluster over plain
             # HTTP — no CA bundle, no edge hairpin.
             - name: OIDC_JWKS_URL
-              value: "http://keycloak.tenant-guardian-prod.svc/realms/guardianintelligence.org/protocol/openid-connect/certs"
+              value: "http://keycloak.tenant-guardian-prod.svc/realms/wakeupmythra.com/protocol/openid-connect/certs"
             - name: OIDC_CLIENT_IDS
               value: "wake-up-mythra,mythra-loadgen"
-            # Flips to "true" once the realm can issue email_verified
-            # (needs SMTP — docs/wake-up-mythra-development.md gaps).
+            # Flips to "true" once every enabled broker asserts verified
+            # email (Google does; revisit when a broker that doesn't lands).
             - name: REQUIRE_EMAIL_VERIFIED
               value: "false"
+            # The park registry: /session refuses names outside this list.
+            - name: PARKS
+              value: "park-mythra"
             # Journal credentials arrive as a mounted file, not env, so
             # rotation rides the kubelet Secret sync and this Deployment
             # stays reloader-free (the hot-reload doctrine above).

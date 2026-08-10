@@ -40,7 +40,7 @@
 //!   checked_in_day u32 }
 #![cfg_attr(not(test), no_std)]
 
-use mythra_sim_core::{det_rand, step_dog, GRID_H, GRID_W};
+use mythra_sim_core::{GRID_H, GRID_W, det_rand, step_dog};
 
 #[cfg(target_arch = "wasm32")]
 #[panic_handler]

@@ -454,10 +454,19 @@ func main() {
 	publicAddr := envStr("PUBLIC_ADDR", "") // "host:port" advertised to clients
 	allowedOrigins := envStr("ALLOWED_ORIGINS", "")
 	maxSessions := envInt("MAX_SESSIONS", 4000)
-	issuer := envStr("OIDC_ISSUER", "https://guardianintelligence.org/realms/guardianintelligence.org")
+	issuer := envStr("OIDC_ISSUER", "https://auth.wakeupmythra.com/realms/wakeupmythra.com")
 	jwksURL := envStr("OIDC_JWKS_URL", "")
 	clientIDs := envStr("OIDC_CLIENT_IDS", "wake-up-mythra,mythra-loadgen")
 	requireEmail := envStr("REQUIRE_EMAIL_VERIFIED", "false") == "true"
+	// Parks are a fixed registry: /session refuses names outside it, so an
+	// authority (wazero runtime, goroutine, journal rows) only ever opens
+	// for a park an operator declared.
+	allowedParks := map[string]bool{}
+	for _, p := range strings.Split(envStr("PARKS", "park-mythra"), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			allowedParks[p] = true
+		}
+	}
 
 	sans := []net.IP{net.ParseIP("127.0.0.1")}
 	if host, _, err := net.SplitHostPort(publicAddr); err == nil {
@@ -518,7 +527,10 @@ func main() {
 
 	mods := &modules{client: client, park: parkMod}
 	registry := newParks(func() []byte { b, _ := parkMod.get(); return b }, j, mods)
-	handlers := &gameHandlers{parks: registry, tickets: newTicketMint(), maxSessions: maxSessions}
+	handlers := &gameHandlers{
+		parks: registry, tickets: newTicketMint(), maxSessions: maxSessions,
+		allowedParks: allowedParks, anonMints: newAnonLimiter(),
+	}
 	gate := newOIDCGate(issuer, jwksURL, clientIDs, requireEmail)
 
 	wtMux := http.NewServeMux()

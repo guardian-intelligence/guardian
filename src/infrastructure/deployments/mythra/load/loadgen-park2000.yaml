@@ -8,9 +8,10 @@
 #   kubectl -n tenant-guardian-prod logs -f job/mythrad-loadgen-park2000
 #   kubectl -n tenant-guardian-prod delete job mythrad-loadgen-park2000
 #
-# Egress (dns, world:443 for the Keycloak token endpoint, the host-network
+# Egress (dns, the in-cluster Keycloak token endpoint, the host-network
 # game service, vminsert) is admitted by the standing mythrad-loadgen
-# CiliumNetworkPolicy keyed on the component label.
+# CiliumNetworkPolicy keyed on the component label; the matching ingress
+# admit lives in the Keycloak policy (iam/prod/networkpolicy.yaml).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -54,7 +55,7 @@ spec:
               value: http://mythrad.tenant-guardian-prod.svc/session
             # Internal Keycloak over HTTP: the driver has no CA bundle.
             - name: TOKEN_URL
-              value: http://keycloak.tenant-guardian-prod.svc/realms/guardianintelligence.org/protocol/openid-connect/token
+              value: http://keycloak.tenant-guardian-prod.svc/realms/wakeupmythra.com/protocol/openid-connect/token
             - name: PARK_WASM
               value: http://mythrad.tenant-guardian-prod.svc/behavior/park.wasm
             - name: CLIENT_SECRET_FILE

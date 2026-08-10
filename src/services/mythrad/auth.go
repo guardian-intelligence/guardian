@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -162,65 +164,146 @@ func (g *oidcGate) verify(ctx context.Context, bearer string) (identity, error) 
 	return identity{Sub: claims.Sub, EmailVerified: claims.EmailVerified, Azp: claims.Azp}, nil
 }
 
-// handleSessionMint is POST /session: OIDC in, admission ticket out. The
-// email_verified requirement is config-gated until the realm can issue it
-// (no SMTP today — docs/wake-up-mythra-development.md gaps).
+// anonDeviceRe accepts the client-minted device UUID that names an
+// anonymous spectator. The id is only a stable pseudonym for feature
+// flags, traces, and the sign-in funnel join; it carries no write
+// authority, so forging one gains nothing.
+var anonDeviceRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// anonLimiter rate-limits anonymous session mints per client address:
+// they are the only unauthenticated mint path, so a token bucket bounds
+// what one source can spend.
+type anonLimiter struct {
+	mu      sync.Mutex
+	buckets map[string]*anonBucket
+}
+
+type anonBucket struct {
+	tokens float64
+	last   time.Time
+}
+
+func newAnonLimiter() *anonLimiter { return &anonLimiter{buckets: map[string]*anonBucket{}} }
+
+func (l *anonLimiter) allow(ip string) bool {
+	const burst, perMinute = 6.0, 6.0
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.buckets) > 65536 {
+		for k, b := range l.buckets {
+			if now.Sub(b.last) > time.Hour {
+				delete(l.buckets, k)
+			}
+		}
+	}
+	b := l.buckets[ip]
+	if b == nil {
+		b = &anonBucket{tokens: burst, last: now}
+		l.buckets[ip] = b
+	}
+	b.tokens = min(burst, b.tokens+perMinute*now.Sub(b.last).Minutes())
+	b.last = now
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
+}
+
+func clientIP(r *http.Request) string {
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		return ip
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// handleSessionMint is POST /session: identity in, admission ticket out.
+// Two doors: an OIDC bearer mints a player (or spectator) for the WUM
+// account it names, and a bare ?spectate&device=<uuid> mints an anonymous
+// spectator — the acquisition funnel. Parks are a fixed registry, not a
+// request-path side effect: an unknown name never opens an authority. The
+// email_verified requirement is config-gated until every broker asserts it.
 func (h *gameHandlers) handleSessionMint(gate *oidcGate, publicAddr string, certHash func() (string, bool)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
 			return
 		}
-		bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if bearer == "" {
-			http.Error(w, "missing bearer token", http.StatusUnauthorized)
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-		defer cancel()
-		id, err := gate.verify(ctx, bearer)
-		if err != nil {
-			mMints.WithLabelValues("denied").Inc()
-			log.Printf("session mint denied: %v", err)
-			status := http.StatusUnauthorized
-			if strings.Contains(err.Error(), "issuer unavailable") {
-				status = http.StatusServiceUnavailable
-			}
-			http.Error(w, "unauthorized", status)
-			return
-		}
-		if gate.requireEmail && !id.EmailVerified {
-			mMints.WithLabelValues("unverified").Inc()
-			http.Error(w, "email verification required", http.StatusForbidden)
-			return
-		}
-		// The load driver's single service account fans out into distinct
-		// bot identities; only its azp may claim a suffix, so a stolen
-		// player token can never mint someone else's dog.
-		if bot := r.URL.Query().Get("bot"); bot != "" {
-			if id.Azp != "mythra-loadgen" || len(bot) > 16 {
-				http.Error(w, "bot suffix not allowed", http.StatusForbidden)
-				return
-			}
-			id.Sub += "/bot-" + bot
-		}
 		park := r.URL.Query().Get("park")
 		if park == "" {
 			park = "park-mythra"
 		}
-		if len(park) > 64 {
-			http.Error(w, "park name too long", http.StatusBadRequest)
+		if !h.allowedParks[park] {
+			mMints.WithLabelValues("unknown_park").Inc()
+			http.Error(w, "unknown park", http.StatusNotFound)
 			return
 		}
 		role := "player"
 		if r.URL.Query().Has("spectate") {
 			role = "spectator"
 		}
+
+		var sub string
+		bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		switch {
+		case bearer == "" && role == "spectator":
+			device := r.URL.Query().Get("device")
+			if !anonDeviceRe.MatchString(device) {
+				http.Error(w, "anonymous spectating needs a device id", http.StatusBadRequest)
+				return
+			}
+			if !h.anonMints.allow(clientIP(r)) {
+				mMints.WithLabelValues("anon_limited").Inc()
+				http.Error(w, "too many anonymous sessions", http.StatusTooManyRequests)
+				return
+			}
+			sub = "anon:" + device
+			mMints.WithLabelValues("anon").Inc()
+		case bearer == "":
+			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			return
+		default:
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+			id, err := gate.verify(ctx, bearer)
+			if err != nil {
+				mMints.WithLabelValues("denied").Inc()
+				log.Printf("session mint denied: %v", err)
+				status := http.StatusUnauthorized
+				if strings.Contains(err.Error(), "issuer unavailable") {
+					status = http.StatusServiceUnavailable
+				}
+				http.Error(w, "unauthorized", status)
+				return
+			}
+			if gate.requireEmail && !id.EmailVerified {
+				mMints.WithLabelValues("unverified").Inc()
+				http.Error(w, "email verification required", http.StatusForbidden)
+				return
+			}
+			// The load driver's single service account fans out into distinct
+			// bot identities; only its azp may claim a suffix, so a stolen
+			// player token can never mint someone else's dog.
+			if bot := r.URL.Query().Get("bot"); bot != "" {
+				if id.Azp != "mythra-loadgen" || len(bot) > 16 {
+					http.Error(w, "bot suffix not allowed", http.StatusForbidden)
+					return
+				}
+				id.Sub += "/bot-" + bot
+			}
+			sub = id.Sub
+			mMints.WithLabelValues("ok").Inc()
+		}
+
 		tk := h.tickets.mint(ticket{
-			Sub: id.Sub, Park: park, Role: role,
+			Sub: sub, Park: park, Role: role,
 			Exp: time.Now().Add(60 * time.Second).Unix(),
 		})
-		mMints.WithLabelValues("ok").Inc()
 		resp := map[string]any{
 			"ticket": tk, "endpoint": publicAddr, "park": park, "role": role,
 		}

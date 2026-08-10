@@ -44,9 +44,11 @@ function Page() {
         </span>
         <span className="stat dim" id="role"></span>
         <button id="signin" style={{ display: "none" }}>
-          Sign in
+          Continue with Google
         </button>
-        <button id="checkin">Check in</button>
+        <button id="checkin" style={{ display: "none" }}>
+          Check in
+        </button>
       </div>
       <canvas id="grid" width={100} height={100}></canvas>
       <div className="who" id="who"></div>

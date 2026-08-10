@@ -360,6 +360,18 @@ resource "cloudflare_dns_record" "wakeupmythra_com_apex" {
   comment = "wake up mythra ${each.key} product edge"
 }
 
+resource "cloudflare_dns_record" "wakeupmythra_com_auth" {
+  for_each = local.public_ingress_origins
+
+  zone_id = data.cloudflare_zone.wakeupmythra_com.id
+  name    = "auth.wakeupmythra.com"
+  type    = "A"
+  content = each.value.public_ipv4
+  ttl     = 1
+  proxied = true
+  comment = "wake up mythra ${each.key} identity edge (Keycloak realm frontendUrl)"
+}
+
 # The game plane: browsers dial WebTransport/QUIC on this name directly -
 # Cloudflare cannot proxy it - so the record is DNS-only and points at the
 # node that binds UDP 4433 (the mythrad hostNetwork pin). Multi-node game

@@ -76,6 +76,7 @@ spec:
     kind: Issuer
   dnsNames:
     - wakeupmythra.com
+    - auth.wakeupmythra.com
   privateKey:
     algorithm: ECDSA
     size: 256

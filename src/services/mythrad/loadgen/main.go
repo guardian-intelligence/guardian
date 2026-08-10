@@ -567,7 +567,7 @@ func main() {
 		log.Fatalf("client secret: %v", err)
 	}
 	toks := &tokenSource{
-		tokenURL: envStr("TOKEN_URL", "https://guardianintelligence.org/realms/guardianintelligence.org/protocol/openid-connect/token"),
+		tokenURL: envStr("TOKEN_URL", "https://auth.wakeupmythra.com/realms/wakeupmythra.com/protocol/openid-connect/token"),
 		clientID: envStr("CLIENT_ID", "mythra-loadgen"),
 		secret:   strings.TrimSpace(string(secret)),
 	}

@@ -1,0 +1,175 @@
+# Steady-state reconciliation for the Wake Up Mythra realm, same doctrine
+# as the Guardian realm's reconciler: an empty database is initialized from
+# the checked-in realm import, and everything mutable afterwards is applied
+# through the Admin REST API by a service account scoped inside the realm it
+# manages. This realm carries no groups, broker mappers, or workflows, so
+# the loop is realm settings + the headless first-broker-login flow +
+# clients + identity providers.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-realm-reconciler-wum
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: keycloak-realm-reconciler
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+    guardian.dev/stage: prod
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: Enabled
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+spec:
+  backoffLimit: 20
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      annotations:
+        checksum/realm-config: bc0cf0701c940d0e9704174cc3f25da24b8414010c3e2396b48308eb6d2607af
+      labels:
+        app.kubernetes.io/name: keycloak-realm-reconciler
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/product: mythra
+        guardian.dev/stage: prod
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reconcile
+          image: quay.io/keycloak/keycloak@sha256:26939e1318d6f008fc2ee6e10cec1cf8f1ba8a21846c1bc81b91ed0506bc2a7a # 26.6.2
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              kcadm=/opt/keycloak/bin/kcadm.sh
+              config=/tmp/kcadm.config
+              server=http://keycloak.tenant-guardian-prod.svc
+              realm=wakeupmythra.com
+              trap 'rm -f "$config"' EXIT
+
+              "$kcadm" config credentials \
+                --config "$config" \
+                --server "$server" \
+                --realm "$realm" \
+                --client wum-realm-reconciler
+
+              "$kcadm" update "realms/$realm" \
+                --config "$config" \
+                -f "/realm/$realm.json"
+
+              # A realm update binds flows by alias but never creates them,
+              # and the broker update below rejects an unresolved
+              # firstBrokerLoginFlowAlias, so the flow must exist first. The
+              # flow and its execution are guarded independently so a run
+              # that died between the two creates converges on retry.
+              flow=broker-create-user-only
+              if ! "$kcadm" get "authentication/flows/$flow/executions" \
+                  --config "$config" --realm "$realm" >/dev/null 2>&1; then
+                "$kcadm" create authentication/flows \
+                  --config "$config" --realm "$realm" \
+                  -b "{\"alias\":\"$flow\",\"description\":\"First broker login with no user-facing steps\",\"providerId\":\"basic-flow\",\"topLevel\":true,\"builtIn\":false}"
+              fi
+              first_execution_id() {
+                "$kcadm" get "authentication/flows/$flow/executions" \
+                  --config "$config" --realm "$realm" \
+                  --fields id --format csv --noquotes | head -n 1
+              }
+              exec_id="$(first_execution_id)"
+              if test -z "$exec_id"; then
+                "$kcadm" create "authentication/flows/$flow/executions/execution" \
+                  --config "$config" --realm "$realm" \
+                  -b '{"provider":"idp-create-user-if-unique"}'
+                exec_id="$(first_execution_id)"
+              fi
+              if test -z "$exec_id"; then
+                echo "flow $flow has no execution to require" >&2
+                exit 1
+              fi
+              "$kcadm" update "authentication/flows/$flow/executions" \
+                --config "$config" --realm "$realm" \
+                -b "{\"id\":\"$exec_id\",\"requirement\":\"REQUIRED\"}"
+
+              for client in /clients/*.json; do
+                client_id="${client##*/}"
+                client_id="${client_id%.json}"
+                internal_id="$("$kcadm" get clients \
+                  --config "$config" --realm "$realm" \
+                  -q "clientId=$client_id" --fields id --format csv --noquotes)"
+                if test -n "$internal_id"; then
+                  "$kcadm" update "clients/$internal_id" \
+                    --config "$config" --realm "$realm" -f "$client"
+                else
+                  "$kcadm" create clients \
+                    --config "$config" --realm "$realm" -f "$client"
+                fi
+              done
+
+              desired_providers=""
+              for provider in /providers/*.json; do
+                alias="${provider##*/}"
+                alias="${alias%.json}"
+                desired_providers="$desired_providers $alias"
+                if "$kcadm" get "identity-provider/instances/$alias" \
+                    --config "$config" --realm "$realm" >/dev/null 2>&1; then
+                  "$kcadm" update "identity-provider/instances/$alias" \
+                    --config "$config" --realm "$realm" -f "$provider"
+                else
+                  "$kcadm" create identity-provider/instances \
+                    --config "$config" --realm "$realm" -f "$provider"
+                fi
+              done
+
+              for configured_provider in $("$kcadm" get identity-provider/instances \
+                  --config "$config" --realm "$realm" \
+                  --fields alias --format csv --noquotes); do
+                case " $desired_providers " in
+                  *" $configured_provider "*) ;;
+                  *) "$kcadm" delete "identity-provider/instances/$configured_provider" \
+                    --config "$config" --realm "$realm" ;;
+                esac
+              done
+          env:
+            - name: KC_CLI_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-wum-realm-reconciler-client
+                  key: password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+              ephemeral-storage: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+              ephemeral-storage: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: realm
+              mountPath: /realm
+              readOnly: true
+            - name: clients
+              mountPath: /clients
+              readOnly: true
+            - name: providers
+              mountPath: /providers
+              readOnly: true
+      volumes:
+        - name: realm
+          configMap:
+            name: keycloak-wum-realm-settings
+        - name: clients
+          configMap:
+            name: keycloak-wum-clients
+        - name: providers
+          configMap:
+            name: keycloak-wum-identity-providers
