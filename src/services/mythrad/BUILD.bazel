@@ -41,33 +41,24 @@ go_binary(
 # value-type declarations (layer 1 is the source token gate in ./sim).
 go_test(
     name = "mythrad_test",
-    srcs = [
-        "delta_test.go",
-        "wasm_gate_test.go",
-    ],
+    srcs = ["wasm_gate_test.go"],
     embed = [":mythrad_lib"],
 )
 
-# The image carries both the service and its protocol load driver; the
-# loadgen Job selects it via command. k6 cannot speak WebTransport, so the
-# driver ships here rather than as a k6 script (docs/loadtest.md conventions
-# still apply: results land in VictoriaMetrics, never only pod logs).
 pkg_tar(
     name = "mythrad_layer",
     files = {
         ":mythrad": "app/mythrad",
-        "//src/services/mythrad/loadgen": "app/loadgen",
     },
     modes = {
         "app/mythrad": "0755",
-        "app/loadgen": "0755",
     },
 )
 
 oci_image(
     name = "image",
     annotations = {
-        "org.opencontainers.image.description": "Room presence and tick service over WebTransport, with its load driver",
+        "org.opencontainers.image.description": "Wake Up Mythra game service: journaled deterministic simulation over WebTransport",
         "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
         "org.opencontainers.image.title": "guardian-mythrad",
     },

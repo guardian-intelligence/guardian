@@ -1,7 +1,8 @@
 # Wake Up Mythra — development plan of record
 
-Status: plan of record (2026-08). The presence plane, wasm behavior stack,
-and update ladder described here are live at wakeupmythra.com; everything in
+Status: plan of record (2026-08). The wasm behavior stack and update ladder
+described here are live at wakeupmythra.com; the netcode and persistence
+plane is specified in docs/netcode.md and landing now; everything in
 [Gaps and sequencing](#gaps-and-sequencing) is not.
 
 ## Work backwards from the surfaces
@@ -94,8 +95,8 @@ Resources:
 
 Core loop: dogs at the park stack Energy; scheduled events offer wake-up
 progress and require dogs physically present to win. Gameplay is occasional
-management choices, not twitch input — this shapes the netcode requirements
-below (no client prediction needed).
+management choices, not twitch input — this shapes the netcode: events at
+human decision rate, not state at tick rate (docs/netcode.md).
 
 Social events broadcast live to all clients in the park with a tight SLA —
 "Andy added BimBim to Charsiu's pack" must land while it is still relevant
@@ -109,15 +110,16 @@ sim ticks at 24Hz.
    applies them. Anything purchasable or rankable (Energy, Coin, Favor, Fur,
    Crystals, prizes, check-ins) is computed server-side without exception.
 
-2. **Clients render by snapshot interpolation; resync is the recovery path.**
-   Terminology, precisely: today every 24Hz tick is a full authoritative
-   snapshot and the client presentation module interpolates between the last
-   two (with frame-jank clamping and snap-on-teleport). "Periodic resync"
-   becomes the right description when ticks move to delta encoding
-   (#1328): baseline keyframe + deltas + periodic keyframes, where a client
-   that misses deltas snaps to the next keyframe. No client prediction:
-   management gameplay does not need it, and omitting it keeps every surface
-   trivially consistent.
+2. **Journaled deterministic simulation.** Every surface runs the identical
+   sim; the server streams an ordered event journal, never state, and the
+   journal is also the durable truth (Postgres) — replay, restore, rejoin,
+   and spectating are the same operation. Clients predict only their own
+   intents and reconcile smoothly; divergence is detected by client-pulled
+   world-hash checks and repaired by snapshot resync. The full contract —
+   wire protocol, batching, epochs, catch-up, corrections — is
+   docs/netcode.md. Steady-state downlink for an idle session is a few
+   bytes of hash checks; the cellular-usage promise is a headline product
+   metric.
 
 3. **One deterministic core, unchanged, on every surface.** Game logic
    compiles from the shared Rust structural core (`//src/services/mythrad/sim`)
@@ -155,15 +157,16 @@ sim ticks at 24Hz.
      module mid-session on web. iOS app lane: OTA updates run interpreted,
      with an in-game indicator to update the app for the AOT build (gated by
      app-store update checks);
-   - server binary: image roll (sessions resume by token);
+   - server binary: image roll (sessions rejoin by journal catch-up);
    - network/routing: no coordination — see invariant 5.
 
 5. **Disconnection is routine; clients auto-reconnect.** Any change to the
    network or routing layer may sever connections without ceremony, because
-   every client redials with backoff and resumes by token. Resume restores
-   the full session — including room membership (#1327 is a bug against this
-   invariant, not a design choice). Measured under a 500-session
-   simultaneous reconnect storm: resume gap p50 < 50ms, p99 < 500ms.
+   every client redials with backoff and rejoins by journal catch-up
+   (`since_seq`): the server sends whichever of missed-events or snapshot is
+   cheaper and the replica converges. An involuntary disconnect is invisible
+   to game semantics — pack membership and park presence live in the
+   journal, not in the connection.
 
 6. **Feature flags are presentation and product gating — never sim inputs.**
    Client-side flagging uses the OpenFeature SDK evaluating over OFREP
@@ -210,10 +213,10 @@ The honest current decomposition, including what is *not* yet separated.
 
 | Artifact | Status | Notes |
 |---|---|---|
-| `mythrad` | live, **deliberately monolithic** | One binary currently carries four layers: QUIC/WebTransport termination + session/token handling; room hub + tick fanout; behavior engine (wazero slots); page/module/asset HTTP serving. It has *not* been split. Split boundary when scale demands: gateway (transport/sessions) vs world-sim (rooms/ticks/behaviors), so parks can shard across nodes. Do not split before sharding forces it |
+| `mythrad` | rebuilding, **deliberately monolithic** | One binary carries: QUIC/WebTransport termination + ticketed sessions; the park authority loop (journal append + fan-out, docs/netcode.md); behavior engine (wazero slots); module/asset HTTP serving. Split boundary when scale demands: gateway (transport/sessions) vs park authority (sim/journal), so parks can shard across nodes. Do not split before sharding forces it |
 | Control plane | planned | Authentication (Guardian customer identity realm; Game Center / Play Games bridging), entitlements (SpiceDB-backed, purchase-source-neutral), billing normalization (IAP / Play / MoR / Steam → ledger), friends/social graph, dog-park registry (geo metadata + manual petition queue), feature-flag service (OpenFeature control plane with streaming subscriptions) |
 | Data plane | planned | Persistent game state, distinct from the in-memory world sim: economy ledgers (TigerBeetle), check-in service (geo attestation, 5-minute sessions, presence-bonus windows), pack membership + inventory + mood scheduler, event feed fanout (the p99 ≤ 2s SLA), month-cycle orchestrator (22/6 clock, prize distribution, Fur grants, reset) |
-| `loadgen` | live | Protocol load driver; ships in the mythrad image |
+| `loadgen` | planned | Journal-protocol load driver: bots run the wasm replica and act at human rate through the real ticketed admission path |
 
 ### Tooling / QA
 
@@ -231,11 +234,9 @@ The honest current decomposition, including what is *not* yet separated.
    recursive-lock crash (repro captured; applies to all iOS browsers and
    WKWebView — they share the stack). File the Feedback, track betas. The
    native app with its own QUIC stack is the hedge, not a WKWebView wrapper.
-2. **#1327** — resume loses room membership. Violates invariant 5; also
-   corrupts pack semantics (an involuntary disconnect must not count as
-   "leaving the park"). Fix before any pack feature ships.
-3. **#1328** — tick datagrams exceed the QUIC limit past ~40 dogs/room.
-   Fix direction is the delta-tick + keyframe design in invariant 2, plus
-   interest management. Prerequisite for busy parks.
-4. **MoR selection** — TBD; keep the entitlements interface provider-neutral.
-5. **Steam** — tentative; no engineering spend until it graduates.
+2. **Email verification** — the customer realm has no SMTP configured and
+   `verifyEmail` is off; the spectator/player OIDC gate (docs/netcode.md)
+   enforces `email_verified` only once the realm can issue it. Adding SMTP
+   to the realm JSON is the unblocking work.
+3. **MoR selection** — TBD; keep the entitlements interface provider-neutral.
+4. **Steam** — tentative; no engineering spend until it graduates.
