@@ -6,6 +6,7 @@
 # Connection budget (max_connections=100):
 # - payments pool: 16 during a Flagger rollout, 8 at steady state
 # - directus pool: 5
+# - mythra pool: 4 (journal appends are one tick-batched writer + reads)
 # - operators/ad-hoc: 5
 # - consumers' pools must sum to <=60; PGConnectionSaturation pages at 70%
 # A product graduates to its own instance only when it demonstrably needs one.
@@ -49,12 +50,17 @@ spec:
       max_slot_wal_keep_size: 4GB
   users:
     directus: {}
+    mythra: {}
     payments: {}
   databases:
     directus:
       roles:
         admin:
           - directus
+    mythra:
+      roles:
+        admin:
+          - mythra
     payments:
       roles:
         admin:
