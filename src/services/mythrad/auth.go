@@ -117,6 +117,7 @@ func (g *oidcGate) getVerifier(ctx context.Context) (*oidc.IDTokenVerifier, erro
 type identity struct {
 	Sub           string
 	EmailVerified bool
+	Azp           string
 }
 
 func (g *oidcGate) verify(ctx context.Context, bearer string) (identity, error) {
@@ -142,7 +143,7 @@ func (g *oidcGate) verify(ctx context.Context, bearer string) (identity, error) 
 	if !g.allowedClients[claims.Azp] {
 		return identity{}, fmt.Errorf("client %q not allowed", claims.Azp)
 	}
-	return identity{Sub: claims.Sub, EmailVerified: claims.EmailVerified}, nil
+	return identity{Sub: claims.Sub, EmailVerified: claims.EmailVerified, Azp: claims.Azp}, nil
 }
 
 // handleSessionMint is POST /session: OIDC in, admission ticket out. The
@@ -176,6 +177,16 @@ func (h *gameHandlers) handleSessionMint(gate *oidcGate, publicAddr string, cert
 			mMints.WithLabelValues("unverified").Inc()
 			http.Error(w, "email verification required", http.StatusForbidden)
 			return
+		}
+		// The load driver's single service account fans out into distinct
+		// bot identities; only its azp may claim a suffix, so a stolen
+		// player token can never mint someone else's dog.
+		if bot := r.URL.Query().Get("bot"); bot != "" {
+			if id.Azp != "mythra-loadgen" || len(bot) > 16 {
+				http.Error(w, "bot suffix not allowed", http.StatusForbidden)
+				return
+			}
+			id.Sub += "/bot-" + bot
 		}
 		park := r.URL.Query().Get("park")
 		if park == "" {

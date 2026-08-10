@@ -69,13 +69,19 @@ go_test(
     ],
 )
 
+# The image carries the service and its journal-protocol load driver; the
+# loadgen Job selects it via command (k6 cannot speak WebTransport, and
+# docs/loadtest.md conventions apply: results land in VictoriaMetrics,
+# never only pod logs).
 pkg_tar(
     name = "mythrad_layer",
     files = {
         ":mythrad": "app/mythrad",
+        "//src/services/mythrad/loadgen": "app/loadgen",
     },
     modes = {
         "app/mythrad": "0755",
+        "app/loadgen": "0755",
     },
 )
 
