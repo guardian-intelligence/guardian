@@ -286,8 +286,14 @@ spec:
                   items:
                     - key: password
                       path: wakeupmythra.com_realm-reconciler-client-secret
+              # optional until the operator registers the Google OAuth
+              # client and lands its ExternalSecret (with the real broker
+              # clientId) in one PR: the iam Kustomization health-gates on
+              # every ExternalSecret being Ready, so an ES for an unseeded
+              # OpenBao key wedges the whole stage, not just this file.
               - secret:
                   name: keycloak-wum-google-oauth
+                  optional: true
                   items:
                     - key: GOOGLE_CLIENT_SECRET
                       path: wakeupmythra.com_google-client-secret
