@@ -180,8 +180,16 @@ flow-control windows sized so the cap fits in memory with headroom
 
 ## Observability and targets
 
-- Steady-state downlink per idle session ≤ ~100KB/hour (checks + verdicts);
-  the cellular-usage promise is the headline product metric.
+- Steady-state downlink per *idle* session ≤ ~100KB/hour (checks + verdicts);
+  the cellular-usage promise is the headline product metric. This holds for
+  a quiet or realistically-sized park. It does **not** hold for a park with
+  thousands of *simultaneously active* players: events fan out to every
+  session, so downlink scales with total human activity × occupancy. A
+  2000-active-player park measured ~20MB/hour/session — still far under the
+  old per-tick streaming cost (87MB/hour regardless of activity), and still
+  bounded by *human* action rate, but the mega-park case needs interest
+  management (spatial/rate culling of the event fan-out) before it meets the
+  idle target. Tracked as future work, not a regression.
 - Tick p99 within the tick budget; batch-commit p99 under one tick.
 - Divergence rate ~0; every resync is exported with a reason label.
 - Social events (intent → visible on every session) p99 ≤ 2s.
@@ -189,6 +197,69 @@ flow-control windows sized so the cap fits in memory with headroom
   a park whose replay hash mismatches is refused service, never served
   wrong.
 
+### Measured — 2000-session single-park run (prod, 2026-08)
+
+Every session an OIDC-ticketed journal session through the real admission
+path; bots acting at human rate.
+
+| Metric | Result | Budget / prior |
+|---|---|---|
+| Sessions held | 2000 / 2000 | breaker never opened |
+| Authority CPU | 1.34 cores | — |
+| Authority RSS | 702 MB, flat (max 704) | **no OOM** (old arch OOMKilled at 1Gi) |
+| Tick p99 | 9.9 ms | 41.7 ms budget |
+| Journal commit p99 | 9.3 ms | < one tick |
+| Journal append errors | 0 | — |
+| Datagram send errors | 0 | (the #1328 signature) |
+| Pod restarts | 0 | — |
+| Intent → visible p99 | 74 ms | 2 s SLA |
+
+The memory wall that OOMKilled the previous architecture at 2000 sessions is
+gone: QUIC flow-control window caps + GOMEMLIMIT hold RSS flat because there
+is no per-session state firehose to buffer. The circuit breaker in the load
+driver also proved out — at authority-kill it absorbed the 200-session
+reconnect storm with a 30s pause instead of the retry-amplified crashloop
+the previous driver caused.
+
 Time-travel debugging and balance regression: any journal prefix replays
 into a state whose hash must match the recorded snapshots; proposed balance
 changes replay historical journals in the shadow lane before promotion.
+
+## Restore drill (runbook)
+
+The claim "weeks of accumulated progress survive any failure" is proven, not
+asserted, by killing the authority mid-load and watching parks reopen from
+the journal:
+
+1. Start a load run against a park (`loadgen`, or real sessions). Note the
+   journal head: `mythra_journal_events_total` climbing, `mythra_snapshots_total`
+   incrementing every ~512 events.
+2. Kill the pod: `kubectl -n tenant-guardian-prod delete pod -l app.kubernetes.io/component=mythrad`.
+   The Deployment (maxSurge 0) reschedules on `ash-earth`; sessions see the
+   QUIC connection drop and redial.
+3. On reopen, `openAuthority` restores the latest snapshot and replays the
+   journal tail. The invariant: `sim_restore` must reproduce the snapshot's
+   stored world hash, and replay must not reject any event. A mismatch logs
+   `snapshot hash mismatch ... refusing to serve` and the park stays closed
+   — the roll-forward doctrine (never serve divergence). Watch for it in the
+   pod logs; its absence is the pass.
+4. Every redialing client sends `since_seq`; the authority answers with
+   min-cost catch-up. Clients whose `since_seq` is fresh replay a handful of
+   events; the rest get a fresh snapshot. `mythra_catchup_total` splits the
+   two.
+5. Confirmation: `mythra_checks_total{result="mismatch"}` stays flat through
+   the recovery (every replica reconverged to the authority's hash), and the
+   journal head continues past where it was before the kill (no events lost —
+   durable-before-visible guaranteed nothing fanned out that wasn't
+   committed).
+
+Recovery time is snapshot-restore (milliseconds) + tail replay (thousands of
+ticks/second) + client redial backoff; a park minutes deep in its journal
+reopens in under a second of authority time. The bound on tail length is the
+snapshot cadence, not the age of the park.
+
+Backup and PITR ride the shared products Postgres: continuous WAL archiving
+plus the nightly base backup (docs/reliability-rto.md). A cluster-loss
+restore rebuilds `park_events`/`park_snapshots` to the RPO, and every park
+reopens by the same replay path — the journal is ordinary rows, so it
+inherits the database's disaster-recovery story for free.
