@@ -1,10 +1,9 @@
 # guardian-stripe-sandbox — the first root reconciled in-cluster
 # (docs/tofu-gitops-design.md): sandbox blast radius, no variables, one
-# provider credential. approvePlan starts empty on purpose — the plan-only
-# soak: the controller plans on every drift interval and holds, the plan
+# provider credential. approvePlan is auto: the merged PR is the approval,
+# and the plan a drift interval would have held now applies. The plan still
 # lands in a Secret (storeReadablePlan: json; the read persona can read
-# ConfigMaps, so never "human" mode), and the flip to auto is its own
-# reviewed PR once the soak shows clean, stable plans.
+# ConfigMaps, so never "human" mode) as the audit artifact.
 apiVersion: infra.contrib.fluxcd.io/v1alpha2
 kind: Terraform
 metadata:
@@ -14,6 +13,7 @@ metadata:
     app.kubernetes.io/name: tofu-controller
     app.kubernetes.io/part-of: guardian
 spec:
+  approvePlan: auto
   interval: 1h
   retryInterval: 2m
   path: ./src/infrastructure/bootstrap/guardian-stripe-sandbox
