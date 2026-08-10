@@ -60,7 +60,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: mythrad
-          image: ghcr.io/guardian-intelligence/mythrad:edge@sha256:7577f0fe1b760061578e4dcfdada0ac4d0510f94a322517942604a626856f02d # {"$imagepolicy": "guardian-imageops:mythrad"}
+          image: ghcr.io/guardian-intelligence/mythrad:edge@sha256:8a3f0145ce9afdab8cefe7bc9e6bbde841a887d8e7c30a79aa7856eb65df7dd6 # {"$imagepolicy": "guardian-imageops:mythrad"}
           env:
             # The memory envelope: session cap × small QUIC flow-control
             # windows, with the Go runtime held below the container limit.
