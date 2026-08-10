@@ -199,8 +199,11 @@ flow-control windows sized so the cap fits in memory with headroom
 
 ### Measured — 2000-session single-park run (prod, 2026-08)
 
-Every session an OIDC-ticketed journal session through the real admission
-path; bots acting at human rate.
+Bots authenticated with the `mythra-loadgen` service account (OIDC
+client-credentials) and acted at human rate. This exercises ticket minting,
+the journal, fan-out, and resync at scale — but NOT interactive user
+sign-in, which is not yet working (see docs/wake-up-mythra-development.md
+gaps).
 
 | Metric | Result | Budget / prior |
 |---|---|---|
