@@ -43,29 +43,11 @@ spec:
           annotations:
             summary: "mythrad metrics scrape is down"
             description: "No mythrad replica has been scrapeable for five minutes; every other mythrad rule is blind while this fires."
-        - alert: MythradTickBudgetExceeded
-          expr: histogram_quantile(0.99, sum(rate(mythra_tick_duration_seconds_bucket[5m])) by (le)) > 0.035
-          for: 10m
-          labels:
-            severity: warning
-            guardian_stage: prod
-          annotations:
-            summary: "mythrad tick p99 above 35ms"
-            description: "Tick p99 is converging on the 41.7ms budget at 24Hz; the simulation is close to missing ticks."
         - alert: MythradBehaviorReloadRejected
           expr: increase(mythra_behavior_reloads_total{result="error"}[10m]) > 0
           labels:
             severity: warning
             guardian_stage: prod
           annotations:
-            summary: "mythrad rejected a behavior script"
-            description: "A live or shadow Lua script failed to load; the previous script keeps running. Check mythrad logs for the parse error."
-        - alert: MythradDatagramErrors
-          expr: sum(rate(mythra_datagram_errors_total[5m])) > 1
-          for: 5m
-          labels:
-            severity: warning
-            guardian_stage: prod
-          annotations:
-            summary: "mythrad datagram sends are failing"
-            description: "Sustained SendDatagram failures — the #1328 signature was ticks silently exceeding the QUIC datagram budget while sessions stayed connected. Check room sizes and mythra_delta_bytes_total; a per-chunk payload must stay under the path MTU."
+            summary: "mythrad rejected a behavior module"
+            description: "A live or shadow wasm module failed to load; the previous module keeps running. Check mythrad logs for the load error."

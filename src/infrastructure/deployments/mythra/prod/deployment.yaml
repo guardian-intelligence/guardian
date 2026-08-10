@@ -62,15 +62,6 @@ spec:
         - name: mythrad
           image: ghcr.io/guardian-intelligence/mythrad:edge@sha256:e9eb67afab6aecb073594401618a106eea80b21af5081501ed1cec88b924e8a4 # {"$imagepolicy": "guardian-imageops:mythrad"}
           env:
-            - name: TICK_HZ
-              value: "24"
-            # Keyframe stream cost is O(room size × recipients): at 2000
-            # dogs a 1s cadence is ~104MB/s of egress, a 5s cadence ~21MB/s.
-            # Deltas are drift-exact between keyframes (client oracle), and
-            # joiners get a unicast keyframe, so the cadence is invisible at
-            # small scale; it only bounds loss-recovery and wh-verify lag.
-            - name: KEYFRAME_TICKS
-              value: "120"
             - name: WT_PORT
               value: "4433"
             - name: HTTP_PORT
