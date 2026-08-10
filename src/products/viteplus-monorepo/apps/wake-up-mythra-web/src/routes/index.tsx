@@ -3,11 +3,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { startFlags } from "~/flags/client";
 import { FlagsCanary } from "~/flags/canary";
+import { startGame } from "~/game/client";
 
 export const Route = createFileRoute("/")({
   component: Page,
 });
 
+// The game client owns the DOM below imperatively (canvas, pills, log)
+// and survives route-component re-renders; start it exactly once per page.
 let started = false;
 
 function Page() {
@@ -15,19 +18,40 @@ function Page() {
     if (started) return;
     started = true;
     startFlags();
+    startGame();
   }, []);
   return (
     <OpenFeatureProvider>
       <FlagsCanary />
       <div className="bar">
         <span id="status" className="pill">
-          CLOSED FOR CONSTRUCTION
+          CONNECTING
         </span>
+        <span className="stat">
+          tick <b id="tick">–</b>
+        </span>
+        <span className="stat">
+          rtt <b id="rtt">–</b>
+        </span>
+        <span className="stat">
+          world <b id="world">–</b>
+        </span>
+        <span className="stat">
+          downlink <b id="bytes">–</b>
+        </span>
+        <span className="stat">
+          park energy <b id="energy">0</b>
+        </span>
+        <span className="stat dim" id="role"></span>
+        <button id="signin" style={{ display: "none" }}>
+          Sign in
+        </button>
+        <button id="checkin">Check in</button>
       </div>
-      <div className="who">
-        The dog park is closed while we rebuild it. The dogs are fine — they are at home, napping.
-        Back soon.
-      </div>
+      <canvas id="grid" width={100} height={100}></canvas>
+      <div className="who" id="who"></div>
+      <input id="chat" placeholder="say something to the park" maxLength={140} />
+      <div id="log"></div>
     </OpenFeatureProvider>
   );
 }
