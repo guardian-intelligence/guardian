@@ -42,6 +42,30 @@ rust_shared_library(
     deps = [":core"],
 )
 
+rust_library(
+    name = "park_lib",
+    srcs = ["park/src/lib.rs"],
+    crate_name = "mythra_sim_park",
+    edition = "2024",
+    visibility = ["//visibility:private"],
+    deps = [":core"],
+)
+
+rust_test(
+    name = "park_test",
+    crate = ":park_lib",
+    edition = "2024",
+)
+
+rust_shared_library(
+    name = "park_cdylib",
+    srcs = ["park/src/lib.rs"],
+    crate_name = "mythra_sim_park",
+    edition = "2024",
+    target_compatible_with = ["@platforms//cpu:wasm32"],
+    deps = [":core"],
+)
+
 rust_shared_library(
     name = "client_cdylib",
     srcs = ["client/src/lib.rs"],
@@ -63,6 +87,12 @@ wasm_module(
     out = "client.wasm",
 )
 
+wasm_module(
+    name = "park_wasm",
+    lib = ":park_cdylib",
+    out = "park.wasm",
+)
+
 # Copies freshly built modules over the committed artifacts (service embed
 # copy + the prod ConfigMap copy).
 sh_binary(
@@ -70,6 +100,7 @@ sh_binary(
     srcs = ["refresh.sh"],
     data = [
         ":client_wasm",
+        ":park_wasm",
         ":server_wasm",
     ],
 )
@@ -83,10 +114,12 @@ sh_test(
         "core/src/lib.rs",
         "server/src/lib.rs",
         "client/src/lib.rs",
+        "park/src/lib.rs",
     ]],
     data = [
         "client/src/lib.rs",
         "core/src/lib.rs",
+        "park/src/lib.rs",
         "server/src/lib.rs",
     ],
 )
@@ -101,6 +134,12 @@ diff_test(
     name = "client_artifact_current_test",
     file1 = ":client_wasm",
     file2 = "//src/services/mythrad:behaviors/client.wasm",
+)
+
+diff_test(
+    name = "park_artifact_current_test",
+    file1 = ":park_wasm",
+    file2 = "//src/services/mythrad:behaviors/park.wasm",
 )
 
 diff_test(
