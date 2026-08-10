@@ -156,6 +156,11 @@ spec:
                 secretKeyRef:
                   name: keycloak-canary-janitor-client
                   key: password
+            - name: MYTHRA_LOADGEN_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-mythra-loadgen-client
+                  key: password
             # File-vault provider: the realm's GitHub IdP clientSecret is a
             # vault expression resolved at USE time from the mounted file
             # below, so the OAuth secret never enters the Keycloak database —
@@ -252,6 +257,11 @@ spec:
                   items:
                     - key: password
                       path: guardianintelligence.org_canary-janitor-client-secret
+              - secret:
+                  name: keycloak-mythra-loadgen-client
+                  items:
+                    - key: password
+                      path: guardianintelligence.org_mythra-loadgen-client-secret
 ---
 # Per-color JGroups discovery targets (DNS_PING). publishNotReadyAddresses is
 # required: pods must find each other before they report Ready.

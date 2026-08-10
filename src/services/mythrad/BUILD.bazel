@@ -13,7 +13,12 @@ exports_files(
 
 go_library(
     name = "mythrad_lib",
-    srcs = ["main.go"],
+    srcs = [
+        "auth.go",
+        "main.go",
+        "park.go",
+        "session.go",
+    ],
     embedsrcs = [
         "behaviors/client.wasm",
         "behaviors/park.wasm",
@@ -22,9 +27,13 @@ go_library(
     importpath = "github.com/guardian-intelligence/guardian/src/services/mythrad",
     visibility = ["//visibility:private"],
     deps = [
+        "//src/services/mythrad/journal",
+        "@com_github_coreos_go_oidc_v3//oidc:go_default_library",
+        "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
         "@com_github_prometheus_client_golang//prometheus:go_default_library",
         "@com_github_prometheus_client_golang//prometheus/promauto:go_default_library",
         "@com_github_prometheus_client_golang//prometheus/promhttp:go_default_library",
+        "@com_github_quic_go_quic_go//:go_default_library",
         "@com_github_quic_go_quic_go//http3:go_default_library",
         "@com_github_quic_go_webtransport_go//:go_default_library",
         "@com_github_tetratelabs_wazero//:go_default_library",
@@ -43,8 +52,21 @@ go_binary(
 # value-type declarations (layer 1 is the source token gate in ./sim).
 go_test(
     name = "mythrad_test",
-    srcs = ["wasm_gate_test.go"],
+    srcs = [
+        "authority_test.go",
+        "wasm_gate_test.go",
+    ],
+    data = [
+        "//src/tools/postgres:dist",
+        "//src/tools/postgres:initdb",
+    ],
     embed = [":mythrad_lib"],
+    env = {"PGTEST_INITDB": "$(rootpath //src/tools/postgres:initdb)"},
+    deps = [
+        "//src/services/mythrad/journal",
+        "//src/services/postflight/controlplane/pgtest",
+        "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
+    ],
 )
 
 pkg_tar(

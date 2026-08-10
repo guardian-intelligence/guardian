@@ -25,11 +25,11 @@ func Run(t *testing.T, factory func(t *testing.T) journal.Journal) {
 
 	t.Run("seqs_are_dense_from_one_and_read_ordered", func(t *testing.T) {
 		j := factory(t)
-		first, err := j.Append(ctx, 1, []journal.Event{ev(10, "a"), ev(10, "b")})
+		first, err := j.Append(ctx, 1, 0, []journal.Event{ev(10, "a"), ev(10, "b")})
 		if err != nil || first != 1 {
 			t.Fatalf("first append: seq=%d err=%v, want 1, nil", first, err)
 		}
-		first, err = j.Append(ctx, 1, []journal.Event{ev(11, "c")})
+		first, err = j.Append(ctx, 1, 2, []journal.Event{ev(11, "c")})
 		if err != nil || first != 3 {
 			t.Fatalf("second append: seq=%d err=%v, want 3, nil", first, err)
 		}
@@ -53,9 +53,33 @@ func Run(t *testing.T, factory func(t *testing.T) journal.Journal) {
 		}
 	})
 
+	t.Run("stale_writer_conflicts_instead_of_interleaving", func(t *testing.T) {
+		j := factory(t)
+		if _, err := j.Append(ctx, 1, 0, []journal.Event{ev(1, "authority")}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := j.Append(ctx, 1, 0, []journal.Event{ev(1, "rogue")}); !errors.Is(err, journal.ErrConflict) {
+			t.Fatalf("stale append err = %v, want ErrConflict", err)
+		}
+		count := 0
+		if err := j.Read(ctx, 1, 1, func(journal.Event) error { count++; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("rogue write landed: %d events", count)
+		}
+	})
+
+	t.Run("gapped_append_conflicts", func(t *testing.T) {
+		j := factory(t)
+		if _, err := j.Append(ctx, 1, 5, []journal.Event{ev(1, "a")}); !errors.Is(err, journal.ErrConflict) {
+			t.Fatalf("gapped append err = %v, want ErrConflict (seqs are dense)", err)
+		}
+	})
+
 	t.Run("read_from_seq_filters", func(t *testing.T) {
 		j := factory(t)
-		if _, err := j.Append(ctx, 1, []journal.Event{ev(1, "a"), ev(2, "b"), ev(3, "c")}); err != nil {
+		if _, err := j.Append(ctx, 1, 0, []journal.Event{ev(1, "a"), ev(2, "b"), ev(3, "c")}); err != nil {
 			t.Fatal(err)
 		}
 		var seqs []int64
@@ -72,10 +96,10 @@ func Run(t *testing.T, factory func(t *testing.T) journal.Journal) {
 
 	t.Run("parks_are_isolated", func(t *testing.T) {
 		j := factory(t)
-		if first, err := j.Append(ctx, 7, []journal.Event{ev(1, "seven")}); err != nil || first != 1 {
+		if first, err := j.Append(ctx, 7, 0, []journal.Event{ev(1, "seven")}); err != nil || first != 1 {
 			t.Fatalf("park 7: seq=%d err=%v", first, err)
 		}
-		if first, err := j.Append(ctx, 8, []journal.Event{ev(1, "eight")}); err != nil || first != 1 {
+		if first, err := j.Append(ctx, 8, 0, []journal.Event{ev(1, "eight")}); err != nil || first != 1 {
 			t.Fatalf("park 8 must start at seq 1: seq=%d err=%v", first, err)
 		}
 		count := 0
@@ -104,7 +128,7 @@ func Run(t *testing.T, factory func(t *testing.T) journal.Journal) {
 			IntentID: 1<<64 - 2,
 			Payload:  payload,
 		}
-		if _, err := j.Append(ctx, 1, []journal.Event{in}); err != nil {
+		if _, err := j.Append(ctx, 1, 0, []journal.Event{in}); err != nil {
 			t.Fatal(err)
 		}
 		if err := j.Read(ctx, 1, 1, func(e journal.Event) error {
@@ -126,18 +150,27 @@ func Run(t *testing.T, factory func(t *testing.T) journal.Journal) {
 			wg.Add(1)
 			go func(w int) {
 				defer wg.Done()
+				var last int64
 				for i := 0; i < perWriter; i++ {
 					for {
-						_, err := j.Append(ctx, 1, []journal.Event{ev(uint64(i), fmt.Sprintf("w%d", w))})
+						_, err := j.Append(ctx, 1, last, []journal.Event{ev(uint64(i), fmt.Sprintf("w%d", w))})
 						if err == nil {
+							last++
 							break
 						}
 						if !errors.Is(err, journal.ErrConflict) {
 							t.Errorf("writer %d: %v", w, err)
 							return
 						}
-						// A real authority stops on ErrConflict; the retry here
-						// exists to prove the log stays dense under the race.
+						// A real authority stops on ErrConflict; this retry
+						// rescans the log head to prove density under the race.
+						if err := j.Read(ctx, 1, last+1, func(e journal.Event) error {
+							last = e.Seq
+							return nil
+						}); err != nil {
+							t.Errorf("writer %d rescan: %v", w, err)
+							return
+						}
 					}
 				}
 			}(w)
@@ -184,7 +217,7 @@ func Run(t *testing.T, factory func(t *testing.T) journal.Journal) {
 
 	t.Run("empty_append_is_an_error", func(t *testing.T) {
 		j := factory(t)
-		if _, err := j.Append(ctx, 1, nil); err == nil {
+		if _, err := j.Append(ctx, 1, 0, nil); err == nil {
 			t.Fatal("empty append must error, not mint a seq")
 		}
 	})
