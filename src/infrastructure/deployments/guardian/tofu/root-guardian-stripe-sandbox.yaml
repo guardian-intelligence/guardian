@@ -22,6 +22,12 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
     namespace: cozy-fluxcd
   storeReadablePlan: json
+  # Outputs carry the creation-only webhook signing secret and the canary
+  # price id; this Secret is the relay hop into OpenBao
+  # (guardian/guardian-mgmt/tenant-guardian-prod/payments/stripe) — the
+  # payments service consumes them from there, never from here.
+  writeOutputsToSecret:
+    name: guardian-stripe-sandbox-outputs
   runnerPodTemplate:
     spec:
       envFrom:
