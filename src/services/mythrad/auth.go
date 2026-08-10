@@ -80,7 +80,8 @@ func (m *ticketMint) check(raw string) (ticket, error) {
 // initializes lazily with retry so an unreachable issuer degrades /session
 // to 503 instead of crashlooping the game service.
 type oidcGate struct {
-	issuer         string
+	issuer         string // the public iss tokens carry and are validated against
+	jwksURL        string // where keys are actually fetched
 	allowedClients map[string]bool
 	requireEmail   bool
 
@@ -88,8 +89,15 @@ type oidcGate struct {
 	verifier *oidc.IDTokenVerifier
 }
 
-func newOIDCGate(issuer, clientIDs string, requireEmail bool) *oidcGate {
-	g := &oidcGate{issuer: issuer, allowedClients: map[string]bool{}, requireEmail: requireEmail}
+// newOIDCGate validates tokens carrying the public issuer as their `iss`
+// but fetches signing keys from jwksURL. In the cluster that is the
+// internal Keycloak certs endpoint over plain HTTP: mythrad runs
+// hostNetwork on a distroless image with no CA bundle, so reaching the
+// public issuer would both hairpin through the edge and fail certificate
+// verification. An empty jwksURL falls back to discovery against the
+// public issuer (local dev).
+func newOIDCGate(issuer, jwksURL, clientIDs string, requireEmail bool) *oidcGate {
+	g := &oidcGate{issuer: issuer, jwksURL: jwksURL, allowedClients: map[string]bool{}, requireEmail: requireEmail}
 	for _, c := range strings.Split(clientIDs, ",") {
 		if c = strings.TrimSpace(c); c != "" {
 			g.allowedClients[c] = true
@@ -104,13 +112,21 @@ func (g *oidcGate) getVerifier(ctx context.Context) (*oidc.IDTokenVerifier, erro
 	if g.verifier != nil {
 		return g.verifier, nil
 	}
+	// Audience is checked manually against the allowed client list in
+	// verify (the web page and the load driver share this gate).
+	cfg := &oidc.Config{SkipClientIDCheck: true}
+	if g.jwksURL != "" {
+		// A remote key set never touches the public issuer: keys come from
+		// the internal endpoint, tokens are still validated against the
+		// public iss. Key fetches lazily on first verify and cache.
+		g.verifier = oidc.NewVerifier(g.issuer, oidc.NewRemoteKeySet(context.Background(), g.jwksURL), cfg)
+		return g.verifier, nil
+	}
 	provider, err := oidc.NewProvider(ctx, g.issuer)
 	if err != nil {
 		return nil, err
 	}
-	// Audience is checked manually against the allowed client list below
-	// (two clients share this gate: the web page and the load driver).
-	g.verifier = provider.Verifier(&oidc.Config{SkipClientIDCheck: true})
+	g.verifier = provider.Verifier(cfg)
 	return g.verifier, nil
 }
 

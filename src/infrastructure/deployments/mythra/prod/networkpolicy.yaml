@@ -26,13 +26,20 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-    # The Keycloak token endpoint is fetched through the public edge like
-    # any external caller (same reasoning as the directus egress).
-    - toEntities:
-        - world
+    # The load driver ships in the CA-less distroless service image, so it
+    # mints its client-credentials token from Keycloak in-cluster over
+    # plain HTTP rather than hairpinning through the public edge. The
+    # stable Service selects the Flagger primary.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-guardian-prod
+            app.kubernetes.io/name: keycloak
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tenant-guardian-prod
+            app.kubernetes.io/name: keycloak-primary
       toPorts:
         - ports:
-            - port: "443"
+            - port: "8080"
               protocol: TCP
     # The game service is a host-network pod: Cilium sees node identities,
     # not pod labels. 4433/udp is the QUIC dial; 9634/tcp is /session and

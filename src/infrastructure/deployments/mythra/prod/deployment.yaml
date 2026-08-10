@@ -70,6 +70,11 @@ spec:
               value: "750MiB"
             - name: OIDC_ISSUER
               value: "https://guardianintelligence.org/realms/guardianintelligence.org"
+            # Tokens carry the public iss, but this hostNetwork distroless
+            # pod fetches signing keys from Keycloak in-cluster over plain
+            # HTTP — no CA bundle, no edge hairpin.
+            - name: OIDC_JWKS_URL
+              value: "http://keycloak.tenant-guardian-prod.svc/realms/guardianintelligence.org/protocol/openid-connect/certs"
             - name: OIDC_CLIENT_IDS
               value: "wake-up-mythra,mythra-loadgen"
             # Flips to "true" once the realm can issue email_verified
