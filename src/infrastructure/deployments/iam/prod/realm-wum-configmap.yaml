@@ -280,7 +280,7 @@ data:
       "linkOnly": false,
       "firstBrokerLoginFlowAlias": "broker-create-user-only",
       "config": {
-        "clientId": "PENDING-GOOGLE-OAUTH-REGISTRATION.apps.googleusercontent.com",
+        "clientId": "735717368936-3k8p97q1qoj85kcgnqr7incqc7ikaq3i.apps.googleusercontent.com",
         "clientSecret": "${vault.google-client-secret}",
         "defaultScope": "openid email",
         "syncMode": "IMPORT"
