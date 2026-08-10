@@ -48,6 +48,21 @@ func TestClusterDomainConformance(t *testing.T) {
 	}
 }
 
+// The walk above only sees cluster.local literals in our own manifests; it
+// cannot see a chart default. tofu-controller's chart defaults
+// --cluster-domain=cluster.local, under which the controller resolves zero
+// addresses for every runner pod and strands all Terraform CRs in
+// "Initializing" before their first plan — so the override must stay pinned.
+func TestTofuControllerSetsClusterDomain(t *testing.T) {
+	t.Parallel()
+	const path = "src/infrastructure/deployments/guardian/tofu/tofu-controller-helmrelease.yaml"
+	release := findDoc(t, yamlDocs(t, runfilePath(path)), "HelmRelease", "tofu-controller")
+	domain := stringValue(nestedValue(t, release, "spec", "values", "clusterDomain"))
+	if domain != "cozy.local" {
+		t.Fatalf("tofu-controller HelmRelease clusterDomain = %q, want cozy.local: the chart default (cluster.local) resolves zero runner addresses on this cluster", domain)
+	}
+}
+
 func isCertManagerCertificate(doc map[string]interface{}) bool {
 	group, _, _ := strings.Cut(stringValue(doc["apiVersion"]), "/")
 	return group == "cert-manager.io" && stringValue(doc["kind"]) == "Certificate"

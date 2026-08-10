@@ -63,6 +63,11 @@ spec:
     # disabled"). CRs exist only in this namespace, so the isolation the
     # flag guards is not in play.
     allowCrossNamespaceRefs: true
+    # The controller dials each runner by its pod DNS A record under
+    # <cluster-domain>; the chart default (cluster.local) is NXDOMAIN on
+    # this cluster, which strands every Terraform CR in "Initializing" with
+    # "name resolver error: produced zero addresses" before any plan runs.
+    clusterDomain: cozy.local
     # The runner image the controller spawns. The digest rides inside the
     # tag on purpose: the controller uses the composed repository:tag string
     # verbatim as the pod image (getRunnerPodImage), so this is what makes
