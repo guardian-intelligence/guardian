@@ -21,6 +21,12 @@ spec:
     name: ${GUARDIAN_SOURCE_NAME:=guardian}
     namespace: cozy-fluxcd
   storeReadablePlan: json
+  # Outputs carry the Codex tunnel connector token and the per-provider
+  # Access service-token secrets; this Secret is the relay hop toward
+  # OpenBao and the cloud-agent environments — consumers never read it
+  # directly.
+  writeOutputsToSecret:
+    name: guardian-mgmt-dns-outputs
   varsFrom:
     - kind: ConfigMap
       name: tofu-vars
