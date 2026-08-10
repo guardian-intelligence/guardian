@@ -5,6 +5,7 @@ load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 exports_files(
     [
         "behaviors/client.wasm",
+        "behaviors/park.wasm",
         "behaviors/server.wasm",
     ],
     visibility = ["//src/services/mythrad/sim:__pkg__"],
@@ -15,6 +16,7 @@ go_library(
     srcs = ["main.go"],
     embedsrcs = [
         "behaviors/client.wasm",
+        "behaviors/park.wasm",
         "behaviors/server.wasm",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/mythrad",

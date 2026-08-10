@@ -62,6 +62,12 @@ var defaultBehavior []byte
 //go:embed behaviors/client.wasm
 var defaultClientModule []byte
 
+// The park module is the complete game state machine (docs/netcode.md);
+// the authority loop instantiates it as the journal's validator.
+//
+//go:embed behaviors/park.wasm
+var defaultParkModule []byte
+
 // closeRebuilding is the application error code sessions receive while the
 // journal protocol is being built: the dial path (certs, UDP, H3 upgrade)
 // stays verifiable end to end in prod even though no game session exists.

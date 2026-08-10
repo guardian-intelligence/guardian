@@ -15,6 +15,7 @@ func TestBehaviorModulesDeclareNoFloats(t *testing.T) {
 	for name, module := range map[string][]byte{
 		"server.wasm": defaultBehavior,
 		"client.wasm": defaultClientModule,
+		"park.wasm":   defaultParkModule,
 	} {
 		if err := scanForFloatDecls(module); err != nil {
 			t.Errorf("%s: %v", name, err)

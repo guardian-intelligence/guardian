@@ -14,6 +14,7 @@ prod="$BUILD_WORKSPACE_DIRECTORY/src/infrastructure/deployments/mythra/prod/beha
 
 install -m 0644 "$here/server.wasm" "$svc/server.wasm"
 install -m 0644 "$here/client.wasm" "$svc/client.wasm"
+install -m 0644 "$here/park.wasm" "$svc/park.wasm"
 install -m 0644 "$here/server.wasm" "$prod/live.wasm"
 install -m 0644 "$here/client.wasm" "$prod/client.wasm"
-echo "refreshed: $svc/{server,client}.wasm and $prod/{live,client}.wasm"
+echo "refreshed: $svc/{server,client,park}.wasm and $prod/{live,client}.wasm"
