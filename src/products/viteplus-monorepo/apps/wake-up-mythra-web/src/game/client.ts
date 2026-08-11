@@ -466,6 +466,7 @@ export function startGame(): void {
         return;
       }
       backoff = 300;
+      failedDials = 0;
       connected = true;
       setStatus("connected");
       emitSpan("wum.connected", {
@@ -501,9 +502,18 @@ export function startGame(): void {
     } catch (e: any) {
       const id = reportError(e, { "error.op": "wum.connect", "wum.park": parkName });
       logLine(`connect failed: ${e.message ?? e} [err ${id}]`);
+      // After a few straight failures, say so where the roster would be —
+      // dials keep retrying in the background, but the user should know the
+      // park is unreachable, not empty (iOS WebKit's WebTransport
+      // networking crash looks exactly like this).
+      if (++failedDials === 3) {
+        $("who").textContent =
+          "Can't reach the park from this browser right now — the pack plays on without us. Still retrying.";
+      }
       if (myEpoch === dialEpoch) onDead();
     }
   }
+  let failedDials = 0;
 
   function onDead() {
     connected = false;
@@ -627,10 +637,15 @@ export function startGame(): void {
       }
       if (names.length < 12) names.push(`walker-${key.slice(0, 4)}`);
     }
-    $("who").textContent =
-      n === 0
-        ? "the park is empty"
-        : `dogs here: ${names.join(", ")}${n > names.length ? ` +${n - names.length} more` : ""}`;
+    // The roster line only speaks for the park while we're attached to it —
+    // a replica that never connected has zero dogs and would otherwise
+    // report "the park is empty" to a user we simply couldn't reach.
+    if (connected) {
+      $("who").textContent =
+        n === 0
+          ? "the park is empty"
+          : `dogs here: ${names.join(", ")}${n > names.length ? ` +${n - names.length} more` : ""}`;
+    }
     // Park energy and our dog's check-in state for the HUD, straight from
     // the canonical snapshot: authoritative, and self-correcting through
     // rollback, resync, and day reset.
