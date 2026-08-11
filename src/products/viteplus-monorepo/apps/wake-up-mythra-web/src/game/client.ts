@@ -27,6 +27,8 @@ const RING_DEPTH = 10; // one snapshot per second of rollback depth
 const EV_JOIN = 1;
 const EV_CHECK_IN = 3;
 const EV_CHAT = 4;
+const REJECT_PRESENT = 2; // sim ERR_PRESENT
+const REJECT_ABSENT = 3; // sim ERR_ABSENT
 
 const FNV_OFFSET = 0xcbf29ce484222325n;
 const FNV_PRIME = 0x100000001b3n;
@@ -107,7 +109,15 @@ export function startGame(): void {
 
   // prediction overlay: own intents awaiting their journal event
   const pendingIntents = new Map<number, { kind: number; p: Uint8Array }>();
-  let intentCounter = 1;
+  // Intent identity must be unique across page loads for the same subject:
+  // the server's idempotency window spans reconnects, so a counter that
+  // restarts at 1 would collide with the previous load's ids and this
+  // load's join would be swallowed as a resend. High bits are a per-load
+  // nonce, low bits count; the whole id stays under 2^53 so a JSON number
+  // carries it exactly.
+  const intentNonce =
+    ((crypto.getRandomValues(new Uint32Array(1))[0]! & 0xfffff) + 1) * 0x100000000;
+  let intentCounter = 0;
 
   let dgWriter: any = null;
   let ctrlWriter: any = null;
@@ -277,7 +287,7 @@ export function startGame(): void {
   }
 
   function sendIntent(kind: number, payload: Uint8Array) {
-    const id = intentCounter++;
+    const id = intentNonce + ++intentCounter;
     pendingIntents.set(id, { kind, p: payload });
     sendCtrl({ type: "intent", id, kind, p: b64(payload) });
   }
@@ -337,11 +347,31 @@ export function startGame(): void {
       pendingEvents.push({ ...m, payload: unb64(m.p ?? "") });
     } else if (m.type === "reject") {
       diag.rejects++;
+      const it = pendingIntents.get(m.intent);
       pendingIntents.delete(m.intent);
+      if (m.reason === REJECT_PRESENT && it?.kind === EV_JOIN) {
+        return; // the dog is already in the park — that IS the joined state
+      }
       logLine(`intent ${m.intent} rejected (reason ${m.reason})`);
+      // "Absent" on a non-join intent means the park lost our dog (a
+      // missed join or a departure that raced our reconnect): re-join and
+      // retry the rejected intent behind it, at most once per window.
+      if (
+        m.reason === REJECT_ABSENT &&
+        role === "player" &&
+        it &&
+        it.kind !== EV_JOIN &&
+        Date.now() - lastAutoJoin > 5000
+      ) {
+        lastAutoJoin = Date.now();
+        logLine("rejoining the park with your dog");
+        sendIntent(EV_JOIN, dogPayload());
+        sendIntent(it.kind, it.p);
+      }
     }
   }
   let resyncOnLanded = false;
+  let lastAutoJoin = 0;
 
   async function connect() {
     const myEpoch = ++dialEpoch;

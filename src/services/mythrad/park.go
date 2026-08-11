@@ -287,17 +287,23 @@ func encodeEvent(kind uint16, payload []byte) []byte {
 // are idempotent by (actor, intent_id): a resend after rejoin is dropped
 // here, and the original event (already fanned out) is the acknowledgment.
 func (a *authority) stageIntent(s *session, intentID uint64, kind uint16, payload []byte) {
-	key := fmt.Sprintf("%s/%d", s.sub, intentID)
 	a.mu.Lock()
-	if _, dup := a.seen[key]; dup {
-		a.mu.Unlock()
-		return
-	}
-	a.seen[key] = struct{}{}
-	a.seenFifo = append(a.seenFifo, key)
-	if len(a.seenFifo) > dedupWindow {
-		delete(a.seen, a.seenFifo[0])
-		a.seenFifo = a.seenFifo[1:]
+	// Intent id 0 marks connection-lifecycle intents (the departure staged
+	// on disconnect): every session of a sub uses the same id there, so
+	// idempotency bookkeeping would swallow every departure after the first.
+	if intentID != 0 {
+		key := fmt.Sprintf("%s/%d", s.sub, intentID)
+		if _, dup := a.seen[key]; dup {
+			a.mu.Unlock()
+			mIntentsDeduped.Inc()
+			return
+		}
+		a.seen[key] = struct{}{}
+		a.seenFifo = append(a.seenFifo, key)
+		if len(a.seenFifo) > dedupWindow {
+			delete(a.seen, a.seenFifo[0])
+			a.seenFifo = a.seenFifo[1:]
+		}
 	}
 	a.staged = append(a.staged, stagedIntent{sess: s, actor: s.sub, intentID: intentID, kind: kind, payload: payload})
 	a.mu.Unlock()
@@ -369,8 +375,18 @@ func (a *authority) tickOnce() {
 		if code != 0 {
 			if in.sess != nil {
 				in.sess.sendReject(in.intentID, code)
+				// A rejected intent produced no journal event, so it must
+				// not occupy the idempotency window: a corrected resend
+				// under the same id has to reach the sim.
+				if in.intentID != 0 {
+					a.mu.Lock()
+					delete(a.seen, fmt.Sprintf("%s/%d", in.actor, in.intentID))
+					a.mu.Unlock()
+				}
 			}
-			mIntentsRejected.Inc()
+			log.Printf("park %s: intent rejected: actor=%s kind=%d intent=%d reason=%s(%d)",
+				a.name, in.actor, in.kind, in.intentID, rejectReasonName(code), code)
+			mIntentsRejected.WithLabelValues(rejectReasonName(code)).Inc()
 			continue
 		}
 		accepted = append(accepted, journal.Event{
