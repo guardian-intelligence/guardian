@@ -123,6 +123,18 @@ metadata:
   labels:
     app.kubernetes.io/name: analytics-ingest
     app.kubernetes.io/part-of: guardian
+  annotations:
+    # Per-address request ceiling in front of the Go quota: nginx counts
+    # $remote_addr, which the realip module has already rewritten to the
+    # Cloudflare-verified client address (direct-to-origin dies at the AOP
+    # client-cert verify before any request processing). Generous on
+    # purpose — the beacon flushes ≤4 POSTs a minute, so 10 rps with a
+    # 100-request burst clears a large NAT'd venue — and per controller
+    # replica, so the effective ceiling scales with origin count. Its job
+    # is denying one address the request volume that fills a disk, not
+    # judging intent; the in-app quota meters the finer unit (events).
+    nginx.ingress.kubernetes.io/limit-rps: "10"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "10"
 spec:
   ingressClassName: tenant-root
   rules:
