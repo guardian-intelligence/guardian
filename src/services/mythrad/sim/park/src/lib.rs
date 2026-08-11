@@ -28,7 +28,9 @@
 //!                                         det_rand(seed, tick, id)
 //!   2 leave         { id u64 }
 //!   3 check_in      { id u64 }            once per day index per dog
-//!   4 chat          { id u64, len u16, utf8 }  validated, no state change
+//!   4 (reserved)                          journaled by a retired event
+//!                                         kind; replays as an accepted
+//!                                         no-op, never newly staged
 //!   5 day_reset     { day u32 }           system event; re-arms check-ins
 //!   6 epoch_advance { epoch u32, module_hash u64 }  system event
 //!
@@ -52,14 +54,16 @@ pub const MAX_DOGS: usize = 2048;
 const IO_CAP: usize = 64 * 1024;
 const MAGIC: u32 = u32::from_le_bytes(*b"MYP1");
 const NEVER: u32 = u32::MAX;
-const CHAT_MAX: usize = 280;
 const DOG_REC: usize = 24;
 const HEADER: usize = 48;
 
 pub const EV_JOIN: u16 = 1;
 pub const EV_LEAVE: u16 = 2;
 pub const EV_CHECK_IN: u16 = 3;
-pub const EV_CHAT: u16 = 4;
+// Kind 4 is reserved: a retired event kind that still exists in park
+// journals. Replay refuses to serve a park on any rejected event, so the
+// kind must stay accepted (as a state-free no-op) forever.
+pub const EV_RESERVED_4: u16 = 4;
 pub const EV_DAY_RESET: u16 = 5;
 pub const EV_EPOCH_ADVANCE: u16 = 6;
 
@@ -239,27 +243,7 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             p.energy += CHECK_IN_ENERGY as u64;
             OK
         }
-        EV_CHAT => {
-            let Some(id) = read_u64(body, len) else {
-                return ERR_ENCODING;
-            };
-            if len < body + 10 {
-                return ERR_ENCODING;
-            }
-            let text_len = {
-                let buf = &io()[..len];
-                u16::from_le_bytes([buf[body + 8], buf[body + 9]]) as usize
-            };
-            if text_len > CHAT_MAX || body + 10 + text_len != len {
-                return ERR_ENCODING;
-            }
-            let p = park();
-            if find(p, id).is_none() {
-                return ERR_ABSENT;
-            }
-            // Validated and journaled; chat carries no park state.
-            OK
-        }
+        EV_RESERVED_4 => OK,
         EV_DAY_RESET => {
             let Some(day) = read_u32(body, len) else {
                 return ERR_ENCODING;
@@ -496,14 +480,6 @@ mod tests {
         ev(kind, &id.to_le_bytes())
     }
 
-    fn chat(id: u64, text: &[u8]) -> u32 {
-        let mut p = Vec::new();
-        p.extend_from_slice(&id.to_le_bytes());
-        p.extend_from_slice(&(text.len() as u16).to_le_bytes());
-        p.extend_from_slice(text);
-        ev(EV_CHAT, &p)
-    }
-
     fn snapshot_vec() -> Vec<u8> {
         let len = sim_snapshot() as usize;
         io()[..len].to_vec()
@@ -590,15 +566,31 @@ mod tests {
         assert_eq!(ev_id(EV_LEAVE, 6), ERR_ABSENT);
         assert_eq!(ev_id(EV_CHECK_IN, 5), ERR_CHECKED_IN);
         assert_eq!(ev_id(EV_CHECK_IN, 9), ERR_ABSENT);
-        assert_eq!(chat(6, b"woof"), ERR_ABSENT);
         assert_eq!(ev(99, &5u64.to_le_bytes()), ERR_KIND);
         assert_eq!(ev(EV_JOIN, &[1, 2]), ERR_ENCODING);
-        assert_eq!(chat(5, &[b'a'; CHAT_MAX + 1]), ERR_ENCODING);
         {
             let mut p = 1u32.to_le_bytes().to_vec(); // not > current epoch
             p.extend_from_slice(&0u64.to_le_bytes());
             assert_eq!(ev(EV_EPOCH_ADVANCE, &p), ERR_EPOCH);
         }
+        assert_eq!(sim_hash(), h);
+        assert_eq!(snapshot_vec(), s);
+    }
+
+    #[test]
+    fn reserved_kind_4_replays_as_accepted_no_op() {
+        let _g = setup(2);
+        assert_eq!(ev_id(EV_JOIN, 5), OK);
+        let h = sim_hash();
+        let s = snapshot_vec();
+        // Journaled instances carry { id u64, len u16, utf8 }, but any
+        // payload must stay accepted and state-free: replay refuses to
+        // serve a park on the first rejected event.
+        let mut p = 5u64.to_le_bytes().to_vec();
+        p.extend_from_slice(&4u16.to_le_bytes());
+        p.extend_from_slice(b"woof");
+        assert_eq!(ev(EV_RESERVED_4, &p), OK);
+        assert_eq!(ev(EV_RESERVED_4, &[]), OK);
         assert_eq!(sim_hash(), h);
         assert_eq!(snapshot_vec(), s);
     }

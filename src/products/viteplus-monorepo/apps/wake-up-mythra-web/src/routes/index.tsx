@@ -52,7 +52,6 @@ function Page() {
       </div>
       <canvas id="grid" width={100} height={100}></canvas>
       <div className="who" id="who"></div>
-      <input id="chat" placeholder="say something to the park" maxLength={140} />
       <div id="log"></div>
     </OpenFeatureProvider>
   );

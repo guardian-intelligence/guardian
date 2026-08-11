@@ -22,7 +22,6 @@ const (
 	evJoin         = 1
 	evLeave        = 2
 	evCheckIn      = 3
-	evChat         = 4
 	evDayReset     = 5
 	evEpochAdvance = 6
 )
@@ -53,7 +52,7 @@ type session struct {
 // the session's own dog for kinds that carry one.
 func intentBoundToActor(kind uint16, payload []byte, dogID uint64) bool {
 	switch kind {
-	case evJoin, evLeave, evCheckIn, evChat:
+	case evJoin, evLeave, evCheckIn:
 		return len(payload) >= 8 && binary.LittleEndian.Uint64(payload) == dogID
 	default:
 		return false // system kinds never arrive from sessions
