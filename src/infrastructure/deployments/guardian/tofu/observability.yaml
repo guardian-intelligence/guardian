@@ -45,8 +45,24 @@ spec:
             description: >-
               No tofu-runner Job for this root has succeeded in over three
               hours (hourly schedule plus slack). The root is not being
-              reconciled from Git; drift would go unseen. Also covers the
-              never-succeeded case after first deploy.
+              reconciled from Git; drift would go unseen.
+        # kube_cronjob_status_last_successful_time only exists once a CronJob
+        # has succeeded at least once, so the staleness rule above cannot see
+        # a root that has never succeeded. Counting present series against
+        # the fixed root count covers that hole.
+        - alert: TofuRootNeverSucceeded
+          expr: count(kube_cronjob_status_last_successful_time{namespace="tofu-system"}) < 6
+          for: 90m
+          labels:
+            severity: warning
+            guardian_component: iac
+          annotations:
+            summary: 'a tofu root CronJob has never succeeded'
+            description: >-
+              Fewer roots report a last-successful reconcile than exist. A
+              CronJob that has never completed successfully is invisible to
+              TofuReconcileStale; compare kube_cronjob_status_last_successful_time
+              series in tofu-system against the six CronJobs to find it.
         - alert: TofuMinterReconcileStale
           expr: time() - kube_cronjob_status_last_successful_time{namespace="tofu-system", cronjob="tofu-guardian-mgmt-cloudflare-tokens"} > 3600
           for: 15m

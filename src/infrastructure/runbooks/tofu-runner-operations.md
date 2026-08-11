@@ -22,6 +22,15 @@ A failed Job means a tofu error, a failed apply, or — on the token minter —
 a plan with changes (its `PAGE_ON_DRIFT` makes drift a failure). The
 `tofu-runner-health` VMRule pages on these.
 
+## Read a root's outputs
+
+Roots do not relay outputs anywhere: an output (a tunnel token, a webhook
+signing secret) lives only in the root's encrypted R2 state. To read one —
+including the relay ceremony that seeds OpenBao after an output-bearing
+apply — assemble the break-glass credentials below and run
+`tofu output <name>` in the root. Treat any output-bearing apply as
+unfinished until its consumers' OpenBao copies are re-seeded.
+
 ## Apply now (don't wait for the next tick)
 
 A merge applies on the root's next scheduled tick. To run a root immediately
