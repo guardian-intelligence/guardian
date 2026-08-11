@@ -15,6 +15,7 @@ package tests
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -232,27 +233,36 @@ func TestInstallCanaryReleaseContractMatchesCutter(t *testing.T) {
 }
 
 const (
-	tofuHelmReleaseRunfile = "src/infrastructure/deployments/guardian/tofu/tofu-controller-helmrelease.yaml"
+	tofuManifestDirRunfile = "src/infrastructure/deployments/guardian/tofu/kustomization.yaml"
 	moduleBazelRunfile     = "MODULE.bazel"
 )
 
-// The tofu-controller release rides three pins in one manifest: the chart
-// GitRepository tag, the controller image newTag+digest postRenderer, and
-// the runner image tag (digest embedded, because the controller uses the
-// composed repository:tag verbatim as the runner pod image). Renovate moves
-// them as one grouped PR; this holds a half-moved set red.
-func TestTofuControllerPinsMoveTogether(t *testing.T) {
-	raw := readText(t, runfilePath(tofuHelmReleaseRunfile))
+// Every per-root CronJob pins the tofu-runner image by digest and carries the
+// image-automation marker, so Flux moves all six to a new digest in one
+// commit and never leaves a root running a stale runner.
+var tofuRunnerImageRe = regexp.MustCompile(
+	`image:\s*(ghcr\.io/guardian-intelligence/tofu-runner:edge@sha256:[0-9a-f]{64})\s*#\s*\{"\$imagepolicy":\s*"guardian-imageops:tofu-runner"\}`)
 
-	re := regexp.MustCompile(`(?m)^\s*# renovate: tofu-controller-release\n\s*(?:tag|newTag): "?(v[0-9]+\.[0-9]+\.[0-9]+)`)
-	matches := re.FindAllStringSubmatch(raw, -1)
-	if len(matches) != 3 {
-		t.Fatalf("%s: expected 3 renovate-annotated tofu-controller-release pins (GitRepository tag, runner tag, postRenderers newTag), found %d", tofuHelmReleaseRunfile, len(matches))
+func TestTofuRunnerImagePinsAgree(t *testing.T) {
+	dir := filepath.Dir(runfilePath(tofuManifestDirRunfile))
+	files, err := filepath.Glob(filepath.Join(dir, "cronjob-*.yaml"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	want := matches[0][1]
-	for _, m := range matches[1:] {
+	if len(files) != 6 {
+		t.Fatalf("expected 6 tofu-runner CronJob manifests, found %d", len(files))
+	}
+	var want string
+	for _, f := range files {
+		m := tofuRunnerImageRe.FindStringSubmatch(readText(t, f))
+		if m == nil {
+			t.Fatalf("%s: no digest-pinned tofu-runner image with a guardian-imageops:tofu-runner imagepolicy marker", filepath.Base(f))
+		}
+		if want == "" {
+			want = m[1]
+		}
 		if m[1] != want {
-			t.Fatalf("%s: tofu-controller release pins disagree: %q vs %q — move the GitRepository tag, runner image, and postRenderers digest together", tofuHelmReleaseRunfile, want, m[1])
+			t.Fatalf("%s pins %q but another CronJob pins %q — all roots must share one tofu-runner digest so image automation moves them together", filepath.Base(f), m[1], want)
 		}
 	}
 }

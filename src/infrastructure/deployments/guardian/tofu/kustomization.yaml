@@ -3,18 +3,19 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - secrets.yaml
-  - tofu-controller-helmrelease.yaml
-  - tofu-controller-networkpolicy.yaml
-  - root-guardian-stripe-sandbox.yaml
-  - root-guardian-mgmt-edge-policy.yaml
-  - root-guardian-github.yaml
-  - root-guardian-mgmt-dns.yaml
-  - root-guardian-mgmt-cloudflare-tokens.yaml
-  - root-guardian-mgmt.yaml
   - rbac.yaml
+  - networkpolicy.yaml
+  - observability.yaml
+  - cronjob-guardian-stripe-sandbox.yaml
+  - cronjob-guardian-mgmt-edge-policy.yaml
+  - cronjob-guardian-github.yaml
+  - cronjob-guardian-mgmt-dns.yaml
+  - cronjob-guardian-mgmt-cloudflare-tokens.yaml
+  - cronjob-guardian-mgmt.yaml
 
-# One copy of the non-secret account id every Cloudflare root's CR consumes
-# via varsFrom; the workstation twin is bootstrap/backend.tfvars.
+# One copy of the non-secret account id every Cloudflare root's CronJob
+# consumes as TF_VAR_cloudflare_account_id; the workstation twin is
+# bootstrap/backend.tfvars.
 configMapGenerator:
   - name: tofu-vars
     namespace: tofu-system

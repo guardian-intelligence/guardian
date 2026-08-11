@@ -1,16 +1,51 @@
-# Terraform CRs joined the cluster after the persona ClusterRoles were cut,
-# so the view aggregate (and with it the read persona that babysits
-# reconciliation) cannot see them without this. Read-only; plans and state
-# stay in Secrets, which view excludes.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+# The identity every root's CronJob pod runs as, and its single privilege:
+# reading the Flux source object in cozy-fluxcd to learn where the artifact
+# it should reconcile lives (main.go resolveArtifact). It is a namespaced
+# Role in cozy-fluxcd, not a ClusterRole — the runner needs no cluster-wide
+# read, only this one source object — and it grants no write anywhere. The
+# provider credentials, backend keys, and state passphrase arrive as envFrom
+# Secrets; the apiserver sees only this get. The CronJobs and Jobs themselves
+# are core batch resources the read persona already sees through the built-in
+# view aggregate, so reconciliation stays observable with no extra grant.
+apiVersion: v1
+kind: ServiceAccount
 metadata:
-  name: tofu-terraform-view
+  name: tofu-runner
+  namespace: tofu-system
   labels:
-    app.kubernetes.io/name: tofu-controller
+    app.kubernetes.io/name: tofu-runner
     app.kubernetes.io/part-of: guardian
-    rbac.authorization.k8s.io/aggregate-to-view: "true"
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tofu-runner-source-reader
+  namespace: cozy-fluxcd
+  labels:
+    app.kubernetes.io/name: tofu-runner
+    app.kubernetes.io/part-of: guardian
 rules:
-  - apiGroups: ["infra.contrib.fluxcd.io"]
-    resources: ["terraforms", "terraforms/status"]
-    verbs: ["get", "list", "watch"]
+  # Both kinds a root can reference: GitRepository in steady state,
+  # OCIRepository in the dark overlay. Read-only, and only the artifact
+  # status is ever consumed.
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["gitrepositories", "ocirepositories"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tofu-runner-source-reader
+  namespace: cozy-fluxcd
+  labels:
+    app.kubernetes.io/name: tofu-runner
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tofu-runner-source-reader
+subjects:
+  - kind: ServiceAccount
+    name: tofu-runner
+    namespace: tofu-system

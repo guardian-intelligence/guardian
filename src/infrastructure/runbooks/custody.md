@@ -71,64 +71,6 @@ All actions run as `aspect infra custody --action <name>`.
   `linstor/master-passphrase` in an already restored tmpfs bundle and refuses
   to replace it. Snapshot the bundle before provisioning encrypted volumes.
 
-## One-time rotation ceremony: the tofu cutover
-
-One bundle open ends the era of workstation `tofu apply`
-(docs/tofu-gitops-design.md). It rotates the OpenTofu state encryption to a
-fresh passphrase whose homes are OpenBao (runner env) and the operator
-vault (cold-boot DR), relays every apply-time credential into OpenBao, and
-leaves custody out of the tofu loop permanently. Single session, in order:
-
-0. **Preconditions.** The tofu-system namespace pair is in the OpenBao
-   self-init block, the tofu-system ExternalSecrets and the rekeyed
-   `versions.tf` files are on main, and the controller is Ready with no
-   Terraform CRs. Authenticate `write-basic`.
-1. **OpenBao re-initialize** with the new self-init config so the
-   `guardian-{reader,writer}-tofu-system` pair exists —
-   [openbao-static-seal-self-init.md](openbao-static-seal-self-init.md).
-2. **Generate the passphrase once**: `openssl rand -base64 32`. Store it in
-   the operator vault as `tofu-state-encryption`, then write it to OpenBao
-   through a minted `guardian-writer-tofu-system` token:
-   `bao kv put kv/guardian/guardian-mgmt/tofu-system/state-encryption passphrase=-`
-   (value on stdin, `umask 077`).
-3. **Open the bundle** (restore per Lifecycle; this is a rotation ceremony
-   and it pages). Assemble the outgoing env exactly as the cold-boot
-   runbook's "OpenTofu state encryption" section describes — the custody
-   passphrase and the R2 keypair are needed one last time to read what they
-   protect.
-4. **Relay the apply-time credentials** to OpenBao through the same writer
-   role, every value on stdin:
-   - `tofu-system/backend-r2`: `AWS_ACCESS_KEY_ID`,
-     `AWS_SECRET_ACCESS_KEY` and `AWS_ENDPOINT_URL_S3` from their
-     custody.env values (`cloudflare_r2_access_key_id`,
-     `cloudflare_r2_secret_access_key`, `cloudflare_r2_s3_api_endpoint`).
-   - `tofu-system/stripe`: `STRIPE_API_KEY` from
-     `stripe_e2e_bootstrap_sandbox_key`.
-   - `tofu-system/cloudflare-edge-policy` and `tofu-system/cloudflare-dns`:
-     `CLOUDFLARE_API_TOKEN` each, from the minter root's
-     `edge_policy_provisioner_token_value` and
-     `dns_lb_provisioner_token_value` outputs (`tofu output -raw`, never an
-     argument).
-   - `tofu-system/cloudflare-minter`: `CLOUDFLARE_API_TOKEN` from
-     `cloudflare_token_minter_api_token`.
-   - `tofu-system/latitude`: `LATITUDESH_AUTH_TOKEN` from `latitude.token`.
-5. **Prove the R2 lockfile** before any state write: two concurrent
-   `tofu plan` runs against `guardian-stripe-sandbox`; the second must fail
-   to acquire the lock (`use_lockfile` rides S3 conditional writes). If
-   both proceed, stop — the contention guard the controller depends on does
-   not hold, and the cutover pauses here.
-6. **Rekey all six roots.** From a checkout preceding the rekey commit,
-   `tofu state pull` with the outgoing env; from main,
-   `tofu state push` with `TF_ENCRYPTION` naming the new `state` key
-   provider and the new passphrase. Then the wrong-passphrase probe from
-   the cold-boot runbook must fail against every root — proof the old
-   passphrase is dead.
-7. **Wipe** the bundle. Bundle membership is untouched today; the tofu
-   values leave the manifest in the teardown change, after every root
-   reconciles in-cluster.
-8. **Verify the consumers**: force-sync the tofu-system ExternalSecrets and
-   confirm `Ready=True` on each.
-
 ## Passwords
 
 The repository password is the whole story; restic has no backdoor and we

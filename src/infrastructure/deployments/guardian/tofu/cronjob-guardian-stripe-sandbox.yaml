@@ -1,0 +1,89 @@
+# guardian-stripe-sandbox — the first root reconciled in-cluster
+# (docs/tofu-gitops-design.md): sandbox blast radius, no variables, one
+# provider credential. It runs in plan mode — the runner plans on every tick
+# and holds (MODE defaults to plan; the plan lands in the pod log, which the
+# read persona can tail). The flip to apply is its own reviewed PR that adds
+# `MODE: apply` once the soak shows clean, stable plans. The pod shape here
+# is the template every other root's CronJob repeats; only the schedule,
+# ROOT_*, the provider Secret, and the mode/drift flags differ.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tofu-guardian-stripe-sandbox
+  namespace: tofu-system
+  labels:
+    app.kubernetes.io/name: tofu-runner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tofu-root: guardian-stripe-sandbox
+spec:
+  schedule: "7 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      # Below the runner's own 55m context ceiling so the pod's deadline is
+      # the real bound and a wedged provider call cannot outlive the tick.
+      activeDeadlineSeconds: 3000
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: tofu-runner
+            guardian.dev/tofu-root: guardian-stripe-sandbox
+        spec:
+          serviceAccountName: tofu-runner
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: tofu
+              image: ghcr.io/guardian-intelligence/tofu-runner:edge@sha256:e213585f3dbe09312c058118b6574e56af1ff54486cba03734d7670e6f5e3dc2 # {"$imagepolicy": "guardian-imageops:tofu-runner"}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: ROOT_NAME
+                  value: guardian-stripe-sandbox
+                - name: ROOT_PATH
+                  value: ./src/infrastructure/bootstrap/guardian-stripe-sandbox
+                - name: SOURCE_KIND
+                  value: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+                - name: SOURCE_NAME
+                  value: ${GUARDIAN_SOURCE_NAME:=guardian}
+              envFrom:
+                - secretRef:
+                    name: tofu-backend-r2
+                - secretRef:
+                    name: tofu-state-encryption
+                - secretRef:
+                    name: tofu-stripe
+              volumeMounts:
+                - name: workspace
+                  mountPath: /workspace
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+          volumes:
+            # tofu extracts the artifact, writes .terraform/ and the plugin
+            # cache under HOME=/workspace, and uses /tmp; both are the only
+            # writable paths under the read-only root filesystem.
+            - name: workspace
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
