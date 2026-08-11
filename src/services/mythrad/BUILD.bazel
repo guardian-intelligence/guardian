@@ -28,6 +28,7 @@ go_library(
     visibility = ["//visibility:private"],
     deps = [
         "//src/services/mythrad/journal",
+        "//src/services/telemetry",
         "@com_github_coreos_go_oidc_v3//oidc:go_default_library",
         "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
         "@com_github_prometheus_client_golang//prometheus:go_default_library",

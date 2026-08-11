@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+
+	"github.com/guardian-intelligence/guardian/src/services/telemetry"
 )
 
 // ticket is the admission artifact (docs/netcode.md): identity, park, and
@@ -304,6 +306,12 @@ func (h *gameHandlers) handleSessionMint(gate *oidcGate, publicAddr string, cert
 			Sub: sub, Park: park, Role: role,
 			Exp: time.Now().Add(60 * time.Second).Unix(),
 		})
+		// The mint is where a browser's quoted trace id meets a game
+		// identity: this line is the join between a client rpc trace and
+		// everything the session does afterwards.
+		if tid := telemetry.TraceIDFrom(r.Context()); tid != "" {
+			log.Printf("session minted: sub=%s park=%s role=%s trace_id=%s", sub, park, role, tid)
+		}
 		resp := map[string]any{
 			"ticket": tk, "endpoint": publicAddr, "park": park, "role": role,
 		}

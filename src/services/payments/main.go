@@ -15,6 +15,7 @@ import (
 	tb "github.com/tigerbeetle/tigerbeetle-go"
 
 	"github.com/guardian-intelligence/guardian/src/services/payments/paymentdb"
+	"github.com/guardian-intelligence/guardian/src/services/telemetry"
 )
 
 func main() {
@@ -30,7 +31,7 @@ func main() {
 		syscall.SIGTERM,
 	)
 	defer stop()
-	traceShutdown, err := initTracing(rootCtx, cfg.OTLPEndpoint)
+	traceShutdown, err := telemetry.Init(rootCtx, paymentsServiceName, cfg.OTLPEndpoint)
 	if err != nil {
 		slog.Error("tracing initialization", "error", err)
 		os.Exit(1)
