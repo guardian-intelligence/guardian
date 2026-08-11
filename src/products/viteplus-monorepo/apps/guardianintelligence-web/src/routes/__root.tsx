@@ -2,10 +2,10 @@ import { createRootRoute, HeadContent, Outlet, Scripts, useLocation } from "@tan
 import { BrandTelemetryProvider } from "@guardian/brand";
 import { PersistentCompanyHome } from "~/components/company-home/persistent-company-home";
 import { DevelopmentModeHotkey } from "~/components/development-mode-hotkey";
-import { emitSpan } from "~/lib/telemetry/browser";
-import { TelemetryProbe } from "~/lib/telemetry/page-view";
+import { emitSpan } from "@guardian/telemetry";
+import { TelemetryProbe } from "@guardian/telemetry/probe";
 import { faviconLinks } from "~/lib/stage-favicons";
-import { deployMetaTags } from "~/lib/telemetry/server-deploy-meta";
+import { deployMetaTags } from "@guardian/telemetry/server-deploy-meta";
 import "~/styles/app.css";
 
 // __root — the HTML shell. No chrome, no footer, no data-treatment wrapper.
@@ -64,7 +64,7 @@ function RootComponent() {
           <PersistentCompanyHome active={isLandingRoute} />
           <Outlet />
         </BrandTelemetryProvider>
-        <TelemetryProbe />
+        <TelemetryProbe app="company" />
         <DevelopmentModeHotkey />
         <Scripts />
       </body>

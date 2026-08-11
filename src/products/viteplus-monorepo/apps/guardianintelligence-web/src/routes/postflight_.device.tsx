@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import * as v from "valibot";
 import { validUserCode } from "~/lib/postflight-auth";
-import { emitSpan } from "~/lib/telemetry/browser";
+import { emitSpan } from "@guardian/telemetry";
 import "~/styles/postflight.css";
 
 // A hand-edited or truncated link degrades to the empty form instead of an

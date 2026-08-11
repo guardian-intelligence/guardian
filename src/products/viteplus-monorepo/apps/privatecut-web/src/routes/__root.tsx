@@ -2,8 +2,8 @@ import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-r
 import { CanvasDocument } from "~/components/canvas-document";
 import { Toaster } from "~/components/ui/sonner";
 import { SITE_DESCRIPTION, SITE_TITLE, SITE_URL } from "~/lib/site";
-import { TelemetryProbe } from "~/lib/telemetry/page-view";
-import { deployMetaTags } from "~/lib/telemetry/server-deploy-meta";
+import { TelemetryProbe } from "@guardian/telemetry/probe";
+import { deployMetaTags } from "@guardian/telemetry/server-deploy-meta";
 import "~/styles/app.css";
 
 export const Route = createRootRoute({
@@ -83,7 +83,7 @@ function RootComponent() {
           <Outlet />
         </CanvasDocument>
         <Toaster />
-        <TelemetryProbe />
+        <TelemetryProbe app="privatecut" />
         <Scripts />
       </body>
     </html>

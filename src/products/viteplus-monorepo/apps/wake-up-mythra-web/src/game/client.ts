@@ -9,6 +9,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { OpenFeature } from "@openfeature/web-sdk";
+import { emitSpan, reportError } from "@guardian/telemetry";
 import {
   accessToken,
   beginSignIn,
@@ -258,6 +259,7 @@ export function startGame(): void {
       return;
     }
     diag.mismatches++;
+    emitSpan("wum.netcode_mismatch", { "wum.tick": String(m.tick), "wum.park": parkName });
     strike("world hash mismatch");
   }
 
@@ -273,6 +275,11 @@ export function startGame(): void {
     resyncing = true;
     resyncOnLanded = true;
     diag.resyncs++;
+    emitSpan("wum.netcode_resync", {
+      "wum.why": why,
+      "wum.seq": String(seq),
+      "wum.park": parkName,
+    });
     $("world").textContent = "✗";
     logLine(`resync: ${why}`);
     sendCtrl({ type: "resync", have: seq });
@@ -319,7 +326,10 @@ export function startGame(): void {
       ioWrite(state);
       const code = sim.sim_restore(state.length);
       if (code !== 0) {
-        logLine(`snapshot restore failed (code ${code})`);
+        const id = reportError(new Error(`snapshot restore failed (code ${code})`), {
+          "error.op": "wum.snapshot_restore",
+        });
+        logLine(`snapshot restore failed (code ${code}) [err ${id}]`);
         return;
       }
       seq = m.seq;
@@ -353,6 +363,12 @@ export function startGame(): void {
         return; // the dog is already in the park — that IS the joined state
       }
       logLine(`intent ${m.intent} rejected (reason ${m.reason})`);
+      emitSpan("wum.netcode_reject", {
+        "wum.reason": String(m.reason),
+        "wum.kind": String(it?.kind ?? ""),
+        "wum.intent": String(m.intent),
+        "wum.park": parkName,
+      });
       // "Absent" on a non-join intent means the park lost our dog (a
       // missed join or a departure that raced our reconnect): re-join and
       // retry the rejected intent behind it, at most once per window.
@@ -441,7 +457,8 @@ export function startGame(): void {
           if (myEpoch === dialEpoch) onDead();
         });
     } catch (e: any) {
-      logLine(`connect failed: ${e.message ?? e}`);
+      const id = reportError(e, { "error.op": "wum.connect", "wum.park": parkName });
+      logLine(`connect failed: ${e.message ?? e} [err ${id}]`);
       if (myEpoch === dialEpoch) onDead();
     }
   }
@@ -452,6 +469,7 @@ export function startGame(): void {
     setStatus("reconnecting");
     const wait = backoff;
     backoff = Math.min(backoff * 2, 5000);
+    emitSpan("wum.redial", { "wum.backoff_ms": String(wait), "wum.park": parkName });
     logLine(`connection lost; redialing in ${wait}ms`);
     setTimeout(connect, wait + Math.random() * 250);
   }
@@ -605,11 +623,13 @@ export function startGame(): void {
 
   async function onSignInOutcome(outcome: SignInOutcome): Promise<void> {
     if (outcome.status === "error") {
+      emitSpan("wum.signin_failed", { "wum.reason": outcome.reason, "wum.flow": "popup" });
       logLine(`sign-in failed: ${outcome.reason}`);
       return;
     }
     if (outcome.status !== "signed-in") return;
     await setIdentity();
+    emitSpan("wum.signin", { "wum.flow": "popup" });
     logLine("signed in — bringing your dog to the park");
     // Redial under the new identity; the replica state carries over, so
     // the upgrade is a reconnect, not a reload.
@@ -629,7 +649,10 @@ export function startGame(): void {
       spectate = new URLSearchParams(location.search).has("spectate");
       parkName = new URLSearchParams(location.search).get("park") || "park-mythra";
       if (outcome.status === "error") {
+        emitSpan("wum.signin_failed", { "wum.reason": outcome.reason, "wum.flow": "redirect" });
         logLine(`sign-in failed: ${outcome.reason}`);
+      } else if (outcome.status === "signed-in") {
+        emitSpan("wum.signin", { "wum.flow": "redirect" });
       }
       $("signin").onclick = () => beginSignIn("google", (o) => void onSignInOutcome(o));
       await setIdentity();
@@ -661,6 +684,7 @@ export function startGame(): void {
       };
 
       if (typeof (globalThis as any).WebTransport === "undefined") {
+        emitSpan("wum.unsupported", { "wum.feature": "webtransport" });
         setStatus("unsupported");
         $("who").textContent = "This browser can't reach the dog park (no WebTransport).";
         return;
@@ -668,9 +692,10 @@ export function startGame(): void {
       logLine(role === "player" ? "joining with your dog" : "spectating — sign in to join");
       void connect();
     } catch (e: any) {
+      const id = reportError(e, { "error.op": "wum.boot" });
       setStatus("error");
       $("who").textContent = `The park didn't load (${e?.message ?? e}) — refresh to retry.`;
-      logLine(`boot failed: ${e?.message ?? e}`);
+      logLine(`boot failed: ${e?.message ?? e} [err ${id}]`);
     }
   }
 

@@ -1,6 +1,6 @@
 import { getRouteApi } from "@tanstack/react-router";
 import { Suspense, lazy, useEffect } from "react";
-import { emitSpan } from "~/lib/telemetry/browser";
+import { emitSpan } from "@guardian/telemetry";
 import { TamControls } from "./tam-controls";
 
 // The canvas chart pulls in d3 + pretext and only runs client-side. Lazy-load

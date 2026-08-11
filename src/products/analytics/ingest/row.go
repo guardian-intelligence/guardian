@@ -125,6 +125,9 @@ func siteFromHost(host string) string {
 	if h == "rumi.engineering" || strings.HasSuffix(h, ".rumi.engineering") {
 		return "rumi.engineering"
 	}
+	if h == "wakeupmythra.com" || strings.HasSuffix(h, ".wakeupmythra.com") {
+		return "wakeupmythra.com"
+	}
 	return "local"
 }
 

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { emitSpan } from "~/lib/telemetry/browser";
+import { emitSpan } from "@guardian/telemetry";
 import { SectionWorkshop } from "~/features/design/sections/workshop";
 import { AppliedFooter } from "~/features/design/sections/applied-footer";
 import { ogMeta } from "~/lib/head";

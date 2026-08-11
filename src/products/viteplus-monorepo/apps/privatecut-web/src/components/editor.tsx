@@ -10,7 +10,7 @@ import {
   SIZE_LIMIT_PRESETS_BYTES,
 } from "~/engine/limits";
 import type { MediaSource, OutputContainer, ProbeSummary, SelectionRange } from "~/engine/types";
-import { emitSpan } from "~/lib/telemetry/browser";
+import { emitSpan } from "@guardian/telemetry";
 import { formatBitrate, formatSeconds } from "~/lib/format";
 import { ResultCard } from "./result-card";
 import { Timeline } from "./timeline";

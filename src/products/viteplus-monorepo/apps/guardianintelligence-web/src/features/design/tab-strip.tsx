@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { emitSpan } from "~/lib/telemetry/browser";
+import { emitSpan } from "@guardian/telemetry";
 
 // DesignTabStrip — four-way nav sitting just below AppChrome on every
 // /design/* route. The strip is section navigation for the brand system,

@@ -28,7 +28,7 @@ import {
 } from "~/features/letters/transitions";
 import { LetterOgPreview, LetterOgPreviewHotkey } from "~/features/letters/og-preview";
 import { canonicalLink, ogMeta, SITE_URL } from "~/lib/head";
-import { emitSpan } from "~/lib/telemetry/browser";
+import { emitSpan } from "@guardian/telemetry";
 
 // Structured provenance for the record, invisible to the reader. A letter's
 // page can stay exactly as open-ended as it was written while the head

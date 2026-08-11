@@ -38,12 +38,14 @@ genrule(
         ":sources",
         "//src/products/viteplus-monorepo:vp_node",
         "//src/products/viteplus-monorepo:workspace_sources",
-        # tsc resolves @guardian/brand's package.json "exports" straight to
-        # its .tsx SOURCE (no prebuilt .d.ts), so typechecking the app
-        # type-checks brand's source in place -- which needs brand's own
-        # node_modules (react/react-dom/@types) reachable by directory
-        # walk-up from brand's location in this sandbox, not just the app's.
+        # tsc resolves the workspace packages' package.json "exports" straight
+        # to their SOURCE (no prebuilt .d.ts), so typechecking the app
+        # type-checks those sources in place -- which needs each package's own
+        # node_modules (react/react-dom/@types/web-vitals) reachable by
+        # directory walk-up from its location in this sandbox, not just the
+        # app's.
         "//src/products/viteplus-monorepo/packages/brand:node_modules",
+        "//src/products/viteplus-monorepo/packages/telemetry:node_modules",
         ":node_modules/typescript",
     ],
     outs = ["company-site-output.tar"],
@@ -83,6 +85,7 @@ link_node_modules() {
 mkdir -p "$$work/node_modules"
 link_node_modules "$$app_node_modules" "$$work/apps/guardianintelligence-web/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/brand/node_modules" "$$work/packages/brand/node_modules"
+link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/telemetry/node_modules" "$$work/packages/telemetry/node_modules"
 cd "$$work/apps/guardianintelligence-web"
 # Mirrors package.json's own "build" script (single source of truth:
 # typecheck + test + build, in that order) -- a developer running

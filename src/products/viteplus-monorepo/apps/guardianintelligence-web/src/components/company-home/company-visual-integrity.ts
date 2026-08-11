@@ -1,4 +1,4 @@
-import { emitSpan } from "~/lib/telemetry/browser";
+import { emitSpan } from "@guardian/telemetry";
 
 export interface CompanyVisualIntegrityMetrics {
   readonly layoutShift: number;

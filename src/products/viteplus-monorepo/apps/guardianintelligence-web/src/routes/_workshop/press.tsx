@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { PRESS_META, press } from "~/content/press";
 import { BodyParagraph, PageShell } from "~/components/page-shell";
-import { emitSpan } from "~/lib/telemetry/browser";
+import { emitSpan } from "@guardian/telemetry";
 import { ogMeta } from "~/lib/head";
 
 export const Route = createFileRoute("/_workshop/press")({

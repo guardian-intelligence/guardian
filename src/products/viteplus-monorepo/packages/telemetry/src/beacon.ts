@@ -44,6 +44,7 @@ function deployShortDigest(): string {
   return deploySlug;
 }
 
+let appName = "";
 let seq = 0;
 let pending: WireEvent[] = [];
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -54,6 +55,13 @@ function lowData(): boolean {
   const c = (navigator as { connection?: { saveData?: boolean; effectiveType?: string } })
     .connection;
   return Boolean(c?.saveData) || /(^|-)2g$/.test(c?.effectiveType ?? "");
+}
+
+// In low-data mode only the load-bearing minimum ships: the route view,
+// vitals, and errors — a constrained network is exactly where errors are
+// most worth having.
+function keepInLowData(name: string): boolean {
+  return name === `${appName}.route_view` || name === "error" || name.startsWith("web_vital.");
 }
 
 function loadSeq(): number {
@@ -83,6 +91,8 @@ function toWire(e: TelemetryEvent, nowPerf: number): WireEvent {
   if (traceHex !== undefined) {
     const b64 = traceIdToBase64(traceHex);
     if (b64 !== "") w.traceId = b64;
+    // The hex id stays in props too: it is what users and log lines quote.
+    rest["trace.id"] = traceHex;
   }
   const deploy = deployShortDigest();
   if (deploy !== "") rest.deploy ??= deploy;
@@ -107,8 +117,7 @@ function drain(): void {
   const events = q.splice(0, q.length);
   const minimal = lowData();
   for (const e of events) {
-    if (minimal && !(e.name === "privatecut.route_view" || e.name.startsWith("web_vital.")))
-      continue;
+    if (minimal && !keepInLowData(e.name)) continue;
     const w = toWire(e, now);
     w.sessionSeq = ++seq;
     pending.push(w);
@@ -224,14 +233,15 @@ function arm(): void {
   timer = setInterval(() => flush(false), lowData() ? 60_000 : 15_000);
 }
 
-export function initBeacon(): void {
+export function initBeacon(app: string): void {
   if (started || typeof window === "undefined") return;
   // Prerendered pages must not emit: gate on activation.
   if ((document as { prerendering?: boolean }).prerendering) {
-    document.addEventListener("prerenderingchange", () => initBeacon(), { once: true });
+    document.addEventListener("prerenderingchange", () => initBeacon(app), { once: true });
     return;
   }
   started = true;
+  appName = app;
   seq = loadSeq();
   arm();
   document.addEventListener("visibilitychange", () => {
