@@ -66,6 +66,7 @@ import (
 	"github.com/tetratelabs/wazero"
 
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/journal"
+	"github.com/guardian-intelligence/guardian/src/services/telemetry"
 )
 
 //go:embed behaviors/server.wasm
@@ -527,6 +528,13 @@ func main() {
 		}
 	}()
 
+	traceShutdown, err := telemetry.Init(context.Background(), "mythrad",
+		os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"))
+	if err != nil {
+		log.Fatalf("tracing: %v", err)
+	}
+	defer traceShutdown(context.Background())
+
 	mods := &modules{client: client, park: parkMod}
 	registry := newParks(func() []byte { b, _ := parkMod.get(); return b }, j, mods)
 	handlers := &gameHandlers{
@@ -653,7 +661,7 @@ func main() {
 
 	log.Printf("mythrad: wt=:%d http=:%d metrics=:%d public=%s issuer=%s", wtPort, httpPort, metricsPort, publicAddr, issuer)
 	go func() { log.Fatal(wt.ListenAndServe()) }()
-	go func() { log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", httpPort), pageMux)) }()
+	go func() { log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", httpPort), telemetry.Middleware(pageMux))) }()
 	go func() { log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", metricsPort), obsMux)) }()
 
 	sig := make(chan os.Signal, 1)

@@ -24,6 +24,7 @@ go_library(
         "//src/proto/gen/go/guardian/authorization/v1:authorizationv1",
         "//src/proto/gen/go/guardian/authorization/v1/authorizationv1connect",
         "//src/services/payments/paymentdb",
+        "//src/services/telemetry",
         "@com_connectrpc_connect//:connect",
         "@com_github_aws_aws_sdk_go_v2//aws:go_default_library",
         "@com_github_aws_aws_sdk_go_v2_config//:go_default_library",

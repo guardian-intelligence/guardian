@@ -5,6 +5,7 @@ import { useRouterState } from "@tanstack/react-router";
 import { onCLS, onINP, onLCP, type Metric } from "web-vitals";
 import { emitSpan } from "./browser";
 import { installErrorCapture } from "./errors";
+import { installFetchTelemetry } from "./fetch-telemetry";
 
 let webVitalsInstalled = false;
 
@@ -38,6 +39,7 @@ export function TelemetryProbe({ app }: { app: string }) {
 
   useEffect(() => {
     installErrorCapture(app);
+    installFetchTelemetry(app);
     installWebVitals();
     // The beacon loads strictly off the critical path: dynamic import on
     // idle, so it is a lazy chunk (never modulepreloaded) and its cost is

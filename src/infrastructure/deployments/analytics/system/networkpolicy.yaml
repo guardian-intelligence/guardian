@@ -71,6 +71,16 @@ spec:
               protocol: TCP
             - port: "4318"
               protocol: TCP
+    # mythrad runs hostNetwork (the public game plane), so its spans arrive
+    # with the node's identity, not a pod endpoint — no label can match.
+    # Nodes are already inside the cluster trust boundary.
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "4317"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:

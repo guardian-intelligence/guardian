@@ -44,6 +44,11 @@ spec:
         app.kubernetes.io/component: mythrad
         guardian.dev/product: mythra
         guardian.dev/stage: prod
+        # Span producer — but Cilium sees this hostNetwork pod as the node,
+        # not an endpoint, so admission to the collector rides the
+        # fromEntities host/remote-node rule in the analytics CNP; the
+        # label documents intent and covers any future pod-network move.
+        guardian.dev/otel: producer
     spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
@@ -107,6 +112,8 @@ spec:
               value: /etc/mythra/behavior
             - name: ASSET_DIR
               value: /etc/mythra/assets
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: "otel-collector.guardian-analytics.svc.cozy.local:4317"
           ports:
             - name: wt
               containerPort: 4433

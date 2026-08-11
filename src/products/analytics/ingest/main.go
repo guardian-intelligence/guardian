@@ -22,6 +22,8 @@ import (
 	"connectrpc.com/otelconnect"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+
+	"github.com/guardian-intelligence/guardian/src/services/telemetry"
 )
 
 func envOr(key, fallback string) string {
@@ -41,7 +43,7 @@ func main() {
 	// OTLP gRPC endpoint of the in-namespace collector; unset ⇒ no-op tracer.
 	otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 
-	tpShutdown, err := initTracing(context.Background(), otelEndpoint)
+	tpShutdown, err := telemetry.Init(context.Background(), "guardian-analytics-ingest", otelEndpoint)
 	if err != nil {
 		slog.Warn("tracing init failed; continuing without traces", "err", err)
 		tpShutdown = func(context.Context) error { return nil }

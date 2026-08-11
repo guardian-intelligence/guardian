@@ -4,6 +4,12 @@
 src/products/viteplus-monorepo/node_modules
 src/products/viteplus-monorepo/apps/guardianintelligence-web/node_modules
 src/products/viteplus-monorepo/apps/privatecut-web/node_modules
+src/products/viteplus-monorepo/apps/wake-up-mythra-web/node_modules
+src/products/viteplus-monorepo/packages/brand/node_modules
+src/products/viteplus-monorepo/packages/canary-journeys/node_modules
+src/products/viteplus-monorepo/packages/postflight-checkout/node_modules
+src/products/viteplus-monorepo/packages/telemetry/node_modules
+src/products/viteplus-monorepo/packages/visual-harness/node_modules
 
 # The CLI crate's make path drops a cargo output tree here; keep bazel's
 # package walk out of it.
