@@ -1,0 +1,74 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
+go_library(
+    name = "tofu_runner_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/infrastructure/cmd/tofu_runner",
+    visibility = ["//visibility:private"],
+)
+
+go_binary(
+    name = "tofu_runner",
+    embed = [":tofu_runner_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "tofu_runner_test",
+    srcs = ["main_test.go"],
+    embed = [":tofu_runner_lib"],
+)
+
+pkg_tar(
+    name = "runner_layer",
+    files = {
+        ":tofu_runner": "app/tofu-runner",
+        "@opentofu_linux_amd64//:tofu": "usr/local/bin/tofu",
+        "@cacert_pem//file": "etc/ssl/certs/ca-certificates.crt",
+    },
+    modes = {
+        "app/tofu-runner": "0755",
+        "usr/local/bin/tofu": "0755",
+        "etc/ssl/certs/ca-certificates.crt": "0644",
+    },
+)
+
+oci_image(
+    name = "image",
+    annotations = {
+        "org.opencontainers.image.description": "Guardian in-cluster OpenTofu reconcile runner (per-root CronJob)",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "guardian-tofu-runner",
+    },
+    base = "@distroless_cc_base_linux_amd64",
+    entrypoint = ["/app/tofu-runner"],
+    env = {
+        # tofu shells out to providers over public TLS; the layered Mozilla
+        # bundle is the system trust store. HOME lands tofu's .terraform.d and
+        # plugin cache inside the writable /workspace emptyDir, so the pod can
+        # run with a read-only root filesystem under restricted PSA.
+        "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
+        "HOME": "/workspace",
+        "WORKDIR": "/workspace",
+    },
+    tars = [":runner_layer"],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/tofu-runner:dev"],
+)
+
+# Pushed by CI (.github/workflows/images.yml) on merges to main.
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/tofu-runner",
+    visibility = ["//visibility:public"],
+)

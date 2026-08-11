@@ -231,7 +231,10 @@ func TestInstallCanaryReleaseContractMatchesCutter(t *testing.T) {
 	}
 }
 
-const tofuHelmReleaseRunfile = "src/infrastructure/deployments/guardian/tofu/tofu-controller-helmrelease.yaml"
+const (
+	tofuHelmReleaseRunfile = "src/infrastructure/deployments/guardian/tofu/tofu-controller-helmrelease.yaml"
+	moduleBazelRunfile     = "MODULE.bazel"
+)
 
 // The tofu-controller release rides three pins in one manifest: the chart
 // GitRepository tag, the controller image newTag+digest postRenderer, and
@@ -254,20 +257,26 @@ func TestTofuControllerPinsMoveTogether(t *testing.T) {
 	}
 }
 
-// The runner image bundles its own OpenTofu (runner.Dockerfile
-// ARG TOFU_VERSION), declared next to the pin as a runner-bundled-tofu
-// comment. It must share a minor with the multitool tofu the break-glass
-// workstation path uses, or the two plan differently against the same
-// state. Patch drift within the minor is accepted — upstream pins its own
-// patch.
+// The tofu the runner image ships and the multitool tofu the break-glass
+// workstation path uses come from the same OpenTofu release: an in-cluster
+// apply and a hand apply against the same state must run identical tofu, so
+// the two pins must be the exact same version, not merely the same minor.
 func TestTofuRunnerTracksMultitoolPin(t *testing.T) {
-	runner := extractMinor(t, tofuHelmReleaseRunfile,
-		`# runner-bundled-tofu: ([0-9]+)\.([0-9]+)`)
-	multitool := extractMinor(t, toolLockRunfile,
-		`opentofu/releases/download/v([0-9]+)\.([0-9]+)\.[0-9]+/`)
-	if runner != multitool {
-		t.Fatalf("runner-bundled tofu %s and multitool tofu %s must share a minor: align the tf-runner release's bundled OpenTofu (runner.Dockerfile) with the multitool pin, and update the runner-bundled-tofu declaration when the images move", runner, multitool)
+	image := tofuLinuxVersion(t, moduleBazelRunfile)
+	multitool := tofuLinuxVersion(t, toolLockRunfile)
+	if image != multitool {
+		t.Fatalf("runner image tofu %s and multitool tofu %s must be the same version: move the opentofu_linux_amd64 pin in MODULE.bazel and the multitool tofu pin together", image, multitool)
 	}
+}
+
+func tofuLinuxVersion(t *testing.T, runfile string) string {
+	t.Helper()
+	re := regexp.MustCompile(`opentofu/releases/download/v([0-9]+\.[0-9]+\.[0-9]+)/tofu_[0-9.]+_linux_amd64\.zip`)
+	m := re.FindStringSubmatch(readText(t, runfilePath(runfile)))
+	if m == nil {
+		t.Fatalf("%s: no linux_amd64 opentofu release pin found", runfile)
+	}
+	return m[1]
 }
 
 func scalarValue(t *testing.T, raw, path, key string, re *regexp.Regexp) string {

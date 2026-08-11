@@ -21,6 +21,7 @@ on:
       - "src/services/postflight/**"
       - "src/services/feature-flags-notify/**"
       - "src/services/mythrad/**"
+      - "src/infrastructure/cmd/tofu_runner/**"
       - "src/products/analytics/**"
       - "src/products/viteplus-monorepo/**"
       - "src/proto/**"
@@ -60,7 +61,7 @@ jobs:
         run: |
           names=(alert-relay analytics-ingest authorization canary-journeys
             feature-flags-notify mythrad payments payments-canary
-            postflight-controlplane company-site privatecut-web
+            postflight-controlplane tofu-runner company-site privatecut-web
             visual-harness wake-up-mythra-web)
           declare -A watch=(
             [alert-relay]='^src/services/alerting/'
@@ -72,6 +73,7 @@ jobs:
             [postflight-controlplane]='^src/services/postflight/'
             [feature-flags-notify]='^src/services/feature-flags-notify/'
             [mythrad]='^src/services/mythrad/'
+            [tofu-runner]='^src/infrastructure/cmd/tofu_runner/'
             [company-site]='^src/products/viteplus-monorepo/'
             [privatecut-web]='^src/products/viteplus-monorepo/'
             [wake-up-mythra-web]='^src/products/viteplus-monorepo/'
@@ -87,12 +89,13 @@ jobs:
             [postflight-controlplane]='//src/services/postflight/controlplane:push'
             [feature-flags-notify]='//src/services/feature-flags-notify:push'
             [mythrad]='//src/services/mythrad:push'
+            [tofu-runner]='//src/infrastructure/cmd/tofu_runner:push'
             [company-site]='//src/products/viteplus-monorepo/apps/guardianintelligence-web/site:push'
             [privatecut-web]='//src/products/viteplus-monorepo/apps/privatecut-web/site:push'
             [wake-up-mythra-web]='//src/products/viteplus-monorepo/apps/wake-up-mythra-web/site:push'
             [visual-harness]='//src/products/viteplus-monorepo/packages/visual-harness:push'
           )
-          go_images=' alert-relay analytics-ingest authorization feature-flags-notify mythrad payments payments-canary postflight-controlplane '
+          go_images=' alert-relay analytics-ingest authorization feature-flags-notify mythrad payments payments-canary postflight-controlplane tofu-runner '
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'
 
           all=false changed=""
