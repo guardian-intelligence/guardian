@@ -171,16 +171,18 @@ func (t *tokenSource) get(ctx context.Context) (string, string, error) {
 // ---------- shared park replica (the verifier's sim) ----------
 
 type replica struct {
-	mu        sync.Mutex
-	rt        wazero.Runtime
-	mem       api.Memory
-	ioPtr     uint32
-	f         map[string]api.Function
-	valid     bool
-	seq       int64
-	tick      uint64
-	wh        string
-	lastEvent time.Time
+	mu         sync.Mutex
+	rt         wazero.Runtime
+	mem        api.Memory
+	ioPtr      uint32
+	terrainPtr uint32
+	f          map[string]api.Function
+	terrainHex string // identity of the loaded terrain blob
+	valid      bool
+	seq        int64
+	tick       uint64
+	wh         string
+	lastEvent  time.Time
 }
 
 func newReplica(module []byte) (*replica, error) {
@@ -191,7 +193,7 @@ func newReplica(module []byte) (*replica, error) {
 		return nil, err
 	}
 	r := &replica{rt: rt, mem: mod.Memory(), f: map[string]api.Function{}}
-	for _, n := range []string{"io_buf", "sim_restore", "sim_step", "sim_apply", "sim_hash", "sim_tick"} {
+	for _, n := range []string{"io_buf", "terrain_buf", "sim_set_terrain", "sim_restore", "sim_step", "sim_apply", "sim_hash", "sim_tick"} {
 		fn := mod.ExportedFunction(n)
 		if fn == nil {
 			return nil, fmt.Errorf("park module missing %s", n)
@@ -203,6 +205,11 @@ func newReplica(module []byte) (*replica, error) {
 		return nil, err
 	}
 	r.ioPtr = uint32(p[0])
+	p, err = r.f["terrain_buf"].Call(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r.terrainPtr = uint32(p[0])
 	return r, nil
 }
 
@@ -217,11 +224,43 @@ func (r *replica) call(n string, args ...uint64) uint64 {
 	return res[0]
 }
 
+// call32 truncates i32-returning exports: wazero's raw result slots are
+// unspecified above the result width.
+func (r *replica) call32(n string, args ...uint64) uint32 {
+	return uint32(r.call(n, args...))
+}
+
+// ensureTerrain loads the named blob into the replica before a restore,
+// fetching it from the service's content-addressed lane on first sight.
+func (r *replica) ensureTerrain(hex string, fetch func(hex string) ([]byte, error)) bool {
+	r.mu.Lock()
+	loaded := r.terrainHex
+	r.mu.Unlock()
+	if hex == "" || hex == loaded {
+		return true
+	}
+	blob, err := fetch(hex)
+	if err != nil {
+		log.Printf("terrain %s fetch failed: %v", hex, err)
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.mem.Write(r.terrainPtr, blob)
+	if code := r.call32("sim_set_terrain", uint64(len(blob))); code != 0 {
+		log.Printf("terrain %s rejected by replica: code %d", hex, code)
+		return false
+	}
+	r.terrainHex = hex
+	r.valid = false // any prior state was for another world
+	return true
+}
+
 func (r *replica) restore(state []byte, seq int64) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.mem.Write(r.ioPtr, state)
-	if r.call("sim_restore", uint64(len(state))) != 0 {
+	if r.call32("sim_restore", uint64(len(state))) != 0 {
 		return false
 	}
 	r.valid = true
@@ -247,7 +286,7 @@ func (r *replica) applyAt(tick uint64, seq int64, kind uint16, payload []byte) {
 	binary.LittleEndian.PutUint16(buf, kind)
 	copy(buf[2:], payload)
 	r.mem.Write(r.ioPtr, buf)
-	if r.call("sim_apply", uint64(len(buf))) != 0 {
+	if r.call32("sim_apply", uint64(len(buf))) != 0 {
 		r.valid = false
 		return
 	}
@@ -317,21 +356,35 @@ func dogID(sub string) uint64 {
 }
 
 type bot struct {
-	idx        int
-	park       string
-	verifier   bool
-	rep        *replica
-	sessionURL string
-	targetURL  string
-	toks       *tokenSource
-	actSec     int
-	checkSec   int
+	idx         int
+	park        string
+	verifier    bool
+	rep         *replica
+	sessionURL  string
+	targetURL   string
+	terrainBase string // "<http base>/terrain/"
+	toks        *tokenSource
+	actSec      int
+	checkSec    int
 
 	seq       int64
 	sinceTick uint64
+	dims      atomic.Uint32 // w<<16 | h from the welcome line
 	intentID  atomic.Uint64
 	pending   sync.Map // id -> time.Time
 	sub       string
+}
+
+func (b *bot) fetchTerrain(hex string) ([]byte, error) {
+	resp, err := http.Get(b.terrainBase + hex)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("terrain %s: HTTP %d", hex, resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
 }
 
 // errLog rate-limits connect-error logging to one line per few seconds
@@ -449,13 +502,24 @@ func (b *bot) runOnce(ctx context.Context) error {
 			case <-done:
 				return
 			case <-act.C:
-				// Alternate leave/join: always-valid player intents that
-				// exercise roster churn and journal appends at human rate.
-				if present.CompareAndSwap(true, false) {
-					sendIntent(2, myDogPayload())
-				} else {
+				// Human-rate intents: mostly movement orders, with enough
+				// leave/join churn to exercise the roster and spawn paths.
+				switch {
+				case !present.Load():
 					present.Store(true)
 					sendIntent(1, myDogPayload())
+				case rand.Intn(10) < 3:
+					present.Store(false)
+					sendIntent(2, myDogPayload())
+				default:
+					dims := b.dims.Load()
+					w, h := dims>>16, dims&0xFFFF
+					if w == 0 || h == 0 {
+						continue
+					}
+					p := append(myDogPayload(), 0, 0)
+					binary.LittleEndian.PutUint16(p[8:], uint16(rand.Intn(int(w*h))))
+					sendIntent(4, p)
 				}
 			case <-check.C:
 				if tick, wh, ok := b.rep.latest(); ok {
@@ -498,24 +562,28 @@ func (b *bot) runOnce(ctx context.Context) error {
 	for sc.Scan() {
 		lgBytes.Add(int64(len(sc.Bytes()) + 1))
 		var m struct {
-			Type   string `json:"type"`
-			Role   string `json:"role"`
-			Seq    int64  `json:"seq"`
-			Tick   uint64 `json:"tick"`
-			Kind   uint16 `json:"kind"`
-			Actor  string `json:"actor"`
-			Intent uint64 `json:"intent"`
-			P      []byte `json:"p"`
-			Z      []byte `json:"z"`
-			Epoch  uint32 `json:"epoch"`
-			WH     string `json:"wh"`
-			Reason uint32 `json:"reason"`
+			Type    string `json:"type"`
+			Role    string `json:"role"`
+			Seq     int64  `json:"seq"`
+			Tick    uint64 `json:"tick"`
+			Kind    uint16 `json:"kind"`
+			Actor   string `json:"actor"`
+			Intent  uint64 `json:"intent"`
+			P       []byte `json:"p"`
+			Z       []byte `json:"z"`
+			Epoch   uint32 `json:"epoch"`
+			WH      string `json:"wh"`
+			Terrain string `json:"terrain"`
+			W       uint32 `json:"w"`
+			H       uint32 `json:"h"`
+			Reason  uint32 `json:"reason"`
 		}
 		if json.Unmarshal(sc.Bytes(), &m) != nil {
 			continue
 		}
 		switch m.Type {
 		case "welcome":
+			b.dims.Store(m.W<<16 | m.H&0xFFFF)
 			if !joined {
 				joined = true
 				present.Store(true)
@@ -524,7 +592,7 @@ func (b *bot) runOnce(ctx context.Context) error {
 		case "snapshot":
 			b.seq = m.Seq
 			b.sinceTick = m.Tick
-			if b.verifier {
+			if b.verifier && b.rep.ensureTerrain(m.Terrain, b.fetchTerrain) {
 				fr := flate.NewReader(bytes.NewReader(m.Z))
 				state, err := io.ReadAll(fr)
 				if err == nil {
@@ -612,8 +680,10 @@ func main() {
 		park := fmt.Sprintf("park-%d", i%parksN)
 		b := &bot{
 			idx: i, park: park, verifier: i < parksN, rep: reps[i%parksN],
-			sessionURL: sessionURL, targetURL: targetURL, toks: toks,
-			actSec: actSec, checkSec: checkSec,
+			sessionURL: sessionURL, targetURL: targetURL,
+			terrainBase: strings.TrimSuffix(sessionURL, "/session") + "/terrain/",
+			toks:        toks,
+			actSec:      actSec, checkSec: checkSec,
 		}
 		wg.Add(1)
 		go func() {

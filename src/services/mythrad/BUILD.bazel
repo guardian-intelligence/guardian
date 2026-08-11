@@ -7,6 +7,7 @@ exports_files(
         "behaviors/client.wasm",
         "behaviors/park.wasm",
         "behaviors/server.wasm",
+        "terrain/fixture_park.bin",
     ],
     visibility = ["//src/services/mythrad/sim:__pkg__"],
 )
@@ -18,11 +19,13 @@ go_library(
         "main.go",
         "park.go",
         "session.go",
+        "terrain.go",
     ],
     embedsrcs = [
         "behaviors/client.wasm",
         "behaviors/park.wasm",
         "behaviors/server.wasm",
+        "terrain/fixture_park.bin",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/mythrad",
     visibility = ["//visibility:private"],

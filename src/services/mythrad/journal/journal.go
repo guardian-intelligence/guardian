@@ -37,12 +37,16 @@ type Event struct {
 
 // Snapshot is a canonical sim state blob at a journal position: replaying
 // events with Seq > s.Seq on top of State must reproduce the live park.
+// TerrainID names the terrain artifact the state was captured on; the sim
+// refuses to restore against any other, so the host must load that blob
+// first.
 type Snapshot struct {
-	Seq   int64
-	Tick  uint64
-	Epoch uint32
-	WH    uint64
-	State []byte
+	Seq       int64
+	Tick      uint64
+	Epoch     uint32
+	WH        uint64
+	TerrainID uint64
+	State     []byte
 }
 
 // ErrConflict reports a lost single-writer race: the log has moved past
@@ -62,6 +66,12 @@ type Journal interface {
 	PutSnapshot(ctx context.Context, parkID int64, s Snapshot) error
 	// LatestSnapshot returns the highest-seq snapshot, if any exists.
 	LatestSnapshot(ctx context.Context, parkID int64) (Snapshot, bool, error)
+	// PutTerrain stores a terrain artifact under its content identity.
+	// Blobs are immutable per id: re-putting an existing id is a no-op, so
+	// ten thousand parks born from one fixture share one row.
+	PutTerrain(ctx context.Context, terrainID uint64, schema uint32, blob []byte) error
+	// TerrainBlob fetches a terrain artifact by content identity.
+	TerrainBlob(ctx context.Context, terrainID uint64) ([]byte, bool, error)
 }
 
 //go:embed migrations/*.sql
@@ -210,31 +220,55 @@ func (p *Pg) Read(ctx context.Context, parkID int64, fromSeq int64, fn func(Even
 
 func (p *Pg) PutSnapshot(ctx context.Context, parkID int64, s Snapshot) error {
 	_, err := p.pool.Exec(ctx,
-		`INSERT INTO park_snapshots (park_id, seq, tick, epoch, wh, state)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO park_snapshots (park_id, seq, tick, epoch, wh, terrain_id, state)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 ON CONFLICT (park_id, seq) DO NOTHING`,
-		parkID, s.Seq, int64(s.Tick), int32(s.Epoch), int64(s.WH), s.State)
+		parkID, s.Seq, int64(s.Tick), int32(s.Epoch), int64(s.WH), int64(s.TerrainID), s.State)
 	return err
 }
 
 func (p *Pg) LatestSnapshot(ctx context.Context, parkID int64) (Snapshot, bool, error) {
 	var s Snapshot
-	var tick, wh int64
+	var tick, wh, terrainID int64
 	var epoch int32
 	err := p.pool.QueryRow(ctx,
-		`SELECT seq, tick, epoch, wh, state
+		`SELECT seq, tick, epoch, wh, terrain_id, state
 		   FROM park_snapshots
 		  WHERE park_id = $1
 		  ORDER BY seq DESC
 		  LIMIT 1`,
 		parkID,
-	).Scan(&s.Seq, &tick, &epoch, &wh, &s.State)
+	).Scan(&s.Seq, &tick, &epoch, &wh, &terrainID, &s.State)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Snapshot{}, false, nil
 	}
 	if err != nil {
 		return Snapshot{}, false, err
 	}
-	s.Tick, s.Epoch, s.WH = uint64(tick), uint32(epoch), uint64(wh)
+	s.Tick, s.Epoch, s.WH, s.TerrainID = uint64(tick), uint32(epoch), uint64(wh), uint64(terrainID)
 	return s, true, nil
+}
+
+func (p *Pg) PutTerrain(ctx context.Context, terrainID uint64, schema uint32, blob []byte) error {
+	_, err := p.pool.Exec(ctx,
+		`INSERT INTO park_terrain (terrain_id, schema, blob)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (terrain_id) DO NOTHING`,
+		int64(terrainID), int32(schema), blob)
+	return err
+}
+
+func (p *Pg) TerrainBlob(ctx context.Context, terrainID uint64) ([]byte, bool, error) {
+	var blob []byte
+	err := p.pool.QueryRow(ctx,
+		`SELECT blob FROM park_terrain WHERE terrain_id = $1`,
+		int64(terrainID),
+	).Scan(&blob)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return blob, true, nil
 }

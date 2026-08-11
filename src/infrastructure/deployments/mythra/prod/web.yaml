@@ -1,6 +1,7 @@
 # Wake Up Mythra web shell: the TanStack Start app serving the page at the
-# product apex. The game service keeps /wt-info, /behavior/, /assets/ and the
-# QUIC plane; this Deployment carries everything the browser loads first.
+# product apex. The game service keeps /wt-info, /behavior/, /assets/,
+# /terrain/ and the QUIC plane; this Deployment carries everything the
+# browser loads first.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

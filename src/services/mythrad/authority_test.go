@@ -31,7 +31,7 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 
 	// openAuthority does not start the run loop: this test owns the host
 	// and drives tickOnce directly.
-	a, err := openAuthority(ctx, "park-test", defaultParkModule, j, mods)
+	a, err := openAuthority(ctx, "park-test", defaultParkModule, fixtureTerrain, j, mods)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,11 +45,15 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 	a.stageIntent(s, 1, evJoin, dog(dogIDFor("alice")))
 	a.tickOnce()
 	a.stageIntent(s, 2, evCheckIn, dog(dogIDFor("alice")))
+	// A movement order makes the replay below exercise pathfinding and
+	// steering through wazero, not just roster bookkeeping.
+	move := append(dog(dogIDFor("alice")), 0x0A, 0x05) // node 1290 = (10, 10): open grass
+	a.stageIntent(s, 3, evMoveTo, move)
 	for i := 0; i < 100; i++ {
 		a.tickOnce()
 	}
-	if a.lastSeq < 2 {
-		t.Fatalf("journal lastSeq = %d, want >= 2 (join + check_in)", a.lastSeq)
+	if a.lastSeq < 3 {
+		t.Fatalf("journal lastSeq = %d, want >= 3 (join + check_in + move_to)", a.lastSeq)
 	}
 
 	// Duplicate intent ids are dropped at the door (idempotent resend).
@@ -63,7 +67,7 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 	wantTick := a.host.Tick()
 	a.host.close()
 
-	b, err := openAuthority(ctx, "park-test", defaultParkModule, j, mods)
+	b, err := openAuthority(ctx, "park-test", defaultParkModule, fixtureTerrain, j, mods)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -90,7 +94,7 @@ func TestAuthorityClosesOnAppendConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	mods := &modules{client: &clientModule{slot: "client"}, park: &clientModule{slot: "park"}}
-	a, err := openAuthority(ctx, "park-race", defaultParkModule, j, mods)
+	a, err := openAuthority(ctx, "park-race", defaultParkModule, fixtureTerrain, j, mods)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +138,7 @@ func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	mods := &modules{client: &clientModule{slot: "client"}, park: &clientModule{slot: "park"}}
-	a, err := openAuthority(ctx, "park-refresh", defaultParkModule, j, mods)
+	a, err := openAuthority(ctx, "park-refresh", defaultParkModule, fixtureTerrain, j, mods)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -197,8 +197,8 @@ func Run(t *testing.T, factory func(t *testing.T) journal.Journal) {
 			t.Fatalf("empty park: ok=%v err=%v, want false, nil", ok, err)
 		}
 		state := []byte{0x4D, 0x59, 0x50, 0x31, 0, 1, 2, 0xFF}
-		older := journal.Snapshot{Seq: 10, Tick: 240, Epoch: 1, WH: 1<<63 + 7, State: state}
-		newer := journal.Snapshot{Seq: 20, Tick: 480, Epoch: 2, WH: 42, State: append(state, 9)}
+		older := journal.Snapshot{Seq: 10, Tick: 240, Epoch: 1, WH: 1<<63 + 7, TerrainID: 1<<64 - 3, State: state}
+		newer := journal.Snapshot{Seq: 20, Tick: 480, Epoch: 2, WH: 42, TerrainID: 7, State: append(state, 9)}
 		if err := j.PutSnapshot(ctx, 1, older); err != nil {
 			t.Fatal(err)
 		}
@@ -210,8 +210,32 @@ func Run(t *testing.T, factory func(t *testing.T) journal.Journal) {
 			t.Fatalf("ok=%v err=%v", ok, err)
 		}
 		if got.Seq != newer.Seq || got.Tick != newer.Tick || got.Epoch != newer.Epoch ||
-			got.WH != newer.WH || !bytes.Equal(got.State, newer.State) {
+			got.WH != newer.WH || got.TerrainID != newer.TerrainID || !bytes.Equal(got.State, newer.State) {
 			t.Fatalf("latest = %+v, want %+v", got, newer)
+		}
+	})
+
+	t.Run("terrain_is_content_addressed_and_immutable", func(t *testing.T) {
+		j := factory(t)
+		if _, ok, err := j.TerrainBlob(ctx, 99); err != nil || ok {
+			t.Fatalf("missing terrain: ok=%v err=%v, want false, nil", ok, err)
+		}
+		id := uint64(1<<63 + 11) // exercises the two's-complement image
+		blob := []byte{0x4D, 0x59, 0x54, 0x31, 1, 0, 0, 0, 8, 0, 8, 0}
+		if err := j.PutTerrain(ctx, id, 1, blob); err != nil {
+			t.Fatal(err)
+		}
+		// re-putting the same identity is a no-op, never an error and
+		// never a mutation — ten thousand parks share one fixture row
+		if err := j.PutTerrain(ctx, id, 1, []byte{0xEE}); err != nil {
+			t.Fatal(err)
+		}
+		got, ok, err := j.TerrainBlob(ctx, id)
+		if err != nil || !ok {
+			t.Fatalf("ok=%v err=%v", ok, err)
+		}
+		if !bytes.Equal(got, blob) {
+			t.Fatalf("terrain blob mutated: %v", got)
 		}
 	})
 
