@@ -115,3 +115,63 @@ func dog8(id uint64) []byte {
 	binary.LittleEndian.PutUint64(p[:], id)
 	return p[:]
 }
+
+// The page-refresh contract: departures ride intent id 0 on every
+// disconnect and must all land (never deduped), and a sim-rejected intent
+// must not occupy the idempotency window — the corrected resend under the
+// same id has to reach the sim. Both were violated by the dedup window
+// spanning reconnects, which is what stranded refreshed players outside
+// the park with reason 3 (absent) on every intent.
+func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	j := journal.NewPg(pool)
+	if err := j.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mods := &modules{client: &clientModule{slot: "client"}, park: &clientModule{slot: "park"}}
+	a, err := openAuthority(ctx, "park-refresh", defaultParkModule, j, mods)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.host.close()
+
+	carol := dog8(dogIDFor("carol"))
+	seqAfter := func(want int64, step string) {
+		t.Helper()
+		if a.lastSeq != want {
+			t.Fatalf("%s: journal lastSeq = %d, want %d", step, a.lastSeq, want)
+		}
+	}
+
+	// First page load: join, then the connection drops and the departure
+	// is staged with intent id 0.
+	s1 := &session{sub: "carol", out: make(chan []byte, 16)}
+	a.stageIntent(s1, 1, evJoin, carol)
+	a.tickOnce()
+	seqAfter(1, "first join")
+	a.stageIntent(s1, 0, evLeave, carol)
+	a.tickOnce()
+	seqAfter(2, "first departure")
+
+	// Refreshed page: an intent for an absent dog is rejected (reason 3),
+	// then the client rejoins and retries under the SAME intent id.
+	s2 := &session{sub: "carol", out: make(chan []byte, 16)}
+	a.stageIntent(s2, 42, evCheckIn, carol)
+	a.tickOnce()
+	seqAfter(2, "check-in while absent")
+	a.stageIntent(s2, 43, evJoin, carol)
+	a.stageIntent(s2, 42, evCheckIn, carol)
+	a.tickOnce()
+	seqAfter(4, "rejoin + retried check-in")
+
+	// Second disconnect: the departure must not be swallowed as a resend
+	// of the first one.
+	a.stageIntent(s2, 0, evLeave, carol)
+	a.tickOnce()
+	seqAfter(5, "second departure")
+}

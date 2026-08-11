@@ -102,8 +102,10 @@ var (
 		Name: "mythra_journal_append_errors_total", Help: "Failed journal appends (authority closes on each)."})
 	mSnapshots = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "mythra_snapshots_total", Help: "Durable snapshots written."})
-	mIntentsRejected = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "mythra_intents_rejected_total", Help: "Intents rejected by validation or authorization."})
+	mIntentsRejected = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "mythra_intents_rejected_total", Help: "Intents rejected by validation or authorization, by reason."}, []string{"reason"})
+	mIntentsDeduped = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_intents_deduped_total", Help: "Intents dropped by the (actor, intent_id) idempotency window."})
 	mChecks = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "mythra_checks_total", Help: "Client hash checks answered."}, []string{"result"})
 	mResyncs = promauto.NewCounter(prometheus.CounterOpts{

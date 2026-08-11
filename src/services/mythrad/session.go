@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"hash/fnv"
+	"log"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -210,12 +211,14 @@ func (h *gameHandlers) handleSession(sess *webtransport.Session) {
 		case "intent":
 			if s.role != "player" {
 				s.sendReject(m.ID, rejectReadOnly)
-				mIntentsRejected.Inc()
+				log.Printf("intent rejected: actor=%s kind=%d intent=%d reason=read_only", s.sub, m.Kind, m.ID)
+				mIntentsRejected.WithLabelValues("read_only").Inc()
 				continue
 			}
 			if !intentBoundToActor(m.Kind, m.P, s.dogID) {
 				s.sendReject(m.ID, rejectNotYours)
-				mIntentsRejected.Inc()
+				log.Printf("intent rejected: actor=%s kind=%d intent=%d reason=not_yours", s.sub, m.Kind, m.ID)
+				mIntentsRejected.WithLabelValues("not_yours").Inc()
 				continue
 			}
 			park.stageIntent(s, m.ID, m.Kind, m.P)
@@ -244,6 +247,32 @@ const (
 	rejectReadOnly = 100
 	rejectNotYours = 101
 )
+
+// rejectReasonName maps a reject code — the sim's own space plus the
+// doorman's — to the label carried by logs and metrics.
+func rejectReasonName(code uint32) string {
+	switch code {
+	case 1:
+		return "encoding"
+	case 2:
+		return "present"
+	case 3:
+		return "absent"
+	case 4:
+		return "full"
+	case 5:
+		return "checked_in"
+	case 6:
+		return "kind"
+	case 7:
+		return "epoch"
+	case rejectReadOnly:
+		return "read_only"
+	case rejectNotYours:
+		return "not_yours"
+	}
+	return strconv.FormatUint(uint64(code), 10)
+}
 
 func (s *session) datagramLoop(ctx context.Context) {
 	for {
