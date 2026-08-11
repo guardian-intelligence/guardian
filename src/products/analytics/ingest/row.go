@@ -12,12 +12,14 @@ import (
 // client-claimed content fields is derived server-side from the request.
 type eventRow struct {
 	ServerTs      time.Time
+	EventTs       time.Time
 	Site          string
 	EventName     string
 	TrustTier     uint8
 	SchemaVersion uint8
 	TraceID       [16]byte
 	CorrelationID [16]byte
+	PageID        [8]byte
 	SessionSeq    uint32
 	Path          string
 	Referrer      string
@@ -25,6 +27,7 @@ type eventRow struct {
 	DeviceClass   string
 	OSFamily      string
 	BrowserFamily string
+	Release       string
 	ClientIP      netip.Addr
 	IPSource      string
 	Country       string

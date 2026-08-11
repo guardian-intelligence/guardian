@@ -8,7 +8,23 @@ makes one of them quotable:
 |---|---|---|---|
 | **trace id** (32-hex, W3C) | one logical action: an rpc, an error | browser (`fetch-telemetry.ts`, `errors.ts`) | `events.trace_id`, `otel_traces.TraceId`, service log lines |
 | correlation id | visitor, 30 days | ingest HMAC cookie (server-derived) | `events.correlation_id`, span attr `guardian.correlation_id` |
+| page id (16-hex) | one page load | browser (`browser.ts`, eager) | `events.page_id` |
 | session_seq | order within a visit | browser sessionStorage counter | `events.session_seq` |
+
+Every event also carries `event_ts` (client emission time mapped onto the
+server clock via the batch skew; equals `server_ts` when the client sent
+nothing plausible — `server_ts` alone is beacon-flush time, identical for a
+whole batch) and `release` (short image digest of the frontend deployment
+that served the page). Concurrent first flushes from a fresh visitor can
+race the correlation cookie and land under different correlation ids;
+`page_id` is the join that survives that split:
+
+```sql
+SELECT event_ts, event_name, session_seq, release, left(props, 200)
+FROM guardian_analytics.events
+WHERE site = 'wakeupmythra.com' AND page_id = unhex('P')  -- 16 hex chars
+ORDER BY session_seq;
+```
 
 The trace id is the handle users (and the WUM HUD log: `[err <id>]`) can
 quote. Same-origin fetches carry it as `traceparent`; server middlewares
@@ -59,21 +75,25 @@ _msg:trace_id=T
 Every uncaught exception, unhandled rejection, resource load failure, CSP
 violation, and explicit `reportError()` is an `error` event with its own
 fresh trace id, `error.kind`, message, and truncated stack in `props`.
-Slice by deployment (`props.deploy` = image digest short form) or app:
+Slice by deployment (the `release` column) or app:
 
 ```sql
-SELECT server_ts, site, JSONExtractString(props, 'error.kind') AS kind,
-       JSONExtractString(props, 'error.message') AS message,
-       JSONExtractString(props, 'deploy') AS deploy
+SELECT event_ts, site, release,
+       JSONExtractString(props, 'error.kind') AS kind,
+       JSONExtractString(props, 'error.message') AS message
 FROM guardian_analytics.events
 WHERE event_name = 'error' AND server_ts > now() - INTERVAL 1 DAY
 ORDER BY server_ts DESC;
 ```
 
-Netcode health rides the same pipeline as `wum.netcode_reject`,
-`wum.netcode_resync`, `wum.netcode_mismatch`, and `wum.redial` events, and
-server-side as the per-reason `mythra_intents_rejected_total` metric
-(alert: `MythradIntentRejectSpike`).
+Netcode health rides the same pipeline: `wum.connected` (every successful
+WebTransport dial, with `wum.dial_ms`; its absence after a `wum.route_view`
+means the page never got in — a hung handshake times out after 10s and
+reports through the error path), `wum.netcode_reject`, `wum.netcode_resync`,
+`wum.netcode_mismatch`, and `wum.redial`. Server-side the same session shows
+as mythrad `wt session open` / `wt session close` log lines (sub, role,
+park, remote, close reason, duration) plus the per-reason
+`mythra_intents_rejected_total` metric (alert: `MythradIntentRejectSpike`).
 
 ## What deliberately does NOT join
 

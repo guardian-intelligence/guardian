@@ -5,7 +5,7 @@
 // deliberately best-effort: bounded queue, bounded localStorage replay,
 // transport errors swallowed. Integrity lives server-side.
 
-import type { TelemetryEvent } from "./browser";
+import { pageIdHex, type TelemetryEvent } from "./browser";
 import { DEPLOY_META } from "./meta-keys";
 import { traceIdToBase64 } from "./trace-id";
 
@@ -23,16 +23,26 @@ interface WireEvent {
   // Event.trace_id bytes, base64 per the Connect JSON codec: the server
   // trace this event belongs to (only rpc/error-style events carry one).
   traceId?: string;
-  offsetMs?: number;
+  // Client clock at emission, epoch ms as a string (proto3 JSON uint64).
+  eventAtUnixMs?: string;
+  // Event.page_id bytes, base64 per the Connect JSON codec.
+  pageId?: string;
+  release?: string;
   sessionSeq?: number;
   vitalName?: string;
   vitalValue?: number;
   propsJson?: string;
 }
 
+// page_id wire form, derived once from the eagerly-minted hex id.
+const PAGE_ID_B64 = pageIdHex
+  ? btoa(String.fromCharCode(...(pageIdHex.match(/../g) ?? []).map((h) => parseInt(h, 16))))
+  : "";
+
 // The serving deployment's image digest (short form), read once from the
-// SSR-emitted guardian:image meta tag; stamped into every event's props so
-// error rates can be sliced by frontend deployment straight from ClickHouse.
+// SSR-emitted guardian:image meta tag; stamped into every event as the
+// release so error rates slice by frontend deployment straight from
+// ClickHouse.
 let deploySlug: string | undefined;
 
 function deployShortDigest(): string {
@@ -58,10 +68,15 @@ function lowData(): boolean {
 }
 
 // In low-data mode only the load-bearing minimum ships: the route view,
-// vitals, and errors — a constrained network is exactly where errors are
-// most worth having.
+// connection outcome, vitals, and errors — a constrained network is exactly
+// where errors and connect success are most worth having.
 function keepInLowData(name: string): boolean {
-  return name === `${appName}.route_view` || name === "error" || name.startsWith("web_vital.");
+  return (
+    name === `${appName}.route_view` ||
+    name === `${appName}.connected` ||
+    name === "error" ||
+    name.startsWith("web_vital.")
+  );
 }
 
 function loadSeq(): number {
@@ -80,13 +95,14 @@ function saveSeq(): void {
   }
 }
 
-function toWire(e: TelemetryEvent, nowPerf: number): WireEvent {
+function toWire(e: TelemetryEvent): WireEvent {
   const { "route.path": routePath, referrer, "trace.id": traceHex, ...rest } = e.attrs;
   const w: WireEvent = {
     name: e.name,
     path: routePath ?? window.location.pathname,
-    offsetMs: Math.max(0, Math.round(nowPerf - e.t)),
+    eventAtUnixMs: String(e.at),
   };
+  if (PAGE_ID_B64 !== "") w.pageId = PAGE_ID_B64;
   if (referrer) w.referrer = referrer;
   if (traceHex !== undefined) {
     const b64 = traceIdToBase64(traceHex);
@@ -94,8 +110,8 @@ function toWire(e: TelemetryEvent, nowPerf: number): WireEvent {
     // The hex id stays in props too: it is what users and log lines quote.
     rest["trace.id"] = traceHex;
   }
-  const deploy = deployShortDigest();
-  if (deploy !== "") rest.deploy ??= deploy;
+  const release = deployShortDigest();
+  if (release !== "") w.release = release;
   if (e.name.startsWith("web_vital.")) {
     w.vitalName = rest["web_vital.name"] ?? "";
     w.vitalValue = Number(rest["web_vital.value"]) || 0;
@@ -113,12 +129,11 @@ function toWire(e: TelemetryEvent, nowPerf: number): WireEvent {
 function drain(): void {
   const q = window.__guardianEvents;
   if (!q?.length) return;
-  const now = performance.now();
   const events = q.splice(0, q.length);
   const minimal = lowData();
   for (const e of events) {
     if (minimal && !keepInLowData(e.name)) continue;
-    const w = toWire(e, now);
+    const w = toWire(e);
     w.sessionSeq = ++seq;
     pending.push(w);
   }
@@ -148,11 +163,9 @@ function takeBatch(): WireEvent[] {
 function persist(events: WireEvent[]): void {
   try {
     const stored: WireEvent[] = JSON.parse(localStorage.getItem(LS_KEY) ?? "[]");
-    // offsetMs is relative to THIS page's performance.now() origin; once it
-    // survives to another page load that timeline is gone, so drop it —
-    // session_seq still orders the events.
-    const durable = events.map(({ offsetMs: _drop, ...rest }) => rest);
-    const merged = stored.concat(durable);
+    // Events persist whole: eventAtUnixMs, pageId and release are absolute,
+    // so a replay after reload still reports the page that emitted them.
+    const merged = stored.concat(events);
     localStorage.setItem(LS_KEY, JSON.stringify(merged.slice(-LS_CAP)));
   } catch {
     // storage denied/full: drop (best-effort)

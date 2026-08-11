@@ -59,6 +59,20 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+          env:
+            - name: GUARDIAN_SITE
+              value: prod
+            - name: GUARDIAN_DEPLOY_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            # The running image's own ref, kept in lockstep with the
+            # container image by the same Flux setter marker: it surfaces as
+            # the guardian:image meta tag, which the analytics beacon stamps
+            # onto every event as the release, so any event names the exact
+            # deployment that served it.
+            - name: GUARDIAN_IMAGE
+              value: ghcr.io/guardian-intelligence/wake-up-mythra-web:edge@sha256:2b393e91276286ef3b4f06bcc50e5933bf9cf00f5e170423f43853d8a6c63663 # {"$imagepolicy": "guardian-imageops:wake-up-mythra-web"}
           readinessProbe:
             httpGet:
               path: /healthz

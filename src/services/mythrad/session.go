@@ -38,12 +38,13 @@ func dogIDFor(sub string) uint64 {
 var sessionCount atomic.Int64
 
 type session struct {
-	sub   string
-	role  string
-	park  *authority
-	sess  *webtransport.Session
-	out   chan []byte
-	dogID uint64
+	sub      string
+	role     string
+	park     *authority
+	sess     *webtransport.Session
+	out      chan []byte
+	dogID    uint64
+	openedAt time.Time
 
 	closeOnce sync.Once
 }
@@ -77,6 +78,8 @@ func (s *session) sendReject(intentID uint64, reason uint32) {
 
 func (s *session) closeSession(why string) {
 	s.closeOnce.Do(func() {
+		log.Printf("wt session close: sub=%s role=%s park=%s reason=%q dur=%s",
+			s.sub, s.role, s.park.name, why, time.Since(s.openedAt).Round(time.Millisecond))
 		s.sess.CloseWithError(4000, why)
 	})
 }
@@ -118,6 +121,7 @@ func (h *gameHandlers) handleSession(sess *webtransport.Session) {
 	tk, err := h.tickets.check(hello.Ticket)
 	if err != nil {
 		mHandshakes.WithLabelValues("bad_ticket").Inc()
+		log.Printf("wt handshake rejected: bad ticket: remote=%s err=%v", sess.RemoteAddr(), err)
 		sess.CloseWithError(4401, "bad ticket")
 		return
 	}
@@ -126,6 +130,7 @@ func (h *gameHandlers) handleSession(sess *webtransport.Session) {
 	park, err := h.parks.get(ctx, tk.Park)
 	if err != nil {
 		mHandshakes.WithLabelValues("park_unavailable").Inc()
+		log.Printf("wt handshake rejected: park unavailable: sub=%s park=%s err=%v", tk.Sub, tk.Park, err)
 		sess.CloseWithError(4503, "park unavailable")
 		return
 	}
@@ -133,6 +138,7 @@ func (h *gameHandlers) handleSession(sess *webtransport.Session) {
 	s := &session{
 		sub: tk.Sub, role: tk.Role, park: park, sess: sess,
 		out: make(chan []byte, 256), dogID: dogIDFor(tk.Sub),
+		openedAt: time.Now(),
 	}
 	done := make(chan attachResult, 1)
 	select {
@@ -146,6 +152,8 @@ func (h *gameHandlers) handleSession(sess *webtransport.Session) {
 		return
 	}
 	mHandshakes.WithLabelValues("ok").Inc()
+	log.Printf("wt session open: sub=%s role=%s park=%s remote=%s since_seq=%d",
+		s.sub, s.role, park.name, sess.RemoteAddr(), hello.SinceSeq)
 	mSessions.WithLabelValues(s.role).Inc()
 	defer mSessions.WithLabelValues(s.role).Dec()
 	defer park.detach(s)

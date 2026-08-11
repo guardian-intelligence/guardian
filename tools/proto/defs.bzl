@@ -82,7 +82,10 @@ mkdir -p "$$out"
   --connect-go_out="$$out" --connect-go_opt=module={go_module} \
   {proto_files}
 normalize() {{
-  find "$$1" -type f -name '*.go' -exec sed -i -e '/^\\/\\/ \\tprotoc  */d' {{}} +
+  # No sed -i: BSD sed takes -i's argument as the backup suffix, silently
+  # skipping the deletion (and littering *-e files) on darwin hosts.
+  find "$$1" -type f -name '*.go' -exec sh -c \
+    'sed -e "/^\\/\\/ \\tprotoc  */d" "$$0" > "$$0.norm" && mv "$$0.norm" "$$0"' {{}} \\;
 }}
 staged="$(@D)/go-checked-in"
 rm -rf "$$staged"

@@ -79,6 +79,7 @@ func (s *eventService) Publish(
 		}
 		row := eventRow{
 			ServerTs:      now,
+			EventTs:       eventTs(now, e.GetEventAtUnixMs(), skew),
 			Site:          meta.ctx.Site,
 			EventName:     e.GetName(),
 			TrustTier:     meta.ctx.TrustTier,
@@ -91,6 +92,7 @@ func (s *eventService) Publish(
 			DeviceClass:   meta.ctx.DeviceClass,
 			OSFamily:      meta.ctx.OSFamily,
 			BrowserFamily: meta.ctx.BrowserFamily,
+			Release:       e.GetRelease(),
 			ClientIP:      meta.ctx.ClientIP,
 			IPSource:      meta.ctx.IPSource,
 			Country:       meta.ctx.Country,
@@ -101,6 +103,7 @@ func (s *eventService) Publish(
 			Props:         redactCredentialShapes(e.GetPropsJson()),
 		}
 		copy(row.TraceID[:], e.GetTraceId())
+		copy(row.PageID[:], e.GetPageId())
 		rows = append(rows, row)
 		if _, ok := meteredEventNames[e.GetName()]; ok {
 			eventsByName.WithLabelValues(meta.ctx.Site, e.GetName()).Inc()

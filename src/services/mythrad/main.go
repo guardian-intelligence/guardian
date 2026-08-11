@@ -661,7 +661,12 @@ func main() {
 
 	log.Printf("mythrad: wt=:%d http=:%d metrics=:%d public=%s issuer=%s", wtPort, httpPort, metricsPort, publicAddr, issuer)
 	go func() { log.Fatal(wt.ListenAndServe()) }()
-	go func() { log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", httpPort), telemetry.Middleware(pageMux))) }()
+	go func() {
+		// /wt-info is polled by external monitors that send no traceparent;
+		// real page boots always do (the fetch wrapper stamps one).
+		handler := telemetry.Middleware(pageMux, telemetry.WithTraceparentOnly("/wt-info"))
+		log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", httpPort), handler))
+	}()
 	go func() { log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", metricsPort), obsMux)) }()
 
 	sig := make(chan os.Signal, 1)

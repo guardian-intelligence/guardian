@@ -1,5 +1,6 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { TelemetryProbe } from "@guardian/telemetry/probe";
+import { deployMetaTags } from "@guardian/telemetry/server-deploy-meta";
 import "~/styles/app.css";
 
 export const Route = createRootRoute({
@@ -14,6 +15,7 @@ export const Route = createRootRoute({
         content:
           "Wake Up, Mythra! — a shared dog park, live. Walk your dog, meet the pack, wake the samoyed.",
       },
+      ...deployMetaTags(),
     ],
   }),
 });

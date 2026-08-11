@@ -307,8 +307,11 @@ func (h *gameHandlers) handleSessionMint(gate *oidcGate, publicAddr string, cert
 			Exp: time.Now().Add(60 * time.Second).Unix(),
 		})
 		// The mint is where a browser's quoted trace id meets a game
-		// identity: this line is the join between a client rpc trace and
-		// everything the session does afterwards.
+		// identity: this line and the span attributes are the join between
+		// a client rpc trace and everything the session does afterwards.
+		telemetry.SpanAttrs(r.Context(), map[string]string{
+			"wum.sub": sub, "wum.park": park, "wum.role": role,
+		})
 		if tid := telemetry.TraceIDFrom(r.Context()); tid != "" {
 			log.Printf("session minted: sub=%s park=%s role=%s trace_id=%s", sub, park, role, tid)
 		}
