@@ -6,6 +6,10 @@
 CREATE TABLE IF NOT EXISTS guardian_analytics.events
 (
     server_ts      DateTime64(3) CODEC(Delta(8), ZSTD(1)),
+    -- Client emission time mapped onto the server clock via the batch skew;
+    -- equals server_ts when the client sent nothing plausible. server_ts
+    -- stays the partition/ORDER BY authority — event_ts is client-claimed.
+    event_ts       DateTime64(3) CODEC(Delta(8), ZSTD(1)),
     site           LowCardinality(String) CODEC(ZSTD(1)),
     event_name     LowCardinality(String) CODEC(ZSTD(1)),
     -- 'unspecified' = 0 so an insert that omits the column cannot silently
@@ -23,6 +27,11 @@ CREATE TABLE IF NOT EXISTS guardian_analytics.events
     -- than a dictionary (1.37 vs 1.61 B/event, A/B in the design doc) with
     -- no dictionary-spill regime to manage.
     correlation_id FixedString(16) CODEC(ZSTD(1)),
+    -- Random id minted once per page load in the browser; all-zero on older
+    -- clients. Joins one page's events across correlation-cookie races
+    -- (concurrent first flushes can each mint a different cookie). Same
+    -- FixedString-over-LowCardinality reasoning as correlation_id.
+    page_id        FixedString(8) CODEC(ZSTD(1)),
     session_seq    UInt32 CODEC(T64, ZSTD(1)),
 
     path           LowCardinality(String) CODEC(ZSTD(1)),
@@ -32,6 +41,9 @@ CREATE TABLE IF NOT EXISTS guardian_analytics.events
     device_class   LowCardinality(String) CODEC(ZSTD(1)),
     os_family      LowCardinality(String) CODEC(ZSTD(1)),
     browser_family LowCardinality(String) CODEC(ZSTD(1)),
+    -- Short image digest of the frontend deployment that served the page,
+    -- from its deploy meta tags; empty when the page carries none.
+    release        LowCardinality(String) CODEC(ZSTD(1)),
 
     -- Raw IP is abuse forensics only: the column TTL zeroes it at 90 days
     -- while the derived country/asn/device fields live the row's full 25

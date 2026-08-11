@@ -37,8 +37,8 @@ const (
 type PublishRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Client clock at send time, epoch ms. The server derives clock skew as
-	// received_at - sent_at (Segment/PostHog pattern); clients never compute
-	// skew or send absolute event times.
+	// received_at - sent_at (Segment/PostHog pattern) and applies that skew to
+	// each event's event_at_unix_ms; clients never compute skew themselves.
 	SentAtUnixMs uint64 `protobuf:"varint,1,opt,name=sent_at_unix_ms,json=sentAtUnixMs,proto3" json:"sent_at_unix_ms,omitempty"`
 	// Batch size is a whole-request property enforced by the handler (an empty
 	// or oversized batch is a request error); per-event constraints below are
@@ -158,9 +158,10 @@ type Event struct {
 	// semantics). Only rpc/error events carry one.
 	TraceId []byte `protobuf:"bytes,4,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
 	// Milliseconds before sent_at that the event occurred (PostHog "offset").
-	// Not yet stored: server_ts is batch receipt time and in-session order
-	// comes from session_seq; reserved for skew-corrected event time
-	// (server_ts - client_skew_ms - offset_ms).
+	// Unused — event_at_unix_ms carries event time, because an offset against a
+	// performance.now() origin cannot survive the client's persist/replay path
+	// across page loads. Retained only because deleting a field fails the buf
+	// breaking check.
 	OffsetMs uint32 `protobuf:"varint,5,opt,name=offset_ms,json=offsetMs,proto3" json:"offset_ms,omitempty"`
 	// Monotonic within the correlation cookie's session. (cookie, seq) is
 	// the dedup key and gap/replay detector.
@@ -169,7 +170,19 @@ type Event struct {
 	VitalName  string  `protobuf:"bytes,7,opt,name=vital_name,json=vitalName,proto3" json:"vital_name,omitempty"`
 	VitalValue float64 `protobuf:"fixed64,8,opt,name=vital_value,json=vitalValue,proto3" json:"vital_value,omitempty"`
 	// Flat JSON object; JSON validity is checked server-side.
-	PropsJson     string `protobuf:"bytes,9,opt,name=props_json,json=propsJson,proto3" json:"props_json,omitempty"`
+	PropsJson string `protobuf:"bytes,9,opt,name=props_json,json=propsJson,proto3" json:"props_json,omitempty"`
+	// Client clock at event emission, epoch ms; 0 = unknown. The server maps it
+	// into its own clock via the batch skew and falls back to receipt time when
+	// the result is implausible — a broken client clock is stored as signal,
+	// never trusted.
+	EventAtUnixMs uint64 `protobuf:"varint,10,opt,name=event_at_unix_ms,json=eventAtUnixMs,proto3" json:"event_at_unix_ms,omitempty"`
+	// Random id minted once per page load, 8 bytes; absent on older clients.
+	// Joins one page's events across correlation-cookie races: concurrent first
+	// flushes can each mint a different cookie, splitting a session.
+	PageId []byte `protobuf:"bytes,11,opt,name=page_id,json=pageId,proto3" json:"page_id,omitempty"`
+	// Deploy identity of the emitting bundle (short image digest from the
+	// page's deploy meta tags); empty when the page carries none.
+	Release       string `protobuf:"bytes,12,opt,name=release,proto3" json:"release,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -267,6 +280,27 @@ func (x *Event) GetPropsJson() string {
 	return ""
 }
 
+func (x *Event) GetEventAtUnixMs() uint64 {
+	if x != nil {
+		return x.EventAtUnixMs
+	}
+	return 0
+}
+
+func (x *Event) GetPageId() []byte {
+	if x != nil {
+		return x.PageId
+	}
+	return nil
+}
+
+func (x *Event) GetRelease() string {
+	if x != nil {
+		return x.Release
+	}
+	return ""
+}
+
 var File_guardian_analytics_v1_events_proto protoreflect.FileDescriptor
 
 const file_guardian_analytics_v1_events_proto_rawDesc = "" +
@@ -277,7 +311,7 @@ const file_guardian_analytics_v1_events_proto_rawDesc = "" +
 	"\x06events\x18\x02 \x03(\v2\x1c.guardian.analytics.v1.EventR\x06events\"I\n" +
 	"\x0fPublishResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\rR\baccepted\x12\x1a\n" +
-	"\brejected\x18\x02 \x01(\rR\brejected\"\xfc\x03\n" +
+	"\brejected\x18\x02 \x01(\rR\brejected\"\xc5\x05\n" +
 	"\x05Event\x12,\n" +
 	"\x04name\x18\x01 \x01(\tB\x18\xbaH\x15r\x13\x10\x01\x18@2\r^[a-z0-9_.]+$R\x04name\x12t\n" +
 	"\x04path\x18\x02 \x01(\tB`\xbaH]\xba\x01U\n" +
@@ -293,7 +327,12 @@ const file_guardian_analytics_v1_events_proto_rawDesc = "" +
 	"\vvital_value\x18\b \x01(\x01R\n" +
 	"vitalValue\x12'\n" +
 	"\n" +
-	"props_json\x18\t \x01(\tB\b\xbaH\x05r\x03(\x80\x10R\tpropsJson2h\n" +
+	"props_json\x18\t \x01(\tB\b\xbaH\x05r\x03(\x80\x10R\tpropsJson\x12'\n" +
+	"\x10event_at_unix_ms\x18\n" +
+	" \x01(\x04R\reventAtUnixMs\x12{\n" +
+	"\apage_id\x18\v \x01(\fBb\xbaH_\xba\x01\\\n" +
+	"\vpage_id.len\x12)page_id must be absent or exactly 8 bytes\x1a\"size(this) == 0 || size(this) == 8R\x06pageId\x12!\n" +
+	"\arelease\x18\f \x01(\tB\a\xbaH\x04r\x02(@R\arelease2h\n" +
 	"\fEventService\x12X\n" +
 	"\aPublish\x12%.guardian.analytics.v1.PublishRequest\x1a&.guardian.analytics.v1.PublishResponseB^Z\\github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1;analyticsv1b\x06proto3"
 

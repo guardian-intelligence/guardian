@@ -7,8 +7,10 @@
 export interface TelemetryEvent {
   readonly name: string;
   readonly attrs: Record<string, string>;
-  // performance.now() at emission, for offset_ms relative to batch send time.
-  readonly t: number;
+  // Date.now() at emission; becomes Event.event_at_unix_ms on the wire. An
+  // absolute stamp survives the beacon's localStorage persist/replay path
+  // across page loads, which a performance.now()-relative offset cannot.
+  readonly at: number;
 }
 
 declare global {
@@ -17,12 +19,23 @@ declare global {
   }
 }
 
+// One id per page load, minted eagerly so every event — including those
+// queued before the beacon module loads — belongs to it. Ingest stores it so
+// one page's events stay joinable even when concurrent first flushes race the
+// correlation cookie and land under different visitor ids.
+export const pageIdHex: string =
+  typeof crypto === "undefined"
+    ? ""
+    : Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) =>
+        b.toString(16).padStart(2, "0"),
+      ).join("");
+
 const MAX_QUEUE = 100;
 
 export function emitSpan(name: string, attrs: Record<string, string>): void {
   if (typeof window === "undefined") return;
   const queue = (window.__guardianEvents ??= []);
-  queue.push({ name, attrs, t: performance.now() });
+  queue.push({ name, attrs, at: Date.now() });
   if (queue.length > MAX_QUEUE) {
     queue.splice(0, queue.length - MAX_QUEUE);
   }

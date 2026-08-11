@@ -57,7 +57,7 @@ spec:
               # migrations failed to bring forward; ingest's INSERT list
               # would then fail on every batch. LIMIT 0 errors on any
               # missing column.
-              clickhouse-client --host "$host" --user ingest --query "SELECT device_class, os_family, browser_family, country, asn, client_ip FROM guardian_analytics.events LIMIT 0"
+              clickhouse-client --host "$host" --user ingest --query "SELECT event_ts, page_id, release, device_class, os_family, browser_family, country, asn, client_ip FROM guardian_analytics.events LIMIT 0"
           env:
             - name: CLICKHOUSE_PASSWORD
               valueFrom:
@@ -65,7 +65,7 @@ spec:
                   name: analytics-ch-ingest
                   key: ingest
             - name: GUARDIAN_DDL_REVISION
-              value: "6"
+              value: "7"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

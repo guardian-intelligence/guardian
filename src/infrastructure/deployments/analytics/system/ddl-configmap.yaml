@@ -20,12 +20,14 @@ data:
     CREATE TABLE IF NOT EXISTS guardian_analytics.events ON CLUSTER 'clickhouse'
     (
         server_ts      DateTime64(3) CODEC(Delta(8), ZSTD(1)),
+        event_ts       DateTime64(3) CODEC(Delta(8), ZSTD(1)),
         site           LowCardinality(String) CODEC(ZSTD(1)),
         event_name     LowCardinality(String) CODEC(ZSTD(1)),
         trust_tier     Enum8('unspecified' = 0, 'server_observed' = 1, 'edge_verified' = 2, 'client_claimed' = 3) CODEC(ZSTD(1)),
         schema_version UInt8 CODEC(ZSTD(1)),
         trace_id       FixedString(16) CODEC(ZSTD(1)),
         correlation_id FixedString(16) CODEC(ZSTD(1)),
+        page_id        FixedString(8) CODEC(ZSTD(1)),
         session_seq    UInt32 CODEC(T64, ZSTD(1)),
         path           LowCardinality(String) CODEC(ZSTD(1)),
         referrer       LowCardinality(String) CODEC(ZSTD(1)),
@@ -33,6 +35,7 @@ data:
         device_class   LowCardinality(String) CODEC(ZSTD(1)),
         os_family      LowCardinality(String) CODEC(ZSTD(1)),
         browser_family LowCardinality(String) CODEC(ZSTD(1)),
+        release        LowCardinality(String) CODEC(ZSTD(1)),
         client_ip      IPv6 CODEC(ZSTD(1)) TTL toDateTime(server_ts) + INTERVAL 90 DAY,
         ip_source      LowCardinality(String) CODEC(ZSTD(1)),
         country        LowCardinality(String) CODEC(ZSTD(1)),
@@ -59,7 +62,6 @@ data:
   # COLUMN TTL on large tables risks repeat mutations).
   migrations.sql: |
     ALTER TABLE guardian_analytics.events ON CLUSTER 'clickhouse'
-        ADD COLUMN IF NOT EXISTS device_class LowCardinality(String) CODEC(ZSTD(1)) AFTER ua,
-        ADD COLUMN IF NOT EXISTS os_family LowCardinality(String) CODEC(ZSTD(1)) AFTER device_class,
-        ADD COLUMN IF NOT EXISTS browser_family LowCardinality(String) CODEC(ZSTD(1)) AFTER os_family,
-        MODIFY COLUMN client_ip IPv6 CODEC(ZSTD(1)) TTL toDateTime(server_ts) + INTERVAL 90 DAY;
+        ADD COLUMN IF NOT EXISTS event_ts DateTime64(3) CODEC(Delta(8), ZSTD(1)) AFTER server_ts,
+        ADD COLUMN IF NOT EXISTS page_id FixedString(8) CODEC(ZSTD(1)) AFTER correlation_id,
+        ADD COLUMN IF NOT EXISTS release LowCardinality(String) CODEC(ZSTD(1)) AFTER browser_family;

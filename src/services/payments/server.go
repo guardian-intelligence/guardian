@@ -68,6 +68,14 @@ func (s *paymentServer) handler() http.Handler {
 
 func (s *paymentServer) traceMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Probes and scrapes hit these paths tens of thousands of times a
+		// day; with 100% sampling their spans would drown real traffic in
+		// the trace store while saying nothing.
+		switch r.URL.Path {
+		case "/healthz", "/readyz", "/metrics":
+			next.ServeHTTP(w, r)
+			return
+		}
 		ctx := otel.GetTextMapPropagator().Extract(
 			r.Context(),
 			propagation.HeaderCarrier(r.Header),

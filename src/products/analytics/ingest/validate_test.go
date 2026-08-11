@@ -4,6 +4,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"buf.build/go/protovalidate"
 
@@ -97,6 +98,32 @@ func TestClampSkew(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := clampSkewMs(now, tc.sent); got != tc.want {
 				t.Fatalf("clampSkewMs() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEventTs(t *testing.T) {
+	received := time.UnixMilli(1_800_000_000_000).UTC()
+	now := received.UnixMilli()
+	cases := []struct {
+		name    string
+		eventAt uint64
+		skew    int32
+		want    time.Time
+	}{
+		{"zero stamp falls back", 0, 0, received},
+		{"garbage huge value falls back", 1 << 63, 0, received},
+		{"emitted 8s before send", uint64(now - 8000), 0, received.Add(-8 * time.Second)},
+		{"client clock 1h ahead corrects back", uint64(now - 8000 + 3_600_000), -3_600_000, received.Add(-8 * time.Second)},
+		{"replayed event from 3 days ago", uint64(now - 3*24*3_600_000), 0, received.Add(-3 * 24 * time.Hour)},
+		{"older than 30 days falls back", uint64(now - 31*24*3_600_000), 0, received},
+		{"future beyond a minute falls back", uint64(now + 120_000), 0, received},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eventTs(received, tc.eventAt, tc.skew); !got.Equal(tc.want) {
+				t.Fatalf("eventTs() = %v, want %v", got, tc.want)
 			}
 		})
 	}

@@ -35,10 +35,11 @@ func (s *clickhouseSink) Ping(ctx context.Context) error {
 
 func (s *clickhouseSink) Insert(ctx context.Context, rows []eventRow) error {
 	batch, err := s.conn.PrepareBatch(ctx, `INSERT INTO guardian_analytics.events
-		(server_ts, site, event_name, trust_tier, schema_version, trace_id,
-		 correlation_id, session_seq, path, referrer, ua, device_class,
-		 os_family, browser_family, client_ip, ip_source, country, asn,
-		 status, duration_ms, client_skew_ms, vital_name, vital_value, props)`)
+		(server_ts, event_ts, site, event_name, trust_tier, schema_version,
+		 trace_id, correlation_id, page_id, session_seq, path, referrer, ua,
+		 device_class, os_family, browser_family, release, client_ip,
+		 ip_source, country, asn, status, duration_ms, client_skew_ms,
+		 vital_name, vital_value, props)`)
 	if err != nil {
 		return fmt.Errorf("prepare batch: %w", err)
 	}
@@ -46,6 +47,7 @@ func (s *clickhouseSink) Insert(ctx context.Context, rows []eventRow) error {
 		r := &rows[i]
 		if err := batch.Append(
 			r.ServerTs,
+			r.EventTs,
 			r.Site,
 			r.EventName,
 			// clickhouse-go's Enum8 column accepts int/int8/string but NOT
@@ -54,6 +56,7 @@ func (s *clickhouseSink) Insert(ctx context.Context, rows []eventRow) error {
 			r.SchemaVersion,
 			string(r.TraceID[:]),
 			string(r.CorrelationID[:]),
+			string(r.PageID[:]),
 			r.SessionSeq,
 			r.Path,
 			r.Referrer,
@@ -61,6 +64,7 @@ func (s *clickhouseSink) Insert(ctx context.Context, rows []eventRow) error {
 			r.DeviceClass,
 			r.OSFamily,
 			r.BrowserFamily,
+			r.Release,
 			r.ClientIP,
 			r.IPSource,
 			r.Country,

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"strings"
+	"time"
 
 	analyticsv1 "github.com/guardian-intelligence/guardian/src/proto/gen/go/guardian/analytics/v1"
 )
@@ -125,4 +126,29 @@ func clampSkewMs(receivedUnixMs int64, sentAtUnixMs uint64) int32 {
 		skew = -maxAbsSkewMs
 	}
 	return int32(skew)
+}
+
+// A replayed batch can legitimately carry events persisted on a much earlier
+// page load, so the past bound is generous; the future bound is not — nothing
+// legitimate is emitted after it is received.
+const (
+	maxEventAgeMs    = 30 * 24 * 60 * 60 * 1000
+	maxEventFutureMs = 60 * 1000
+)
+
+// eventTs maps the client's emission stamp onto the server clock using the
+// batch skew (received_at - sent_at): corrected = event_at + skew, which for
+// an event emitted at send time is exactly receipt time. Zero or implausible
+// stamps fall back to receipt time — a broken client clock stays visible in
+// client_skew_ms but never poisons the event timeline.
+func eventTs(received time.Time, eventAtUnixMs uint64, skewMs int32) time.Time {
+	if eventAtUnixMs == 0 || eventAtUnixMs > 1<<62 {
+		return received
+	}
+	corrected := int64(eventAtUnixMs) + int64(skewMs)
+	delta := received.UnixMilli() - corrected
+	if delta > maxEventAgeMs || delta < -maxEventFutureMs {
+		return received
+	}
+	return time.UnixMilli(corrected).UTC()
 }

@@ -410,6 +410,7 @@ export function startGame(): void {
         q.set("spectate", "1");
         q.set("device", deviceId());
       }
+      const dialStart = performance.now();
       const mint = await fetch(`/session?${q}`, { method: "POST", headers });
       if (!mint.ok) throw new Error(`/session ${mint.status}`);
       const sess = await mint.json();
@@ -424,7 +425,30 @@ export function startGame(): void {
             ],
           })
         : new WT(`https://${sess.endpoint}/wt`);
-      await transport.ready;
+      // A blocked UDP path can leave the handshake pending forever — ready
+      // neither resolves nor rejects and closed never settles — so nothing
+      // downstream would ever run or report. Race it against a deadline.
+      let dialTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          transport.ready,
+          new Promise<never>((_, reject) => {
+            dialTimer = setTimeout(
+              () => reject(new Error("WebTransport handshake timeout (10s)")),
+              10_000,
+            );
+          }),
+        ]);
+      } catch (e) {
+        try {
+          transport.close();
+        } catch {
+          // already dead
+        }
+        throw e;
+      } finally {
+        clearTimeout(dialTimer);
+      }
       if (myEpoch !== dialEpoch) {
         transport.close();
         return;
@@ -432,6 +456,12 @@ export function startGame(): void {
       backoff = 300;
       connected = true;
       setStatus("connected");
+      emitSpan("wum.connected", {
+        "wum.park": parkName,
+        "wum.role": role,
+        "wum.anon": String(anon),
+        "wum.dial_ms": String(Math.round(performance.now() - dialStart)),
+      });
       if (!diag.startedAt) diag.startedAt = Date.now();
 
       const ctrl = await transport.createBidirectionalStream();

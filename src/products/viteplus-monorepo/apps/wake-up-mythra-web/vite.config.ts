@@ -58,6 +58,7 @@ export default defineConfig({
     nitro({
       devProxy: {
         "/wt-info": "http://127.0.0.1:9634",
+        "/session": "http://127.0.0.1:9634",
         "/assets/**": "http://127.0.0.1:9634",
         "/behavior/**": "http://127.0.0.1:9634",
       },

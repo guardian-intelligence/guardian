@@ -23,8 +23,8 @@ service EventService {
 
 message PublishRequest {
   // Client clock at send time, epoch ms. The server derives clock skew as
-  // received_at - sent_at (Segment/PostHog pattern); clients never compute
-  // skew or send absolute event times.
+  // received_at - sent_at (Segment/PostHog pattern) and applies that skew to
+  // each event's event_at_unix_ms; clients never compute skew themselves.
   uint64 sent_at_unix_ms = 1;
   // Batch size is a whole-request property enforced by the handler (an empty
   // or oversized batch is a request error); per-event constraints below are
@@ -65,9 +65,10 @@ message Event {
     expression: "size(this) == 0 || size(this) == 16"
   }];
   // Milliseconds before sent_at that the event occurred (PostHog "offset").
-  // Not yet stored: server_ts is batch receipt time and in-session order
-  // comes from session_seq; reserved for skew-corrected event time
-  // (server_ts - client_skew_ms - offset_ms).
+  // Unused — event_at_unix_ms carries event time, because an offset against a
+  // performance.now() origin cannot survive the client's persist/replay path
+  // across page loads. Retained only because deleting a field fails the buf
+  // breaking check.
   uint32 offset_ms = 5;
   // Monotonic within the correlation cookie's session. (cookie, seq) is
   // the dedup key and gap/replay detector.
@@ -77,4 +78,20 @@ message Event {
   double vital_value = 8;
   // Flat JSON object; JSON validity is checked server-side.
   string props_json = 9 [(buf.validate.field).string.max_bytes = 2048];
+  // Client clock at event emission, epoch ms; 0 = unknown. The server maps it
+  // into its own clock via the batch skew and falls back to receipt time when
+  // the result is implausible — a broken client clock is stored as signal,
+  // never trusted.
+  uint64 event_at_unix_ms = 10;
+  // Random id minted once per page load, 8 bytes; absent on older clients.
+  // Joins one page's events across correlation-cookie races: concurrent first
+  // flushes can each mint a different cookie, splitting a session.
+  bytes page_id = 11 [(buf.validate.field).cel = {
+    id: "page_id.len"
+    message: "page_id must be absent or exactly 8 bytes"
+    expression: "size(this) == 0 || size(this) == 8"
+  }];
+  // Deploy identity of the emitting bundle (short image digest from the
+  // page's deploy meta tags); empty when the page carries none.
+  string release = 12 [(buf.validate.field).string.max_bytes = 64];
 }
