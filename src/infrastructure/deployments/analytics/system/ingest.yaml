@@ -150,3 +150,15 @@ spec:
                 name: analytics-ingest
                 port:
                   number: 80
+    # Wake Up Mythra publishes from its own apex the same way; the
+    # wakeupmythra.com origin cert rides the mythra-apex Ingress's tls block.
+    - host: wakeupmythra.com
+      http:
+        paths:
+          - path: /api/events
+            pathType: Prefix
+            backend:
+              service:
+                name: analytics-ingest
+                port:
+                  number: 80

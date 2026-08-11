@@ -6,7 +6,7 @@ import {
   newsroomItemBySlug,
   type NewsroomItem,
 } from "~/content/newsroom";
-import { emitSpan } from "~/lib/telemetry/browser";
+import { emitSpan } from "@guardian/telemetry";
 import { ogMeta } from "~/lib/head";
 import { BareMetalTamPlayground } from "~/features/tam-playground/tam-playground";
 import { validateTamSearch } from "~/features/tam-playground/model";

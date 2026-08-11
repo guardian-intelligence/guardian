@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { traceIdToBase64 } from "./trace-id";
+import { newTraceIdHex, traceIdToBase64 } from "../src/trace-id";
 
 describe("traceIdToBase64", () => {
   it("encodes a 32-hex trace id as 16 base64 bytes", () => {
@@ -27,5 +27,15 @@ describe("traceIdToBase64", () => {
     "zzf92f3577b34da6a3ce929d0e0e4736",
   ])("rejects %j", (bad) => {
     expect(traceIdToBase64(bad)).toBe("");
+  });
+});
+
+describe("newTraceIdHex", () => {
+  it("mints ids traceIdToBase64 accepts", () => {
+    for (let i = 0; i < 20; i++) {
+      const hex = newTraceIdHex();
+      expect(hex).toMatch(/^[0-9a-f]{32}$/);
+      expect(traceIdToBase64(hex)).not.toBe("");
+    }
   });
 });

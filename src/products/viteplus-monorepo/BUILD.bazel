@@ -57,6 +57,7 @@ filegroup(
         "//src/products/viteplus-monorepo/packages/brand:package_manifest",
         "//src/products/viteplus-monorepo/packages/canary-journeys:package_manifest",
         "//src/products/viteplus-monorepo/packages/postflight-checkout:package_manifest",
+        "//src/products/viteplus-monorepo/packages/telemetry:package_manifest",
         "//src/products/viteplus-monorepo/packages/visual-harness:package_manifest",
     ] + glob(
         [
@@ -85,6 +86,7 @@ filegroup(
         "//src/products/viteplus-monorepo/packages/brand:sources",
         "//src/products/viteplus-monorepo/packages/canary-journeys:sources",
         "//src/products/viteplus-monorepo/packages/postflight-checkout:sources",
+        "//src/products/viteplus-monorepo/packages/telemetry:sources",
         "//src/products/viteplus-monorepo/packages/visual-harness:sources",
     ] + glob(
         [
@@ -152,6 +154,7 @@ genrule(
         "//src/products/viteplus-monorepo/packages/brand:node_modules",
         "//src/products/viteplus-monorepo/packages/canary-journeys:node_modules",
         "//src/products/viteplus-monorepo/packages/postflight-checkout:node_modules",
+        "//src/products/viteplus-monorepo/packages/telemetry:node_modules",
         "//src/products/viteplus-monorepo/packages/visual-harness:node_modules",
     ],
     outs = ["workspace_lint.stamp"],
@@ -198,6 +201,7 @@ link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/apps/wake
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/brand/node_modules" "$$work/packages/brand/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/canary-journeys/node_modules" "$$work/packages/canary-journeys/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/postflight-checkout/node_modules" "$$work/packages/postflight-checkout/node_modules"
+link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/telemetry/node_modules" "$$work/packages/telemetry/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/visual-harness/node_modules" "$$work/packages/visual-harness/node_modules"
 export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
 export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"

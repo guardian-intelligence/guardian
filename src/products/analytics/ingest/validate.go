@@ -43,6 +43,7 @@ var (
 		"page_shell.",
 		"beacon.",
 		"privatecut.",
+		"wum.",
 		"cli.",
 	}
 	knownVitals = map[string]struct{}{

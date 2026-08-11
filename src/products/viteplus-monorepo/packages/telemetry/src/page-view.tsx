@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useRouterState } from "@tanstack/react-router";
 import { onCLS, onINP, onLCP, type Metric } from "web-vitals";
 import { emitSpan } from "./browser";
+import { installErrorCapture } from "./errors";
 
 let webVitalsInstalled = false;
 
@@ -28,13 +29,15 @@ function installWebVitals(): void {
   onINP(handler("inp"));
 }
 
-// Mounted at the root. Emits `privatecut.route_view` on initial load and every
-// subsequent SPA route resolution. Web Vitals fire independently of route.
-export function TelemetryProbe() {
+// Mounted at the root. Emits `<app>.route_view` on initial load and every
+// subsequent SPA route resolution, installs the global error capture, and
+// registers Web Vitals — one mount wires the whole telemetry surface.
+export function TelemetryProbe({ app }: { app: string }) {
   const path = useRouterState({ select: (state) => state.location.pathname });
   const previousPath = useRef<string | undefined>(undefined);
 
   useEffect(() => {
+    installErrorCapture(app);
     installWebVitals();
     // The beacon loads strictly off the critical path: dynamic import on
     // idle, so it is a lazy chunk (never modulepreloaded) and its cost is
@@ -45,16 +48,16 @@ export function TelemetryProbe() {
         ? (cb) => window.requestIdleCallback(cb, { timeout: 5000 })
         : (cb) => void setTimeout(cb, 2000);
     idle(() => {
-      void import("./beacon").then((m) => m.initBeacon());
+      void import("./beacon").then((m) => m.initBeacon(app));
     });
-  }, []);
+  }, [app]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const navigation: PerformanceNavigationTiming | undefined = performance.getEntriesByType(
       "navigation",
     )[0] as PerformanceNavigationTiming | undefined;
-    emitSpan("privatecut.route_view", {
+    emitSpan(`${app}.route_view`, {
       "route.path": path,
       "route.host": window.location.host,
       "route.previous_path": previousPath.current ?? "",
@@ -62,7 +65,7 @@ export function TelemetryProbe() {
       "navigation.type": navigation?.type ?? "unknown",
     });
     previousPath.current = path;
-  }, [path]);
+  }, [app, path]);
 
   return null;
 }

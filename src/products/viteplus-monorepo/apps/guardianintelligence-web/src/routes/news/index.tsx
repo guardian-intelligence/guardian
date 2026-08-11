@@ -6,7 +6,7 @@ import {
   newsroomCtaHref,
   type NewsroomItem,
 } from "~/content/newsroom";
-import { emitSpan } from "~/lib/telemetry/browser";
+import { emitSpan } from "@guardian/telemetry";
 import { ogMeta } from "~/lib/head";
 
 // /news — the public announcement index.

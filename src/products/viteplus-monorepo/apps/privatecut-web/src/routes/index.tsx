@@ -9,7 +9,7 @@ import { LandingGuide, landingJsonLd } from "~/components/landing-guide";
 import { LinkInput } from "~/components/link-input";
 import type { PrivateCutEngine } from "~/engine/client";
 import type { MediaSource, ProbeSummary } from "~/engine/types";
-import { emitSpan } from "~/lib/telemetry/browser";
+import { emitSpan } from "@guardian/telemetry";
 
 type DeviceKind = "phone" | "computer";
 

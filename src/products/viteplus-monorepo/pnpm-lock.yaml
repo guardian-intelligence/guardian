@@ -185,6 +185,9 @@ importers:
       '@guardian/brand':
         specifier: workspace:*
         version: link:../../packages/brand
+      '@guardian/telemetry':
+        specifier: workspace:*
+        version: link:../../packages/telemetry
       '@opentelemetry/api':
         specifier: 'catalog:'
         version: 1.9.1
@@ -221,9 +224,6 @@ importers:
       valibot:
         specifier: 'catalog:'
         version: 1.4.2(typescript@6.0.3)
-      web-vitals:
-        specifier: 'catalog:'
-        version: 4.2.4
     devDependencies:
       '@playwright/test':
         specifier: 'catalog:'
@@ -276,6 +276,9 @@ importers:
       '@guardian/brand':
         specifier: workspace:*
         version: link:../../packages/brand
+      '@guardian/telemetry':
+        specifier: workspace:*
+        version: link:../../packages/telemetry
       '@opentelemetry/api':
         specifier: 'catalog:'
         version: 1.9.1
@@ -309,9 +312,6 @@ importers:
       sonner:
         specifier: 'catalog:'
         version: 2.0.7(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      web-vitals:
-        specifier: 'catalog:'
-        version: 4.2.4
     devDependencies:
       '@playwright/test':
         specifier: 'catalog:'
@@ -349,6 +349,9 @@ importers:
 
   apps/wake-up-mythra-web:
     dependencies:
+      '@guardian/telemetry':
+        specifier: workspace:*
+        version: link:../../packages/telemetry
       '@openfeature/core':
         specifier: 'catalog:'
         version: 1.12.0
@@ -457,6 +460,37 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.1
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vite:
+        specifier: npm:@voidzero-dev/vite-plus-core@0.2.6
+        version: '@voidzero-dev/vite-plus-core@0.2.6(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3)'
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.2.6(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@voidzero-dev/vite-plus-core@0.2.6(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3))(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3)
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.6(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3))
+
+  packages/telemetry:
+    dependencies:
+      web-vitals:
+        specifier: 'catalog:'
+        version: 4.2.4
+    devDependencies:
+      '@tanstack/react-router':
+        specifier: 'catalog:'
+        version: 1.170.19(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.1
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.18
+      react:
+        specifier: 'catalog:'
+        version: 19.2.8
       typescript:
         specifier: 'catalog:'
         version: 6.0.3

@@ -13,6 +13,7 @@
     "typecheck": "vp exec tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@guardian/telemetry": "workspace:*",
     "@openfeature/core": "catalog:",
     "@openfeature/ofrep-web-provider": "catalog:",
     "@openfeature/react-sdk": "catalog:",

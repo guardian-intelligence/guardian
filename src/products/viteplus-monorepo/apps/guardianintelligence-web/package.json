@@ -19,6 +19,7 @@
   "dependencies": {
     "@chenglou/pretext": "catalog:",
     "@guardian/brand": "workspace:*",
+    "@guardian/telemetry": "workspace:*",
     "@opentelemetry/api": "catalog:",
     "@resvg/resvg-js": "catalog:",
     "@tanstack/react-router": "catalog:",
@@ -30,8 +31,7 @@
     "nitro": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "valibot": "catalog:",
-    "web-vitals": "catalog:"
+    "valibot": "catalog:"
   },
   "devDependencies": {
     "@playwright/test": "catalog:",

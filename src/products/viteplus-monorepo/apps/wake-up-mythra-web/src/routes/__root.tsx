@@ -1,4 +1,5 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
+import { TelemetryProbe } from "@guardian/telemetry/probe";
 import "~/styles/app.css";
 
 export const Route = createRootRoute({
@@ -24,6 +25,7 @@ function RootComponent() {
         <HeadContent />
       </head>
       <body>
+        <TelemetryProbe app="wum" />
         <Outlet />
         <Scripts />
       </body>

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { SpanKind, SpanStatusCode, type Span } from "@opentelemetry/api";
 import { BoundedGate } from "~/lib/bounded-gate";
-import { childContext, exportedTraceId, ready, tracer } from "~/lib/telemetry/otel-node";
+import { childContext, exportedTraceId, ready, tracer } from "~/lib/otel-node";
 import {
   parseStatusId,
   syndicationUrl,

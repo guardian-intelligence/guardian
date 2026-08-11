@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { currentNewsroomItem, newsroomCtaHref, newsroomCtaLabel } from "~/content/newsroom";
-import { emitSpan } from "~/lib/telemetry/browser";
+import { emitSpan } from "@guardian/telemetry";
 
 // NewsroomStrip — a bounded Flare broadcast band shown on the homepage (and
 // anywhere else Guardian wants to speak in the public register) whenever a

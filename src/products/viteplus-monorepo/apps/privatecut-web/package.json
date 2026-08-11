@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@guardian/brand": "workspace:*",
+    "@guardian/telemetry": "workspace:*",
     "@opentelemetry/api": "catalog:",
     "@opentelemetry/exporter-trace-otlp-http": "catalog:",
     "@opentelemetry/resources": "catalog:",
@@ -25,8 +26,7 @@
     "nitro": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "sonner": "catalog:",
-    "web-vitals": "catalog:"
+    "sonner": "catalog:"
   },
   "devDependencies": {
     "@playwright/test": "catalog:",

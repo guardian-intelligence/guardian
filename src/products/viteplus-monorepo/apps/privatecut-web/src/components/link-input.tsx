@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import type { MediaSource } from "~/engine/types";
 import { resolveXVideo, ResolveError } from "~/lib/x-resolve";
-import { emitSpan } from "~/lib/telemetry/browser";
+import { emitSpan } from "@guardian/telemetry";
 
 export interface LinkInputProps {
   readonly onSource: (source: MediaSource) => void;

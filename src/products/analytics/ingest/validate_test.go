@@ -21,6 +21,7 @@ func TestValidateEvent(t *testing.T) {
 	}{
 		{"registered exact name", ok(&analyticsv1.Event{Name: "page_view", Path: "/"}), ""},
 		{"registered prefix name", ok(&analyticsv1.Event{Name: "company.route_view", Path: "/letters"}), ""},
+		{"wum prefix name", ok(&analyticsv1.Event{Name: "wum.netcode_reject", Path: "/"}), ""},
 		{"cli canary name", ok(&analyticsv1.Event{Name: "cli.install_canary.method", Path: "/postflight"}), ""},
 		{"unregistered name", &analyticsv1.Event{Name: "cryptominer.ping"}, rejectName},
 		{"prefix alone is not a name", &analyticsv1.Event{Name: "company."}, rejectName},
@@ -113,6 +114,10 @@ func TestSiteFromHost(t *testing.T) {
 		"rumi.engineering:443":              "rumi.engineering",
 		"www.rumi.engineering":              "rumi.engineering",
 		"rumi.engineering.evil.io":          "local",
+		"wakeupmythra.com":                 "wakeupmythra.com",
+		"wakeupmythra.com:443":             "wakeupmythra.com",
+		"www.wakeupmythra.com":             "wakeupmythra.com",
+		"wakeupmythra.com.evil.io":         "local",
 		"evil.example.com":                 "local",
 		"guardianintelligence.org.evil.io": "local",
 		"10.0.0.5:8080":                    "local",
