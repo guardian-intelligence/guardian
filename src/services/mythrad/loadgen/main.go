@@ -436,6 +436,7 @@ func (b *bot) runOnce(ctx context.Context) error {
 
 	done := make(chan struct{})
 	defer close(done)
+	var present atomic.Bool
 
 	// act at human rate; checks pull from the shared replica
 	go func() {
@@ -448,12 +449,14 @@ func (b *bot) runOnce(ctx context.Context) error {
 			case <-done:
 				return
 			case <-act.C:
-				text := []byte("woof")
-				p := make([]byte, 10+len(text))
-				binary.LittleEndian.PutUint64(p, dogID(b.sub))
-				binary.LittleEndian.PutUint16(p[8:], uint16(len(text)))
-				copy(p[10:], text)
-				sendIntent(4, p)
+				// Alternate leave/join: always-valid player intents that
+				// exercise roster churn and journal appends at human rate.
+				if present.CompareAndSwap(true, false) {
+					sendIntent(2, myDogPayload())
+				} else {
+					present.Store(true)
+					sendIntent(1, myDogPayload())
+				}
 			case <-check.C:
 				if tick, wh, ok := b.rep.latest(); ok {
 					msg, _ := json.Marshal(map[string]any{"type": "check", "tick": tick, "wh": wh, "ct": time.Now().UnixMilli()})
@@ -515,6 +518,7 @@ func (b *bot) runOnce(ctx context.Context) error {
 		case "welcome":
 			if !joined {
 				joined = true
+				present.Store(true)
 				sendIntent(1, myDogPayload())
 			}
 		case "snapshot":

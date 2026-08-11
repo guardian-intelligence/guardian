@@ -19,6 +19,7 @@ import {
   subjectOf,
   type SignInOutcome,
 } from "./auth";
+import * as v from "valibot";
 
 type Wasm = any;
 
@@ -27,9 +28,23 @@ const TARGET_LAG_TICKS = 6; // replica trails server-now by 250ms
 const RING_DEPTH = 10; // one snapshot per second of rollback depth
 const EV_JOIN = 1;
 const EV_CHECK_IN = 3;
-const EV_CHAT = 4;
 const REJECT_PRESENT = 2; // sim ERR_PRESENT
 const REJECT_ABSENT = 3; // sim ERR_ABSENT
+
+// Sim reject codes 1-7 and doorman codes 100-101 (rejectReasonName in
+// mythrad session.go is the server-side mirror).
+const REJECT_TEXT = {
+  1: "the park couldn't read that intent",
+  2: "your dog is already in the park",
+  3: "your dog isn't in the park",
+  4: "the park is full",
+  5: "already checked in today",
+  6: "the park doesn't know that action",
+  7: "the park moved on to a new epoch",
+  100: "spectators can't act — sign in to play",
+  101: "that dog isn't yours",
+} as const;
+const RejectCode = v.picklist([1, 2, 3, 4, 5, 6, 7, 100, 101]);
 
 const FNV_OFFSET = 0xcbf29ce484222325n;
 const FNV_PRIME = 0x100000001b3n;
@@ -193,10 +208,6 @@ export function startGame(): void {
       diag.events++;
       recentEvents.push(ev);
       pendingIntents.delete(ev.intent);
-      if (ev.kind === EV_CHAT && ev.payload.length > 10) {
-        const text = new TextDecoder().decode(ev.payload.subarray(10));
-        logLine(`${shortName(ev.actor)}: ${text.slice(0, 140)}`);
-      }
       hashRing.set(simTick(), simHashHex());
     }
   }
@@ -220,10 +231,6 @@ export function startGame(): void {
         return;
       }
     }
-  }
-
-  function shortName(actor: string): string {
-    return actor === "system" ? "system" : `walker-${fnv64(actor).toString(16).slice(0, 4)}`;
   }
 
   // ---- verdicts, checks, resync ----
@@ -362,7 +369,12 @@ export function startGame(): void {
       if (m.reason === REJECT_PRESENT && it?.kind === EV_JOIN) {
         return; // the dog is already in the park — that IS the joined state
       }
-      logLine(`intent ${m.intent} rejected (reason ${m.reason})`);
+      const known = v.safeParse(RejectCode, m.reason);
+      logLine(
+        known.success
+          ? REJECT_TEXT[known.output]
+          : `intent ${m.intent} rejected (reason ${m.reason})`,
+      );
       emitSpan("wum.netcode_reject", {
         "wum.reason": String(m.reason),
         "wum.kind": String(it?.kind ?? ""),
@@ -619,14 +631,44 @@ export function startGame(): void {
       n === 0
         ? "the park is empty"
         : `dogs here: ${names.join(", ")}${n > names.length ? ` +${n - names.length} more` : ""}`;
-    // Park energy for the HUD straight from the canonical snapshot header.
+    // Park energy and our dog's check-in state for the HUD, straight from
+    // the canonical snapshot: authoritative, and self-correcting through
+    // rollback, resync, and day reset.
     if (simTick() % 24 === 0) {
       const sl = sim.sim_snapshot();
       if (sl >= 48) {
         const hdr = new DataView(sim.memory.buffer, sim.io_buf(), 48);
         $("energy").textContent = String(hdr.getBigUint64(40, true));
+        if (role === "player") updateCheckinButton(sl, hdr.getUint32(32, true));
       }
     }
+  }
+
+  // Records are strictly sorted by dog id (snapshot encoding contract), so
+  // our dog is a binary search away. checked_in_day === today's day index
+  // means the sim would reject another check-in.
+  function updateCheckinButton(snapLen: number, day: number) {
+    const view = new DataView(sim.memory.buffer, sim.io_buf(), snapLen);
+    const n = view.getUint32(36, true);
+    let present = false;
+    let checkedIn = false;
+    let lo = 0;
+    let hi = n - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const at = 48 + mid * 24;
+      const id = view.getBigUint64(at, true);
+      if (id === myDog) {
+        present = true;
+        checkedIn = view.getUint32(at + 20, true) === day;
+        break;
+      }
+      if (id < myDog) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    const btn = v.parse(v.instance(HTMLButtonElement), $("checkin"));
+    btn.disabled = !present || checkedIn;
+    btn.textContent = checkedIn ? "Checked in ✓" : "Check in";
   }
 
   // ---- boot ----
@@ -647,8 +689,10 @@ export function startGame(): void {
       device: deviceId(),
     });
     $("signin").style.display = anon ? "" : "none";
-    $("checkin").style.display = role === "player" ? "" : "none";
-    ($("chat") as HTMLInputElement).style.display = role === "player" ? "" : "none";
+    const checkin = v.parse(v.instance(HTMLButtonElement), $("checkin"));
+    checkin.style.display = role === "player" ? "" : "none";
+    checkin.disabled = true; // until the snapshot shows our dog present
+    checkin.textContent = "Check in";
   }
 
   async function onSignInOutcome(outcome: SignInOutcome): Promise<void> {
@@ -700,18 +744,6 @@ export function startGame(): void {
       logLine(`park module ${info.parkWasm}, presentation ${info.clientWasm}`);
 
       $("checkin").onclick = () => sendIntent(EV_CHECK_IN, dogPayload());
-      ($("chat") as HTMLInputElement).onkeydown = (e) => {
-        if (e.key !== "Enter") return;
-        const input = e.target as HTMLInputElement;
-        const text = new TextEncoder().encode(input.value.slice(0, 140));
-        if (!text.length) return;
-        const p = new Uint8Array(10 + text.length);
-        new DataView(p.buffer).setBigUint64(0, myDog, true);
-        new DataView(p.buffer).setUint16(8, text.length, true);
-        p.set(text, 10);
-        sendIntent(EV_CHAT, p);
-        input.value = "";
-      };
 
       if (typeof (globalThis as any).WebTransport === "undefined") {
         emitSpan("wum.unsupported", { "wum.feature": "webtransport" });
