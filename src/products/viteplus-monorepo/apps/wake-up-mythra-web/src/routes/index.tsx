@@ -50,7 +50,7 @@ function Page() {
           Check in
         </button>
       </div>
-      <canvas id="grid" width={100} height={100}></canvas>
+      <canvas id="grid" width={640} height={360}></canvas>
       <div className="who" id="who"></div>
       <div id="log"></div>
     </OpenFeatureProvider>

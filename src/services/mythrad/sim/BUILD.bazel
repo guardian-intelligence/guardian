@@ -1,15 +1,18 @@
 load("@aspect_bazel_lib//lib:diff_test.bzl", "diff_test")
-load("@rules_rust//rust:defs.bzl", "rust_library", "rust_shared_library", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_shared_library", "rust_test")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load(":wasm.bzl", "wasm_module")
 
-# The world-sim behavior stack: a shared structural core compiled into two
-# wasm modules - the server's authoritative step (run by wazero) and the
-# client's presentation smoothing (run by the browser). Built artifacts are
+# The world-sim stack: a fixed-point kernel (core), the terrain artifact
+# and its traversal semantics (terrain), pathfinding + steering (nav), and
+# the park game state machine (park) — compiled into wasm modules run
+# identically by the server (wazero) and every client. Built artifacts are
 # committed (embed default + ConfigMap delivery both need bytes in git);
 # `bazel run :refresh` regenerates them and diff tests fail the build when
-# source and committed bytes drift.
+# source and committed bytes drift. The fixture terrain blob rides the
+# same discipline: its bytes name every park's world, so they only change
+# through an explicit refresh.
 
 platform(
     name = "wasm32",
@@ -33,13 +36,59 @@ rust_test(
     edition = "2024",
 )
 
+rust_library(
+    name = "terrain",
+    srcs = ["terrain/src/lib.rs"],
+    crate_name = "mythra_sim_terrain",
+    edition = "2024",
+    visibility = ["//visibility:private"],
+    deps = [":core"],
+)
+
+rust_test(
+    name = "terrain_test",
+    crate = ":terrain",
+    edition = "2024",
+)
+
+rust_library(
+    name = "nav",
+    srcs = ["nav/src/lib.rs"],
+    crate_name = "mythra_sim_nav",
+    edition = "2024",
+    visibility = ["//visibility:private"],
+    deps = [
+        ":core",
+        ":terrain",
+    ],
+)
+
+rust_test(
+    name = "nav_test",
+    crate = ":nav",
+    edition = "2024",
+)
+
+rust_binary(
+    name = "fixture_gen",
+    srcs = ["terrain/fixture/main.rs"],
+    edition = "2024",
+    deps = [":terrain"],
+)
+
+genrule(
+    name = "fixture_park",
+    outs = ["fixture_park.bin"],
+    cmd = "$(location :fixture_gen) $@",
+    tools = [":fixture_gen"],
+)
+
 rust_shared_library(
     name = "server_cdylib",
     srcs = ["server/src/lib.rs"],
     crate_name = "mythra_sim_server",
     edition = "2024",
     target_compatible_with = ["@platforms//cpu:wasm32"],
-    deps = [":core"],
 )
 
 rust_library(
@@ -48,7 +97,11 @@ rust_library(
     crate_name = "mythra_sim_park",
     edition = "2024",
     visibility = ["//visibility:private"],
-    deps = [":core"],
+    deps = [
+        ":core",
+        ":nav",
+        ":terrain",
+    ],
 )
 
 rust_test(
@@ -63,7 +116,11 @@ rust_shared_library(
     crate_name = "mythra_sim_park",
     edition = "2024",
     target_compatible_with = ["@platforms//cpu:wasm32"],
-    deps = [":core"],
+    deps = [
+        ":core",
+        ":nav",
+        ":terrain",
+    ],
 )
 
 rust_shared_library(
@@ -93,13 +150,14 @@ wasm_module(
     out = "park.wasm",
 )
 
-# Copies freshly built modules over the committed artifacts (service embed
-# copy + the prod ConfigMap copy).
+# Copies freshly built modules and the fixture terrain over the committed
+# artifacts (service embed copy + the prod ConfigMap copy).
 sh_binary(
     name = "refresh",
     srcs = ["refresh.sh"],
     data = [
         ":client_wasm",
+        ":fixture_park",
         ":park_wasm",
         ":server_wasm",
     ],
@@ -112,6 +170,9 @@ sh_test(
     srcs = ["no_float_test.sh"],
     args = ["$(location %s)" % s for s in [
         "core/src/lib.rs",
+        "terrain/src/lib.rs",
+        "terrain/fixture/main.rs",
+        "nav/src/lib.rs",
         "server/src/lib.rs",
         "client/src/lib.rs",
         "park/src/lib.rs",
@@ -119,8 +180,11 @@ sh_test(
     data = [
         "client/src/lib.rs",
         "core/src/lib.rs",
+        "nav/src/lib.rs",
         "park/src/lib.rs",
         "server/src/lib.rs",
+        "terrain/fixture/main.rs",
+        "terrain/src/lib.rs",
     ],
 )
 
@@ -140,6 +204,12 @@ diff_test(
     name = "park_artifact_current_test",
     file1 = ":park_wasm",
     file2 = "//src/services/mythrad:behaviors/park.wasm",
+)
+
+diff_test(
+    name = "fixture_artifact_current_test",
+    file1 = ":fixture_park",
+    file2 = "//src/services/mythrad:terrain/fixture_park.bin",
 )
 
 diff_test(

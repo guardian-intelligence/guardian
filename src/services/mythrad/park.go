@@ -35,12 +35,15 @@ const (
 // parkHost wraps one wazero instance of the park module (the game state
 // machine). Not goroutine-safe: owned by its authority's loop.
 type parkHost struct {
-	rt    wazero.Runtime
-	mem   api.Memory
-	ioPtr uint32
-	ioCap uint32
+	rt         wazero.Runtime
+	mem        api.Memory
+	ioPtr      uint32
+	ioCap      uint32
+	terrainPtr uint32
+	terrainCap uint32
 
-	fInit, fRestore, fSnapshot, fStep, fApply, fHash, fTick, fEpoch api.Function
+	fInit, fRestore, fSnapshot, fStep, fApply, fHash, fTick, fEpoch,
+	fSetTerrain, fTerrainID api.Function
 }
 
 func newParkHost(module []byte) (*parkHost, error) {
@@ -56,24 +59,27 @@ func newParkHost(module []byte) (*parkHost, error) {
 	h.fInit, h.fRestore, h.fSnapshot = get("sim_init"), get("sim_restore"), get("sim_snapshot")
 	h.fStep, h.fApply, h.fHash = get("sim_step"), get("sim_apply"), get("sim_hash")
 	h.fTick, h.fEpoch = get("sim_tick"), get("sim_epoch")
+	h.fSetTerrain, h.fTerrainID = get("sim_set_terrain"), get("sim_terrain_id")
 	ioBuf, ioCap := get("io_buf"), get("io_cap")
+	terrainBuf, terrainCap := get("terrain_buf"), get("terrain_cap")
 	if h.mem == nil || h.fInit == nil || h.fRestore == nil || h.fSnapshot == nil ||
 		h.fStep == nil || h.fApply == nil || h.fHash == nil || h.fTick == nil ||
-		h.fEpoch == nil || ioBuf == nil || ioCap == nil {
+		h.fEpoch == nil || h.fSetTerrain == nil || h.fTerrainID == nil ||
+		ioBuf == nil || ioCap == nil || terrainBuf == nil || terrainCap == nil {
 		rt.Close(ctx)
 		return nil, errors.New("park module missing sim ABI exports")
 	}
-	p, err := ioBuf.Call(ctx)
-	if err != nil {
-		rt.Close(ctx)
-		return nil, err
+	for _, f := range []struct {
+		dst *uint32
+		fn  api.Function
+	}{{&h.ioPtr, ioBuf}, {&h.ioCap, ioCap}, {&h.terrainPtr, terrainBuf}, {&h.terrainCap, terrainCap}} {
+		v, err := f.fn.Call(ctx)
+		if err != nil {
+			rt.Close(ctx)
+			return nil, err
+		}
+		*f.dst = uint32(v[0])
 	}
-	c, err := ioCap.Call(ctx)
-	if err != nil {
-		rt.Close(ctx)
-		return nil, err
-	}
-	h.ioPtr, h.ioCap = uint32(p[0]), uint32(c[0])
 	return h, nil
 }
 
@@ -92,22 +98,48 @@ func (h *parkHost) call(f api.Function, args ...uint64) uint64 {
 	return res[0]
 }
 
-func (h *parkHost) Init(seed uint64, parkID int64, epoch uint32) {
-	h.call(h.fInit, seed, uint64(parkID), uint64(epoch))
+// call32 is call for i32-returning exports. wazero's raw result slots are
+// unspecified above the result width — the arm64 backend leaves argument
+// remnants in the high bits — so every i32 result MUST come through here,
+// never through a bare `call(...) != 0`.
+func (h *parkHost) call32(f api.Function, args ...uint64) uint32 {
+	return uint32(h.call(f, args...))
 }
+
+func (h *parkHost) Init(seed uint64, parkID int64, epoch uint32) error {
+	if code := h.call32(h.fInit, seed, uint64(parkID), uint64(epoch)); code != 0 {
+		return fmt.Errorf("sim_init rejected: code %d", code)
+	}
+	return nil
+}
+
+// SetTerrain loads a terrain artifact into the module. Required before
+// Init or Restore and around every terrain_set event during replay — the
+// sim cross-checks the blob's identity at each of those boundaries.
+func (h *parkHost) SetTerrain(blob []byte) error {
+	if uint32(len(blob)) > h.terrainCap || !h.mem.Write(h.terrainPtr, blob) {
+		return errors.New("terrain blob does not fit module terrain buffer")
+	}
+	if code := h.call32(h.fSetTerrain, uint64(len(blob))); code != 0 {
+		return fmt.Errorf("sim_set_terrain rejected blob: code %d", code)
+	}
+	return nil
+}
+
+func (h *parkHost) TerrainID() uint64 { return h.call(h.fTerrainID) }
 
 func (h *parkHost) Restore(state []byte) error {
 	if uint32(len(state)) > h.ioCap || !h.mem.Write(h.ioPtr, state) {
 		return errors.New("snapshot does not fit module io buffer")
 	}
-	if code := h.call(h.fRestore, uint64(len(state))); code != 0 {
+	if code := h.call32(h.fRestore, uint64(len(state))); code != 0 {
 		return fmt.Errorf("sim_restore rejected snapshot: code %d", code)
 	}
 	return nil
 }
 
 func (h *parkHost) Snapshot() []byte {
-	n := uint32(h.call(h.fSnapshot))
+	n := h.call32(h.fSnapshot)
 	b, ok := h.mem.Read(h.ioPtr, n)
 	if !ok {
 		panic("park module snapshot read out of bounds")
@@ -120,7 +152,7 @@ func (h *parkHost) Snapshot() []byte {
 func (h *parkHost) Step()         { h.call(h.fStep) }
 func (h *parkHost) Hash() uint64  { return h.call(h.fHash) }
 func (h *parkHost) Tick() uint64  { return h.call(h.fTick) }
-func (h *parkHost) Epoch() uint32 { return uint32(h.call(h.fEpoch)) }
+func (h *parkHost) Epoch() uint32 { return h.call32(h.fEpoch) }
 
 // Apply runs one encoded event (kind u16 LE + payload) through sim_apply.
 // The module must not mutate on a nonzero return (pinned by its tests).
@@ -128,7 +160,7 @@ func (h *parkHost) Apply(event []byte) uint32 {
 	if uint32(len(event)) > h.ioCap || !h.mem.Write(h.ioPtr, event) {
 		return 1 // the sim's ERR_ENCODING
 	}
-	return uint32(h.call(h.fApply, uint64(len(event))))
+	return h.call32(h.fApply, uint64(len(event)))
 }
 
 // stagedIntent is a session (or system) intent waiting for the tick
@@ -159,6 +191,7 @@ type attachResult struct {
 	tick    uint64
 	epoch   uint32
 	wh      uint64
+	terrain string
 	state   []byte
 	err     error
 }
@@ -189,6 +222,13 @@ type authority struct {
 	j    journal.Journal
 	mods *modules
 
+	// The active terrain artifact, cached for welcome/snapshot lines so
+	// clients know which blob to fetch before restoring. Written only by
+	// the boot path and the tick goroutine's replay.
+	terrainHex           string
+	terrainW, terrainH   uint16
+	terrainSchemaCurrent uint32
+
 	mu       sync.Mutex
 	staged   []stagedIntent
 	subs     map[*session]bool
@@ -210,14 +250,33 @@ type authority struct {
 
 func parkIDFor(name string) int64 {
 	f := fnv.New64a()
-	f.Write([]byte(name))
+	// The generation tag versions every park's journal lineage at once: a
+	// park id under a new tag has an empty journal, so worlds born under
+	// an incompatible sim never replay through the current one.
+	f.Write([]byte("g2/" + name))
 	return int64(f.Sum64())
 }
 
+// setTerrain loads a blob into the host and caches its identity for the
+// welcome/snapshot lines.
+func (a *authority) setTerrain(blob []byte) error {
+	schema, w, h, err := terrainHeaderFields(blob)
+	if err != nil {
+		return err
+	}
+	if err := a.host.SetTerrain(blob); err != nil {
+		return err
+	}
+	a.terrainHex = fmt.Sprintf("%016x", terrainID(blob))
+	a.terrainW, a.terrainH, a.terrainSchemaCurrent = w, h, schema
+	return nil
+}
+
 // openAuthority restores the park from its journal (genesis-snapshotting a
-// brand new one) and starts its loop. A park whose snapshot does not replay
-// to its recorded world hash is refused, never served wrong.
-func openAuthority(ctx context.Context, name string, module []byte, j journal.Journal, mods *modules) (*authority, error) {
+// brand new one on the genesis terrain) and starts its loop. A park whose
+// snapshot does not replay to its recorded world hash is refused, never
+// served wrong.
+func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, j journal.Journal, mods *modules) (*authority, error) {
 	host, err := newParkHost(module)
 	if err != nil {
 		return nil, err
@@ -231,45 +290,92 @@ func openAuthority(ctx context.Context, name string, module []byte, j journal.Jo
 		lastSnapAt: time.Now(),
 		utcDay:     uint32(time.Now().Unix() / 86400),
 	}
+	fail := func(err error) (*authority, error) {
+		host.close()
+		return nil, fmt.Errorf("park %s: %w", name, err)
+	}
 	snap, ok, err := j.LatestSnapshot(ctx, a.id)
 	if err != nil {
-		host.close()
-		return nil, err
+		return fail(err)
 	}
 	if ok {
+		blob, found, err := j.TerrainBlob(ctx, snap.TerrainID)
+		if err != nil {
+			return fail(err)
+		}
+		if !found {
+			return fail(fmt.Errorf("terrain %016x missing — snapshot cannot restore", snap.TerrainID))
+		}
+		if err := a.setTerrain(blob); err != nil {
+			return fail(err)
+		}
 		if err := host.Restore(snap.State); err != nil {
-			host.close()
-			return nil, fmt.Errorf("park %s: %w", name, err)
+			return fail(err)
 		}
 		if got := host.Hash(); got != snap.WH {
-			host.close()
-			return nil, fmt.Errorf("park %s: snapshot hash mismatch (stored %016x, got %016x) — refusing to serve", name, snap.WH, got)
+			return fail(fmt.Errorf("snapshot hash mismatch (stored %016x, got %016x) — refusing to serve", snap.WH, got))
 		}
 		a.lastSeq = snap.Seq
+		// Buffer the tail before replaying: the tail is bounded by the
+		// snapshot cadence, and terrain_set replay must fetch blobs — a
+		// query inside Read's row streaming would hold two pool
+		// connections at once and can deadlock a small pool.
+		var tail []journal.Event
 		if err := j.Read(ctx, a.id, snap.Seq+1, func(ev journal.Event) error {
+			tail = append(tail, ev)
+			return nil
+		}); err != nil {
+			return fail(err)
+		}
+		for _, ev := range tail {
+			// Step to the event's tick under the terrain that was live for
+			// those ticks; only then may a terrain_set swap the blob — the
+			// same choreography the live run and every client follow.
 			for host.Tick() < ev.Tick {
 				host.Step()
 			}
+			if ev.Kind == evTerrainSet && len(ev.Payload) == 12 {
+				tid := binary.LittleEndian.Uint64(ev.Payload[4:12])
+				blob, found, err := j.TerrainBlob(ctx, tid)
+				if err != nil {
+					return fail(err)
+				}
+				if !found {
+					return fail(fmt.Errorf("terrain %016x missing at seq %d", tid, ev.Seq))
+				}
+				if err := a.setTerrain(blob); err != nil {
+					return fail(err)
+				}
+			}
 			if code := host.Apply(encodeEvent(ev.Kind, ev.Payload)); code != 0 {
-				return fmt.Errorf("replay: event seq %d rejected with code %d", ev.Seq, code)
+				return fail(fmt.Errorf("replay: event seq %d rejected with code %d", ev.Seq, code))
 			}
 			a.lastSeq = ev.Seq
-			return nil
-		}); err != nil {
-			host.close()
-			return nil, fmt.Errorf("park %s: %w", name, err)
 		}
 	} else {
+		// Genesis: the terrain artifact becomes durable first, then the
+		// snapshot that references it — events alone cannot recreate a
+		// park, and a snapshot must never point at an unstored blob.
+		schema, _, _, err := terrainHeaderFields(genesisTerrain)
+		if err != nil {
+			return fail(err)
+		}
+		tid := terrainID(genesisTerrain)
+		if err := j.PutTerrain(ctx, tid, schema, genesisTerrain); err != nil {
+			return fail(err)
+		}
+		if err := a.setTerrain(genesisTerrain); err != nil {
+			return fail(err)
+		}
 		var b [8]byte
 		rand.Read(b[:])
-		host.Init(binary.LittleEndian.Uint64(b[:]), a.id, 1)
-		// The genesis snapshot makes the seed durable before anything is
-		// served: events alone cannot recreate a park.
+		if err := host.Init(binary.LittleEndian.Uint64(b[:]), a.id, 1); err != nil {
+			return fail(err)
+		}
 		if err := j.PutSnapshot(ctx, a.id, journal.Snapshot{
-			Seq: 0, Tick: 0, Epoch: 1, WH: host.Hash(), State: host.Snapshot(),
+			Seq: 0, Tick: 0, Epoch: 1, WH: host.Hash(), TerrainID: tid, State: host.Snapshot(),
 		}); err != nil {
-			host.close()
-			return nil, err
+			return fail(err)
 		}
 	}
 	// The caller starts run(); tests drive tickOnce directly instead.
@@ -437,7 +543,8 @@ func (a *authority) tickOnce() {
 		a.eventsSinceSnap = 0
 		a.lastSnapAt = time.Now()
 		snap := journal.Snapshot{
-			Seq: a.lastSeq, Tick: t, Epoch: a.host.Epoch(), WH: wh, State: a.host.Snapshot(),
+			Seq: a.lastSeq, Tick: t, Epoch: a.host.Epoch(), WH: wh,
+			TerrainID: a.host.TerrainID(), State: a.host.Snapshot(),
 		}
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -468,7 +575,9 @@ func (a *authority) handleAttach(req attachReq) attachResult {
 	}
 	welcome, _ := json.Marshal(map[string]any{
 		"type": "welcome", "park": a.name, "role": s.role, "epoch": a.host.Epoch(),
-		"seq": a.lastSeq, "tick": a.host.Tick(), "grid": [2]int{100, 100},
+		"seq": a.lastSeq, "tick": a.host.Tick(),
+		"terrain": a.terrainHex, "terrain_schema": a.terrainSchemaCurrent,
+		"w": a.terrainW, "h": a.terrainH,
 	})
 	res := attachResult{
 		welcome: append(welcome, '\n'),
@@ -476,6 +585,7 @@ func (a *authority) handleAttach(req attachReq) attachResult {
 		tick:    a.host.Tick(),
 		epoch:   a.host.Epoch(),
 		wh:      a.host.Hash(),
+		terrain: a.terrainHex,
 		state:   a.host.Snapshot(),
 	}
 
@@ -497,7 +607,7 @@ var errPastAttach = errors.New("past attach position")
 // attach position follow on the session channel, so the journal read stops
 // at the attach seq — anything newer is already on its way.
 func (a *authority) catchupLines(sinceSeq int64, sinceTick uint64, res attachResult) [][]byte {
-	snapLine := snapshotLineFrom(res.seq, res.tick, res.epoch, res.wh, res.state)
+	snapLine := snapshotLineFrom(res.seq, res.tick, res.epoch, res.wh, res.terrain, res.state)
 	if sinceSeq > 0 && sinceSeq <= res.seq && sinceTick+hashRingTicks >= res.tick {
 		var events [][]byte
 		eventBytes := 0
@@ -534,14 +644,14 @@ func (a *authority) snapshotLine() []byte {
 	if cached.tick == t && cached.line != nil {
 		return cached.line
 	}
-	line := snapshotLineFrom(a.lastSeq, t, a.host.Epoch(), a.host.Hash(), a.host.Snapshot())
+	line := snapshotLineFrom(a.lastSeq, t, a.host.Epoch(), a.host.Hash(), a.terrainHex, a.host.Snapshot())
 	a.mu.Lock()
 	a.snapCache = snapCacheEntry{tick: t, line: line}
 	a.mu.Unlock()
 	return line
 }
 
-func snapshotLineFrom(seq int64, tick uint64, epoch uint32, wh uint64, state []byte) []byte {
+func snapshotLineFrom(seq int64, tick uint64, epoch uint32, wh uint64, terrain string, state []byte) []byte {
 	var z bytes.Buffer
 	w, _ := flate.NewWriter(&z, flate.BestCompression)
 	w.Write(state)
@@ -549,7 +659,8 @@ func snapshotLineFrom(seq int64, tick uint64, epoch uint32, wh uint64, state []b
 	msg, _ := json.Marshal(map[string]any{
 		"type": "snapshot", "seq": seq, "tick": tick,
 		"epoch": epoch, "wh": fmt.Sprintf("%016x", wh),
-		"z": z.Bytes(), // json encodes []byte as base64
+		"terrain": terrain,
+		"z":       z.Bytes(), // json encodes []byte as base64
 	})
 	return append(msg, '\n')
 }
@@ -589,15 +700,16 @@ func (a *authority) isClosed() bool {
 
 // parks is the registry of open authorities on this hub.
 type parks struct {
-	mu     sync.Mutex
-	byName map[string]*authority
-	module func() []byte
-	j      journal.Journal
-	mods   *modules
+	mu      sync.Mutex
+	byName  map[string]*authority
+	module  func() []byte
+	genesis []byte // terrain artifact every brand-new park is born with
+	j       journal.Journal
+	mods    *modules
 }
 
-func newParks(module func() []byte, j journal.Journal, mods *modules) *parks {
-	return &parks{byName: map[string]*authority{}, module: module, j: j, mods: mods}
+func newParks(module func() []byte, genesis []byte, j journal.Journal, mods *modules) *parks {
+	return &parks{byName: map[string]*authority{}, module: module, genesis: genesis, j: j, mods: mods}
 }
 
 func (p *parks) get(ctx context.Context, name string) (*authority, error) {
@@ -609,7 +721,7 @@ func (p *parks) get(ctx context.Context, name string) (*authority, error) {
 	p.mu.Unlock()
 	// Open outside the registry lock (journal replay takes a moment); the
 	// rare double-open race resolves to the first registered instance.
-	a, err := openAuthority(ctx, name, p.module(), p.j, p.mods)
+	a, err := openAuthority(ctx, name, p.module(), p.genesis, p.j, p.mods)
 	if err != nil {
 		return nil, err
 	}

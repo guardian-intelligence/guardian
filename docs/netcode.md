@@ -25,20 +25,34 @@ the wrong place.
 
 ### Sim core (wasm) — identical exports on every host
 
-    sim_init(seed, park_id, epoch)          fresh park
-    sim_restore(snapshot) -> ok|err         from a snapshot blob
+    sim_set_terrain(blob) -> ok|err         load a terrain artifact (own buffer)
+    sim_init(seed, park_id, epoch) -> ok|err  fresh park on the loaded terrain
+    sim_restore(snapshot) -> ok|err         from a snapshot blob; refuses to
+                                            restore against the wrong terrain
     sim_snapshot() -> bytes                 full state, canonical encoding
     sim_step()                              one tick, pure function of state
     sim_apply(event) -> ok|reject(code)     MUST NOT mutate on reject
-    sim_hash() -> u64                       world hash
+    sim_hash() -> u64                       world hash (terrain id folded in)
     sim_tick() -> u64
     sim_epoch() -> u32                      module epoch compatibility
+    sim_terrain_id() -> u64                 identity of the adopted terrain
     sim_view(out) -> len                    render data (positions/skins/moods)
 
 `sim_apply` doubles as validation: the authority calls it, and reject means
 the intent never becomes an event. There is no separate validate() to drift
 out of sync. Transactionality (no mutation on reject) is what makes that
 safe. Prediction needs no extra ABI: clients fork via snapshot/restore.
+
+Hosts driving wasm from Go must truncate i32 results (`uint32(res[0])`):
+wazero's raw result slots are unspecified above the result width and the
+arm64 backend leaves argument remnants there.
+
+**Movement is state, never cache.** A dog's movement is exactly
+(position Q16.16, waypoint node, target node) — all hashed, all in the
+snapshot. The waypoint is recomputed by deterministic A* only at state
+transitions (new target, corner reached, blocked), so a restored snapshot
+continues movement bit-identically; there is no path cache whose absence
+could diverge a replay.
 
 ### Wire protocol (WebTransport; one transport for players and spectators)
 
@@ -53,10 +67,10 @@ Session setup over HTTPS, then one bidi reliable stream plus datagrams:
       intent  { intent_id u64, kind u16, payload }     opaque payload
       resync  { have_seq }
     server -> client (stream, strictly ordered):
-      welcome  { session, role, epoch, seq, tick, snapshot? }
+      welcome  { session, role, epoch, seq, tick, terrain, terrain_schema, w, h }
       event    { seq, tick, kind, payload }            the journal, verbatim
       reject   { intent_id, reason }
-      snapshot { seq, tick, epoch, state }             deflate-compressed
+      snapshot { seq, tick, epoch, wh, terrain, state }  deflate-compressed
     client -> server (datagram):  check   { tick, wh }
     server -> client (datagram):  verdict { tick_now, ok }
 
@@ -70,14 +84,17 @@ clients resend pending intents after any rejoin.
 
     park_events   (park_id, seq, tick, epoch, kind, actor, intent_id,
                    payload bytea, wall_ts, PK (park_id, seq))
-    park_snapshots(park_id, seq, tick, epoch, wh, state bytea, wall_ts,
-                   PK (park_id, seq))
+    park_snapshots(park_id, seq, tick, epoch, wh, terrain_id, state bytea,
+                   wall_ts, PK (park_id, seq))
+    park_terrain  (terrain_id, schema, blob bytea, wall_ts, PK (terrain_id))
 
     type Journal interface {
         Append(ctx, parkID, []Event) (firstSeq, err)   // sole writer = authority
         Read(ctx, parkID, fromSeq) (iter, err)
         PutSnapshot(ctx, parkID, Snapshot) error
         LatestSnapshot(ctx, parkID) (Snapshot, error)
+        PutTerrain(ctx, terrainID, schema, blob) error // immutable per id
+        TerrainBlob(ctx, terrainID) (blob, ok, error)
     }
 
 Contract semantics live in the interface, not the backend: per-park seq is
@@ -119,6 +136,25 @@ module_hash}` journal event makes a swap effective. Replay switches modules
 at epoch boundaries, so a balance change never invalidates history — the
 journal replays under the rules that were live when it was written. Clients
 lacking the module fetch it from /behavior by hash, then apply the event.
+
+### Terrain artifacts
+
+A park's world is durable data, not a function of code: the terrain blob is
+generated once (fixture today, procgen later), stored content-addressed in
+`park_terrain`, and served immutably at `/terrain/<16-hex>`. The identity is
+`mix64(fnv1a(blob))` — computable inside the no_std sim, so one name covers
+the journal payload, the URL, and the world hash.
+
+The lane mirrors module epochs exactly. Hosts load the blob through
+`sim_set_terrain` before `sim_init`/`sim_restore`; a change to a live park
+is a `terrain_set{schema, terrain_id}` journal event, and the host (server
+replay and browser alike) fetches + loads the blob *before* feeding the
+event — the sim refuses to adopt an identity the loaded blob doesn't carry,
+and refuses to restore a snapshot taken on different terrain, so the
+load-first contract cannot rot silently. On adoption the sim deterministically
+relocates any dog left standing on a now-invalid node and clears every
+movement intent. Schema migrations are backfills: a deterministic migrator
+producing new blobs plus one `terrain_set` per park, never an in-place edit.
 
 ## Client netcode
 

@@ -11,38 +11,56 @@
 //!     same rule, so every replica derives bit-identical state.
 //!   - `sim_apply` validates and applies in one call and MUST NOT mutate
 //!     on reject — it doubles as the authority's validation.
+//!   - Terrain is not state: it is a content-addressed artifact the host
+//!     loads through `sim_set_terrain` before `sim_init`/`sim_restore` and
+//!     around every `terrain_set` event. The state holds only the
+//!     artifact's identity, which every boundary call cross-checks.
 //!
-//! ABI (all integers; payloads move through the io buffer):
+//! Movement is stored as exactly (position, waypoint, target) per dog.
+//! Paths are never cached: the waypoint is recomputed only at state
+//! transitions (new target, corner reached, blocked), so a restored
+//! snapshot continues movement bit-identically — there is no derived
+//! structure whose absence could diverge a replay.
+//!
+//! ABI (all integers; payloads move through the io buffer, terrain blobs
+//! through the larger terrain buffer):
 //!   io_buf() -> *mut u8, io_cap() -> u32
-//!   sim_init(seed: u64, park_id: u64, epoch: u32)
+//!   terrain_buf() -> *mut u8, terrain_cap() -> u32
+//!   sim_set_terrain(len: u32) -> u32  parse+adopt blob, 0 ok
+//!   sim_init(seed: u64, park_id: u64, epoch: u32) -> u32
 //!   sim_restore(len: u32) -> u32      0 ok, else restore error code
 //!   sim_snapshot() -> u32             canonical snapshot written to io, len
 //!   sim_step()
 //!   sim_apply(len: u32) -> u32        0 ok, else reject code
 //!   sim_hash() -> u64                 canonical state hash
-//!   sim_tick() -> u64, sim_epoch() -> u32
+//!   sim_tick() -> u64, sim_epoch() -> u32, sim_terrain_id() -> u64
 //!   sim_view() -> u32                 render data written to io, len
 //!
 //! Event encoding (little-endian): kind u16, then payload —
-//!   1 join          { id u64 }            spawn position derived from
-//!                                         det_rand(seed, tick, id)
+//!   1 join          { id u64 }            spawn cell derived from
+//!                                         det_rand over standable ground
 //!   2 leave         { id u64 }
 //!   3 check_in      { id u64 }            once per day index per dog
-//!   4 (reserved)                          journaled by a retired event
-//!                                         kind; replays as an accepted
-//!                                         no-op, never newly staged
+//!   4 move_to       { id u64, node u16 }  set the dog's movement target
 //!   5 day_reset     { day u32 }           system event; re-arms check-ins
 //!   6 epoch_advance { epoch u32, module_hash u64 }  system event
+//!   7 terrain_set   { schema u32, terrain_id u64 }  system event; the
+//!                                         loaded blob must already match
 //!
 //! Snapshot encoding (canonical; dogs strictly sorted by id; park energy
 //! is cumulative — departed dogs' contributions persist — so it is state,
 //! not a derivable aggregate):
-//!   magic "MYP1", epoch u32, park_id u64, seed u64, tick u64, day u32,
-//!   n u32, energy u64, then n * { id u64, x i32, y i32, energy u32,
-//!   checked_in_day u32 }
+//!   magic "MYP2", epoch u32, park_id u64, seed u64, tick u64, day u32,
+//!   n u32, energy u64, terrain_schema u32, terrain_id u64, then n *
+//!   { id u64, x i32, y i32, energy u32, checked_in_day u32, target u16,
+//!     waypoint u16, flags u8, pad u8 }
+//!   x, y are Q16.16 park-cell coordinates; target/waypoint are nav nodes
+//!   (0xFFFF = none); flags bit 0 = standing on a deck.
 #![cfg_attr(not(test), no_std)]
 
-use mythra_sim_core::{GRID_H, GRID_W, det_rand, step_dog};
+use mythra_sim_core::det_rand;
+use mythra_sim_nav as nav;
+use mythra_sim_terrain::{BLOCK, MAX_BLOB, NONE, Node, SWIM, Terrain};
 
 #[cfg(target_arch = "wasm32")]
 #[panic_handler]
@@ -52,20 +70,18 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 
 pub const MAX_DOGS: usize = 2048;
 const IO_CAP: usize = 64 * 1024;
-const MAGIC: u32 = u32::from_le_bytes(*b"MYP1");
+const MAGIC: u32 = u32::from_le_bytes(*b"MYP2");
 const NEVER: u32 = u32::MAX;
-const DOG_REC: usize = 24;
-const HEADER: usize = 48;
+const DOG_REC: usize = 30;
+const HEADER: usize = 60;
 
 pub const EV_JOIN: u16 = 1;
 pub const EV_LEAVE: u16 = 2;
 pub const EV_CHECK_IN: u16 = 3;
-// Kind 4 is reserved: a retired event kind that still exists in park
-// journals. Replay refuses to serve a park on any rejected event, so the
-// kind must stay accepted (as a state-free no-op) forever.
-pub const EV_RESERVED_4: u16 = 4;
+pub const EV_MOVE_TO: u16 = 4;
 pub const EV_DAY_RESET: u16 = 5;
 pub const EV_EPOCH_ADVANCE: u16 = 6;
+pub const EV_TERRAIN_SET: u16 = 7;
 
 pub const OK: u32 = 0;
 pub const ERR_ENCODING: u32 = 1;
@@ -75,8 +91,15 @@ pub const ERR_FULL: u32 = 4;
 pub const ERR_CHECKED_IN: u32 = 5;
 pub const ERR_KIND: u32 = 6;
 pub const ERR_EPOCH: u32 = 7;
+pub const ERR_TARGET: u32 = 8;
+pub const ERR_TERRAIN: u32 = 9;
 
 const CHECK_IN_ENERGY: u32 = 10;
+/// A standing dog rolls to wander once per this many ticks on average
+/// (about eight seconds), out to this many cells away.
+const WANDER_ODDS: u32 = 192;
+const WANDER_RANGE: u32 = 8;
+const FLAG_DECK: u8 = 1;
 
 #[derive(Clone, Copy)]
 struct Dog {
@@ -85,6 +108,9 @@ struct Dog {
     y: i32,
     energy: u32,
     checked_in_day: u32,
+    target: u16,
+    waypoint: u16,
+    flags: u8,
 }
 
 const EMPTY_DOG: Dog = Dog {
@@ -93,6 +119,9 @@ const EMPTY_DOG: Dog = Dog {
     y: 0,
     energy: 0,
     checked_in_day: NEVER,
+    target: NONE.0,
+    waypoint: NONE.0,
+    flags: 0,
 };
 
 struct Park {
@@ -102,6 +131,8 @@ struct Park {
     tick: u64,
     day: u32,
     energy: u64,
+    terrain_schema: u32,
+    terrain_id: u64,
     n: usize,
     dogs: [Dog; MAX_DOGS],
 }
@@ -113,11 +144,16 @@ static mut PARK: Park = Park {
     tick: 0,
     day: 0,
     energy: 0,
+    terrain_schema: 0,
+    terrain_id: 0,
     n: 0,
     dogs: [EMPTY_DOG; MAX_DOGS],
 };
 
 static mut IO: [u8; IO_CAP] = [0; IO_CAP];
+static mut TERRAIN_BLOB: [u8; MAX_BLOB] = [0; MAX_BLOB];
+static mut TERRAIN: Option<Terrain<'static>> = None;
+static mut SCRATCH: nav::Scratch = nav::Scratch::NEW;
 
 fn park() -> &'static mut Park {
     unsafe { &mut *(&raw mut PARK) }
@@ -125,6 +161,14 @@ fn park() -> &'static mut Park {
 
 fn io() -> &'static mut [u8; IO_CAP] {
     unsafe { &mut *(&raw mut IO) }
+}
+
+fn terrain() -> Option<Terrain<'static>> {
+    unsafe { *(&raw const TERRAIN) }
+}
+
+fn scratch() -> &'static mut nav::Scratch {
+    unsafe { &mut *(&raw mut SCRATCH) }
 }
 
 #[unsafe(no_mangle)]
@@ -138,7 +182,42 @@ pub extern "C" fn io_cap() -> u32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sim_init(seed: u64, park_id: u64, epoch: u32) {
+pub extern "C" fn terrain_buf() -> *mut u8 {
+    &raw mut TERRAIN_BLOB as *mut u8
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn terrain_cap() -> u32 {
+    MAX_BLOB as u32
+}
+
+/// Parses and adopts the blob the host wrote into the terrain buffer.
+/// Writing that buffer invalidates any previously loaded terrain, so on a
+/// parse failure no terrain is loaded — the host must succeed here before
+/// touching any other entry point.
+#[unsafe(no_mangle)]
+pub extern "C" fn sim_set_terrain(len: u32) -> u32 {
+    unsafe { *(&raw mut TERRAIN) = None };
+    let len = len as usize;
+    if len > MAX_BLOB {
+        return ERR_ENCODING;
+    }
+    let blob: &'static [u8] =
+        unsafe { core::slice::from_raw_parts(&raw const TERRAIN_BLOB as *const u8, len) };
+    match Terrain::parse(blob) {
+        Ok(t) => {
+            unsafe { *(&raw mut TERRAIN) = Some(t) };
+            OK
+        }
+        Err(code) => code,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sim_init(seed: u64, park_id: u64, epoch: u32) -> u32 {
+    let Some(t) = terrain() else {
+        return ERR_TERRAIN;
+    };
     let p = park();
     *p = Park {
         epoch,
@@ -147,9 +226,12 @@ pub extern "C" fn sim_init(seed: u64, park_id: u64, epoch: u32) {
         tick: 0,
         day: 0,
         energy: 0,
+        terrain_schema: t.schema,
+        terrain_id: t.id,
         n: 0,
         dogs: [EMPTY_DOG; MAX_DOGS],
     };
+    OK
 }
 
 #[unsafe(no_mangle)]
@@ -162,19 +244,92 @@ pub extern "C" fn sim_epoch() -> u32 {
     park().epoch
 }
 
-/// One tick: every dog steps under the shared core dynamics. Pure function
-/// of state; identical on every surface by construction.
+#[unsafe(no_mangle)]
+pub extern "C" fn sim_terrain_id() -> u64 {
+    park().terrain_id
+}
+
+fn node_of(t: &Terrain, d: &Dog) -> Node {
+    Node::at(t.idx(d.x >> 16, d.y >> 16), d.flags & FLAG_DECK != 0)
+}
+
+/// One tick: every dog runs its movement state machine, in roster (id)
+/// order. Pure function of state; identical on every surface by
+/// construction. Terrain identity is re-checked so a host that violated
+/// the load contract freezes movement instead of computing on the wrong
+/// world (the hash oracle will surface it).
 #[unsafe(no_mangle)]
 pub extern "C" fn sim_step() {
     let p = park();
-    for i in 0..p.n {
-        let d = &mut p.dogs[i];
-        let id = d.id.to_le_bytes();
-        let (dx, dy) = step_dog(p.tick, p.seed, &id, d.x, d.y, GRID_W, GRID_H);
-        d.x = (d.x + dx).clamp(0, GRID_W - 1);
-        d.y = (d.y + dy).clamp(0, GRID_H - 1);
+    if let Some(t) = terrain() {
+        if t.id == p.terrain_id {
+            for i in 0..p.n {
+                step_dog(p, &t, i);
+            }
+        }
     }
     p.tick += 1;
+}
+
+fn step_dog(p: &mut Park, t: &Terrain, i: usize) {
+    let (seed, tick) = (p.seed, p.tick);
+    let d = &mut p.dogs[i];
+    if d.target == NONE.0 {
+        // idle: roll to wander somewhere nearby and standable
+        if det_rand(seed, tick, d.id, WANDER_ODDS) != 0 {
+            return;
+        }
+        let span = 2 * WANDER_RANGE + 1;
+        let dx = det_rand(seed, tick, d.id ^ 0x5741_4E44, span) as i32 - WANDER_RANGE as i32;
+        let dy = det_rand(seed, tick, d.id ^ 0x5741_4E45, span) as i32 - WANDER_RANGE as i32;
+        let (cx, cy) = ((d.x >> 16) + dx, (d.y >> 16) + dy);
+        if (dx == 0 && dy == 0) || !t.in_bounds(cx, cy) {
+            return;
+        }
+        let idx = t.idx(cx, cy);
+        if t.class(idx) == BLOCK || idx == t.idx(d.x >> 16, d.y >> 16) {
+            return;
+        }
+        d.target = Node::ground(idx).0;
+        d.waypoint = NONE.0;
+        return;
+    }
+    if d.waypoint == NONE.0 {
+        let here = node_of(t, d);
+        if here.0 == d.target {
+            d.target = NONE.0;
+            return;
+        }
+        let wp = nav::first_waypoint(t, scratch(), here, Node(d.target));
+        if wp == NONE {
+            d.target = NONE.0;
+            return;
+        }
+        d.waypoint = wp.0;
+    }
+    let mut on_deck = d.flags & FLAG_DECK != 0;
+    let outcome = nav::step_toward(t, &mut d.x, &mut d.y, &mut on_deck, Node(d.waypoint));
+    d.flags = if on_deck {
+        d.flags | FLAG_DECK
+    } else {
+        d.flags & !FLAG_DECK
+    };
+    match outcome {
+        nav::Step::Arrived => {
+            if d.waypoint == d.target {
+                d.target = NONE.0;
+            }
+            d.waypoint = NONE.0;
+        }
+        nav::Step::Blocked => {
+            // another dog's world can't block (no dog-dog collision yet);
+            // a blocked step means the straight run is obstructed, so give
+            // up rather than burn a search every tick against a wall
+            d.target = NONE.0;
+            d.waypoint = NONE.0;
+        }
+        nav::Step::Moving => {}
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -189,8 +344,11 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
     };
     match kind {
         EV_JOIN => {
-            let Some(id) = read_u64(body, len) else {
+            let Some(id) = read_u64_exact(body, len) else {
                 return ERR_ENCODING;
+            };
+            let Some(t) = terrain() else {
+                return ERR_TERRAIN;
             };
             let p = park();
             if find(p, id).is_some() {
@@ -199,8 +357,8 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             if p.n >= MAX_DOGS {
                 return ERR_FULL;
             }
-            let x = det_rand(p.seed, p.tick, id, GRID_W as u32) as i32;
-            let y = det_rand(p.seed, p.tick.wrapping_add(1), id, GRID_H as u32) as i32;
+            let spawn = spawn_cell(&t, p.seed, p.tick, id);
+            let (x, y) = nav::center(&t, spawn);
             insert(
                 p,
                 Dog {
@@ -209,12 +367,15 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
                     y,
                     energy: 0,
                     checked_in_day: NEVER,
+                    target: NONE.0,
+                    waypoint: NONE.0,
+                    flags: 0,
                 },
             );
             OK
         }
         EV_LEAVE => {
-            let Some(id) = read_u64(body, len) else {
+            let Some(id) = read_u64_exact(body, len) else {
                 return ERR_ENCODING;
             };
             let p = park();
@@ -227,7 +388,7 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             OK
         }
         EV_CHECK_IN => {
-            let Some(id) = read_u64(body, len) else {
+            let Some(id) = read_u64_exact(body, len) else {
                 return ERR_ENCODING;
             };
             let p = park();
@@ -243,9 +404,31 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             p.energy += CHECK_IN_ENERGY as u64;
             OK
         }
-        EV_RESERVED_4 => OK,
+        EV_MOVE_TO => {
+            if len != body + 10 {
+                return ERR_ENCODING;
+            }
+            let buf = &io()[..len];
+            let mut b8 = [0u8; 8];
+            b8.copy_from_slice(&buf[body..body + 8]);
+            let id = u64::from_le_bytes(b8);
+            let node = Node(u16::from_le_bytes([buf[body + 8], buf[body + 9]]));
+            let Some(t) = terrain() else {
+                return ERR_TERRAIN;
+            };
+            if !t.exists(node) {
+                return ERR_TARGET;
+            }
+            let p = park();
+            let Some(i) = find(p, id) else {
+                return ERR_ABSENT;
+            };
+            p.dogs[i].target = node.0;
+            p.dogs[i].waypoint = NONE.0;
+            OK
+        }
         EV_DAY_RESET => {
-            let Some(day) = read_u32(body, len) else {
+            let Some(day) = read_u32_exact(body, len) else {
                 return ERR_ENCODING;
             };
             park().day = day;
@@ -266,12 +449,78 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             p.epoch = epoch;
             OK
         }
+        EV_TERRAIN_SET => {
+            if len != body + 12 {
+                return ERR_ENCODING;
+            }
+            let (schema, tid) = {
+                let buf = &io()[..len];
+                let mut b8 = [0u8; 8];
+                b8.copy_from_slice(&buf[body + 4..body + 12]);
+                (
+                    u32::from_le_bytes([buf[body], buf[body + 1], buf[body + 2], buf[body + 3]]),
+                    u64::from_le_bytes(b8),
+                )
+            };
+            // The host fetches and loads the blob before feeding the
+            // event (the same choreography as module epochs); adopting an
+            // identity the loaded blob doesn't carry would fork the world.
+            let Some(t) = terrain() else {
+                return ERR_TERRAIN;
+            };
+            if t.schema != schema || t.id != tid {
+                return ERR_TERRAIN;
+            }
+            let p = park();
+            p.terrain_schema = schema;
+            p.terrain_id = tid;
+            for i in 0..p.n {
+                let d = &mut p.dogs[i];
+                // movement intent does not survive a world change
+                d.target = NONE.0;
+                d.waypoint = NONE.0;
+                let (cx, cy) = (
+                    (d.x >> 16).clamp(0, t.w as i32 - 1),
+                    (d.y >> 16).clamp(0, t.h as i32 - 1),
+                );
+                let idx = t.idx(cx, cy);
+                let node = Node::at(idx, d.flags & FLAG_DECK != 0);
+                if (cx, cy) != (d.x >> 16, d.y >> 16) || !t.exists(node) {
+                    let safe = t.nearest_ground(idx);
+                    let (x, y) = nav::center(&t, safe);
+                    d.x = x;
+                    d.y = y;
+                    d.flags &= !FLAG_DECK;
+                }
+            }
+            OK
+        }
         _ => ERR_KIND,
     }
 }
 
-fn read_u64(at: usize, len: usize) -> Option<u64> {
-    if len < at + 8 {
+/// Deterministic spawn: a bounded number of seeded draws over the whole
+/// park, falling back to the nearest standable ground to the center. The
+/// fallback is total for any park with at least one standable cell.
+fn spawn_cell(t: &Terrain, seed: u64, tick: u64, id: u64) -> Node {
+    let cells = t.cells() as u32;
+    for k in 0..32u64 {
+        let idx = det_rand(
+            seed,
+            tick,
+            id.wrapping_add(k.wrapping_mul(0x9E37_79B9_7F4A_7C15)),
+            cells,
+        ) as u16;
+        let (x, y) = nav::center(t, Node::ground(idx));
+        if t.class(idx) != BLOCK && !t.subtile_blocked(x, y) {
+            return Node::ground(idx);
+        }
+    }
+    t.nearest_ground(t.idx(t.w as i32 / 2, t.h as i32 / 2))
+}
+
+fn read_u64_exact(at: usize, len: usize) -> Option<u64> {
+    if len != at + 8 {
         return None;
     }
     let buf = &io()[..len];
@@ -280,7 +529,7 @@ fn read_u64(at: usize, len: usize) -> Option<u64> {
     Some(u64::from_le_bytes(b))
 }
 
-fn read_u32(at: usize, len: usize) -> Option<u32> {
+fn read_u32_exact(at: usize, len: usize) -> Option<u32> {
     if len != at + 4 {
         return None;
     }
@@ -317,6 +566,8 @@ pub extern "C" fn sim_snapshot() -> u32 {
     buf[32..36].copy_from_slice(&p.day.to_le_bytes());
     buf[36..40].copy_from_slice(&(n as u32).to_le_bytes());
     buf[40..48].copy_from_slice(&p.energy.to_le_bytes());
+    buf[48..52].copy_from_slice(&p.terrain_schema.to_le_bytes());
+    buf[52..60].copy_from_slice(&p.terrain_id.to_le_bytes());
     let mut at = HEADER;
     for d in &p.dogs[..n] {
         buf[at..at + 8].copy_from_slice(&d.id.to_le_bytes());
@@ -324,6 +575,10 @@ pub extern "C" fn sim_snapshot() -> u32 {
         buf[at + 12..at + 16].copy_from_slice(&d.y.to_le_bytes());
         buf[at + 16..at + 20].copy_from_slice(&d.energy.to_le_bytes());
         buf[at + 20..at + 24].copy_from_slice(&d.checked_in_day.to_le_bytes());
+        buf[at + 24..at + 26].copy_from_slice(&d.target.to_le_bytes());
+        buf[at + 26..at + 28].copy_from_slice(&d.waypoint.to_le_bytes());
+        buf[at + 28] = d.flags;
+        buf[at + 29] = 0;
         at += DOG_REC;
     }
     total as u32
@@ -335,6 +590,9 @@ pub extern "C" fn sim_restore(len: u32) -> u32 {
     if len < HEADER || len > IO_CAP {
         return 1;
     }
+    let Some(t) = terrain() else {
+        return 4;
+    };
     let buf = io();
     if u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) != MAGIC {
         return 1;
@@ -342,6 +600,15 @@ pub extern "C" fn sim_restore(len: u32) -> u32 {
     let n = u32::from_le_bytes([buf[36], buf[37], buf[38], buf[39]]) as usize;
     if n > MAX_DOGS || len != HEADER + n * DOG_REC {
         return 2;
+    }
+    let schema = u32::from_le_bytes([buf[48], buf[49], buf[50], buf[51]]);
+    let mut b8 = [0u8; 8];
+    b8.copy_from_slice(&buf[52..60]);
+    let tid = u64::from_le_bytes(b8);
+    // Restoring against the wrong world would replay a different park;
+    // fail fast so the host's terrain-load contract cannot rot silently.
+    if t.schema != schema || t.id != tid {
+        return 4;
     }
     let mut dogs = [EMPTY_DOG; MAX_DOGS];
     let mut prev: Option<u64> = None;
@@ -361,16 +628,34 @@ pub extern "C" fn sim_restore(len: u32) -> u32 {
             b.copy_from_slice(&buf[at + o..at + o + 4]);
             b
         };
-        *slot = Dog {
+        let d = Dog {
             id,
             x: i32::from_le_bytes(rd(8)),
             y: i32::from_le_bytes(rd(12)),
             energy: u32::from_le_bytes(rd(16)),
             checked_in_day: u32::from_le_bytes(rd(20)),
+            target: u16::from_le_bytes([buf[at + 24], buf[at + 25]]),
+            waypoint: u16::from_le_bytes([buf[at + 26], buf[at + 27]]),
+            flags: buf[at + 28],
         };
+        let node = Node::at(
+            t.idx(
+                (d.x >> 16).clamp(0, t.w as i32 - 1),
+                (d.y >> 16).clamp(0, t.h as i32 - 1),
+            ),
+            d.flags & FLAG_DECK != 0,
+        );
+        if !t.in_bounds(d.x >> 16, d.y >> 16)
+            || d.flags & !FLAG_DECK != 0
+            || !t.exists(node)
+            || (d.target != NONE.0 && !t.exists(Node(d.target)))
+            || (d.waypoint != NONE.0 && !t.exists(Node(d.waypoint)))
+        {
+            return 5;
+        }
+        *slot = d;
         at += DOG_REC;
     }
-    let mut b8 = [0u8; 8];
     let p = park();
     p.epoch = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
     b8.copy_from_slice(&buf[8..16]);
@@ -382,6 +667,8 @@ pub extern "C" fn sim_restore(len: u32) -> u32 {
     p.day = u32::from_le_bytes([buf[32], buf[33], buf[34], buf[35]]);
     b8.copy_from_slice(&buf[40..48]);
     p.energy = u64::from_le_bytes(b8);
+    p.terrain_schema = schema;
+    p.terrain_id = tid;
     p.n = n;
     p.dogs = dogs;
     0
@@ -402,30 +689,92 @@ pub extern "C" fn sim_hash() -> u64 {
     h.u32(p.day);
     h.u32(p.n as u32);
     h.u64(p.energy);
+    h.u32(p.terrain_schema);
+    h.u64(p.terrain_id);
     for d in &p.dogs[..p.n] {
         h.u64(d.id);
         h.u32(d.x as u32);
         h.u32(d.y as u32);
         h.u32(d.energy);
         h.u32(d.checked_in_day);
+        h.u32(d.target as u32);
+        h.u32(d.waypoint as u32);
+        h.u32(d.flags as u32);
     }
-    mix64(h.0)
+    mythra_sim_core::mix64(h.0)
 }
 
+/// Presentation projection, never hashed: one 20-byte record per dog —
+/// id u64, x i32, y i32 (Q16.16 cells), flags u8 (bit0 deck, bit1
+/// swimming, bit2 moving), facing u8 (octant, 0=E clockwise), anim u8,
+/// pad u8. Facing and animation are derived here so every renderer shows
+/// the same dog doing the same thing.
 #[unsafe(no_mangle)]
 pub extern "C" fn sim_view() -> u32 {
     let p = park();
+    let t = terrain();
     let n = p.n;
     let buf = io();
     buf[0..4].copy_from_slice(&(n as u32).to_le_bytes());
     let mut at = 4;
     for d in &p.dogs[..n] {
+        let moving = d.target != NONE.0;
+        let on_deck = d.flags & FLAG_DECK != 0;
+        let mut flags = 0u8;
+        let mut facing = 2u8; // idle default: south
+        if on_deck {
+            flags |= 1;
+        }
+        if let Some(t) = &t {
+            if !on_deck
+                && t.in_bounds(d.x >> 16, d.y >> 16)
+                && t.class(t.idx(d.x >> 16, d.y >> 16)) == SWIM
+            {
+                flags |= 2;
+            }
+            if moving && d.waypoint != NONE.0 {
+                let (wx, wy) = nav::center(t, Node(d.waypoint));
+                facing = octant(wx - d.x, wy - d.y);
+            }
+        }
+        if moving {
+            flags |= 4;
+        }
+        let anim = if moving { ((p.tick >> 2) & 3) as u8 } else { 0 };
         buf[at..at + 8].copy_from_slice(&d.id.to_le_bytes());
         buf[at + 8..at + 12].copy_from_slice(&d.x.to_le_bytes());
         buf[at + 12..at + 16].copy_from_slice(&d.y.to_le_bytes());
-        at += 16;
+        buf[at + 16] = flags;
+        buf[at + 17] = facing;
+        buf[at + 18] = anim;
+        buf[at + 19] = 0;
+        at += 20;
     }
     at as u32
+}
+
+/// Octant of a direction vector: 0=E, 1=SE, 2=S, ... counterclockwise in
+/// screen coordinates (y grows south). Dominant-axis with a 2:1 threshold.
+fn octant(dx: i32, dy: i32) -> u8 {
+    let (ax, ay) = (dx.unsigned_abs() as i64, dy.unsigned_abs() as i64);
+    let (ex, ey) = if ax > 2 * ay {
+        (dx.signum(), 0)
+    } else if ay > 2 * ax {
+        (0, dy.signum())
+    } else {
+        (dx.signum(), dy.signum())
+    };
+    match (ex, ey) {
+        (1, 0) => 0,
+        (1, 1) => 1,
+        (0, 1) => 2,
+        (-1, 1) => 3,
+        (-1, 0) => 4,
+        (-1, -1) => 5,
+        (0, -1) => 6,
+        (1, -1) => 7,
+        _ => 2,
+    }
 }
 
 struct Fnv(u64);
@@ -448,24 +797,48 @@ impl Fnv {
     }
 }
 
-fn mix64(mut z: u64) -> u64 {
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mythra_sim_terrain::{BYTES_PER_CELL, Builder, HEADER as T_HEADER, STAIRS, WALK, blob_id};
     use std::sync::{Mutex, MutexGuard};
 
     // The module state is a single static (as it is in wasm); tests
     // serialize on this lock and re-init in every case.
     static LOCK: Mutex<()> = Mutex::new(());
 
+    // A 12x12 test park: open grass, a river column with a bridge (deck at
+    // elev 1 with stairs+platform approaches), and a walled corner.
+    fn park_blob() -> Vec<u8> {
+        let mut buf = vec![0u8; T_HEADER + 144 * BYTES_PER_CELL];
+        let mut b = Builder::new(&mut buf, 12, 12);
+        for y in 0..12 {
+            b.set_ground(6, y, SWIM, 0);
+        }
+        for x in [4, 5, 7, 8] {
+            b.set_ground(x, 5, WALK, 1);
+        }
+        b.set_ground(3, 5, STAIRS, 0);
+        b.set_ground(9, 5, STAIRS, 0);
+        for x in 5..=7 {
+            b.set_deck(x, 5, 1);
+        }
+        b.set_ground(0, 11, BLOCK, 0);
+        b.set_ground(1, 11, BLOCK, 0);
+        b.set_obstacle(2, 2, 0b0000_0110_0110_0000);
+        b.finish().to_vec()
+    }
+
+    fn load_terrain(blob: &[u8]) {
+        let buf = unsafe { &mut *(&raw mut TERRAIN_BLOB) };
+        buf[..blob.len()].copy_from_slice(blob);
+        assert_eq!(sim_set_terrain(blob.len() as u32), OK);
+    }
+
     fn setup(seed: u64) -> MutexGuard<'static, ()> {
         let g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        sim_init(seed, 42, 1);
+        load_terrain(&park_blob());
+        assert_eq!(sim_init(seed, 42, 1), OK);
         g
     }
 
@@ -480,6 +853,12 @@ mod tests {
         ev(kind, &id.to_le_bytes())
     }
 
+    fn ev_move(id: u64, node: u16) -> u32 {
+        let mut p = id.to_le_bytes().to_vec();
+        p.extend_from_slice(&node.to_le_bytes());
+        ev(EV_MOVE_TO, &p)
+    }
+
     fn snapshot_vec() -> Vec<u8> {
         let len = sim_snapshot() as usize;
         io()[..len].to_vec()
@@ -490,21 +869,27 @@ mod tests {
         assert_eq!(sim_restore(s.len() as u32), 0);
     }
 
-    // A scripted journal: (tick, kind, id-or-value). Applies each event at
-    // its tick per the replication contract, stepping between.
-    fn run_journal(journal: &[(u64, u16, u64)], until_tick: u64) {
-        for &(tick, kind, val) in journal {
+    fn dog(id: u64) -> Dog {
+        let p = park();
+        p.dogs[find(p, id).expect("dog present")]
+    }
+
+    // A scripted journal: (tick, kind, a, b). Applies each event at its
+    // tick per the replication contract, stepping between.
+    fn run_journal(journal: &[(u64, u16, u64, u16)], until_tick: u64) {
+        for &(tick, kind, a, b) in journal {
             while sim_tick() < tick {
                 sim_step();
             }
             let code = match kind {
-                EV_DAY_RESET => ev(EV_DAY_RESET, &(val as u32).to_le_bytes()),
+                EV_DAY_RESET => ev(EV_DAY_RESET, &(a as u32).to_le_bytes()),
                 EV_EPOCH_ADVANCE => {
-                    let mut p = (val as u32).to_le_bytes().to_vec();
+                    let mut p = (a as u32).to_le_bytes().to_vec();
                     p.extend_from_slice(&0u64.to_le_bytes());
                     ev(EV_EPOCH_ADVANCE, &p)
                 }
-                _ => ev_id(kind, val),
+                EV_MOVE_TO => ev_move(a, b),
+                _ => ev_id(kind, a),
             };
             assert_eq!(code, OK, "event {kind} at tick {tick}");
         }
@@ -513,46 +898,131 @@ mod tests {
         }
     }
 
-    const JOURNAL: &[(u64, u16, u64)] = &[
-        (0, EV_JOIN, 7),
-        (0, EV_JOIN, 3),
-        (5, EV_JOIN, 11),
-        (5, EV_CHECK_IN, 7),
-        (30, EV_CHECK_IN, 3),
-        (100, EV_LEAVE, 7),
-        (240, EV_DAY_RESET, 1),
-        (241, EV_CHECK_IN, 3),
-        (300, EV_EPOCH_ADVANCE, 2),
-    ];
+    fn journal() -> Vec<(u64, u16, u64, u16)> {
+        let blob = park_blob();
+        let t = Terrain::parse(&blob).unwrap();
+        let far = Node::ground(t.idx(10, 2)).0; // east side: crosses the river
+        let deck = Node::deck(t.idx(6, 5)).0; // mid-bridge
+        vec![
+            (0, EV_JOIN, 7, 0),
+            (0, EV_JOIN, 3, 0),
+            (5, EV_JOIN, 11, 0),
+            (5, EV_CHECK_IN, 7, 0),
+            (8, EV_MOVE_TO, 7, far),
+            (30, EV_CHECK_IN, 3, 0),
+            (40, EV_MOVE_TO, 3, deck),
+            (100, EV_LEAVE, 7, 0),
+            (240, EV_DAY_RESET, 1, 0),
+            (241, EV_CHECK_IN, 3, 0),
+            (300, EV_EPOCH_ADVANCE, 2, 0),
+        ]
+    }
 
     #[test]
     fn replay_is_deterministic() {
         let _g = setup(99);
-        run_journal(JOURNAL, 500);
+        let j = journal();
+        run_journal(&j, 900);
         let h1 = sim_hash();
         let s1 = snapshot_vec();
-        sim_init(99, 42, 1);
-        run_journal(JOURNAL, 500);
+        assert_eq!(sim_init(99, 42, 1), OK);
+        run_journal(&j, 900);
         assert_eq!(sim_hash(), h1);
         assert_eq!(snapshot_vec(), s1);
     }
 
     #[test]
-    fn snapshot_round_trip_resumes_identically() {
+    fn snapshot_round_trip_resumes_identically_mid_journey() {
         let _g = setup(7);
-        run_journal(JOURNAL, 350);
+        let j = journal();
+        // tick 60 is mid-movement for dog 3 (and likely dog 7): the
+        // snapshot must capture (pos, waypoint, target) well enough that
+        // the continuation is bit-identical
+        run_journal(&j[..7], 60);
         let s = snapshot_vec();
         let h_mid = sim_hash();
-        for _ in 0..150 {
+        for _ in 0..300 {
             sim_step();
         }
         let h_end = sim_hash();
         restore_vec(&s);
         assert_eq!(sim_hash(), h_mid);
-        for _ in 0..150 {
+        for _ in 0..300 {
             sim_step();
         }
         assert_eq!(sim_hash(), h_end);
+    }
+
+    #[test]
+    fn move_to_walks_the_dog_there_and_then_it_rests() {
+        let _g = setup(3);
+        assert_eq!(ev_id(EV_JOIN, 8), OK);
+        let blob = park_blob();
+        let t = Terrain::parse(&blob).unwrap();
+        let goal = t.idx(10, 2);
+        assert_eq!(ev_move(8, Node::ground(goal).0), OK);
+        for _ in 0..2000 {
+            sim_step();
+            let d = dog(8);
+            if d.target == NONE.0 && (d.x >> 16, d.y >> 16) == (10, 2) {
+                return;
+            }
+        }
+        let d = dog(8);
+        panic!("dog never arrived: at ({}, {})", d.x >> 16, d.y >> 16);
+    }
+
+    #[test]
+    fn crossing_the_river_uses_the_bridge_surface() {
+        let _g = setup(3);
+        assert_eq!(ev_id(EV_JOIN, 8), OK);
+        // pin the start deterministically: move it to the west side first
+        let blob = park_blob();
+        let t = Terrain::parse(&blob).unwrap();
+        {
+            let p = park();
+            let i = find(p, 8).unwrap();
+            let (x, y) = nav::center(&t, Node::ground(t.idx(1, 5)));
+            p.dogs[i].x = x;
+            p.dogs[i].y = y;
+        }
+        assert_eq!(ev_move(8, Node::ground(t.idx(11, 5)).0), OK);
+        let mut was_on_deck = false;
+        for _ in 0..2000 {
+            sim_step();
+            let d = dog(8);
+            was_on_deck |= d.flags & FLAG_DECK != 0;
+            if d.target == NONE.0 && (d.x >> 16) == 11 {
+                assert!(
+                    was_on_deck,
+                    "east crossing at the bridge row should board the deck"
+                );
+                assert_eq!(d.flags & FLAG_DECK, 0, "arrived back on ground");
+                return;
+            }
+        }
+        panic!("dog never crossed");
+    }
+
+    #[test]
+    fn wander_moves_idle_dogs_deterministically() {
+        let _g = setup(1234);
+        assert_eq!(ev_id(EV_JOIN, 5), OK);
+        assert_eq!(ev_id(EV_JOIN, 9), OK);
+        let before: Vec<(i32, i32)> = park().dogs[..2].iter().map(|d| (d.x, d.y)).collect();
+        for _ in 0..1200 {
+            sim_step();
+        }
+        let after: Vec<(i32, i32)> = park().dogs[..2].iter().map(|d| (d.x, d.y)).collect();
+        assert_ne!(before, after, "idle dogs should wander within a minute");
+        let h = sim_hash();
+        assert_eq!(sim_init(1234, 42, 1), OK);
+        assert_eq!(ev_id(EV_JOIN, 5), OK);
+        assert_eq!(ev_id(EV_JOIN, 9), OK);
+        for _ in 0..1200 {
+            sim_step();
+        }
+        assert_eq!(sim_hash(), h);
     }
 
     #[test]
@@ -568,29 +1038,21 @@ mod tests {
         assert_eq!(ev_id(EV_CHECK_IN, 9), ERR_ABSENT);
         assert_eq!(ev(99, &5u64.to_le_bytes()), ERR_KIND);
         assert_eq!(ev(EV_JOIN, &[1, 2]), ERR_ENCODING);
+        assert_eq!(ev_move(5, 0xFFFE), ERR_TARGET); // out-of-range node
+        // aliased encoding (bit 15) of a perfectly standable cell: must be
+        // rejected, or first_waypoint would chase stale scratch state
+        assert_eq!(ev_move(5, 0x8000), ERR_TARGET);
+        assert_eq!(ev_move(6, 0), ERR_ABSENT);
         {
             let mut p = 1u32.to_le_bytes().to_vec(); // not > current epoch
             p.extend_from_slice(&0u64.to_le_bytes());
             assert_eq!(ev(EV_EPOCH_ADVANCE, &p), ERR_EPOCH);
         }
-        assert_eq!(sim_hash(), h);
-        assert_eq!(snapshot_vec(), s);
-    }
-
-    #[test]
-    fn reserved_kind_4_replays_as_accepted_no_op() {
-        let _g = setup(2);
-        assert_eq!(ev_id(EV_JOIN, 5), OK);
-        let h = sim_hash();
-        let s = snapshot_vec();
-        // Journaled instances carry { id u64, len u16, utf8 }, but any
-        // payload must stay accepted and state-free: replay refuses to
-        // serve a park on the first rejected event.
-        let mut p = 5u64.to_le_bytes().to_vec();
-        p.extend_from_slice(&4u16.to_le_bytes());
-        p.extend_from_slice(b"woof");
-        assert_eq!(ev(EV_RESERVED_4, &p), OK);
-        assert_eq!(ev(EV_RESERVED_4, &[]), OK);
+        {
+            let mut p = mythra_sim_terrain::SCHEMA.to_le_bytes().to_vec();
+            p.extend_from_slice(&0xDEAD_BEEFu64.to_le_bytes()); // unknown id
+            assert_eq!(ev(EV_TERRAIN_SET, &p), ERR_TERRAIN);
+        }
         assert_eq!(sim_hash(), h);
         assert_eq!(snapshot_vec(), s);
     }
@@ -604,21 +1066,27 @@ mod tests {
         assert_eq!(ev(EV_DAY_RESET, &1u32.to_le_bytes()), OK);
         assert_eq!(ev_id(EV_CHECK_IN, 8), OK);
         let s = snapshot_vec();
-        // header energy is derivable from dog records on restore
         restore_vec(&s);
         assert_eq!(snapshot_vec(), s);
         assert_eq!(park().energy, 2 * CHECK_IN_ENERGY as u64);
     }
 
     #[test]
-    fn roster_stays_sorted_and_bounded() {
+    fn roster_stays_sorted_and_spawns_are_standable() {
         let _g = setup(5);
+        let blob = park_blob();
+        let t = Terrain::parse(&blob).unwrap();
         for id in [900u64, 3, 77, 500, 12] {
             assert_eq!(ev_id(EV_JOIN, id), OK);
         }
         let p = park();
         for i in 1..p.n {
             assert!(p.dogs[i - 1].id < p.dogs[i].id);
+        }
+        for d in &p.dogs[..p.n] {
+            let idx = t.idx(d.x >> 16, d.y >> 16);
+            assert_ne!(t.class(idx), BLOCK, "dog {} spawned in a wall", d.id);
+            assert_eq!(d.flags & FLAG_DECK, 0);
         }
         assert_eq!(ev_id(EV_LEAVE, 77), OK);
         let p = park();
@@ -629,7 +1097,22 @@ mod tests {
     }
 
     #[test]
-    fn restore_rejects_malformed_snapshots() {
+    fn full_park_snapshot_fits_the_io_buffer() {
+        let _g = setup(6);
+        for id in 0..MAX_DOGS as u64 {
+            assert_eq!(ev_id(EV_JOIN, id + 1), OK);
+        }
+        assert_eq!(ev_id(EV_JOIN, 5000), ERR_FULL);
+        let len = sim_snapshot() as usize;
+        assert_eq!(len, HEADER + MAX_DOGS * DOG_REC);
+        assert!(len <= IO_CAP);
+        let view_len = sim_view() as usize;
+        assert_eq!(view_len, 4 + MAX_DOGS * 20);
+        assert!(view_len <= IO_CAP);
+    }
+
+    #[test]
+    fn restore_rejects_malformed_and_mismatched_snapshots() {
         let _g = setup(2);
         assert_eq!(ev_id(EV_JOIN, 1), OK);
         assert_eq!(ev_id(EV_JOIN, 2), OK);
@@ -649,28 +1132,67 @@ mod tests {
         // truncated record area
         io()[..s.len() - 1].copy_from_slice(&s[..s.len() - 1]);
         assert_eq!(sim_restore((s.len() - 1) as u32), 2);
+        // a snapshot taken on different terrain is refused
+        let mut other = s.clone();
+        other[52] ^= 0xFF; // terrain_id
+        io()[..other.len()].copy_from_slice(&other);
+        assert_eq!(sim_restore(other.len() as u32), 4);
+        // a dog standing outside the world is refused
+        let mut oob = s.clone();
+        oob[HEADER + 8..HEADER + 12].copy_from_slice(&(200i32 << 16).to_le_bytes());
+        io()[..oob.len()].copy_from_slice(&oob);
+        assert_eq!(sim_restore(oob.len() as u32), 5);
+        restore_vec(&s);
+        assert_eq!(snapshot_vec(), s);
     }
 
     #[test]
-    fn join_spawn_is_deterministic_and_in_bounds() {
-        let _g = setup(1234);
-        for _ in 0..10 {
-            sim_step();
-        }
-        assert_eq!(ev_id(EV_JOIN, 55), OK);
-        let (x1, y1) = {
+    fn terrain_set_relocates_stranded_dogs_and_clears_intent() {
+        let _g = setup(11);
+        assert_eq!(ev_id(EV_JOIN, 4), OK);
+        let blob = park_blob();
+        let t = Terrain::parse(&blob).unwrap();
+        // park the dog mid-river heading somewhere, then shrink the world
+        {
             let p = park();
-            let i = find(p, 55).unwrap();
-            (p.dogs[i].x, p.dogs[i].y)
-        };
-        assert!((0..GRID_W).contains(&x1) && (0..GRID_H).contains(&y1));
-        sim_init(1234, 42, 1);
-        for _ in 0..10 {
-            sim_step();
+            let i = find(p, 4).unwrap();
+            let (x, y) = nav::center(&t, Node::ground(t.idx(6, 3)));
+            p.dogs[i].x = x;
+            p.dogs[i].y = y;
+            p.dogs[i].target = Node::ground(t.idx(10, 10)).0;
         }
-        assert_eq!(ev_id(EV_JOIN, 55), OK);
-        let p = park();
-        let i = find(p, 55).unwrap();
-        assert_eq!((p.dogs[i].x, p.dogs[i].y), (x1, y1));
+        // new terrain: 8x8, and the old river column (x=6) is now a wall
+        let mut buf = vec![0u8; T_HEADER + 64 * BYTES_PER_CELL];
+        let mut b = Builder::new(&mut buf, 8, 8);
+        for y in 0..8 {
+            b.set_ground(6, y, BLOCK, 0);
+        }
+        let blob2 = b.finish().to_vec();
+        load_terrain(&blob2);
+        let mut p = mythra_sim_terrain::SCHEMA.to_le_bytes().to_vec();
+        p.extend_from_slice(&blob_id(&blob2).to_le_bytes());
+        assert_eq!(ev(EV_TERRAIN_SET, &p), OK);
+        let d = dog(4);
+        let t2 = Terrain::parse(&blob2).unwrap();
+        assert_ne!(t2.class(t2.idx(d.x >> 16, d.y >> 16)), BLOCK);
+        assert!(t2.in_bounds(d.x >> 16, d.y >> 16));
+        assert_eq!(d.target, NONE.0);
+        assert_eq!(sim_terrain_id(), blob_id(&blob2));
+        // hash reflects the new world identity
+        let h = sim_hash();
+        assert_ne!(h, 0);
+        // and the whole dance replays identically
+        let s = snapshot_vec();
+        restore_vec(&s);
+        assert_eq!(sim_hash(), h);
+    }
+
+    #[test]
+    fn init_and_apply_require_terrain() {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe { *(&raw mut TERRAIN) = None };
+        assert_eq!(sim_init(1, 1, 1), ERR_TERRAIN);
+        load_terrain(&park_blob());
+        assert_eq!(sim_init(1, 1, 1), OK);
     }
 }

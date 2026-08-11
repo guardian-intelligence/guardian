@@ -12,6 +12,11 @@
 //     so connected pages fetch updates mid-session. Authorities instantiate
 //     the park module at open; an epoch_advance journal event is how a swap
 //     becomes effective for a running park.
+//   - tier 3 (terrain): each park's world is a content-addressed terrain
+//     artifact served at /terrain/<16-hex>. The welcome and snapshot lines
+//     carry the active identity; clients fetch the blob and load it into
+//     their replica before restoring — the same choreography the authority
+//     itself follows on boot and replay.
 //
 // Wire protocol (JSON lines on one bidi stream + JSON datagrams):
 //
@@ -19,10 +24,10 @@
 //	client -> server stream:   {"type":"hello","proto":3,"ticket","since_seq","since_tick"}
 //	                           {"type":"intent","id","kind","p":base64}
 //	                           {"type":"resync","have"}
-//	server -> client stream:   {"type":"welcome","park","role","epoch","seq","tick","grid"}
+//	server -> client stream:   {"type":"welcome","park","role","epoch","seq","tick","terrain","terrain_schema","w","h"}
 //	                           {"type":"event","seq","tick","kind","actor","intent","p"}
 //	                           {"type":"reject","intent","reason"}
-//	                           {"type":"snapshot","seq","tick","epoch","wh","z":deflate}
+//	                           {"type":"snapshot","seq","tick","epoch","wh","terrain","z":deflate}
 //	client -> server datagram: {"type":"check","tick","wh","ct"}
 //	server -> client datagram: {"type":"verdict","tick","now","ok?","ct","cw","pw"}
 package main
@@ -77,6 +82,13 @@ var defaultClientModule []byte
 
 //go:embed behaviors/park.wasm
 var defaultParkModule []byte
+
+// The fixture terrain: the world every brand-new park is born with until
+// procedural generation exists. Committed bytes (diff-tested against the
+// generator) so park identity can only change through an explicit refresh.
+//
+//go:embed terrain/fixture_park.bin
+var fixtureTerrain []byte
 
 var (
 	mTickDur = promauto.NewHistogram(prometheus.HistogramOpts{
@@ -536,7 +548,7 @@ func main() {
 	defer traceShutdown(context.Background())
 
 	mods := &modules{client: client, park: parkMod}
-	registry := newParks(func() []byte { b, _ := parkMod.get(); return b }, j, mods)
+	registry := newParks(func() []byte { b, _ := parkMod.get(); return b }, fixtureTerrain, j, mods)
 	handlers := &gameHandlers{
 		parks: registry, tickets: newTicketMint(), maxSessions: maxSessions,
 		allowedParks: allowedParks, anonMints: newAnonLimiter(),
@@ -643,6 +655,40 @@ func main() {
 	}
 	pageMux.HandleFunc("/behavior/client.wasm", serveModule(client))
 	pageMux.HandleFunc("/behavior/park.wasm", serveModule(parkMod))
+	// Terrain artifacts are immutable per URL: the embedded fixture serves
+	// from memory, everything else from the journal's content store.
+	fixtureID := terrainID(fixtureTerrain)
+	pageMux.HandleFunc("/terrain/", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseUint(strings.TrimPrefix(r.URL.Path, "/terrain/"), 16, 64)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		blob := fixtureTerrain
+		if id != fixtureID {
+			if !journalReady.Load() {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			var found bool
+			blob, found, err = j.TerrainBlob(ctx, id)
+			if err != nil {
+				// transient store trouble is not "this terrain does not
+				// exist" — a 404 would poison immutable caches
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			if !found {
+				http.NotFound(w, r)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		w.Write(blob)
+	})
 	pageMux.HandleFunc("/assets/", func(w http.ResponseWriter, r *http.Request) {
 		ref := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/assets/"), ".svg")
 		body, ok := assets.get(ref)

@@ -3,7 +3,8 @@
 # hostNetwork with a node pin: WebTransport needs public UDP 4433 and the
 # edge (Cloudflare) cannot proxy it, so the pod binds the node's public IP
 # directly (TigerBeetle precedent). The game-service HTTP paths (/wt-info,
-# /behavior, /assets) are served through the normal proxied ingress; only
+# /behavior, /assets, /terrain) are served through the normal proxied
+# ingress; only
 # the QUIC dial goes direct, authenticated by the certificate hash the page
 # fetches from /wt-info.
 #
@@ -282,6 +283,13 @@ spec:
                 port:
                   number: 80
           - path: /assets
+            pathType: Prefix
+            backend:
+              service:
+                name: mythrad
+                port:
+                  number: 80
+          - path: /terrain
             pathType: Prefix
             backend:
               service:

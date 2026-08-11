@@ -28,10 +28,11 @@ const TARGET_LAG_TICKS = 6; // replica trails server-now by 250ms
 const RING_DEPTH = 10; // one snapshot per second of rollback depth
 const EV_JOIN = 1;
 const EV_CHECK_IN = 3;
+const EV_MOVE_TO = 4;
 const REJECT_PRESENT = 2; // sim ERR_PRESENT
 const REJECT_ABSENT = 3; // sim ERR_ABSENT
 
-// Sim reject codes 1-7 and doorman codes 100-101 (rejectReasonName in
+// Sim reject codes 1-9 and doorman codes 100-101 (rejectReasonName in
 // mythrad session.go is the server-side mirror).
 const REJECT_TEXT = {
   1: "the park couldn't read that intent",
@@ -41,10 +42,20 @@ const REJECT_TEXT = {
   5: "already checked in today",
   6: "the park doesn't know that action",
   7: "the park moved on to a new epoch",
+  8: "your dog can't stand there",
+  9: "the park's terrain is still loading",
   100: "spectators can't act — sign in to play",
   101: "that dog isn't yours",
 } as const;
-const RejectCode = v.picklist([1, 2, 3, 4, 5, 6, 7, 100, 101]);
+const RejectCode = v.picklist([1, 2, 3, 4, 5, 6, 7, 8, 9, 100, 101]);
+
+// Snapshot layout mirrors the park module ("MYP2"): 60-byte header (day
+// u32 @32, n u32 @36, energy u64 @40), then 30-byte dog records with
+// checked_in_day u32 at offset +20. The sim_view stride is 20 bytes:
+// id u64, x i32, y i32 (Q16.16 cells), flags u8, facing u8, anim u8, pad.
+const SNAP_HEADER = 60;
+const DOG_REC = 30;
+const VIEW_STRIDE = 20;
 
 const FNV_OFFSET = 0xcbf29ce484222325n;
 const FNV_PRIME = 0x100000001b3n;
@@ -101,6 +112,18 @@ export function startGame(): void {
   let smoother: Wasm = null; // the presentation module
   let sub = "";
   let myDog = 0n;
+  // The active terrain artifact: raw planes for the renderer, loaded into
+  // the sim before any restore. Content-addressed, so one fetch per hex.
+  let terrainHex = "";
+  let terrain: {
+    w: number;
+    h: number;
+    ground: Uint8Array;
+    elev: Uint8Array;
+    deck: Uint8Array;
+    obstacle: Uint8Array;
+    variant: Uint8Array;
+  } | null = null;
   let seq = 0; // last applied journal seq
   let connected = false;
   let anon = true; // anonymous spectator until a token proves otherwise
@@ -162,6 +185,48 @@ export function startGame(): void {
     buf[1] = kind >> 8;
     buf.set(payload, 2);
     return sim.sim_apply(ioWrite(buf));
+  }
+
+  // ensureTerrain fetches the named artifact, loads it into the sim's
+  // terrain buffer, and decodes the planes for the renderer. Ordered
+  // before any snapshot restore by onLine's sequential await. Never
+  // throws: a failure would otherwise kill the stream reader while the
+  // transport stays up, wedging the session with no visible symptom.
+  async function ensureTerrain(hex: string | undefined): Promise<boolean> {
+    if (!hex || hex === terrainHex || !sim) return true;
+    try {
+      const resp = await fetch(`/terrain/${hex}`);
+      if (!resp.ok) throw new Error(`/terrain/${hex} ${resp.status}`);
+      const blob = new Uint8Array(await resp.arrayBuffer());
+      if (blob.length > sim.terrain_cap()) {
+        throw new Error(`terrain ${hex} is ${blob.length}B, over module cap`);
+      }
+      const mem = new Uint8Array(sim.memory.buffer);
+      mem.set(blob, sim.terrain_buf());
+      const code = sim.sim_set_terrain(blob.length);
+      if (code !== 0) throw new Error(`terrain ${hex} rejected (code ${code})`);
+      const dv = new DataView(blob.buffer);
+      const w = dv.getUint16(8, true);
+      const h = dv.getUint16(10, true);
+      const cells = w * h;
+      terrain = {
+        w,
+        h,
+        ground: blob.subarray(16, 16 + cells),
+        elev: blob.subarray(16 + cells, 16 + 2 * cells),
+        deck: blob.subarray(16 + 2 * cells, 16 + 3 * cells),
+        obstacle: blob.subarray(16 + 3 * cells, 16 + 5 * cells),
+        variant: blob.subarray(16 + 5 * cells, 16 + 6 * cells),
+      };
+      terrainHex = hex;
+      prerenderTerrain();
+      logLine(`terrain ${hex.slice(0, 8)}: ${w}x${h}`);
+      return true;
+    } catch (e: any) {
+      const id = reportError(e, { "error.op": "wum.terrain_load" });
+      logLine(`terrain load failed: ${e?.message ?? e} [err ${id}]`);
+      return false;
+    }
   }
 
   function stepOnce() {
@@ -328,7 +393,16 @@ export function startGame(): void {
       );
       serverTick = m.tick;
       serverTickAt = performance.now();
+      await ensureTerrain(m.terrain);
     } else if (m.type === "snapshot") {
+      if (!(await ensureTerrain(m.terrain))) {
+        // Without the terrain this snapshot cannot restore; unlatch and
+        // ask again shortly — the retry loop is resync -> snapshot ->
+        // ensureTerrain until the fetch heals.
+        resyncing = false;
+        setTimeout(() => requestResync("terrain fetch failed"), 3000);
+        return;
+      }
       const state = await inflate(m.z);
       ioWrite(state);
       const code = sim.sim_restore(state.length);
@@ -589,29 +663,224 @@ export function startGame(): void {
     applyReady();
   }
 
-  // ---- render ----
+  // ---- render: placeholder isometric view ----
+  // 2:1 diamonds, 16x8 px tiles, 5 px per elevation level. The renderer is
+  // a pure consumer of (terrain planes, sim_view buffer, camera) — the
+  // seam a future standalone renderer package takes over wholesale.
   const Q16 = 65536;
+  const TILE_W = 16;
+  const TILE_H = 8;
+  const ELEV_PX = 5;
+  const ISO_PAD = TILE_H * 4; // top margin so raised tiles stay in-layer
+  const canvas = $("grid") as HTMLCanvasElement;
+  let groundLayer: HTMLCanvasElement | null = null;
+  let deckLayer: HTMLCanvasElement | null = null;
+  let isoOriginX = 0; // world-pixel x of cell (0,0)'s diamond center
+  let lastCam: [number, number] = [0, 0];
+
+  function shade(hex: string, f: number): string {
+    const n = parseInt(hex.slice(1), 16);
+    const c = (v: number) => Math.max(0, Math.min(255, Math.round(v * f)));
+    return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`;
+  }
+
+  function diamond(g: CanvasRenderingContext2D, cx: number, cy: number, fill: string) {
+    g.fillStyle = fill;
+    g.beginPath();
+    g.moveTo(cx, cy - TILE_H / 2);
+    g.lineTo(cx + TILE_W / 2, cy);
+    g.lineTo(cx, cy + TILE_H / 2);
+    g.lineTo(cx - TILE_W / 2, cy);
+    g.closePath();
+    g.fill();
+  }
+
+  // A tile's two viewer-facing side faces, dropped `depth` px.
+  function skirt(g: CanvasRenderingContext2D, cx: number, cy: number, depth: number, fill: string) {
+    g.fillStyle = shade(fill, 0.62);
+    g.beginPath();
+    g.moveTo(cx - TILE_W / 2, cy);
+    g.lineTo(cx, cy + TILE_H / 2);
+    g.lineTo(cx, cy + TILE_H / 2 + depth);
+    g.lineTo(cx - TILE_W / 2, cy + depth);
+    g.closePath();
+    g.fill();
+    g.fillStyle = shade(fill, 0.5);
+    g.beginPath();
+    g.moveTo(cx + TILE_W / 2, cy);
+    g.lineTo(cx, cy + TILE_H / 2);
+    g.lineTo(cx, cy + TILE_H / 2 + depth);
+    g.lineTo(cx + TILE_W / 2, cy + depth);
+    g.closePath();
+    g.fill();
+  }
+
+  function prerenderTerrain() {
+    if (!terrain) return;
+    const { w, h } = terrain;
+    isoOriginX = (h * TILE_W) / 2;
+    const pw = ((w + h) * TILE_W) / 2 + TILE_W;
+    const ph = ((w + h) * TILE_H) / 2 + ISO_PAD + TILE_H * 2;
+    groundLayer = document.createElement("canvas");
+    groundLayer.width = pw;
+    groundLayer.height = ph;
+    deckLayer = document.createElement("canvas");
+    deckLayer.width = pw;
+    deckLayer.height = ph;
+    const g = groundLayer.getContext("2d")!;
+    const d = deckLayer.getContext("2d")!;
+    const GRASS = ["#79b356", "#7cb85c", "#76ad53", "#82bd63"];
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const cls = terrain.ground[i]!;
+        const el = terrain.elev[i]!;
+        // Diamond centers sit at CELL centers in worldToPx's frame — the
+        // +TILE_H/2 keeps tiles, dogs, and click targeting on one grid.
+        const cx = isoOriginX + ((x - y) * TILE_W) / 2;
+        const cy = ISO_PAD + ((x + y + 1) * TILE_H) / 2 - el * ELEV_PX;
+        let fill: string;
+        if (cls === 0) {
+          fill = "#2c2f38"; // block: dark wall cap
+        } else if (cls === 2) {
+          fill = el > 0 ? "#63b1ec" : "#4d9de0"; // water, brighter upstream
+        } else if (cls === 3) {
+          fill = "#a89a84"; // stairs
+        } else {
+          const v = terrain.variant[i]!;
+          fill = v === 8 ? "#c9ad7c" : GRASS[v % 4]!; // path vs grass tufts
+        }
+        if (el > 0 || cls === 0) {
+          const depth = (cls === 0 ? 1 : el) * ELEV_PX + (cls === 0 ? ELEV_PX : 0);
+          // a waterfall face is the river pouring over its own ledge
+          const southLower =
+            cls === 2 && y + 1 < h && terrain.ground[i + w] === 2 && terrain.elev[i + w]! < el;
+          skirt(g, cx, cy, depth, southLower ? "#d8ecf8" : fill);
+        }
+        diamond(g, cx, cy, fill);
+        if (cls === 3) {
+          // tread lines sell the stairs
+          g.strokeStyle = shade(fill, 0.75);
+          g.lineWidth = 1;
+          for (const t of [-2, 0, 2]) {
+            g.beginPath();
+            g.moveTo(cx - TILE_W / 4, cy + t);
+            g.lineTo(cx + TILE_W / 4, cy + t);
+            g.stroke();
+          }
+        }
+        const mask = terrain.obstacle[2 * i]! | (terrain.obstacle[2 * i + 1]! << 8);
+        if (mask) {
+          for (let s = 0; s < 16; s++) {
+            if (!(mask & (1 << s))) continue;
+            const sx = ((s & 3) + 0.5) / 4;
+            const sy = ((s >> 2) + 0.5) / 4;
+            const ox = cx + ((sx - sy) * TILE_W) / 2;
+            const oy = cy - TILE_H / 2 + ((sx + sy) * TILE_H) / 2;
+            g.fillStyle = "#6b4f35";
+            g.fillRect(ox - 2, oy - 3, 4, 4);
+          }
+        }
+        const dk = terrain.deck[i]!;
+        if (dk) {
+          const dy = ISO_PAD + ((x + y + 1) * TILE_H) / 2 - (dk - 1) * ELEV_PX;
+          skirt(d, cx, dy, 2, "#a9743f");
+          diamond(d, cx, dy, "#b98a52");
+          d.strokeStyle = "#8a6238";
+          d.lineWidth = 1;
+          d.beginPath();
+          d.moveTo(cx - TILE_W / 4, dy);
+          d.lineTo(cx + TILE_W / 4, dy);
+          d.stroke();
+        }
+      }
+    }
+  }
+
+  // World Q16.16 cell coords -> layer pixel coords at a given standing
+  // elevation (in levels).
+  function worldToPx(xq: number, yq: number, elevLevels: number): [number, number] {
+    const fx = xq / Q16;
+    const fy = yq / Q16;
+    return [
+      isoOriginX + ((fx - fy) * TILE_W) / 2,
+      ISO_PAD + ((fx + fy) * TILE_H) / 2 - elevLevels * ELEV_PX,
+    ];
+  }
+
+  type DogView = {
+    id: bigint;
+    xq: number;
+    yq: number;
+    flags: number;
+    anim: number;
+  };
+
+  function drawDog(ctx: CanvasRenderingContext2D, dg: DogView, camX: number, camY: number) {
+    if (!terrain) return;
+    const cellX = Math.min(terrain.w - 1, Math.max(0, dg.xq >> 16));
+    const cellY = Math.min(terrain.h - 1, Math.max(0, dg.yq >> 16));
+    const i = cellY * terrain.w + cellX;
+    const onDeck = (dg.flags & 1) !== 0;
+    const swimming = (dg.flags & 2) !== 0;
+    const moving = (dg.flags & 4) !== 0;
+    const el = onDeck ? terrain.deck[i]! - 1 : terrain.elev[i]!;
+    const [px, py] = worldToPx(dg.xq, dg.yq, el);
+    const sx = px - camX;
+    const sy = py - camY;
+    const bob = moving && !swimming ? (dg.anim % 2) - 0.5 : 0;
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.beginPath();
+    ctx.ellipse(sx, sy + 1, 4, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = dg.id === myDog ? "#ffd166" : "#f4f1ea";
+    ctx.beginPath();
+    if (swimming) {
+      ctx.ellipse(sx, sy - 1, 4, 2.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.5)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, 6, 3, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.ellipse(sx, sy - 3 + bob, 3.4, 3.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (dg.id === myDog) {
+      ctx.strokeStyle = "#ffd166";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, 7, 3.5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
   const prevPos = new Map<string, [number, number]>();
   function frame(now: number) {
     requestAnimationFrame(frame);
     pump(now);
     if (!sim) return;
-    const ctx = ($("grid") as HTMLCanvasElement).getContext("2d")!;
-    ctx.fillStyle = "#FFFFFF";
-    ctx.fillRect(0, 0, 100, 100);
-    const len = sim.sim_view();
-    const view = new DataView(sim.memory.buffer, sim.io_buf(), len);
-    const n = view.getUint32(0, true);
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = "#161a21";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     $("tick").textContent = String(simTick());
     const hours = (Date.now() - (diag.startedAt || Date.now())) / 3600000;
     $("bytes").textContent =
       hours > 0.001 ? `${(diag.bytesDown / 1024 / hours).toFixed(1)}KB/h` : `${diag.bytesDown}B`;
+    if (!terrain || !groundLayer || !deckLayer) return;
+    const len = sim.sim_view();
+    const view = new DataView(sim.memory.buffer, sim.io_buf(), len);
+    const n = view.getUint32(0, true);
     const alpha = Math.min(1.25, Math.max(0, acc / tickMs));
     const names: string[] = [];
+    const dogs: DogView[] = [];
+    let mine: DogView | null = null;
     for (let i = 0; i < n; i++) {
-      const at = 4 + i * 16;
+      const at = 4 + i * VIEW_STRIDE;
       const id = view.getBigUint64(at, true);
-      const x = view.getInt32(at + 8, true);
+      const x = view.getInt32(at + 8, true); // Q16.16 cells
       const y = view.getInt32(at + 12, true);
       const key = id.toString(16);
       const [px, py] = prevPos.get(key) ?? [x, y];
@@ -619,24 +888,46 @@ export function startGame(): void {
       let sy = y;
       if (smoother) {
         const fbuf = new Int32Array(smoother.memory.buffer, smoother.frame_buf(), 4);
-        fbuf[0] = px * Q16;
-        fbuf[1] = py * Q16;
-        fbuf[2] = x * Q16;
-        fbuf[3] = y * Q16;
+        fbuf[0] = px;
+        fbuf[1] = py;
+        fbuf[2] = x;
+        fbuf[3] = y;
         smoother.smooth_frame(1, (alpha * Q16) | 0, 8 * Q16);
-        sx = fbuf[0]! / Q16;
-        sy = fbuf[1]! / Q16;
+        sx = fbuf[0]!;
+        sy = fbuf[1]!;
       }
       prevPos.set(key, [sx, sy]);
-      ctx.fillStyle = "#111111";
-      ctx.fillRect(sx, sy, 1.6, 1.6);
-      if (id === myDog) {
-        ctx.strokeStyle = "#111111";
-        ctx.lineWidth = 0.4;
-        ctx.strokeRect(sx - 1.6, sy - 1.6, 4.8, 4.8);
-      }
+      const dg: DogView = {
+        id,
+        xq: sx,
+        yq: sy,
+        flags: view.getUint8(at + 16),
+        anim: view.getUint8(at + 18),
+      };
+      dogs.push(dg);
+      if (id === myDog) mine = dg;
       if (names.length < 12) names.push(`walker-${key.slice(0, 4)}`);
     }
+    // drop smoothing state for dogs that left, so churn never accumulates
+    if (prevPos.size > n * 2 + 16) {
+      const seen = new Set(dogs.map((d) => d.id.toString(16)));
+      for (const k of prevPos.keys()) if (!seen.has(k)) prevPos.delete(k);
+    }
+    // painter's order down the iso diagonal; layers handle under/over deck
+    dogs.sort((a, b) => a.xq + a.yq - (b.xq + b.yq));
+    const focus = mine ?? {
+      xq: (terrain.w / 2) * Q16,
+      yq: (terrain.h / 2) * Q16,
+      flags: 0,
+    };
+    const [fx, fy] = worldToPx(focus.xq, focus.yq, 0);
+    const camX = Math.max(0, Math.min(groundLayer.width - canvas.width, fx - canvas.width / 2));
+    const camY = Math.max(0, Math.min(groundLayer.height - canvas.height, fy - canvas.height / 2));
+    lastCam = [camX, camY];
+    ctx.drawImage(groundLayer, -camX, -camY);
+    for (const dg of dogs) if (!(dg.flags & 1)) drawDog(ctx, dg, camX, camY);
+    ctx.drawImage(deckLayer, -camX, -camY);
+    for (const dg of dogs) if (dg.flags & 1) drawDog(ctx, dg, camX, camY);
     // The roster line only speaks for the park while we're attached to it —
     // a replica that never connected has zero dogs and would otherwise
     // report "the park is empty" to a user we simply couldn't reach.
@@ -651,13 +942,33 @@ export function startGame(): void {
     // rollback, resync, and day reset.
     if (simTick() % 24 === 0) {
       const sl = sim.sim_snapshot();
-      if (sl >= 48) {
-        const hdr = new DataView(sim.memory.buffer, sim.io_buf(), 48);
+      if (sl >= SNAP_HEADER) {
+        const hdr = new DataView(sim.memory.buffer, sim.io_buf(), SNAP_HEADER);
         $("energy").textContent = String(hdr.getBigUint64(40, true));
         if (role === "player") updateCheckinButton(sl, hdr.getUint32(32, true));
       }
     }
   }
+
+  // A tap says "walk there": invert the iso projection at ground level and
+  // send a move_to intent for the tapped cell.
+  canvas.addEventListener("click", (e) => {
+    if (!terrain || role !== "player") return;
+    const rect = canvas.getBoundingClientRect();
+    const px = ((e.clientX - rect.left) * canvas.width) / rect.width + lastCam[0];
+    const py = ((e.clientY - rect.top) * canvas.height) / rect.height + lastCam[1];
+    const wx = (px - isoOriginX) / (TILE_W / 2);
+    const wy = (py - ISO_PAD) / (TILE_H / 2);
+    const cellX = Math.floor((wx + wy) / 2);
+    const cellY = Math.floor((wy - wx) / 2);
+    if (cellX < 0 || cellY < 0 || cellX >= terrain.w || cellY >= terrain.h) return;
+    const node = cellY * terrain.w + cellX;
+    const p = new Uint8Array(10);
+    const dv = new DataView(p.buffer);
+    dv.setBigUint64(0, myDog, true);
+    dv.setUint16(8, node, true);
+    sendIntent(EV_MOVE_TO, p);
+  });
 
   // Records are strictly sorted by dog id (snapshot encoding contract), so
   // our dog is a binary search away. checked_in_day === today's day index
@@ -671,7 +982,7 @@ export function startGame(): void {
     let hi = n - 1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      const at = 48 + mid * 24;
+      const at = SNAP_HEADER + mid * DOG_REC;
       const id = view.getBigUint64(at, true);
       if (id === myDog) {
         present = true;
