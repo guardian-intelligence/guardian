@@ -71,6 +71,68 @@ spec:
           annotations:
             summary: "Analytics ingest metrics scrape is down"
             description: "vmagent cannot scrape analytics-ingest /metrics (or the scrape target was never discovered); the enrichment canary is blind while this fires."
+        # Storage-burn watchdogs. The posture is generous-and-reactive:
+        # nothing below throttles anyone, it pages while the disk still has
+        # days of headroom. Baseline accepted rate is ~0.1/s, so 20/s
+        # sustained is unambiguous flood (or a launch — either way, look).
+        # Triage: slice by trust_tier/ASN/release in ClickHouse, then widen
+        # or tighten the ingest quota / ingress ceiling in a PR.
+        - alert: AnalyticsIngestVolumeSpike
+          expr: |
+            sum(rate(analytics_ingest_events_total[10m])) > 20
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Analytics accepted-event volume is far above baseline"
+            description: "Accepted events are flowing at >20/s for 15m (~200x baseline) and are being written to ClickHouse. Slice guardian_analytics.events by trust_tier, asn, and site over the window to find the source."
+        - alert: AnalyticsIngestRejectFlood
+          # One MetricsQL multi-metric selector instead of adding two sums:
+          # a CounterVec exports nothing until its first increment, and a
+          # sum over an absent series would annihilate a `+`.
+          expr: |
+            sum(rate({__name__=~"analytics_ingest_(events|batches)_rejected_total",reason!="quota"}[10m])) > 5
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Analytics ingest is rejecting a sustained junk stream"
+            description: "Validation is rejecting >5 events-or-batches/s for 15m. Nothing is being stored, but someone is probing or fuzzing the schema; reject reasons are on the metric and in ingest logs."
+        - alert: AnalyticsIngestQuotaClamping
+          expr: |
+            sum(rate(analytics_ingest_batches_rejected_total{reason="quota"}[10m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A client has been pinned at the per-address event quota for 15m"
+            description: "Sustained 429s from the per-address token bucket (20 events/s, burst 4000, per IPv4 address / IPv6 /64). Either an attack being contained or a legitimate integration outgrowing the ceiling — identify the address in ingest logs before deciding which."
+        - alert: AnalyticsClickHouseDiskLow
+          expr: |
+            min by (persistentvolumeclaim) (
+              kubelet_volume_stats_available_bytes{namespace="tenant-root",persistentvolumeclaim=~"data-volume-template-chi-clickhouse-analytics-.*"}
+                /
+              kubelet_volume_stats_capacity_bytes{namespace="tenant-root",persistentvolumeclaim=~"data-volume-template-chi-clickhouse-analytics-.*"}
+            ) < 0.20
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ClickHouse analytics data volume under 20% free"
+            description: "{{ $labels.persistentvolumeclaim }} is filling. If AnalyticsIngestVolumeSpike is also firing this is flood damage; otherwise organic growth — either way plan a TTL tightening or volume grow before the critical threshold."
+        - alert: AnalyticsClickHouseDiskCritical
+          expr: |
+            min by (persistentvolumeclaim) (
+              kubelet_volume_stats_available_bytes{namespace="tenant-root",persistentvolumeclaim=~"data-volume-template-chi-clickhouse-analytics-.*"}
+                /
+              kubelet_volume_stats_capacity_bytes{namespace="tenant-root",persistentvolumeclaim=~"data-volume-template-chi-clickhouse-analytics-.*"}
+            ) < 0.10
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "ClickHouse analytics data volume under 10% free"
+            description: "{{ $labels.persistentvolumeclaim }} is close to full; inserts and merges will start failing. Free space now (drop the noisiest partitions or tighten a TTL) and root-cause with the volume-spike alert's triage query."
         - alert: PaymentsCheckoutCanaryJobFailed
           expr: |
             (kube_job_status_failed{namespace="guardian-analytics",job_name=~"payments-checkout-canary-.*"} > 0)

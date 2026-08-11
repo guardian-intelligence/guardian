@@ -187,7 +187,10 @@ function send(events: WireEvent[], sync: boolean): void {
     priority: "low",
   } as RequestInit).then(
     (res) => {
-      if (!res.ok && res.status >= 500) persist(events);
+      // 4xx is a permanent verdict (a poison batch must not replay
+      // forever) except 429: the ingest quota wants the batch later,
+      // not never.
+      if (!res.ok && (res.status >= 500 || res.status === 429)) persist(events);
     },
     () => persist(events),
   );

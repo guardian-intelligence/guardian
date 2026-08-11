@@ -32,6 +32,20 @@ var eventsByName = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "Accepted events by site and event name, allowlisted names only.",
 }, []string{"site", "event_name"})
 
+// Rejected work was invisible outside logs: a junk flood that never passes
+// validation burns CPU and log volume without moving analytics_ingest_events_total,
+// so the flood alerts watch these. Both label sets are bounded (fixed reason
+// vocabulary; site comes from the host allowlist in siteFromHost).
+var eventsRejected = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "analytics_ingest_events_rejected_total",
+	Help: "Events rejected by per-event validation, by reason.",
+}, []string{"site", "reason"})
+
+var batchesRejected = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "analytics_ingest_batches_rejected_total",
+	Help: "Publish batches rejected wholesale, by reason.",
+}, []string{"site", "reason"})
+
 func presenceLabel(present bool) string {
 	if present {
 		return "present"

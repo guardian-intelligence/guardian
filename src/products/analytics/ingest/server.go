@@ -20,6 +20,7 @@ type eventService struct {
 	batch    *batcher
 	now      func() time.Time
 	validate protovalidate.Validator
+	quota    *ipQuota
 }
 
 // Connect handlers see only the RPC message; the trust-bearing material
@@ -55,14 +56,23 @@ func (s *eventService) Publish(
 	stampCorrelation(ctx, meta.corrID, meta.ctx.TrustTier, meta.ctx.Site)
 	events := req.Msg.GetEvents()
 	if len(events) == 0 {
+		batchesRejected.WithLabelValues(meta.ctx.Site, "empty").Inc()
 		return nil, connect.NewError(connect.CodeInvalidArgument, errEmptyBatch)
 	}
 	if len(events) > maxBatchEvents {
 		// Oversized batches reject wholesale, never truncate.
+		batchesRejected.WithLabelValues(meta.ctx.Site, "too_large").Inc()
 		return nil, connect.NewError(connect.CodeInvalidArgument, errBatchTooLarge)
 	}
 
 	now := s.now()
+	if !s.quota.allow(meta.ctx.ClientIP, len(events), now) {
+		// ResourceExhausted surfaces as 429; the beacon keeps the batch in
+		// localStorage and replays on a later flush, so a genuine client
+		// that somehow hits the ceiling loses time, not events.
+		batchesRejected.WithLabelValues(meta.ctx.Site, "quota").Inc()
+		return nil, connect.NewError(connect.CodeResourceExhausted, errQuotaExceeded)
+	}
 	skew := clampSkewMs(now.UnixMilli(), req.Msg.GetSentAtUnixMs())
 
 	rows := make([]eventRow, 0, len(events))
@@ -124,6 +134,7 @@ func (s *eventService) Publish(
 	rejected := 0
 	for reason, n := range rejects {
 		rejected += n
+		eventsRejected.WithLabelValues(meta.ctx.Site, string(reason)).Add(float64(n))
 		slog.Warn("events rejected", "reason", string(reason), "count", n,
 			"site", meta.ctx.Site, "tier", meta.ctx.TrustTier)
 	}
@@ -141,6 +152,7 @@ func (s *eventService) Publish(
 var (
 	errEmptyBatch    = constError("empty batch")
 	errBatchTooLarge = constError("batch exceeds event cap")
+	errQuotaExceeded = constError("event quota exceeded; retry later")
 )
 
 type constError string

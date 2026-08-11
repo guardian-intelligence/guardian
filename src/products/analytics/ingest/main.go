@@ -91,7 +91,7 @@ func main() {
 	}
 	slog.Info("ip2asn table loaded", "ranges", len(asnTab.ranges), "path", asnPath)
 	batch := newBatcher(sink, 10_000, 10*time.Second, 100_000)
-	svc := &eventService{batch: batch, now: time.Now, validate: validator}
+	svc := &eventService{batch: batch, now: time.Now, validate: validator, quota: newIPQuota()}
 
 	srv := &http.Server{
 		Addr: addr,

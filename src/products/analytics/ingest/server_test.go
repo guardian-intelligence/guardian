@@ -46,7 +46,7 @@ func newTestStack(t *testing.T) (*httptest.Server, *captureSink) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := &eventService{batch: b, now: func() time.Time { return time.UnixMilli(1_800_000_000_000) }, validate: v}
+	svc := &eventService{batch: b, now: func() time.Time { return time.UnixMilli(1_800_000_000_000) }, validate: v, quota: newIPQuota()}
 	srv := httptest.NewServer(newHandler(svc, testASNTable(t)))
 	t.Cleanup(srv.Close)
 	return srv, sink
@@ -318,5 +318,45 @@ func TestMeteredEventNamesCounter(t *testing.T) {
 	}
 	if d := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.encode_completed")) - unmeteredBefore; d != 0 {
 		t.Errorf("unmetered name delta = %v, want 0", d)
+	}
+}
+
+// The quota charges verified addresses only, admits until the burst is
+// spent, then 429s the whole batch — and an unverified publisher (no edge
+// headers) is never charged at all.
+func TestPublishQuotaExhaustion(t *testing.T) {
+	srv, _ := newTestStack(t)
+	client := publishClient(srv)
+
+	quotaBefore := testutil.ToFloat64(batchesRejected.WithLabelValues("local", "quota"))
+	events := make([]*analyticsv1.Event, maxBatchEvents)
+	for i := range events {
+		events[i] = &analyticsv1.Event{Name: "page_view", Path: "/"}
+	}
+	batches := quotaBurst / maxBatchEvents
+	for i := 0; i < batches; i++ {
+		req := connect.NewRequest(&analyticsv1.PublishRequest{SentAtUnixMs: 1, Events: events})
+		req.Header().Set("X-Guardian-Client-Ip", "203.0.113.50")
+		req.Header().Set("X-Guardian-Client-Ip-Source", "cloudflare")
+		if _, err := client.Publish(context.Background(), req); err != nil {
+			t.Fatalf("batch %d within burst rejected: %v", i, err)
+		}
+	}
+
+	over := connect.NewRequest(&analyticsv1.PublishRequest{SentAtUnixMs: 1, Events: events})
+	over.Header().Set("X-Guardian-Client-Ip", "203.0.113.50")
+	over.Header().Set("X-Guardian-Client-Ip-Source", "cloudflare")
+	_, err := client.Publish(context.Background(), over)
+	if connect.CodeOf(err) != connect.CodeResourceExhausted {
+		t.Fatalf("over-burst batch: err = %v, want resource_exhausted", err)
+	}
+	if d := testutil.ToFloat64(batchesRejected.WithLabelValues("local", "quota")) - quotaBefore; d != 1 {
+		t.Errorf("quota reject metric delta = %v, want 1", d)
+	}
+
+	// Same instant, same volume, no verified address: never charged.
+	free := connect.NewRequest(&analyticsv1.PublishRequest{SentAtUnixMs: 1, Events: events})
+	if _, err := client.Publish(context.Background(), free); err != nil {
+		t.Fatalf("unverified publisher was charged: %v", err)
 	}
 }
