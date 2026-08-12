@@ -217,10 +217,13 @@ function PostflightPage() {
       </main>
 
       <footer className="postflight-footer">
-        <span>© 2026 Guardian Intelligence LLC</span>
-        <a href="https://x.com/guardians_llc" rel="noreferrer">
-          Follow @guardians_llc on X
-        </a>
+        <span>© 2026 Anveio Foundation · Guardian Intelligence</span>
+        <nav aria-label="Postflight footer">
+          <a href="/legal">Legal identity</a>
+          <a href="https://x.com/guardians_llc" rel="noreferrer">
+            Follow @guardians_llc on X
+          </a>
+        </nav>
       </footer>
     </div>
   );

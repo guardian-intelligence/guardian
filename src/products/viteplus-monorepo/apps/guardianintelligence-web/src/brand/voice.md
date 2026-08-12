@@ -14,7 +14,7 @@ One line: **Confident without ceremony.**
 ## Wording
 
 "Founder", not "CEO".
-"Guardian", not "Guardian Intelligence", or "Guardian Intelligence, LLC" outside of legal contexts.
+"Guardian" in general brand copy. "Guardian Intelligence" is also a public name. "Anveio Foundation" names the legal entity.
 
 ## Banned grammar
 
@@ -30,7 +30,7 @@ We say the thing.
 ## Invariants alongside voice
 
 - Wings always in Argent -- we modify the background to keep it that way.
-- **Wings belong to Guardian.** The only lockup is _Guardian_ — the brand, not the legal entity. "Guardian Intelligence" is reserved for contracts, invoices, and the mailing address. Solutions — today there is one, **Guardian**
+- **Wings belong to Guardian.** The only lockup is _Guardian_ — a public brand of Anveio Foundation. Solutions — today there is one, **Guardian**
 
 ## Tone anchors
 

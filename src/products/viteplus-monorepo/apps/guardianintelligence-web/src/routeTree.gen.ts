@@ -23,6 +23,7 @@ import { Route as WorkshopChangelogRouteImport } from './routes/_workshop/change
 import { Route as WorkshopCompanyRouteImport } from './routes/_workshop/company'
 import { Route as WorkshopContactRouteImport } from './routes/_workshop/contact'
 import { Route as WorkshopDesignRouteRouteImport } from './routes/_workshop/design/route'
+import { Route as WorkshopLegalRouteImport } from './routes/_workshop/legal'
 import { Route as WorkshopPressRouteImport } from './routes/_workshop/press'
 import { Route as WorkshopSolutionsRouteImport } from './routes/_workshop/solutions'
 import { Route as LettersIndexRouteImport } from './routes/letters/index'
@@ -112,6 +113,11 @@ const WorkshopContactRoute = WorkshopContactRouteImport.update({
 const WorkshopDesignRouteRoute = WorkshopDesignRouteRouteImport.update({
   id: '/design',
   path: '/design',
+  getParentRoute: () => WorkshopRouteRoute,
+} as any)
+const WorkshopLegalRoute = WorkshopLegalRouteImport.update({
+  id: '/legal',
+  path: '/legal',
   getParentRoute: () => WorkshopRouteRoute,
 } as any)
 const WorkshopPressRoute = WorkshopPressRouteImport.update({
@@ -235,6 +241,7 @@ export interface FileRoutesByFullPath {
   '/changelog': typeof WorkshopChangelogRoute
   '/company': typeof WorkshopCompanyRoute
   '/contact': typeof WorkshopContactRoute
+  '/legal': typeof WorkshopLegalRoute
   '/press': typeof WorkshopPressRoute
   '/solutions': typeof WorkshopSolutionsRoute
   '/letters/$slug': typeof LettersSlugRoute
@@ -267,6 +274,7 @@ export interface FileRoutesByTo {
   '/changelog': typeof WorkshopChangelogRoute
   '/company': typeof WorkshopCompanyRoute
   '/contact': typeof WorkshopContactRoute
+  '/legal': typeof WorkshopLegalRoute
   '/press': typeof WorkshopPressRoute
   '/solutions': typeof WorkshopSolutionsRoute
   '/letters/$slug': typeof LettersSlugRoute
@@ -305,6 +313,7 @@ export interface FileRoutesById {
   '/_workshop/changelog': typeof WorkshopChangelogRoute
   '/_workshop/company': typeof WorkshopCompanyRoute
   '/_workshop/contact': typeof WorkshopContactRoute
+  '/_workshop/legal': typeof WorkshopLegalRoute
   '/_workshop/press': typeof WorkshopPressRoute
   '/_workshop/solutions': typeof WorkshopSolutionsRoute
   '/letters/$slug': typeof LettersSlugRoute
@@ -344,6 +353,7 @@ export interface FileRouteTypes {
     | '/changelog'
     | '/company'
     | '/contact'
+    | '/legal'
     | '/press'
     | '/solutions'
     | '/letters/$slug'
@@ -376,6 +386,7 @@ export interface FileRouteTypes {
     | '/changelog'
     | '/company'
     | '/contact'
+    | '/legal'
     | '/press'
     | '/solutions'
     | '/letters/$slug'
@@ -413,6 +424,7 @@ export interface FileRouteTypes {
     | '/_workshop/changelog'
     | '/_workshop/company'
     | '/_workshop/contact'
+    | '/_workshop/legal'
     | '/_workshop/press'
     | '/_workshop/solutions'
     | '/letters/$slug'
@@ -552,6 +564,13 @@ declare module '@tanstack/react-router' {
       path: '/design'
       fullPath: '/design'
       preLoaderRoute: typeof WorkshopDesignRouteRouteImport
+      parentRoute: typeof WorkshopRouteRoute
+    }
+    '/_workshop/legal': {
+      id: '/_workshop/legal'
+      path: '/legal'
+      fullPath: '/legal'
+      preLoaderRoute: typeof WorkshopLegalRouteImport
       parentRoute: typeof WorkshopRouteRoute
     }
     '/_workshop/press': {
@@ -727,6 +746,7 @@ interface WorkshopRouteRouteChildren {
   WorkshopChangelogRoute: typeof WorkshopChangelogRoute
   WorkshopCompanyRoute: typeof WorkshopCompanyRoute
   WorkshopContactRoute: typeof WorkshopContactRoute
+  WorkshopLegalRoute: typeof WorkshopLegalRoute
   WorkshopPressRoute: typeof WorkshopPressRoute
   WorkshopSolutionsRoute: typeof WorkshopSolutionsRoute
   WorkshopIndexRoute: typeof WorkshopIndexRoute
@@ -739,6 +759,7 @@ const WorkshopRouteRouteChildren: WorkshopRouteRouteChildren = {
   WorkshopChangelogRoute: WorkshopChangelogRoute,
   WorkshopCompanyRoute: WorkshopCompanyRoute,
   WorkshopContactRoute: WorkshopContactRoute,
+  WorkshopLegalRoute: WorkshopLegalRoute,
   WorkshopPressRoute: WorkshopPressRoute,
   WorkshopSolutionsRoute: WorkshopSolutionsRoute,
   WorkshopIndexRoute: WorkshopIndexRoute,

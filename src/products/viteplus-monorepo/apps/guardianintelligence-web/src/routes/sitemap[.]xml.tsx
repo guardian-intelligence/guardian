@@ -17,6 +17,7 @@ import { SITE_URL } from "~/lib/head";
 const STATIC_PATHS: readonly string[] = [
   "/",
   "/company",
+  "/legal",
   "/solutions",
   "/letters",
   "/news",

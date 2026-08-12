@@ -26,7 +26,7 @@ export const press = {
   contactNote:
     "Please include the outlet, the angle, and the deadline. We answer by end of day Seattle time.",
   writingGuide: [
-    'Write "Guardian" at all references. Reserve "Guardian Intelligence" for legal-entity contexts: contracts, invoices, the mailing address.',
+    'Write "Guardian" at general references. "Guardian Intelligence" is also a public name of the business. The legal entity is Anveio Foundation.',
     "The company is an American applied intelligence firm based in Seattle.",
     'Never write "founder" as "Founder" (capital F) outside of a title slot. It is a role, not a rank.',
   ],
