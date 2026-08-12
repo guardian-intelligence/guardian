@@ -135,6 +135,8 @@ var (
 		Name: "mythra_behavior_reloads_total", Help: "Behavior module hot-reloads."}, []string{"slot", "result"})
 	mBehaviorInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "mythra_behavior_script", Help: "1 for the currently loaded module hash per slot."}, []string{"slot", "hash"})
+	mEpochSwaps = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "mythra_epoch_swaps_total", Help: "Park module epoch-swap lane outcomes."}, []string{"result"})
 )
 
 func envInt(k string, d int) int {

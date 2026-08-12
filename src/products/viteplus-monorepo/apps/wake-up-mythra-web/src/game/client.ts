@@ -29,6 +29,7 @@ const RING_DEPTH = 10; // one snapshot per second of rollback depth
 const EV_JOIN = 1;
 const EV_CHECK_IN = 3;
 const EV_MOVE_TO = 4;
+const EV_EPOCH_ADVANCE = 6;
 const REJECT_PRESENT = 2; // sim ERR_PRESENT
 const REJECT_ABSENT = 3; // sim ERR_ABSENT
 
@@ -110,11 +111,21 @@ export function startGame(): void {
   // ---- replica state (survives redials) ----
   let sim: Wasm = null; // the park module instance
   let smoother: Wasm = null; // the presentation module
+  // The module-epoch lane: an epoch_advance event (or a verdict whose park
+  // hash disagrees) fetches the new module into a background instance;
+  // the resync snapshot restores there and the instances swap between
+  // frames (docs/netcode.md).
+  let parkHash = ""; // display hash of the running park module
+  let pendingSim: Wasm = null;
+  let pendingHash = "";
   let sub = "";
   let myDog = 0n;
   // The active terrain artifact: raw planes for the renderer, loaded into
-  // the sim before any restore. Content-addressed, so one fetch per hex.
+  // the sim before any restore. Content-addressed, so one fetch per hex;
+  // the raw bytes stay cached to reload into swapped-in module instances.
   let terrainHex = "";
+  let terrainRaw: Uint8Array | null = null;
+  let loadedRawHex = "";
   let terrain: {
     w: number;
     h: number;
@@ -195,9 +206,14 @@ export function startGame(): void {
   async function ensureTerrain(hex: string | undefined): Promise<boolean> {
     if (!hex || hex === terrainHex || !sim) return true;
     try {
-      const resp = await fetch(`/terrain/${hex}`);
-      if (!resp.ok) throw new Error(`/terrain/${hex} ${resp.status}`);
-      const blob = new Uint8Array(await resp.arrayBuffer());
+      let blob: Uint8Array;
+      if (hex === loadedRawHex && terrainRaw) {
+        blob = terrainRaw; // module swap: same world, new instance
+      } else {
+        const resp = await fetch(`/terrain/${hex}`);
+        if (!resp.ok) throw new Error(`/terrain/${hex} ${resp.status}`);
+        blob = new Uint8Array(await resp.arrayBuffer());
+      }
       if (blob.length > sim.terrain_cap()) {
         throw new Error(`terrain ${hex} is ${blob.length}B, over module cap`);
       }
@@ -205,6 +221,8 @@ export function startGame(): void {
       mem.set(blob, sim.terrain_buf());
       const code = sim.sim_set_terrain(blob.length);
       if (code !== 0) throw new Error(`terrain ${hex} rejected (code ${code})`);
+      terrainRaw = blob;
+      loadedRawHex = hex;
       const dv = new DataView(blob.buffer);
       const w = dv.getUint16(8, true);
       const h = dv.getUint16(10, true);
@@ -227,6 +245,45 @@ export function startGame(): void {
       logLine(`terrain load failed: ${e?.message ?? e} [err ${id}]`);
       return false;
     }
+  }
+
+  // beginModuleSwap fetches the current park module into a background
+  // instance and asks for a snapshot; the snapshot handler restores there
+  // and swaps between frames. `sum8` (from the epoch_advance payload) is
+  // the first 8 LE bytes of the expected sha256 — a fetch that disagrees
+  // is logged and still adopted: the server only serves current bytes, and
+  // any further flip arrives as its own epoch event.
+  let fetchingModule = false;
+  async function beginModuleSwap(why: string, sum8?: bigint) {
+    if (fetchingModule) return;
+    fetchingModule = true;
+    try {
+      const bytes = await fetch(`/behavior/park.wasm?v=${Date.now()}`).then((r) => {
+        if (!r.ok) throw new Error(`park.wasm ${r.status}`);
+        return r.arrayBuffer();
+      });
+      const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+      const hash = [...digest.slice(0, 4)].map((b) => b.toString(16).padStart(2, "0")).join("");
+      if (hash === parkHash) return; // raced a flip that already settled
+      const sum = new DataView(digest.buffer).getBigUint64(0, true);
+      if (sum8 !== undefined && sum !== sum8) {
+        logLine(`module fetch is ${hash}, not the announced epoch module — adopting anyway`);
+      }
+      pendingSim = (await WebAssembly.instantiate(bytes)).instance.exports;
+      pendingHash = hash;
+      logLine(`park module ${hash} staged (${why}); resyncing into it`);
+      emitSpan("wum.module_swap", { "wum.hash": hash, "wum.why": why, "wum.park": parkName });
+      requestResync(`module epoch (${why})`);
+    } catch (e: any) {
+      const id = reportError(e, { "error.op": "wum.module_swap" });
+      logLine(`module swap failed: ${e?.message ?? e} [err ${id}]`);
+      setTimeout(() => {
+        fetchingModule = false;
+        void beginModuleSwap(why, sum8);
+      }, 3000);
+      return;
+    }
+    fetchingModule = false;
   }
 
   function stepOnce() {
@@ -274,6 +331,11 @@ export function startGame(): void {
       recentEvents.push(ev);
       pendingIntents.delete(ev.intent);
       hashRing.set(simTick(), simHashHex());
+      if (ev.kind === EV_EPOCH_ADVANCE && ev.payload.length === 12) {
+        // The journaled boundary: ticks after this run on the new module.
+        const sum8 = new DataView(ev.payload.buffer, ev.payload.byteOffset).getBigUint64(4, true);
+        void beginModuleSwap(`epoch event seq ${ev.seq}`, sum8);
+      }
     }
   }
 
@@ -321,6 +383,11 @@ export function startGame(): void {
     serverTick = m.now + rttMs / 2 / TICK_MS;
     serverTickAt = performance.now();
     $("rtt").textContent = `${rttMs.toFixed(0)}ms`;
+    // Backstop for a missed epoch_advance (attached mid-boundary): the
+    // verdict names the server's park module; disagreement means swap.
+    if (m.pw && parkHash && m.pw !== parkHash && !pendingSim) {
+      void beginModuleSwap(`verdict says ${m.pw}`);
+    }
     if (m.ok === undefined) {
       strike("check aged out of the server ring");
       return;
@@ -395,6 +462,16 @@ export function startGame(): void {
       serverTickAt = performance.now();
       await ensureTerrain(m.terrain);
     } else if (m.type === "snapshot") {
+      if (pendingSim) {
+        // Swap between frames: the fresh instance becomes the replica and
+        // this snapshot restores into it. Terrain reloads from the cached
+        // raw bytes; the world hash check below vouches for the whole move.
+        sim = pendingSim;
+        pendingSim = null;
+        parkHash = pendingHash;
+        terrainHex = "";
+        logLine(`park module ${parkHash} live`);
+      }
       if (!(await ensureTerrain(m.terrain))) {
         // Without the terrain this snapshot cannot restore; unlatch and
         // ask again shortly — the retry loop is resync -> snapshot ->
@@ -1067,6 +1144,7 @@ export function startGame(): void {
       ]);
       sim = (await WebAssembly.instantiate(parkBytes)).instance.exports;
       smoother = (await WebAssembly.instantiate(clientBytes)).instance.exports;
+      parkHash = info.parkWasm;
       logLine(`park module ${info.parkWasm}, presentation ${info.clientWasm}`);
 
       $("checkin").onclick = () => sendIntent(EV_CHECK_IN, dogPayload());

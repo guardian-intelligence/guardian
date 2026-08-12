@@ -67,12 +67,16 @@ Session setup over HTTPS, then one bidi reliable stream plus datagrams:
       intent  { intent_id u64, kind u16, payload }     opaque payload
       resync  { have_seq }
     server -> client (stream, strictly ordered):
-      welcome  { session, role, epoch, seq, tick, terrain, terrain_schema, w, h }
+      welcome  { session, role, epoch, seq, tick, terrain }
       event    { seq, tick, kind, payload }            the journal, verbatim
       reject   { intent_id, reason }
       snapshot { seq, tick, epoch, wh, terrain, state }  deflate-compressed
     client -> server (datagram):  check   { tick, wh }
-    server -> client (datagram):  verdict { tick_now, ok }
+    server -> client (datagram):  verdict { tick_now, ok, cw, pw }
+                                  cw/pw = current client/park module hashes
+
+The terrain hex is the only terrain fact on the wire — dimensions and
+schema live in the content-addressed blob every consumer fetches.
 
 There is no ack message: an accepted intent returns as an `event` carrying
 its `intent_id` — the journal is the acknowledgment. Spectators are sessions
@@ -132,10 +136,35 @@ server-issued events — client clocks are never authoritative.
 ### Module epochs
 
 The ConfigMap hot-swap lane ships module bytes; an `epoch_advance{epoch,
-module_hash}` journal event makes a swap effective. Replay switches modules
-at epoch boundaries, so a balance change never invalidates history — the
-journal replays under the rules that were live when it was written. Clients
-lacking the module fetch it from /behavior by hash, then apply the event.
+module_hash}` journal event makes a swap effective (module_hash = first 8
+LE bytes of the module's sha256). The authority runs the whole lane:
+
+1. **Soak.** A new park module on the mount becomes a candidate instance
+   restored from the live snapshot and run in the dark — fed every event
+   the live module accepts, stepped in lockstep, fanning out nothing — for
+   ~5s. A trap, a reject the live module didn't issue, or an instantiation
+   failure pins the bytes as bad until the mount serves different ones.
+2. **Commit.** The boundary is journaled: `epoch_advance` leads a normal
+   tick batch (durable before visible, like every event). Immediately
+   after that tick, the candidate re-restores the authoritative boundary
+   state and a **synchronous** snapshot goes durable with the world hash
+   computed by the NEW module — so an epoch boundary is always a snapshot
+   boundary, and replay never crosses a module change: `openAuthority`
+   restores from that snapshot under the converged module. Only then does
+   the candidate become the host. Its soak state is discarded — it was a
+   validation instrument, not a lineage.
+3. **Clients follow the event.** Applying `epoch_advance` (or seeing a
+   verdict whose park-module hash disagrees — the backstop for a replica
+   attached mid-boundary) fetches /behavior by hash into a background
+   instance and requests a resync; the snapshot restores there and the
+   instances swap between frames. The post-restore hash check vouches for
+   the whole move. Load bots follow identically.
+
+A hash-compatible module (refactor, dead code) swaps with byte-identical
+snapshots and an unchanged world hash; a behavioral module re-anchors the
+hash lineage at the boundary. Either way pre-boundary history replays
+under snapshots recorded at-or-after the last boundary, so old journals
+never meet new rules.
 
 ### Terrain artifacts
 
