@@ -120,6 +120,85 @@ func dog8(id uint64) []byte {
 	return p[:]
 }
 
+// The module-update lane end to end: a new park module on the mount soaks
+// in the dark, commits as a journaled epoch_advance with a boundary
+// snapshot hashed by the NEW module, the authority keeps serving on the
+// swapped host, and a reopen under the converged module restores from the
+// re-anchored snapshot and replays to the identical hash.
+func TestModuleEpochSwapLane(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	j := journal.NewPg(pool)
+	if err := j.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mods := &modules{client: &clientModule{slot: "client"}, park: &clientModule{slot: "park"}}
+	mods.park.set(defaultParkModule)
+	a, err := openAuthority(ctx, "park-epoch", defaultParkModule, fixtureTerrain, j, mods)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &session{sub: "dana", out: make(chan []byte, 16)}
+	a.stageIntent(s, 1, evJoin, dog8(dogIDFor("dana")))
+	a.tickOnce()
+	epochBefore := a.host.Epoch()
+
+	// A module the runtime refuses must be pinned bad, never promoted.
+	bad := append(append([]byte{}, defaultParkModule...), 0xFF)
+	mods.park.set(bad)
+	a.tickOnce()
+	if a.moduleHash != displayHash(defaultParkModule) || a.cand != nil {
+		t.Fatal("invalid module bytes must not open a candidate")
+	}
+
+	// Same behavior, different bytes: an appended custom section (id 0,
+	// size 3, name "t", one content byte — wazero requires non-empty
+	// content) is a valid wasm suffix, so the hash flips without changing
+	// the sim.
+	variant := append(append([]byte{}, defaultParkModule...), 0x00, 0x03, 0x01, 0x74, 0x00)
+	mods.park.set(variant)
+	for i := 0; i < soakTicks+5; i++ {
+		a.tickOnce()
+	}
+	if a.moduleHash != displayHash(variant) {
+		t.Fatalf("module hash = %s after soak window, want %s (swap never committed)", a.moduleHash, displayHash(variant))
+	}
+	if got := a.host.Epoch(); got != epochBefore+1 {
+		t.Fatalf("epoch = %d after swap, want %d", got, epochBefore+1)
+	}
+	if a.cand != nil {
+		t.Fatal("candidate host left open after commit")
+	}
+
+	// The swapped host keeps serving.
+	a.stageIntent(s, 2, evCheckIn, dog8(dogIDFor("dana")))
+	a.tickOnce()
+	wantHash := a.host.Hash()
+	wantTick := a.host.Tick()
+	a.host.close()
+
+	// Reopen the park as a converged deploy would: the mount serves the
+	// new module, and the boundary snapshot must restore under it.
+	b, err := openAuthority(ctx, "park-epoch", variant, fixtureTerrain, j, mods)
+	if err != nil {
+		t.Fatalf("reopen after epoch swap: %v", err)
+	}
+	defer b.host.close()
+	for b.host.Tick() < wantTick {
+		b.host.Step()
+	}
+	if got := b.host.Hash(); got != wantHash {
+		t.Fatalf("replay across the epoch boundary: hash %016x, want %016x", got, wantHash)
+	}
+	if got := b.host.Epoch(); got != epochBefore+1 {
+		t.Fatalf("reopened epoch = %d, want %d", got, epochBefore+1)
+	}
+}
+
 // The page-refresh contract: departures ride intent id 0 on every
 // disconnect and must all land (never deduped), and a sim-rejected intent
 // must not occupy the idempotency window — the corrected resend under the

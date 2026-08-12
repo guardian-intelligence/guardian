@@ -5,7 +5,9 @@ import (
 	"compress/flate"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,17 +87,27 @@ func newParkHost(module []byte) (*parkHost, error) {
 
 func (h *parkHost) close() { h.rt.Close(context.Background()) }
 
-func (h *parkHost) call(f api.Function, args ...uint64) uint64 {
+// callE is the non-panicking call used for candidate modules under soak:
+// a candidate that traps is a rejected deploy, not a host bug.
+func (h *parkHost) callE(f api.Function, args ...uint64) (uint64, error) {
 	res, err := f.Call(context.Background(), args...)
 	if err != nil {
-		// The module validates its inputs and never traps on data; a trap
-		// is a host bug and this park instance is unusable.
-		panic(fmt.Sprintf("park module trapped: %v", err))
+		return 0, err
 	}
 	if len(res) == 0 {
-		return 0
+		return 0, nil
 	}
-	return res[0]
+	return res[0], nil
+}
+
+func (h *parkHost) call(f api.Function, args ...uint64) uint64 {
+	res, err := h.callE(f, args...)
+	if err != nil {
+		// The live module validates its inputs and never traps on data; a
+		// trap is a host bug and this park instance is unusable.
+		panic(fmt.Sprintf("park module trapped: %v", err))
+	}
+	return res
 }
 
 // call32 is call for i32-returning exports. wazero's raw result slots are
@@ -153,6 +165,51 @@ func (h *parkHost) Step()         { h.call(h.fStep) }
 func (h *parkHost) Hash() uint64  { return h.call(h.fHash) }
 func (h *parkHost) Tick() uint64  { return h.call(h.fTick) }
 func (h *parkHost) Epoch() uint32 { return h.call32(h.fEpoch) }
+
+// Candidate-safe variants: errors instead of panics, used only while a
+// new module soaks in the dark before an epoch swap.
+func (h *parkHost) SetTerrainE(blob []byte) error {
+	if uint32(len(blob)) > h.terrainCap || !h.mem.Write(h.terrainPtr, blob) {
+		return errors.New("terrain blob does not fit candidate terrain buffer")
+	}
+	code, err := h.callE(h.fSetTerrain, uint64(len(blob)))
+	if err != nil {
+		return err
+	}
+	if uint32(code) != 0 {
+		return fmt.Errorf("candidate rejected terrain: code %d", uint32(code))
+	}
+	return nil
+}
+
+func (h *parkHost) RestoreE(state []byte) error {
+	if uint32(len(state)) > h.ioCap || !h.mem.Write(h.ioPtr, state) {
+		return errors.New("snapshot does not fit candidate io buffer")
+	}
+	code, err := h.callE(h.fRestore, uint64(len(state)))
+	if err != nil {
+		return err
+	}
+	if uint32(code) != 0 {
+		return fmt.Errorf("candidate rejected snapshot: code %d", uint32(code))
+	}
+	return nil
+}
+
+func (h *parkHost) ApplyE(event []byte) (uint32, error) {
+	if uint32(len(event)) > h.ioCap || !h.mem.Write(h.ioPtr, event) {
+		return 1, nil
+	}
+	code, err := h.callE(h.fApply, uint64(len(event)))
+	return uint32(code), err
+}
+
+func (h *parkHost) StepE() error {
+	_, err := h.callE(h.fStep)
+	return err
+}
+
+func (h *parkHost) HashE() (uint64, error) { return h.callE(h.fHash) }
 
 // Apply runs one encoded event (kind u16 LE + payload) through sim_apply.
 // The module must not mutate on a nonzero return (pinned by its tests).
@@ -223,11 +280,25 @@ type authority struct {
 	mods *modules
 
 	// The active terrain artifact, cached for welcome/snapshot lines so
-	// clients know which blob to fetch before restoring. Written only by
-	// the boot path and the tick goroutine's replay.
-	terrainHex           string
-	terrainW, terrainH   uint16
-	terrainSchemaCurrent uint32
+	// clients know which blob to fetch before restoring, and as raw bytes
+	// for candidate modules under soak. Written only by the boot path and
+	// the tick goroutine's replay.
+	terrainHex  string
+	terrainBlob []byte
+
+	// The module-update lane (docs/netcode.md, module epochs): when the
+	// behavior mount serves a park module whose hash differs from the
+	// running one, a candidate instance soaks in the dark — fed the same
+	// events, stepped in lockstep, fanning out nothing — and on a clean
+	// soak the swap commits as an epoch_advance journal event plus a
+	// synchronous boundary snapshot hashed by the new module. All fields
+	// are owned by the tick goroutine.
+	moduleHash string // display hash of the running module
+	cand       *parkHost
+	candHash   string
+	candSum    uint64 // first 8 bytes (LE) of the candidate's sha256
+	soakLeft   int
+	badModule  string // last hash that failed soak; retried only on change
 
 	mu       sync.Mutex
 	staged   []stagedIntent
@@ -248,6 +319,117 @@ type authority struct {
 	utcDay          uint32
 }
 
+const soakTicks = 120 // ~5s of dark lockstep before an epoch swap commits
+
+func displayHash(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:4])
+}
+
+// swapPrelude advances the module-update lane at the top of a tick. When a
+// candidate's soak has just completed it returns the epoch_advance intent
+// that must lead this tick's batch — the journaled boundary between the
+// old module's ticks and the new one's.
+func (a *authority) swapPrelude() []stagedIntent {
+	bytes, hash := a.mods.park.get()
+	if a.cand != nil && hash != a.candHash {
+		a.failSoak("", errors.New("superseded by a newer module"))
+	}
+	if a.cand == nil {
+		if len(bytes) == 0 || hash == a.moduleHash || hash == a.badModule {
+			return nil
+		}
+		cand, err := newParkHost(bytes)
+		if err != nil {
+			a.badModule = hash
+			log.Printf("park %s: module %s rejected: %v", a.name, hash, err)
+			mEpochSwaps.WithLabelValues("soak_abort").Inc()
+			return nil
+		}
+		a.cand, a.candHash, a.soakLeft = cand, hash, soakTicks
+		sum := sha256.Sum256(bytes)
+		a.candSum = binary.LittleEndian.Uint64(sum[:8])
+		if err := cand.SetTerrainE(a.terrainBlob); err != nil {
+			a.failSoak(hash, err)
+			return nil
+		}
+		if err := cand.RestoreE(a.host.Snapshot()); err != nil {
+			a.failSoak(hash, err)
+			return nil
+		}
+		log.Printf("park %s: module %s soaking for %d ticks (live %s)", a.name, hash, soakTicks, a.moduleHash)
+		return nil
+	}
+	if a.soakLeft > 0 {
+		a.soakLeft--
+		return nil
+	}
+	var p [12]byte
+	binary.LittleEndian.PutUint32(p[:4], a.host.Epoch()+1)
+	binary.LittleEndian.PutUint64(p[4:], a.candSum)
+	return []stagedIntent{{actor: "system", kind: evEpochAdvance, payload: p[:]}}
+}
+
+// failSoak rejects the candidate. A non-empty hash pins it as bad so the
+// lane only retries when the mount serves different bytes.
+func (a *authority) failSoak(hash string, err error) {
+	if a.cand != nil {
+		a.cand.close()
+		a.cand = nil
+	}
+	if hash != "" {
+		a.badModule = hash
+	}
+	log.Printf("park %s: module soak aborted (%s): %v", a.name, a.candHash, err)
+	mEpochSwaps.WithLabelValues("soak_abort").Inc()
+}
+
+// promote commits the swap right after the boundary tick: the candidate
+// re-restores the authoritative boundary state (its soak state was a
+// validation instrument, not a lineage), the boundary snapshot goes
+// durable under the NEW module's hash — the anchor journal replay will
+// restore from — and only then does the candidate become the host.
+func (a *authority) promote(t uint64) {
+	state := a.host.Snapshot()
+	if err := a.cand.RestoreE(state); err != nil {
+		a.failSoak(a.candHash, fmt.Errorf("boundary restore: %w", err))
+		return
+	}
+	wh, err := a.cand.HashE()
+	if err != nil {
+		a.failSoak(a.candHash, fmt.Errorf("boundary hash: %w", err))
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	err = a.j.PutSnapshot(ctx, a.id, journal.Snapshot{
+		Seq: a.lastSeq, Tick: t, Epoch: a.host.Epoch(), WH: wh,
+		TerrainID: a.host.TerrainID(), State: state,
+	})
+	cancel()
+	if err != nil {
+		// The epoch advanced in state and journal but the module stays — a
+		// loud no-op. The lane retries when the mount serves new bytes.
+		a.failSoak(a.candHash, fmt.Errorf("boundary snapshot: %w", err))
+		return
+	}
+	mSnapshots.Inc()
+	old := a.host
+	a.host, a.cand = a.cand, nil
+	old.close()
+	prev := a.moduleHash
+	a.moduleHash = a.candHash
+	a.mu.Lock()
+	// The ring entry for the boundary tick and any cached snapshot line
+	// were computed by the old module; re-anchor both.
+	a.ring[t%hashRingTicks] = ringEntry{tick: t, wh: wh}
+	a.snapCache = snapCacheEntry{}
+	a.mu.Unlock()
+	a.eventsSinceSnap = 0
+	a.lastSnapAt = time.Now()
+	log.Printf("park %s: epoch %d — module %s live (was %s), wh %016x", a.name, a.host.Epoch(), a.moduleHash, prev, wh)
+	mEpochSwaps.WithLabelValues("committed").Inc()
+}
+
 func parkIDFor(name string) int64 {
 	f := fnv.New64a()
 	// The generation tag versions every park's journal lineage at once: a
@@ -258,17 +440,16 @@ func parkIDFor(name string) int64 {
 }
 
 // setTerrain loads a blob into the host and caches its identity for the
-// welcome/snapshot lines.
+// welcome/snapshot lines (and the bytes for soak candidates).
 func (a *authority) setTerrain(blob []byte) error {
-	schema, w, h, err := terrainHeaderFields(blob)
-	if err != nil {
+	if _, _, _, err := terrainHeaderFields(blob); err != nil {
 		return err
 	}
 	if err := a.host.SetTerrain(blob); err != nil {
 		return err
 	}
 	a.terrainHex = fmt.Sprintf("%016x", terrainID(blob))
-	a.terrainW, a.terrainH, a.terrainSchemaCurrent = w, h, schema
+	a.terrainBlob = blob
 	return nil
 }
 
@@ -283,6 +464,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 	}
 	a := &authority{
 		name: name, id: parkIDFor(name), host: host, j: j, mods: mods,
+		moduleHash: displayHash(module),
 		subs:       map[*session]bool{},
 		seen:       map[string]struct{}{},
 		attach:     make(chan attachReq),
@@ -447,6 +629,9 @@ func (a *authority) run() {
 	for {
 		select {
 		case <-a.stop:
+			if a.cand != nil {
+				a.cand.close()
+			}
 			a.host.close()
 			return
 		case req := <-a.attach:
@@ -468,8 +653,11 @@ func (a *authority) tickOnce() {
 		a.stageSystem(evDayReset, p[:])
 	}
 
+	prelude := a.swapPrelude()
+	committing := len(prelude) > 0
+
 	a.mu.Lock()
-	staged := a.staged
+	staged := append(prelude, a.staged...)
 	a.staged = nil
 	a.mu.Unlock()
 
@@ -494,6 +682,16 @@ func (a *authority) tickOnce() {
 				a.name, in.actor, in.kind, in.intentID, rejectReasonName(code), code)
 			mIntentsRejected.WithLabelValues(rejectReasonName(code)).Inc()
 			continue
+		}
+		// Feed the accepted event to the soaking candidate: a module that
+		// cannot replay the live journal must never be promoted.
+		if a.cand != nil {
+			ccode, cerr := a.cand.ApplyE(encodeEvent(in.kind, in.payload))
+			if cerr != nil {
+				a.failSoak(a.candHash, fmt.Errorf("apply trap: %w", cerr))
+			} else if ccode != 0 {
+				a.failSoak(a.candHash, fmt.Errorf("rejected kind %d (code %d) the live module accepted", in.kind, ccode))
+			}
 		}
 		accepted = append(accepted, journal.Event{
 			Tick: tick, Epoch: epoch, Kind: in.kind,
@@ -532,12 +730,21 @@ func (a *authority) tickOnce() {
 	}
 
 	a.host.Step()
+	if a.cand != nil {
+		if err := a.cand.StepE(); err != nil {
+			a.failSoak(a.candHash, fmt.Errorf("step trap: %w", err))
+		}
+	}
 	t := a.host.Tick()
 	wh := a.host.Hash()
 	a.mu.Lock()
 	a.ring[t%hashRingTicks] = ringEntry{tick: t, wh: wh}
 	a.ringHead = t
 	a.mu.Unlock()
+
+	if committing && a.cand != nil {
+		a.promote(t)
+	}
 
 	if a.eventsSinceSnap >= snapshotEvery || (a.eventsSinceSnap > 0 && time.Since(a.lastSnapAt) > snapshotMaxAge) {
 		a.eventsSinceSnap = 0
@@ -573,11 +780,11 @@ func (a *authority) handleAttach(req attachReq) attachResult {
 		mCatchup.WithLabelValues("resync").Inc()
 		return attachResult{}
 	}
+	// The terrain hex is the only terrain fact on the wire: dimensions and
+	// schema live in the content-addressed blob every consumer fetches.
 	welcome, _ := json.Marshal(map[string]any{
 		"type": "welcome", "park": a.name, "role": s.role, "epoch": a.host.Epoch(),
-		"seq": a.lastSeq, "tick": a.host.Tick(),
-		"terrain": a.terrainHex, "terrain_schema": a.terrainSchemaCurrent,
-		"w": a.terrainW, "h": a.terrainH,
+		"seq": a.lastSeq, "tick": a.host.Tick(), "terrain": a.terrainHex,
 	})
 	res := attachResult{
 		welcome: append(welcome, '\n'),

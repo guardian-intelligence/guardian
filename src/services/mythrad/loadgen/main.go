@@ -256,6 +256,24 @@ func (r *replica) ensureTerrain(hex string, fetch func(hex string) ([]byte, erro
 	return true
 }
 
+// reload swaps the replica onto new module bytes (an epoch_advance landed
+// in the stream). The terrain buffer died with the old instance, so the
+// terrain identity resets and the next snapshot's ensureTerrain refetches;
+// valid=false makes the verifier's check ticker request that snapshot.
+func (r *replica) reload(module []byte) error {
+	nr, err := newReplica(module)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rt.Close(context.Background())
+	r.rt, r.mem, r.ioPtr, r.terrainPtr, r.f = nr.rt, nr.mem, nr.ioPtr, nr.terrainPtr, nr.f
+	r.terrainHex = ""
+	r.valid = false
+	return nil
+}
+
 func (r *replica) restore(state []byte, seq int64) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -369,22 +387,52 @@ type bot struct {
 
 	seq       int64
 	sinceTick uint64
-	dims      atomic.Uint32 // w<<16 | h from the welcome line
+	dims      atomic.Uint32 // w<<16 | h, decoded from the terrain blob
 	intentID  atomic.Uint64
 	pending   sync.Map // id -> time.Time
 	sub       string
+	moduleURL string
+}
+
+// terrainDims caches w<<16|h per terrain hex process-wide, so the fleet
+// decodes each artifact's header once instead of per bot.
+var terrainDims sync.Map
+
+func (b *bot) loadDims(hex string) {
+	if hex == "" {
+		return
+	}
+	if v, ok := terrainDims.Load(hex); ok {
+		b.dims.Store(v.(uint32))
+		return
+	}
+	blob, err := b.fetchTerrain(hex)
+	if err != nil || len(blob) < 12 {
+		return
+	}
+	d := uint32(binary.LittleEndian.Uint16(blob[8:10]))<<16 | uint32(binary.LittleEndian.Uint16(blob[10:12]))
+	terrainDims.Store(hex, d)
+	b.dims.Store(d)
 }
 
 func (b *bot) fetchTerrain(hex string) ([]byte, error) {
-	resp, err := http.Get(b.terrainBase + hex)
+	return fetchBytes(b.terrainBase + hex)
+}
+
+func fetchBytes(url string) ([]byte, error) {
+	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("terrain %s: HTTP %d", hex, resp.StatusCode)
+		return nil, fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || len(body) < 8 {
+		return nil, fmt.Errorf("%s: %v (%d bytes)", url, err, len(body))
+	}
+	return body, nil
 }
 
 // errLog rate-limits connect-error logging to one line per few seconds
@@ -574,8 +622,6 @@ func (b *bot) runOnce(ctx context.Context) error {
 			Epoch   uint32 `json:"epoch"`
 			WH      string `json:"wh"`
 			Terrain string `json:"terrain"`
-			W       uint32 `json:"w"`
-			H       uint32 `json:"h"`
 			Reason  uint32 `json:"reason"`
 		}
 		if json.Unmarshal(sc.Bytes(), &m) != nil {
@@ -583,7 +629,7 @@ func (b *bot) runOnce(ctx context.Context) error {
 		}
 		switch m.Type {
 		case "welcome":
-			b.dims.Store(m.W<<16 | m.H&0xFFFF)
+			b.loadDims(m.Terrain)
 			if !joined {
 				joined = true
 				present.Store(true)
@@ -605,6 +651,17 @@ func (b *bot) runOnce(ctx context.Context) error {
 			b.sinceTick = m.Tick
 			if b.verifier {
 				b.rep.applyAt(m.Tick, m.Seq, m.Kind, m.P)
+				// An epoch boundary: follow the swap the way clients do —
+				// refetch the module, rebuild, resync via the check ticker.
+				if m.Kind == 6 {
+					if mod, err := fetchBytes(b.moduleURL); err != nil {
+						log.Printf("bot %d: module refetch failed: %v", b.idx, err)
+					} else if err := b.rep.reload(mod); err != nil {
+						log.Printf("bot %d: module reload failed: %v", b.idx, err)
+					} else {
+						log.Printf("bot %d: park module swapped at seq %d", b.idx, m.Seq)
+					}
+				}
 			}
 			if m.Actor == b.sub {
 				if v, ok := b.pending.LoadAndDelete(m.Intent); ok {
@@ -644,14 +701,9 @@ func main() {
 		secret:   strings.TrimSpace(string(secret)),
 	}
 
-	resp, err := http.Get(parkWasm)
+	module, err := fetchBytes(parkWasm)
 	if err != nil {
 		log.Fatalf("fetch park module: %v", err)
-	}
-	module, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil || len(module) < 8 {
-		log.Fatalf("park module: %v (%d bytes)", err, len(module))
 	}
 
 	go pushMetrics(importURL)
@@ -684,6 +736,7 @@ func main() {
 			terrainBase: strings.TrimSuffix(sessionURL, "/session") + "/terrain/",
 			toks:        toks,
 			actSec:      actSec, checkSec: checkSec,
+			moduleURL: parkWasm,
 		}
 		wg.Add(1)
 		go func() {
