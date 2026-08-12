@@ -24,7 +24,6 @@ import * as v from "valibot";
 type Wasm = any;
 
 const TICK_MS = 1000 / 24;
-const TARGET_LAG_TICKS = 6; // replica trails server-now by 250ms
 const RING_DEPTH = 10; // one snapshot per second of rollback depth
 const EV_JOIN = 1;
 const EV_CHECK_IN = 3;
@@ -158,12 +157,10 @@ export function startGame(): void {
   let strikes = 0;
   let resyncing = false;
 
-  // clock discipline
-  let tickMs = TICK_MS;
-  let acc = 0;
-  let lastFrame = 0;
-  let serverTick = 0; // from last verdict
-  let serverTickAt = 0; // performance.now() at that verdict
+  // Clock discipline lives in the client module (mythra_sim_clock): the
+  // page feeds verdict samples and obeys per-frame step directives. The
+  // local rtt EWMA below is HUD-only.
+  const STEP_BUDGET_US = 8000; // frame CPU the clock may spend stepping
   let rttMs = 100;
 
   // prediction overlay: own intents awaiting their journal event
@@ -392,9 +389,8 @@ export function startGame(): void {
 
   function onVerdict(m: any) {
     rttMs = 0.8 * rttMs + 0.2 * Math.max(1, Date.now() - m.ct);
-    serverTick = m.now + rttMs / 2 / TICK_MS;
-    serverTickAt = performance.now();
     $("rtt").textContent = `${rttMs.toFixed(0)}ms`;
+    smoother?.clock_sample(BigInt(m.ct), BigInt(Date.now()), BigInt(m.now));
     // Backstop for a missed epoch_advance (attached mid-boundary): the
     // verdict names the server's park module; disagreement means swap.
     if (m.pw && parkHash && m.pw !== parkHash && !pendingSim) {
@@ -485,8 +481,8 @@ export function startGame(): void {
       logLine(
         `welcome: ${role}, park ${m.park}, epoch ${m.epoch}, journal seq ${m.seq}, tick ${m.tick}`,
       );
-      serverTick = m.tick;
-      serverTickAt = performance.now();
+      // the welcome is the clock's first sample (rtt unknown: same-ms echo)
+      smoother?.clock_sample(BigInt(Date.now()), BigInt(Date.now()), BigInt(m.tick));
       await ensureTerrain(m.terrain);
     } else if (m.type === "snapshot") {
       if (pendingSim) {
@@ -524,6 +520,7 @@ export function startGame(): void {
       hashRing.clear();
       hashRing.set(simTick(), simHashHex());
       resyncing = false;
+      smoother?.clock_reset(BigInt(m.tick), BigInt(Date.now()));
       const local = simHashHex();
       const okTxt = local === m.wh ? "✓" : "✗";
       $("world").textContent = okTxt;
@@ -746,27 +743,19 @@ export function startGame(): void {
   }
 
   // ---- the local tick loop ----
-  function targetTick(now: number): number {
-    if (!serverTickAt) return simTick();
-    return serverTick + (now - serverTickAt) / TICK_MS - TARGET_LAG_TICKS;
-  }
-
-  function pump(now: number) {
-    const dt = Math.min(250, now - lastFrame);
-    lastFrame = now;
-    if (!sim) return;
-    acc += dt;
-    const target = targetTick(now);
-    const behind = target - simTick();
-    // Slew, never jump: ±2% tick duration until converged.
-    tickMs = TICK_MS * (behind > 1 ? 0.98 : behind < -1 ? 1.02 : 1);
-    let budget = behind > 48 ? 2000 : 4; // headless fast-forward when far behind
-    while (acc >= tickMs && simTick() < target && budget-- > 0) {
-      acc -= tickMs;
+  // The clock module owns all timing policy (lock, fast-forward,
+  // snapshot-beats-stepping); this loop only executes its directive.
+  function pump() {
+    if (!sim || !smoother) return;
+    const d = smoother.clock_frame(BigInt(Date.now()), sim.sim_tick(), STEP_BUDGET_US) as number;
+    if (d & 0x10000) {
+      requestResync("clock: beyond the recovery window");
+    }
+    let steps = d & 0xffff;
+    while (steps-- > 0) {
       stepOnce();
       applyReady();
     }
-    if (acc > 4 * tickMs) acc = 4 * tickMs;
     applyReady();
   }
 
@@ -1075,7 +1064,7 @@ export function startGame(): void {
   const prevPos = new Map<string, [number, number]>();
   function frame(now: number) {
     requestAnimationFrame(frame);
-    pump(now);
+    pump();
     if (!sim) return;
     const ctx = canvas.getContext("2d")!;
     ctx.imageSmoothingEnabled = false;
@@ -1089,7 +1078,7 @@ export function startGame(): void {
     const len = sim.sim_view();
     const view = new DataView(sim.memory.buffer, sim.io_buf(), len);
     const n = view.getUint32(0, true);
-    const alpha = Math.min(1.25, Math.max(0, acc / tickMs));
+    const alpha = (smoother?.clock_phase() ?? 0) / Q16;
     const names: string[] = [];
     const dogs: DogView[] = [];
     let mine: DogView | null = null;
@@ -1346,9 +1335,6 @@ export function startGame(): void {
     }
   }
 
-  requestAnimationFrame((t) => {
-    lastFrame = t;
-    requestAnimationFrame(frame);
-  });
+  requestAnimationFrame(frame);
   void boot();
 }

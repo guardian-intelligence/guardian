@@ -123,13 +123,30 @@ rust_shared_library(
     ],
 )
 
+rust_library(
+    name = "clock",
+    srcs = ["clock/src/lib.rs"],
+    crate_name = "mythra_sim_clock",
+    edition = "2024",
+    visibility = ["//visibility:private"],
+)
+
+rust_test(
+    name = "clock_test",
+    crate = ":clock",
+    edition = "2024",
+)
+
 rust_shared_library(
     name = "client_cdylib",
     srcs = ["client/src/lib.rs"],
     crate_name = "mythra_sim_client",
     edition = "2024",
     target_compatible_with = ["@platforms//cpu:wasm32"],
-    deps = [":core"],
+    deps = [
+        ":clock",
+        ":core",
+    ],
 )
 
 wasm_module(
@@ -175,10 +192,12 @@ sh_test(
         "nav/src/lib.rs",
         "server/src/lib.rs",
         "client/src/lib.rs",
+        "clock/src/lib.rs",
         "park/src/lib.rs",
     ]],
     data = [
         "client/src/lib.rs",
+        "clock/src/lib.rs",
         "core/src/lib.rs",
         "nav/src/lib.rs",
         "park/src/lib.rs",
