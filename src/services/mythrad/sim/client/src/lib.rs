@@ -72,6 +72,16 @@ pub extern "C" fn clock_state() -> u32 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn clock_error_q16(now_ms: u64, replica_tick: u64) -> i64 {
+    clock().error_q16(now_ms, replica_tick)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn clock_rtt_ms() -> u32 {
+    (clock().rtt_ms_q16() >> 16) as u32
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn frame_cap() -> u32 {
     MAX_DOGS as u32
 }
