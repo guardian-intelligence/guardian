@@ -849,20 +849,34 @@ export function startGame(): void {
     dragSamples.push({ t: now, dx, dy });
     while (dragSamples.length && now - dragSamples[0]!.t > 100) dragSamples.shift();
   });
+  // Only motion within the last 100ms of the gesture speaks for the
+  // release, and only above a flick threshold: a drag that slowed or
+  // paused before lifting is a placement and stays planted (the same
+  // discrimination UIPanGestureRecognizer applies before a scroll view
+  // coasts). ~0.35 canvas-px/ms ≈ a deliberate flick at our scale.
+  const FLICK_MIN = 0.35;
   const endDrag = () => {
     if (!dragging) return;
     dragging = false;
-    if (dragMoved && dragSamples.length >= 2) {
-      const span = performance.now() - dragSamples[0]!.t;
-      if (span > 1) {
-        let sx = 0;
-        let sy = 0;
-        for (const s of dragSamples) {
-          sx += s.dx;
-          sy += s.dy;
+    if (dragMoved) {
+      const now = performance.now();
+      const recent = dragSamples.filter((s) => now - s.t <= 100);
+      if (recent.length >= 2) {
+        const span = now - recent[0]!.t;
+        if (span > 1) {
+          let sx = 0;
+          let sy = 0;
+          for (const s of recent) {
+            sx += s.dx;
+            sy += s.dy;
+          }
+          const vx = -sx / span;
+          const vy = -sy / span;
+          if (Math.hypot(vx, vy) >= FLICK_MIN) {
+            camV[0] = vx;
+            camV[1] = vy;
+          }
         }
-        camV[0] = -sx / span;
-        camV[1] = -sy / span;
       }
     }
     dragSamples.length = 0;
