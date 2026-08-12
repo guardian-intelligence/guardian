@@ -391,6 +391,7 @@ export function startGame(): void {
     rttMs = 0.8 * rttMs + 0.2 * Math.max(1, Date.now() - m.ct);
     $("rtt").textContent = `${rttMs.toFixed(0)}ms`;
     smoother?.clock_sample(BigInt(m.ct), BigInt(Date.now()), BigInt(m.now));
+    lastVerdictTxt = `${m.ok === undefined ? "unknown" : m.ok ? "ok ✓" : "MISMATCH ✗"} @tick ${m.tick} · ${Date.now() - m.ct}ms round trip`;
     // Backstop for a missed epoch_advance (attached mid-boundary): the
     // verdict names the server's park module; disagreement means swap.
     if (m.pw && parkHash && m.pw !== parkHash && !pendingSim) {
@@ -742,6 +743,59 @@ export function startGame(): void {
     }
   }
 
+  // ---- dev-only debug panel: live clock truth + desync injection ----
+  // "Freeze" starves step execution (the clock still observes and
+  // escalates), so a growing deficit — and the FastForward or
+  // snapshot-required recovery after resume — is watchable in real time.
+  const CLOCK_STATES = ["acquiring", "locked", "fast-forward", "snapshot-required"];
+  let debugFreezeUntil = 0;
+  let lastVerdictTxt = "—";
+  const stepsFrozen = () => Date.now() < debugFreezeUntil;
+  const debugPanel = import.meta.env?.DEV ? buildDebugPanel() : null;
+  function buildDebugPanel(): HTMLElement {
+    const p = document.createElement("div");
+    p.style.cssText =
+      "position:fixed;bottom:8px;right:8px;background:#161a21ee;color:#f4f1ea;" +
+      "font:12px ui-monospace,monospace;padding:10px 12px;border:1px solid #333;" +
+      "border-radius:8px;z-index:9;min-width:240px";
+    p.innerHTML = `<div style="opacity:.6;margin-bottom:6px">dev debug — clock</div>
+      <div id="dbg-clock">clock —</div>
+      <div id="dbg-desync">desync —</div>
+      <div id="dbg-verdict">verdict —</div>
+      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+        <button id="dbg-check">check now</button>
+        <button id="dbg-freeze8">freeze 8s</button>
+        <button id="dbg-freeze40">freeze 40s</button>
+        <button id="dbg-resume">resume</button>
+      </div>`;
+    document.body.appendChild(p);
+    (p.querySelector("#dbg-check") as HTMLButtonElement).onclick = () => {
+      lastVerdictTxt = "check sent…";
+      sendCheck();
+    };
+    (p.querySelector("#dbg-freeze8") as HTMLButtonElement).onclick = () => {
+      debugFreezeUntil = Date.now() + 8000;
+    };
+    (p.querySelector("#dbg-freeze40") as HTMLButtonElement).onclick = () => {
+      debugFreezeUntil = Date.now() + 40000; // past the ring: watch the
+      // clock give up on stepping and demand a snapshot
+    };
+    (p.querySelector("#dbg-resume") as HTMLButtonElement).onclick = () => {
+      debugFreezeUntil = 0;
+    };
+    return p;
+  }
+  function updateDebugPanel() {
+    if (!debugPanel || !sim || !smoother?.clock_error_q16) return;
+    const err = Number(smoother.clock_error_q16(BigInt(Date.now()), sim.sim_tick())) / Q16;
+    const st = CLOCK_STATES[smoother.clock_state()] ?? "?";
+    $("dbg-clock").textContent =
+      `clock ${st}${stepsFrozen() ? " (frozen)" : ""} · rtt ${smoother.clock_rtt_ms()}ms`;
+    $("dbg-desync").textContent =
+      `desync ${err.toFixed(1)} ticks (${(err / 24).toFixed(2)}s)`;
+    $("dbg-verdict").textContent = `verdict ${lastVerdictTxt}`;
+  }
+
   // ---- the local tick loop ----
   // The clock module owns all timing policy (lock, fast-forward,
   // snapshot-beats-stepping); this loop only executes its directive.
@@ -751,7 +805,7 @@ export function startGame(): void {
     if (d & 0x10000) {
       requestResync("clock: beyond the recovery window");
     }
-    let steps = d & 0xffff;
+    let steps = stepsFrozen() ? 0 : d & 0xffff;
     while (steps-- > 0) {
       stepOnce();
       applyReady();
@@ -1065,6 +1119,7 @@ export function startGame(): void {
   function frame(now: number) {
     requestAnimationFrame(frame);
     pump();
+    updateDebugPanel();
     if (!sim) return;
     const ctx = canvas.getContext("2d")!;
     ctx.imageSmoothingEnabled = false;

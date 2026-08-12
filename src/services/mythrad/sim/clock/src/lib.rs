@@ -194,6 +194,15 @@ impl Clock {
     pub fn phase_q16(&self) -> u32 {
         (self.frac_q16.clamp(0, ONE - 1)) as u32
     }
+
+    /// The current phase error in Q16 ticks (positive = replica behind
+    /// target). Pure read for diagnostics; no state change.
+    pub fn error_q16(&self, now_ms: u64, replica_tick: u64) -> i64 {
+        if self.state == State::Acquiring {
+            return 0;
+        }
+        self.target_q16(now_ms) - (replica_tick as i64) * ONE
+    }
 }
 
 #[cfg(test)]
