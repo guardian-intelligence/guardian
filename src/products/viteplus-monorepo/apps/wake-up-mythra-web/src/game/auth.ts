@@ -7,7 +7,11 @@
 // resumes silently within the realm's session window. The client layer is
 // UX only: enforcement is the /session mint on the server.
 
-const ISSUER = "https://auth.wakeupmythra.com/realms/wakeupmythra.com";
+// The dev runner points this at the local issuer (scripts/wum-dev.sh);
+// production builds carry the realm.
+const ISSUER =
+  (import.meta.env?.VITE_OIDC_ISSUER as string | undefined) ??
+  "https://auth.wakeupmythra.com/realms/wakeupmythra.com";
 const CLIENT_ID = "wake-up-mythra";
 const AUTH_URL = `${ISSUER}/protocol/openid-connect/auth`;
 const TOKEN_URL = `${ISSUER}/protocol/openid-connect/token`;
