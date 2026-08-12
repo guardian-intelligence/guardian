@@ -50,7 +50,7 @@ DATABASE_URL="$DSN" \
   OIDC_ISSUER="$ISSUER" \
   BEHAVIOR_DIR="$ROOT/src/services/mythrad/behaviors" \
   ASSET_DIR="$ROOT/src/services/mythrad/assets" \
-  PUBLIC_ADDR="127.0.0.1:4433" \
+  PUBLIC_ADDR="${WUM_DEV_PUBLIC_ADDR:-127.0.0.1:4433}" \
   "$ROOT/$MYTHRAD" &
 PIDS+=($!)
 

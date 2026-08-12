@@ -37,6 +37,30 @@ The dev issuer honors the `client_credentials` grant for any client id, so
 loadgen's real admission path (`azp=mythra-loadgen` + `?bot=<n>` subject
 suffixes) works locally without secrets.
 
+## Degradation harness
+
+`netsim` is a dev-time UDP impairment proxy between the browser's
+WebTransport dial and mythrad's QUIC listener. Chrome DevTools network
+throttling does not touch QUIC, so this proxy is the only honest way to
+degrade the game path. It simulates latency/jitter, packet loss, subway
+tunnels (total silence), tower switches (path migration — the server
+sees the connection arrive from a new source port), and interface
+teardown (`/sever`). Jitter and loss draw from a seeded generator so
+scenarios replay identically.
+
+```sh
+bazelisk run //src/services/mythrad/netsim &
+WUM_DEV_PUBLIC_ADDR=127.0.0.1:14433 scripts/wum-dev.sh   # dial via proxy
+curl -X POST 'http://127.0.0.1:14434/impair?latency_ms=300&jitter_ms=40&loss_pct=5&seed=7'
+curl -X POST 'http://127.0.0.1:14434/silence?ms=8000'
+curl -X POST 'http://127.0.0.1:14434/migrate'
+```
+
+`apps/wake-up-mythra-web/e2e/degradation.mjs` drives a full scenario
+headlessly and asserts the client's behavior under each impairment —
+including a deliberately RED-encoded assertion for the known
+stuck-behind-after-CPU-stall crawl that the sim/clock module will flip.
+
 ## Database maintenance
 
 ```sh
