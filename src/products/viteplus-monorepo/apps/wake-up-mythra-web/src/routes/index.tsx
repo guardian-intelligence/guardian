@@ -49,6 +49,9 @@ function Page() {
         <button id="checkin" style={{ display: "none" }}>
           Check in
         </button>
+        <button id="boost" style={{ display: "none", touchAction: "none" }}>
+          Hold to zoom 🐕💨
+        </button>
       </div>
       <canvas id="grid" width={640} height={360}></canvas>
       <div className="who" id="who"></div>

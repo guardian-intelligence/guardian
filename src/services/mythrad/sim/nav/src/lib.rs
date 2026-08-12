@@ -325,7 +325,8 @@ enum Axis {
 
 /// One tick of steering toward a waypoint: capped-velocity advance,
 /// decomposed per axis so each sub-move crosses at most one cell boundary
-/// (speeds are far below one cell per tick). Boundary crossings ask
+/// (speeds are far below one cell per tick; `boosted` doubles them and is
+/// bounded by the same static assertion). Boundary crossings ask
 /// can_cross — the same rule pathfinding used — and the surface flips
 /// exactly when the crossing enters the waypoint's cell on the waypoint's
 /// surface.
@@ -343,10 +344,11 @@ pub fn step_toward(
     y: &mut i32,
     on_deck: &mut bool,
     waypoint: Node,
+    boosted: bool,
 ) -> Step {
     const _: () = assert!(
-        WALK_SPEED <= HALF,
-        "an axis sub-move must not span two boundaries"
+        2 * WALK_SPEED <= HALF,
+        "a boosted axis sub-move must not span two boundaries"
     );
     let (tx, ty) = center(t, waypoint);
     let (dx, dy) = ((tx - *x) as i64, (ty - *y) as i64);
@@ -356,7 +358,8 @@ pub fn step_toward(
     }
     let here = t.idx(*x >> 16, *y >> 16);
     let swimming = !*on_deck && t.class(here) == SWIM;
-    let speed = if swimming { SWIM_SPEED } else { WALK_SPEED } as i64;
+    let base = if swimming { SWIM_SPEED } else { WALK_SPEED } as i64;
+    let speed = if boosted { 2 * base } else { base };
     let step = if dist < speed { dist } else { speed };
     let sx = (dx * step / dist) as i32;
     let sy = (dy * step / dist) as i32;
@@ -654,7 +657,7 @@ mod tests {
         let wp = Node::ground(t.idx(4, 2));
         let mut arrived = false;
         for _ in 0..400 {
-            match step_toward(&t, &mut x, &mut y, &mut on_deck, wp) {
+            match step_toward(&t, &mut x, &mut y, &mut on_deck, wp, false) {
                 Step::Arrived => {
                     arrived = true;
                     break;
@@ -680,7 +683,7 @@ mod tests {
         let wp = Node::ground(t.idx(13, 13));
         let mut blocked = false;
         for _ in 0..200 {
-            match step_toward(&t, &mut x, &mut y, &mut on_deck, wp) {
+            match step_toward(&t, &mut x, &mut y, &mut on_deck, wp, false) {
                 Step::Blocked => {
                     blocked = true;
                     break;
@@ -702,7 +705,7 @@ mod tests {
         let mut on_deck = false;
         let wp = Node::deck(t.idx(5, 4));
         for _ in 0..100 {
-            if step_toward(&t, &mut x, &mut y, &mut on_deck, wp) == Step::Arrived {
+            if step_toward(&t, &mut x, &mut y, &mut on_deck, wp, false) == Step::Arrived {
                 break;
             }
         }
@@ -738,7 +741,7 @@ mod tests {
                 waypoint = first_waypoint(&t, &mut s, here, target);
                 assert_ne!(waypoint, NONE);
             }
-            match step_toward(&t, &mut x, &mut y, &mut on_deck, waypoint) {
+            match step_toward(&t, &mut x, &mut y, &mut on_deck, waypoint, false) {
                 Step::Arrived => {
                     if waypoint == target {
                         break;

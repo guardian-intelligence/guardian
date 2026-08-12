@@ -26,6 +26,7 @@ const (
 	evDayReset     = 5
 	evEpochAdvance = 6
 	evTerrainSet   = 7
+	evBoostSet     = 8
 )
 
 // dogIDFor derives the actor's dog id: the binding between OIDC subject
@@ -54,7 +55,7 @@ type session struct {
 // the session's own dog for kinds that carry one.
 func intentBoundToActor(kind uint16, payload []byte, dogID uint64) bool {
 	switch kind {
-	case evJoin, evLeave, evCheckIn, evMoveTo:
+	case evJoin, evLeave, evCheckIn, evMoveTo, evBoostSet:
 		return len(payload) >= 8 && binary.LittleEndian.Uint64(payload) == dogID
 	default:
 		return false // system kinds never arrive from sessions
@@ -279,6 +280,8 @@ func rejectReasonName(code uint32) string {
 		return "target"
 	case 9:
 		return "terrain"
+	case 10:
+		return "noop"
 	case rejectReadOnly:
 		return "read_only"
 	case rejectNotYours:
