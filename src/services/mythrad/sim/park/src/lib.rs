@@ -46,6 +46,9 @@
 //!   6 epoch_advance { epoch u32, module_hash u64 }  system event
 //!   7 terrain_set   { schema u32, terrain_id u64 }  system event; the
 //!                                         loaded blob must already match
+//!   8 boost_set     { id u64, on u8 }     held-button 2x speed; only
+//!                                         transitions journal (a no-op
+//!                                         set rejects with ERR_NOOP)
 //!
 //! Snapshot encoding (canonical; dogs strictly sorted by id; park energy
 //! is cumulative — departed dogs' contributions persist — so it is state,
@@ -55,7 +58,7 @@
 //!   { id u64, x i32, y i32, energy u32, checked_in_day u32, target u16,
 //!     waypoint u16, flags u8, pad u8 }
 //!   x, y are Q16.16 park-cell coordinates; target/waypoint are nav nodes
-//!   (0xFFFF = none); flags bit 0 = standing on a deck.
+//!   (0xFFFF = none); flags bit 0 = standing on a deck, bit 1 = boosting.
 #![cfg_attr(not(test), no_std)]
 
 use mythra_sim_core::det_rand;
@@ -82,6 +85,7 @@ pub const EV_MOVE_TO: u16 = 4;
 pub const EV_DAY_RESET: u16 = 5;
 pub const EV_EPOCH_ADVANCE: u16 = 6;
 pub const EV_TERRAIN_SET: u16 = 7;
+pub const EV_BOOST_SET: u16 = 8;
 
 pub const OK: u32 = 0;
 pub const ERR_ENCODING: u32 = 1;
@@ -93,6 +97,7 @@ pub const ERR_KIND: u32 = 6;
 pub const ERR_EPOCH: u32 = 7;
 pub const ERR_TARGET: u32 = 8;
 pub const ERR_TERRAIN: u32 = 9;
+pub const ERR_NOOP: u32 = 10;
 
 const CHECK_IN_ENERGY: u32 = 10;
 /// A standing dog rolls to wander once per this many ticks on average
@@ -100,6 +105,8 @@ const CHECK_IN_ENERGY: u32 = 10;
 const WANDER_ODDS: u32 = 192;
 const WANDER_RANGE: u32 = 8;
 const FLAG_DECK: u8 = 1;
+const FLAG_BOOST: u8 = 1 << 1;
+const FLAGS_VALID: u8 = FLAG_DECK | FLAG_BOOST;
 
 #[derive(Clone, Copy)]
 struct Dog {
@@ -308,7 +315,8 @@ fn step_dog(p: &mut Park, t: &Terrain, i: usize) {
         d.waypoint = wp.0;
     }
     let mut on_deck = d.flags & FLAG_DECK != 0;
-    let outcome = nav::step_toward(t, &mut d.x, &mut d.y, &mut on_deck, Node(d.waypoint));
+    let boosted = d.flags & FLAG_BOOST != 0;
+    let outcome = nav::step_toward(t, &mut d.x, &mut d.y, &mut on_deck, Node(d.waypoint), boosted);
     d.flags = if on_deck {
         d.flags | FLAG_DECK
     } else {
@@ -425,6 +433,32 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             };
             p.dogs[i].target = node.0;
             p.dogs[i].waypoint = NONE.0;
+            OK
+        }
+        EV_BOOST_SET => {
+            if len != body + 9 {
+                return ERR_ENCODING;
+            }
+            let (id, on) = {
+                let buf = &io()[..len];
+                let mut b8 = [0u8; 8];
+                b8.copy_from_slice(&buf[body..body + 8]);
+                (u64::from_le_bytes(b8), buf[body + 8])
+            };
+            if on > 1 {
+                return ERR_ENCODING;
+            }
+            let p = park();
+            let Some(i) = find(p, id) else {
+                return ERR_ABSENT;
+            };
+            let cur = p.dogs[i].flags & FLAG_BOOST != 0;
+            if cur == (on == 1) {
+                // Only transitions journal: a resend or a held-button
+                // heartbeat must not mint events.
+                return ERR_NOOP;
+            }
+            p.dogs[i].flags ^= FLAG_BOOST;
             OK
         }
         EV_DAY_RESET => {
@@ -646,7 +680,7 @@ pub extern "C" fn sim_restore(len: u32) -> u32 {
             d.flags & FLAG_DECK != 0,
         );
         if !t.in_bounds(d.x >> 16, d.y >> 16)
-            || d.flags & !FLAG_DECK != 0
+            || d.flags & !FLAGS_VALID != 0
             || !t.exists(node)
             || (d.target != NONE.0 && !t.exists(Node(d.target)))
             || (d.waypoint != NONE.0 && !t.exists(Node(d.waypoint)))
@@ -706,9 +740,9 @@ pub extern "C" fn sim_hash() -> u64 {
 
 /// Presentation projection, never hashed: one 20-byte record per dog —
 /// id u64, x i32, y i32 (Q16.16 cells), flags u8 (bit0 deck, bit1
-/// swimming, bit2 moving), facing u8 (octant, 0=E clockwise), anim u8,
-/// pad u8. Facing and animation are derived here so every renderer shows
-/// the same dog doing the same thing.
+/// swimming, bit2 moving, bit3 boosting), facing u8 (octant, 0=E
+/// clockwise), anim u8, pad u8. Facing and animation are derived here so
+/// every renderer shows the same dog doing the same thing.
 #[unsafe(no_mangle)]
 pub extern "C" fn sim_view() -> u32 {
     let p = park();
@@ -739,6 +773,9 @@ pub extern "C" fn sim_view() -> u32 {
         }
         if moving {
             flags |= 4;
+        }
+        if d.flags & FLAG_BOOST != 0 {
+            flags |= 8;
         }
         let anim = if moving { ((p.tick >> 2) & 3) as u8 } else { 0 };
         buf[at..at + 8].copy_from_slice(&d.id.to_le_bytes());
@@ -859,6 +896,12 @@ mod tests {
         ev(EV_MOVE_TO, &p)
     }
 
+    fn ev_boost(id: u64, on: u8) -> u32 {
+        let mut p = id.to_le_bytes().to_vec();
+        p.push(on);
+        ev(EV_BOOST_SET, &p)
+    }
+
     fn snapshot_vec() -> Vec<u8> {
         let len = sim_snapshot() as usize;
         io()[..len].to_vec()
@@ -889,6 +932,7 @@ mod tests {
                     ev(EV_EPOCH_ADVANCE, &p)
                 }
                 EV_MOVE_TO => ev_move(a, b),
+                EV_BOOST_SET => ev_boost(a, b as u8),
                 _ => ev_id(kind, a),
             };
             assert_eq!(code, OK, "event {kind} at tick {tick}");
@@ -909,8 +953,12 @@ mod tests {
             (5, EV_JOIN, 11, 0),
             (5, EV_CHECK_IN, 7, 0),
             (8, EV_MOVE_TO, 7, far),
+            // a held boost spanning movement, a corner, and its release
+            (10, EV_BOOST_SET, 7, 1),
             (30, EV_CHECK_IN, 3, 0),
             (40, EV_MOVE_TO, 3, deck),
+            (45, EV_BOOST_SET, 3, 1),
+            (70, EV_BOOST_SET, 3, 0),
             (100, EV_LEAVE, 7, 0),
             (240, EV_DAY_RESET, 1, 0),
             (241, EV_CHECK_IN, 3, 0),
@@ -1005,6 +1053,67 @@ mod tests {
     }
 
     #[test]
+    fn boost_doubles_ground_covered() {
+        // Two identical walks along the open south row, one boosted: after
+        // the same tick budget the boosted dog must be measurably ahead —
+        // and exactly at double speed until arrival (WALK_SPEED is exact).
+        let blob = park_blob();
+        let t = Terrain::parse(&blob).unwrap();
+        let start = Node::ground(t.idx(0, 10));
+        let goal = Node::ground(t.idx(5, 10)).0;
+        let run = |boosted: bool| -> i32 {
+            let _g = setup(77);
+            assert_eq!(ev_id(EV_JOIN, 8), OK);
+            {
+                let p = park();
+                let i = find(p, 8).unwrap();
+                let (x, y) = nav::center(&t, start);
+                p.dogs[i].x = x;
+                p.dogs[i].y = y;
+            }
+            if boosted {
+                assert_eq!(ev_boost(8, 1), OK);
+            }
+            assert_eq!(ev_move(8, goal), OK);
+            // 16 ticks: 2 cells unboosted, 4 boosted — neither arrives on
+            // the 5-cell course, so the differential is pure speed.
+            for _ in 0..16 {
+                sim_step();
+            }
+            dog(8).x
+        };
+        let slow = run(false);
+        let fast = run(true);
+        let (sx, _) = nav::center(&t, start);
+        assert_eq!(
+            fast - sx,
+            2 * (slow - sx),
+            "boosted dog should cover exactly double the distance"
+        );
+        assert!(fast > slow);
+    }
+
+    #[test]
+    fn boost_transitions_gate_and_survive_snapshots() {
+        let _g = setup(21);
+        assert_eq!(ev_id(EV_JOIN, 4), OK);
+        assert_eq!(ev_boost(4, 1), OK);
+        assert_eq!(ev_boost(4, 1), ERR_NOOP); // held-button resend
+        let s = snapshot_vec();
+        restore_vec(&s);
+        assert_ne!(dog(4).flags & FLAG_BOOST, 0, "boost must survive restore");
+        assert_eq!(ev_boost(4, 0), OK);
+        assert_eq!(ev_boost(4, 0), ERR_NOOP);
+        assert_eq!(ev_boost(9, 1), ERR_ABSENT);
+        assert_eq!(ev_boost(4, 2), ERR_ENCODING);
+        // an out-of-contract flag bit in a snapshot is refused on restore
+        let mut bad = snapshot_vec();
+        bad[HEADER + 28] |= 0x04;
+        io()[..bad.len()].copy_from_slice(&bad);
+        assert_eq!(sim_restore(bad.len() as u32), 5);
+    }
+
+    #[test]
     fn wander_moves_idle_dogs_deterministically() {
         let _g = setup(1234);
         assert_eq!(ev_id(EV_JOIN, 5), OK);
@@ -1043,6 +1152,9 @@ mod tests {
         // rejected, or first_waypoint would chase stale scratch state
         assert_eq!(ev_move(5, 0x8000), ERR_TARGET);
         assert_eq!(ev_move(6, 0), ERR_ABSENT);
+        assert_eq!(ev_boost(5, 0), ERR_NOOP); // already off
+        assert_eq!(ev_boost(6, 1), ERR_ABSENT);
+        assert_eq!(ev_boost(5, 7), ERR_ENCODING);
         {
             let mut p = 1u32.to_le_bytes().to_vec(); // not > current epoch
             p.extend_from_slice(&0u64.to_le_bytes());

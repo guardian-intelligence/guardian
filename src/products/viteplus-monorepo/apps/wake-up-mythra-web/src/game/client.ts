@@ -30,6 +30,7 @@ const EV_JOIN = 1;
 const EV_CHECK_IN = 3;
 const EV_MOVE_TO = 4;
 const EV_EPOCH_ADVANCE = 6;
+const EV_BOOST_SET = 8;
 const REJECT_PRESENT = 2; // sim ERR_PRESENT
 const REJECT_ABSENT = 3; // sim ERR_ABSENT
 
@@ -45,10 +46,12 @@ const REJECT_TEXT = {
   7: "the park moved on to a new epoch",
   8: "your dog can't stand there",
   9: "the park's terrain is still loading",
+  10: "already doing that", // boost no-transition; usually swallowed below
   100: "spectators can't act — sign in to play",
   101: "that dog isn't yours",
 } as const;
-const RejectCode = v.picklist([1, 2, 3, 4, 5, 6, 7, 8, 9, 100, 101]);
+const RejectCode = v.picklist([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100, 101]);
+const REJECT_NOOP = 10;
 
 // Snapshot layout mirrors the park module ("MYP2"): 60-byte header (day
 // u32 @32, n u32 @36, energy u64 @40), then 30-byte dog records with
@@ -330,7 +333,10 @@ export function startGame(): void {
       diag.events++;
       recentEvents.push(ev);
       pendingIntents.delete(ev.intent);
-      hashRing.set(simTick(), simHashHex());
+      // The ring entry for the current tick stays as stepOnce recorded it:
+      // "state at entry to the tick", the same definition the server's
+      // ring uses. Re-hashing here after applying this tick's events would
+      // poison exactly the entry a same-tick check samples.
       if (ev.kind === EV_EPOCH_ADVANCE && ev.payload.length === 12) {
         // The journaled boundary: ticks after this run on the new module.
         const sum8 = new DataView(ev.payload.buffer, ev.payload.byteOffset).getBigUint64(4, true);
@@ -451,6 +457,21 @@ export function startGame(): void {
     return p;
   }
 
+  // ---- boost: the held-button management action ----
+  // Edge-triggered: press sends on=1, release sends on=0, and the sim
+  // journals only transitions. Release insurance rides every channel a
+  // browser can lose a pointerup on; a disconnect needs none — the
+  // departure staged on disconnect removes the dog, boost bit and all.
+  let boostHeld = false;
+  function setBoost(on: boolean) {
+    if (role !== "player" || boostHeld === on) return;
+    boostHeld = on;
+    const p = new Uint8Array(9);
+    new DataView(p.buffer).setBigUint64(0, myDog, true);
+    p[8] = on ? 1 : 0;
+    sendIntent(EV_BOOST_SET, p);
+  }
+
   async function onLine(m: any) {
     if (m.type === "welcome") {
       role = m.role;
@@ -519,6 +540,9 @@ export function startGame(): void {
       pendingIntents.delete(m.intent);
       if (m.reason === REJECT_PRESENT && it?.kind === EV_JOIN) {
         return; // the dog is already in the park — that IS the joined state
+      }
+      if (m.reason === REJECT_NOOP && it?.kind === EV_BOOST_SET) {
+        return; // resent transition already in effect — that IS the state
       }
       const known = v.safeParse(RejectCode, m.reason);
       logLine(
@@ -901,6 +925,7 @@ export function startGame(): void {
     const onDeck = (dg.flags & 1) !== 0;
     const swimming = (dg.flags & 2) !== 0;
     const moving = (dg.flags & 4) !== 0;
+    const boosting = (dg.flags & 8) !== 0;
     const el = onDeck ? terrain.deck[i]! - 1 : terrain.elev[i]!;
     const [px, py] = worldToPx(dg.xq, dg.yq, el);
     const sx = px - camX;
@@ -910,6 +935,15 @@ export function startGame(): void {
     ctx.beginPath();
     ctx.ellipse(sx, sy + 1, 4, 2, 0, 0, Math.PI * 2);
     ctx.fill();
+    if (boosting) {
+      // dust puffs: the universal cartoon shorthand for "zoom"
+      ctx.fillStyle = "rgba(255,224,138,0.6)";
+      const k = dg.anim % 2 === 0 ? 1 : -1;
+      ctx.beginPath();
+      ctx.ellipse(sx - 6 * k, sy + 1, 2, 1.2, 0, 0, Math.PI * 2);
+      ctx.ellipse(sx + 5 * k, sy + 2, 1.4, 1, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.fillStyle = dg.id === myDog ? "#ffd166" : "#f4f1ea";
     ctx.beginPath();
     if (swimming) {
@@ -1096,6 +1130,7 @@ export function startGame(): void {
     checkin.style.display = role === "player" ? "" : "none";
     checkin.disabled = true; // until the snapshot shows our dog present
     checkin.textContent = "Check in";
+    $("boost").style.display = role === "player" ? "" : "none";
   }
 
   async function onSignInOutcome(outcome: SignInOutcome): Promise<void> {
@@ -1148,6 +1183,18 @@ export function startGame(): void {
       logLine(`park module ${info.parkWasm}, presentation ${info.clientWasm}`);
 
       $("checkin").onclick = () => sendIntent(EV_CHECK_IN, dogPayload());
+      const boostBtn = $("boost");
+      boostBtn.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        setBoost(true);
+      });
+      for (const ev of ["pointerup", "pointercancel", "pointerleave"]) {
+        boostBtn.addEventListener(ev, () => setBoost(false));
+      }
+      window.addEventListener("blur", () => setBoost(false));
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) setBoost(false);
+      });
 
       if (typeof (globalThis as any).WebTransport === "undefined") {
         emitSpan("wum.unsupported", { "wum.feature": "webtransport" });
