@@ -12,10 +12,9 @@
 //   tunnel    8s blackhole: the replica free-runs on its local clock,
 //             late events heal through the rollback ring — tiny deficit,
 //             zero divergence (network death must NOT strand the sim)
-//   cpu-stall 8s frozen main thread: the stuck-behind pathology. The
-//             assertion is RED-encoded: today's client crawls back at
-//             ~0.5 ticks/s and the drill EXPECTS that; when the sim/clock
-//             module lands, flip `crawls` to assert fast recovery.
+//   cpu-stall 8s frozen main thread: the once-stuck-behind pathology.
+//             The sim/clock module's FastForward must recover the whole
+//             deficit within seconds (it once crawled at +0.5 ticks/s).
 //   migrate   tower switch (upstream rebind): relay continues, no resync
 import { chromium } from "playwright";
 
@@ -65,14 +64,13 @@ await page.evaluate(() => {
     /* rAF frozen */
   }
 });
+// give FastForward 3s: the ~190-tick deficit must be fully recovered
 await page.waitForTimeout(3000);
-const c0 = (await probe()).tick;
-await page.waitForTimeout(6000);
-const c1 = (await probe()).tick;
-const catchRate = (c1 - c0) / 6 - 24;
-const crawls = catchRate < 2; // RED today; sim/clock flips this
+const afterStall = await probe();
+const stallDeficit = tunnel.tick + (8 + 3) * 24 - afterStall.tick;
+const recovered = Math.abs(stallDeficit) < 12 && afterStall.world === "✓";
 console.log(
-  `cpu-stall: catch-up rate=+${catchRate.toFixed(1)} t/s ${crawls ? "(crawl confirmed — RED until sim/clock lands)" : "(fast recovery — clock module active)"}`,
+  `cpu-stall: deficit 3s after stall=${stallDeficit} ticks ${recovered ? "(fast recovery — clock module active)" : "(STUCK — clock regression)"}`,
 );
 
 await ctl("/migrate");
@@ -86,7 +84,7 @@ const ok =
   parseInt(laggy.rtt) > 200 &&
   Math.abs(tunnelDeficit) < 48 &&
   tunnel.world === "✓" &&
-  crawls &&
+  recovered &&
   post.checks > laggy.checks &&
   post.mismatches === 0;
 console.log(ok ? "DEGRADATION DRILL OK" : "DEGRADATION DRILL FAILED");
