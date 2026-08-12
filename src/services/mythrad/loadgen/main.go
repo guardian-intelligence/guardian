@@ -740,7 +740,12 @@ func main() {
 	var wg sync.WaitGroup
 	interval := time.Second / time.Duration(max(1, rampRate))
 	for i := 0; i < sessions; i++ {
+		// Single-park runs may target a named park (e.g. the public
+		// park-mythra) instead of the numbered load-park convention.
 		park := fmt.Sprintf("park-%d", i%parksN)
+		if name := envStr("PARK_NAME", ""); name != "" && parksN == 1 {
+			park = name
+		}
 		b := &bot{
 			idx: i, park: park, verifier: i < parksN, rep: reps[i%parksN],
 			sessionURL: sessionURL, targetURL: targetURL,
