@@ -200,11 +200,11 @@ function LetterSignature({ letter }: { readonly letter: Letter }) {
       <div className="mt-16" style={{ marginLeft: "72px" }}>
         <HandwrittenSignature className="block h-auto w-[min(100%,clamp(180px,25vw,252px))] text-[var(--treatment-ink)]" />
         <p
-          aria-label="By Shovon Hasan - Founder, Guardian Intelligence Inc. Est. 2026 Seattle, WA"
+          aria-label="By Shovon Hasan - Founder, Guardian. Est. 2026 Seattle, WA"
           className="mt-3 max-w-[min(100%,clamp(180px,25vw,252px))] text-right font-display text-[clamp(10.5px,0.8vw,12px)] leading-[1.35] tracking-[0.02em] text-[var(--treatment-muted-strong)]"
         >
           <span className="block text-[var(--treatment-ink)]">By Shovon Hasan</span>{" "}
-          <span className="block">Founder, Guardian Intelligence Inc.</span>{" "}
+          <span className="block">Founder, Guardian</span>{" "}
           <span className="block">Est. 2026 · Seattle, WA</span>
         </p>
       </div>

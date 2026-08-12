@@ -38,5 +38,6 @@ export const contact = {
       note: "You would like to work with us.",
     },
   ],
-  mailingAddress: "Guardian Intelligence · Seattle, Washington, USA",
+  mailingAddress:
+    "Guardian Intelligence is operated by Anveio Foundation · Seattle, Washington, USA",
 } as const;

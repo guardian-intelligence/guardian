@@ -69,14 +69,17 @@ function NewsroomFooter() {
     >
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6">
         <div
-          className="whitespace-nowrap py-10 text-[10px] tracking-[0.08em] md:text-[11px] md:tracking-[0.12em]"
+          className="flex flex-wrap items-center justify-between gap-3 py-10 text-[10px] tracking-[0.08em] md:text-[11px] md:tracking-[0.12em]"
           style={{
             fontFamily: "'Geist Mono', ui-monospace, monospace",
             textTransform: "uppercase",
             color: "var(--treatment-muted-faint)",
           }}
         >
-          © 2026 Guardian Intelligence LLC · Seattle, Washington
+          <span>© 2026 Anveio Foundation · Guardian Intelligence · Seattle, Washington</span>
+          <Link to="/legal" className="underline underline-offset-4">
+            Legal identity
+          </Link>
         </div>
       </div>
     </footer>

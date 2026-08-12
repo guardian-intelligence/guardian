@@ -65,6 +65,7 @@ function WorkshopFooter() {
             <FooterLink to="/careers">Careers</FooterLink>
             <FooterLink to="/changelog">Changelog</FooterLink>
             <FooterLink to="/contact">Contact</FooterLink>
+            <FooterLink to="/legal">Legal identity</FooterLink>
           </FooterColumn>
           <FooterColumn heading="Solutions">
             <FooterLink to="/solutions">Overview</FooterLink>
@@ -76,14 +77,14 @@ function WorkshopFooter() {
           </FooterColumn>
         </div>
         <div
-          className="whitespace-nowrap pb-10 text-[10px] tracking-[0.08em] md:text-[11px] md:tracking-[0.12em]"
+          className="pb-10 text-[10px] leading-relaxed tracking-[0.08em] md:text-[11px] md:tracking-[0.12em]"
           style={{
             fontFamily: "'Geist Mono', ui-monospace, monospace",
             textTransform: "uppercase",
             color: "var(--treatment-muted-faint)",
           }}
         >
-          © 2026 Guardian Intelligence LLC · Seattle, Washington
+          © 2026 Anveio Foundation · Guardian Intelligence · Seattle, Washington
         </div>
       </div>
     </footer>

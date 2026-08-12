@@ -462,6 +462,13 @@
   color: #aaa4af;
 }
 
+.postflight-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 20px;
+}
+
 .postflight-nav-cta:hover,
 .postflight-final a:hover,
 .postflight-guardian-button:hover {
