@@ -19,9 +19,17 @@ const TOKEN_URL = `${ISSUER}/protocol/openid-connect/token`;
 export type Provider = "google";
 
 // Storage is reached only inside functions: this module is imported by the
-// SSR bundle, where no Web Storage global exists.
+// SSR bundle, where no Web Storage global exists. Durable identity
+// (tokens, device id) lives in localStorage; in-flight OAuth flow state
+// (state, PKCE verifier, return query) is per-tab in sessionStorage —
+// two windows signing in concurrently must not clobber each other's
+// flow, and the popup/redirect always completes in the tab that started
+// it.
 function store(): Storage {
   return localStorage;
+}
+function flowStore(): Storage {
+  return sessionStorage;
 }
 
 // deviceId is the anonymous spectator's stable pseudonym — the targeting
@@ -48,8 +56,8 @@ async function authRequestURL(provider: Provider): Promise<string> {
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
   const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
-  store().setItem("pkce_verifier", verifier);
-  store().setItem("oauth_state", state);
+  flowStore().setItem("pkce_verifier", verifier);
+  flowStore().setItem("oauth_state", state);
   const q = new URLSearchParams({
     client_id: CLIENT_ID,
     response_type: "code",
@@ -78,7 +86,7 @@ export function beginSignIn(provider: Provider, onDone: (outcome: SignInOutcome)
       // Popup blocked (or a mobile browser that treats it as one): carry
       // the current query through the redirect so ?park= and ?spectate
       // survive the round trip.
-      store().setItem("signin_return", location.search);
+      flowStore().setItem("signin_return", location.search);
       location.assign(url);
       return;
     }
@@ -96,7 +104,7 @@ export function beginSignIn(provider: Provider, onDone: (outcome: SignInOutcome)
         settle({ status: "error", reason: String(e.data.error) });
         return;
       }
-      if (e.data.state !== store().getItem("oauth_state")) {
+      if (e.data.state !== flowStore().getItem("oauth_state")) {
         settle({ status: "error", reason: "state mismatch" });
         return;
       }
@@ -152,11 +160,11 @@ async function exchangeCode(code: string): Promise<SignInOutcome> {
       client_id: CLIENT_ID,
       code,
       redirect_uri: location.origin + "/",
-      code_verifier: store().getItem("pkce_verifier") ?? "",
+      code_verifier: flowStore().getItem("pkce_verifier") ?? "",
     }),
   );
-  store().removeItem("pkce_verifier");
-  store().removeItem("oauth_state");
+  flowStore().removeItem("pkce_verifier");
+  flowStore().removeItem("oauth_state");
   return outcome;
 }
 
@@ -182,16 +190,16 @@ export async function completeSignIn(): Promise<SignInOutcome> {
   ]) {
     q.delete(p);
   }
-  const stored = store().getItem("signin_return");
-  store().removeItem("signin_return");
+  const stored = flowStore().getItem("signin_return");
+  flowStore().removeItem("signin_return");
   const restored = new URLSearchParams(stored ?? "");
   for (const [k, v] of q) restored.set(k, v);
   const search = restored.toString();
   history.replaceState(null, "", location.pathname + (search ? `?${search}` : ""));
 
   if (authError) {
-    store().removeItem("pkce_verifier");
-    store().removeItem("oauth_state");
+    flowStore().removeItem("pkce_verifier");
+    flowStore().removeItem("oauth_state");
     return {
       status: "error",
       reason:
@@ -200,9 +208,9 @@ export async function completeSignIn(): Promise<SignInOutcome> {
           : "sign-in was cancelled",
     };
   }
-  if (!state || state !== store().getItem("oauth_state")) {
-    store().removeItem("pkce_verifier");
-    store().removeItem("oauth_state");
+  if (!state || state !== flowStore().getItem("oauth_state")) {
+    flowStore().removeItem("pkce_verifier");
+    flowStore().removeItem("oauth_state");
     return { status: "error", reason: "sign-in session expired — try again" };
   }
   const outcome = await exchangeCode(code!);
