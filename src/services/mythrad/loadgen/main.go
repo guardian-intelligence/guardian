@@ -538,6 +538,7 @@ func (b *bot) runOnce(ctx context.Context) error {
 	done := make(chan struct{})
 	defer close(done)
 	var present atomic.Bool
+	boosting := false // owned by the act goroutine
 
 	// act at human rate; checks pull from the shared replica
 	go func() {
@@ -551,14 +552,24 @@ func (b *bot) runOnce(ctx context.Context) error {
 				return
 			case <-act.C:
 				// Human-rate intents: mostly movement orders, with enough
-				// leave/join churn to exercise the roster and spawn paths.
+				// leave/join churn to exercise the roster and spawn paths,
+				// and boost toggles so held-button state rides replay,
+				// snapshots, and hash checks under load.
 				switch {
 				case !present.Load():
 					present.Store(true)
+					boosting = false
 					sendIntent(1, myDogPayload())
 				case rand.Intn(10) < 3:
 					present.Store(false)
 					sendIntent(2, myDogPayload())
+				case rand.Intn(10) < 2:
+					boosting = !boosting
+					p := append(myDogPayload(), 0)
+					if boosting {
+						p[8] = 1
+					}
+					sendIntent(8, p)
 				default:
 					dims := b.dims.Load()
 					w, h := dims>>16, dims&0xFFFF
