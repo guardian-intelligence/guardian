@@ -52,8 +52,11 @@ function Page() {
         <button id="boost" style={{ display: "none", touchAction: "none" }}>
           Hold to zoom 🐕💨
         </button>
+        <button id="recenter" style={{ display: "none" }}>
+          ⌖ follow
+        </button>
       </div>
-      <canvas id="grid" width={640} height={360}></canvas>
+      <canvas id="grid" width={640} height={360} style={{ touchAction: "none" }}></canvas>
       <div className="who" id="who"></div>
       <div id="log"></div>
     </OpenFeatureProvider>

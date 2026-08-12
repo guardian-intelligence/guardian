@@ -278,10 +278,73 @@ pub extern "C" fn sim_step() {
     p.tick += 1;
 }
 
+/// While boosted and otherwise idle, a dog patrols the park's primary
+/// bridge: back and forth between the standable ground endpoints of the
+/// first deck span (row-major order, horizontal runs). Derived purely
+/// from terrain data — no fixture knowledge — and stateless: the leg
+/// target is the reachable endpoint with the greater PATH cost under the
+/// same deterministic A* movement runs on, so after each arrival the
+/// other end is chosen and the ping-pong emerges from (position,
+/// terrain) alone. Unreachable ends are never armed, so a stranded dog
+/// costs at most its component's worth of failed search per tick while
+/// the button is held. Gives held-boost a continuous, predictable
+/// trajectory for cross-client latency checks.
+fn patrol_target(t: &Terrain, s: &mut nav::Scratch, from: Node) -> Node {
+    let mut first = None;
+    for i in 0..t.cells() as u16 {
+        if t.deck_elev(i).is_some() {
+            first = Some(i);
+            break;
+        }
+    }
+    let Some(first) = first else {
+        return NONE;
+    };
+    let (x0, row) = t.xy(first);
+    let mut x1 = x0;
+    while t.in_bounds(x1 + 1, row) && t.deck_elev(t.idx(x1 + 1, row)).is_some() {
+        x1 += 1;
+    }
+    let end = |ex: i32| -> Node {
+        if t.in_bounds(ex, row) {
+            t.nearest_ground(t.idx(ex, row))
+        } else {
+            NONE
+        }
+    };
+    let mut best = NONE;
+    let mut best_cost = 0u32;
+    for cand in [end(x0 - 1), end(x1 + 1)] {
+        if cand == NONE || cand.idx() == from.idx() {
+            continue;
+        }
+        if let Some(cost) = nav::path_cost(t, s, from, cand) {
+            // strict > keeps the tie-break on the west end (visited first)
+            if best == NONE || cost > best_cost {
+                best = cand;
+                best_cost = cost;
+            }
+        }
+    }
+    best
+}
+
 fn step_dog(p: &mut Park, t: &Terrain, i: usize) {
     let (seed, tick) = (p.seed, p.tick);
     let d = &mut p.dogs[i];
     if d.target == NONE.0 {
+        // a held boost turns idleness into the bridge patrol; an explicit
+        // move order (target already set) always wins, and releasing the
+        // button just stops re-arming the next leg
+        if d.flags & FLAG_BOOST != 0 {
+            let here = node_of(t, d);
+            let pt = patrol_target(t, scratch(), here);
+            if pt != NONE {
+                d.target = pt.0;
+                d.waypoint = NONE.0;
+                return;
+            }
+        }
         // idle: roll to wander somewhere nearby and standable
         if det_rand(seed, tick, d.id, WANDER_ODDS) != 0 {
             return;
@@ -1091,6 +1154,53 @@ mod tests {
             "boosted dog should cover exactly double the distance"
         );
         assert!(fast > slow);
+    }
+
+    #[test]
+    fn held_boost_patrols_the_bridge_and_release_stops_rearming() {
+        let _g = setup(31);
+        assert_eq!(ev_id(EV_JOIN, 6), OK);
+        let blob = park_blob();
+        let t = Terrain::parse(&blob).unwrap();
+        // west platform of the deck span (5..7, 5): the patrol endpoints
+        // resolve to the platforms at (4,5) and (8,5)
+        {
+            let p = park();
+            let i = find(p, 6).unwrap();
+            let (x, y) = nav::center(&t, Node::ground(t.idx(4, 5)));
+            p.dogs[i].x = x;
+            p.dogs[i].y = y;
+        }
+        assert_eq!(ev_boost(6, 1), OK);
+        let mut crossed_deck = false;
+        let mut reached_east = false;
+        let mut returned_west = false;
+        for _ in 0..1200 {
+            sim_step();
+            let d = dog(6);
+            crossed_deck |= d.flags & FLAG_DECK != 0;
+            let cell = ((d.x >> 16), (d.y >> 16));
+            if cell == (8, 5) {
+                reached_east = true;
+            }
+            if reached_east && cell == (4, 5) {
+                returned_west = true;
+                break;
+            }
+        }
+        assert!(crossed_deck, "patrol must cross the deck");
+        assert!(reached_east && returned_west, "patrol must ping-pong");
+        // release mid-leg: the current leg finishes, no new leg re-arms
+        assert_eq!(ev_boost(6, 0), OK);
+        for _ in 0..2000 {
+            sim_step();
+            if dog(6).target == NONE.0 {
+                break;
+            }
+        }
+        assert_eq!(dog(6).target, NONE.0, "leg should finish");
+        sim_step();
+        assert_eq!(dog(6).target, NONE.0, "patrol must not re-arm unboosted");
     }
 
     #[test]

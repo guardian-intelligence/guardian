@@ -291,6 +291,24 @@ pub fn first_waypoint(t: &Terrain, s: &mut Scratch, from: Node, to: Node) -> Nod
     }
 }
 
+/// Path cost between two nodes under the exact search the waypoint system
+/// runs (10/14 octile scale, swim penalty included); None when
+/// unreachable. Lets callers rank destinations by what a dog would
+/// actually walk, with the same determinism guarantees as the pathing.
+pub fn path_cost(t: &Terrain, s: &mut Scratch, from: Node, to: Node) -> Option<u32> {
+    if !t.exists(from) || !t.exists(to) {
+        return None;
+    }
+    if from.dense() == to.dense() {
+        return Some(0);
+    }
+    if search(t, s, from, to) {
+        Some(s.g[to.dense()])
+    } else {
+        None
+    }
+}
+
 pub const WALK_SPEED: i32 = ONE as i32 / 8; // 3 cells/s at 24Hz
 pub const SWIM_SPEED: i32 = ONE as i32 / 16;
 /// Within this Q16.16 distance of a waypoint's center, the waypoint is

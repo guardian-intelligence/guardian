@@ -97,6 +97,12 @@ export function startGame(): void {
     rejects: 0,
     tick: 0,
     startedAt: 0,
+    // read by headless drill harnesses; cells are Q16.16
+    myX: 0,
+    myY: 0,
+    camX: 0,
+    camY: 0,
+    camFree: false,
   };
   (globalThis as any).__mythraDiag = diag;
 
@@ -779,6 +785,91 @@ export function startGame(): void {
   let isoOriginX = 0; // world-pixel x of cell (0,0)'s diamond center
   let lastCam: [number, number] = [0, 0];
 
+  // ---- camera: follow by default, free-pan with iOS-scroll momentum ----
+  // Presentation-only — the sim has no concept of a camera. A drag past
+  // the slop switches to free-cam and pans 1:1; release hands the last
+  // ~100ms of gesture velocity to a coast that decays by UIScrollView's
+  // documented decelerationRate (0.998 per millisecond) — the reference
+  // curve for "feels native on iOS". Bounds clamp kills velocity on the
+  // struck axis. "⌖ follow" returns to the default follow camera.
+  const DECEL = 0.998;
+  const DRAG_SLOP_CSS = 8;
+  let camFree = false;
+  const cam: [number, number] = [0, 0];
+  const camV: [number, number] = [0, 0]; // canvas px per ms
+  let camT = 0;
+  let dragging = false;
+  let dragMoved = false;
+  let downClient: [number, number] = [0, 0];
+  let dragLast: [number, number] | null = null;
+  const dragSamples: { t: number; dx: number; dy: number }[] = [];
+
+  function setCamFree(v: boolean) {
+    camFree = v;
+    if (!v) {
+      camV[0] = 0;
+      camV[1] = 0;
+    }
+    $("recenter").style.display = v ? "" : "none";
+  }
+
+  function canvasPt(e: PointerEvent): [number, number] {
+    const rect = canvas.getBoundingClientRect();
+    return [
+      ((e.clientX - rect.left) * canvas.width) / rect.width,
+      ((e.clientY - rect.top) * canvas.height) / rect.height,
+    ];
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    dragging = true;
+    dragMoved = false;
+    camV[0] = 0; // a touch during a coast grabs the map, iOS-style
+    camV[1] = 0;
+    downClient = [e.clientX, e.clientY];
+    dragLast = canvasPt(e);
+    dragSamples.length = 0;
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!dragging || !dragLast) return;
+    if (!dragMoved) {
+      const dist = Math.hypot(e.clientX - downClient[0], e.clientY - downClient[1]);
+      if (dist < DRAG_SLOP_CSS) return;
+      dragMoved = true;
+      setCamFree(true);
+    }
+    const [cx, cy] = canvasPt(e);
+    const dx = cx - dragLast[0];
+    const dy = cy - dragLast[1];
+    dragLast = [cx, cy];
+    cam[0] -= dx;
+    cam[1] -= dy;
+    const now = performance.now();
+    dragSamples.push({ t: now, dx, dy });
+    while (dragSamples.length && now - dragSamples[0]!.t > 100) dragSamples.shift();
+  });
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    if (dragMoved && dragSamples.length >= 2) {
+      const span = performance.now() - dragSamples[0]!.t;
+      if (span > 1) {
+        let sx = 0;
+        let sy = 0;
+        for (const s of dragSamples) {
+          sx += s.dx;
+          sy += s.dy;
+        }
+        camV[0] = -sx / span;
+        camV[1] = -sy / span;
+      }
+    }
+    dragSamples.length = 0;
+  };
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
+
   function shade(hex: string, f: number): string {
     const n = parseInt(hex.slice(1), 16);
     const c = (v: number) => Math.max(0, Math.min(255, Math.round(v * f)));
@@ -1016,7 +1107,11 @@ export function startGame(): void {
         anim: view.getUint8(at + 18),
       };
       dogs.push(dg);
-      if (id === myDog) mine = dg;
+      if (id === myDog) {
+        mine = dg;
+        diag.myX = dg.xq;
+        diag.myY = dg.yq;
+      }
       if (names.length < 12) names.push(`walker-${key.slice(0, 4)}`);
     }
     // drop smoothing state for dogs that left, so churn never accumulates
@@ -1026,15 +1121,38 @@ export function startGame(): void {
     }
     // painter's order down the iso diagonal; layers handle under/over deck
     dogs.sort((a, b) => a.xq + a.yq - (b.xq + b.yq));
-    const focus = mine ?? {
-      xq: (terrain.w / 2) * Q16,
-      yq: (terrain.h / 2) * Q16,
-      flags: 0,
-    };
-    const [fx, fy] = worldToPx(focus.xq, focus.yq, 0);
-    const camX = Math.max(0, Math.min(groundLayer.width - canvas.width, fx - canvas.width / 2));
-    const camY = Math.max(0, Math.min(groundLayer.height - canvas.height, fy - canvas.height / 2));
+    const cdt = camT ? Math.min(100, now - camT) : 16;
+    camT = now;
+    if (camFree) {
+      if (!dragging && (Math.abs(camV[0]) > 0.005 || Math.abs(camV[1]) > 0.005)) {
+        cam[0] += camV[0] * cdt;
+        cam[1] += camV[1] * cdt;
+        const f = Math.pow(DECEL, cdt);
+        camV[0] *= f;
+        camV[1] *= f;
+      }
+    } else {
+      const focus = mine ?? {
+        xq: (terrain.w / 2) * Q16,
+        yq: (terrain.h / 2) * Q16,
+        flags: 0,
+      };
+      const [fx, fy] = worldToPx(focus.xq, focus.yq, 0);
+      cam[0] = fx - canvas.width / 2;
+      cam[1] = fy - canvas.height / 2;
+    }
+    const maxX = groundLayer.width - canvas.width;
+    const maxY = groundLayer.height - canvas.height;
+    if (cam[0] <= 0 || cam[0] >= maxX) camV[0] = 0;
+    if (cam[1] <= 0 || cam[1] >= maxY) camV[1] = 0;
+    cam[0] = Math.max(0, Math.min(maxX, cam[0]));
+    cam[1] = Math.max(0, Math.min(maxY, cam[1]));
+    const camX = cam[0];
+    const camY = cam[1];
     lastCam = [camX, camY];
+    diag.camX = camX;
+    diag.camY = camY;
+    diag.camFree = camFree;
     ctx.drawImage(groundLayer, -camX, -camY);
     for (const dg of dogs) if (!(dg.flags & 1)) drawDog(ctx, dg, camX, camY);
     ctx.drawImage(deckLayer, -camX, -camY);
@@ -1062,9 +1180,10 @@ export function startGame(): void {
   }
 
   // A tap says "walk there": invert the iso projection at ground level and
-  // send a move_to intent for the tapped cell.
+  // send a move_to intent for the tapped cell. A pan is not a tap — the
+  // slop discriminator above set dragMoved for this gesture.
   canvas.addEventListener("click", (e) => {
-    if (!terrain || role !== "player") return;
+    if (dragMoved || !terrain || role !== "player") return;
     const rect = canvas.getBoundingClientRect();
     const px = ((e.clientX - rect.left) * canvas.width) / rect.width + lastCam[0];
     const py = ((e.clientY - rect.top) * canvas.height) / rect.height + lastCam[1];
@@ -1183,6 +1302,7 @@ export function startGame(): void {
       logLine(`park module ${info.parkWasm}, presentation ${info.clientWasm}`);
 
       $("checkin").onclick = () => sendIntent(EV_CHECK_IN, dogPayload());
+      $("recenter").onclick = () => setCamFree(false);
       const boostBtn = $("boost");
       boostBtn.addEventListener("pointerdown", (e) => {
         e.preventDefault();
