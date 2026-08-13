@@ -72,6 +72,16 @@ metadata:
     app.kubernetes.io/name: guardian-mythra-observer
     app.kubernetes.io/part-of: guardian
 rules:
+  # kubectl resolves the target once before opening the exec subresource.
+  # Keep that preflight read fixed to the same credential-isolated console.
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    resourceNames:
+      - mythra-journal-console-0
+    verbs:
+      - get
   - apiGroups:
       - ""
     resources:
