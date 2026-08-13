@@ -49,33 +49,39 @@ pkg_tar(
 )
 
 # The packed filesystem mirror tofurc points tofu at: the registry release
-# zips (pinned in MODULE.bazel, verified against the roots' lockfiles by
-# TestTofuRunnerProviderMirrorTracksRootLockfiles) laid out under
-# <mirror>/<registry-host>/<namespace>/<type>/<zip>. Its own layer so a
-# provider bump does not re-ship the runner binary layer.
+# zips (pinned in MODULE.bazel) laid out under
+# <mirror>/<registry-host>/<namespace>/<type>/<zip>. This list is the single
+# source of truth — the pkg_files layout, the per-provider layers, and the
+# oci_image tars all derive from it, and
+# TestTofuRunnerProviderMirrorTracksRootLockfiles parses the pairs to prove
+# every provider the roots lock is pinned AND laid into the image at the
+# address tofu resolves. The short name must be the address's type segment:
+# it selects the @tofu_provider_<name>_linux_amd64 zip whose filename embeds
+# the type tofu discovers by.
+TOFU_PROVIDER_MIRROR = [
+    ("cloudflare", "cloudflare/cloudflare"),
+    ("github", "integrations/github"),
+    ("latitudesh", "latitudesh/latitudesh"),
+    ("stripe", "stripe/stripe"),
+]
+
 [
     pkg_files(
         name = "mirror_" + name,
         srcs = ["@tofu_provider_" + name + "_linux_amd64//file"],
         prefix = "usr/local/share/tofu/providers/registry.opentofu.org/" + address,
     )
-    for name, address in [
-        ("cloudflare", "cloudflare/cloudflare"),
-        ("github", "integrations/github"),
-        ("latitudesh", "latitudesh/latitudesh"),
-        ("stripe", "stripe/stripe"),
-    ]
+    for name, address in TOFU_PROVIDER_MIRROR
 ]
 
-pkg_tar(
-    name = "provider_mirror_layer",
-    srcs = [
-        ":mirror_cloudflare",
-        ":mirror_github",
-        ":mirror_latitudesh",
-        ":mirror_stripe",
-    ],
-)
+# One layer per provider so a single-provider bump re-ships only its own zip.
+[
+    pkg_tar(
+        name = "provider_layer_" + name,
+        srcs = [":mirror_" + name],
+    )
+    for name, _ in TOFU_PROVIDER_MIRROR
+]
 
 oci_image(
     name = "image",
@@ -98,9 +104,9 @@ oci_image(
         "WORKDIR": "/workspace",
         "TF_CLI_CONFIG_FILE": "/usr/local/share/tofu/tofurc",
     },
-    tars = [
-        ":runner_layer",
-        ":provider_mirror_layer",
+    tars = [":runner_layer"] + [
+        ":provider_layer_" + name
+        for name, _ in TOFU_PROVIDER_MIRROR
     ],
     visibility = ["//visibility:public"],
 )

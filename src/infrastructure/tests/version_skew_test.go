@@ -291,25 +291,38 @@ func tofuLinuxVersion(t *testing.T, runfile string) string {
 
 const tofuRunnerBuildRunfile = "src/infrastructure/cmd/tofu_runner/BUILD.bazel"
 
-var tofuRootNames = []string{
-	"guardian-github",
-	"guardian-mgmt",
-	"guardian-mgmt-cloudflare-tokens",
-	"guardian-mgmt-dns",
-	"guardian-mgmt-edge-policy",
-	"guardian-stripe-sandbox",
+// tofuRootNames derives the root set from the deployed CronJob manifests, so
+// a root added to the cluster cannot be forgotten here: its lockfile is
+// either in this test's runfiles (add the //src/infrastructure/bootstrap/…
+// :root data dep) or readText fails loudly.
+func tofuRootNames(t *testing.T) []string {
+	t.Helper()
+	dir := filepath.Dir(runfilePath(tofuManifestDirRunfile))
+	files, err := filepath.Glob(filepath.Join(dir, "cronjob-*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("%s: no cronjob-*.yaml manifests found", dir)
+	}
+	var roots []string
+	for _, f := range files {
+		roots = append(roots, strings.TrimSuffix(strings.TrimPrefix(filepath.Base(f), "cronjob-"), ".yaml"))
+	}
+	return roots
 }
 
 // The runner image bakes a packed provider filesystem mirror and its tofurc
-// has no direct{} fallback, so a provider a root locks but the mirror lacks
-// fails init in-cluster. A provider pin therefore lives in three places that
-// must move together: the root's .terraform.lock.hcl, the MODULE.bazel
-// mirror archive, and the mirror layout list in the runner's BUILD file.
-// Renovate bumps a root's versions.tf but cannot recompute the mirror pins,
-// so this test is the doorbell: the bump PR goes red until the lockfile and
-// MODULE.bazel move with it. The mirror sha256 must also be one of the
-// lockfile's zh: hashes, so the image can only ship bytes the root already
-// trusts — tofu re-verifies the same hash at init.
+// has no direct{} fallback, so a provider a root needs but the mirror lacks
+// fails init in-cluster. A provider pin therefore lives in four places that
+// must move together: the root's versions.tf constraint, its
+// .terraform.lock.hcl, the MODULE.bazel mirror archive, and the mirror
+// layout list in the runner's BUILD file. Renovate rewrites only versions.tf
+// and cannot regenerate the lockfile or recompute the mirror pins, so this
+// test is the doorbell: the bump PR goes red until all four move together.
+// The mirror sha256 must also be one of the lockfile's zh: hashes, so the
+// image can only ship bytes the root already trusts — tofu re-verifies the
+// same hash at init.
 func TestTofuRunnerProviderMirrorTracksRootLockfiles(t *testing.T) {
 	type mirrorPin struct {
 		version string
@@ -328,15 +341,40 @@ func TestTofuRunnerProviderMirrorTracksRootLockfiles(t *testing.T) {
 		t.Fatalf("%s: no tofu provider mirror pins found", moduleBazelRunfile)
 	}
 
-	mirrorLayout := readText(t, runfilePath(tofuRunnerBuildRunfile))
+	// The (name, address) pairs of the BUILD file's TOFU_PROVIDER_MIRROR
+	// list, from which the image's mirror layout is derived. The name selects
+	// the zip whose filename embeds the provider type tofu discovers by, so
+	// it must equal the address's type segment or the zip lands under a
+	// directory tofu never consults.
+	layout := map[string]bool{}
+	pairRe := regexp.MustCompile(`\("([a-z0-9]+)", "([a-z0-9-]+/[a-z0-9-]+)"\)`)
+	for _, m := range pairRe.FindAllStringSubmatch(readText(t, runfilePath(tofuRunnerBuildRunfile)), -1) {
+		name, address := m[1], m[2]
+		if name != address[strings.LastIndex(address, "/")+1:] {
+			t.Fatalf("%s: mirror pair (%q, %q): the short name must be the address's type segment", tofuRunnerBuildRunfile, name, address)
+		}
+		if _, ok := pins[name]; !ok {
+			t.Fatalf("%s lays out provider %s but MODULE.bazel has no tofu_provider_%s_linux_amd64 pin", tofuRunnerBuildRunfile, address, name)
+		}
+		layout[address] = true
+	}
+
+	lockHostRe := regexp.MustCompile(`(?m)^provider "([^"]+)" \{`)
 	providerBlockRe := regexp.MustCompile(`(?s)provider "registry\.opentofu\.org/([a-z0-9-]+/[a-z0-9-]+)" \{(.*?)\n\}`)
-	versionRe := regexp.MustCompile(`version\s*=\s*"([0-9.]+)"`)
+	lockVersionRe := regexp.MustCompile(`version\s*=\s*"([0-9.]+)"`)
 	zhRe := regexp.MustCompile(`"zh:([0-9a-f]{64})"`)
+	declaredRe := regexp.MustCompile(`source\s*=\s*"([^"]+)"\s*\n\s*version\s*=\s*"([^"]+)"`)
 
 	locked := map[string]bool{}
-	for _, root := range tofuRootNames {
+	for _, root := range tofuRootNames(t) {
 		lockfile := "src/infrastructure/bootstrap/" + root + "/.terraform.lock.hcl"
-		blocks := providerBlockRe.FindAllStringSubmatch(readText(t, runfilePath(lockfile)), -1)
+		lockText := readText(t, runfilePath(lockfile))
+		for _, m := range lockHostRe.FindAllStringSubmatch(lockText, -1) {
+			if !strings.HasPrefix(m[1], "registry.opentofu.org/") {
+				t.Fatalf("%s locks provider %q outside registry.opentofu.org: the baked mirror and this doorbell only cover that host — renormalize the source address", lockfile, m[1])
+			}
+		}
+		blocks := providerBlockRe.FindAllStringSubmatch(lockText, -1)
 		if len(blocks) == 0 {
 			t.Fatalf("%s: no provider blocks found", lockfile)
 		}
@@ -347,7 +385,7 @@ func TestTofuRunnerProviderMirrorTracksRootLockfiles(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s locks %s but MODULE.bazel has no tofu_provider_%s_linux_amd64 mirror pin: the runner image could not init this root", root, address, providerType)
 			}
-			version := versionRe.FindStringSubmatch(block[2])
+			version := lockVersionRe.FindStringSubmatch(block[2])
 			if version == nil {
 				t.Fatalf("%s: no version in the %s block", lockfile, address)
 			}
@@ -361,16 +399,56 @@ func TestTofuRunnerProviderMirrorTracksRootLockfiles(t *testing.T) {
 			if !trusted {
 				t.Fatalf("MODULE.bazel mirror sha256 %s for %s is not among %s's zh: lockfile hashes: the image would ship a zip the root does not trust", pin.sha256, address, root)
 			}
-			if !strings.Contains(mirrorLayout, `"`+address+`"`) {
-				t.Fatalf("%s locks %s but the mirror layout list in %s does not lay its zip into the image", root, address, tofuRunnerBuildRunfile)
+			if !layout[address] {
+				t.Fatalf("%s locks %s but the TOFU_PROVIDER_MIRROR list in %s does not lay its zip into the image", root, address, tofuRunnerBuildRunfile)
 			}
 			locked[providerType] = true
+		}
+
+		// The declared constraint is what Renovate rewrites; the mirror can
+		// only serve the exact locked version, so the constraint must BE that
+		// version — a bumped-but-not-relocked root fails here, not in-cluster.
+		declared := declaredRe.FindAllStringSubmatch(readText(t, runfilePath("src/infrastructure/bootstrap/"+root+"/versions.tf")), -1)
+		if len(declared) == 0 {
+			t.Fatalf("%s/versions.tf: no required_providers source/version pairs found", root)
+		}
+		for _, d := range declared {
+			address := strings.TrimPrefix(d[1], "registry.opentofu.org/")
+			providerType := address[strings.LastIndex(address, "/")+1:]
+			pin, ok := pins[providerType]
+			if !ok {
+				t.Fatalf("%s/versions.tf declares provider %s with no MODULE.bazel mirror pin", root, d[1])
+			}
+			constraint := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(d[2]), "="))
+			if !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(constraint) {
+				t.Fatalf("%s/versions.tf pins %s as %q: the baked mirror requires an exact version pin", root, address, d[2])
+			}
+			if constraint != pin.version {
+				t.Fatalf("%s/versions.tf pins %s %s but the MODULE.bazel mirror ships %s: regenerate the lockfile (tofu init -upgrade) and move the mirror pin together", root, address, constraint, pin.version)
+			}
 		}
 	}
 	for providerType := range pins {
 		if !locked[providerType] {
 			t.Fatalf("MODULE.bazel mirror pin tofu_provider_%s_linux_amd64 matches no root's lockfile: prune it or fix its zip name", providerType)
 		}
+	}
+}
+
+// TofuRootNeverSucceeded pages on count(last-successful series) < N with N
+// hand-written in the VMRule; a root added without bumping N would fail
+// invisibly forever (its failed runs have no last-success series for
+// TofuRootJobFailed's join to compare against). Bind N to the deployed
+// CronJob count so the manifest add and the rule bump are one PR.
+func TestTofuRootNeverSucceededRuleCountsAllRoots(t *testing.T) {
+	observability := filepath.Join(filepath.Dir(runfilePath(tofuManifestDirRunfile)), "observability.yaml")
+	m := regexp.MustCompile(`count\(kube_cronjob_status_last_successful_time\{namespace="tofu-system"\}\) < ([0-9]+)`).
+		FindStringSubmatch(readText(t, observability))
+	if m == nil {
+		t.Fatalf("%s: no TofuRootNeverSucceeded count threshold found", observability)
+	}
+	if want := len(tofuRootNames(t)); m[1] != strconv.Itoa(want) {
+		t.Fatalf("TofuRootNeverSucceeded expects %s roots but %d CronJob manifests exist: move the rule's count with the root set", m[1], want)
 	}
 }
 

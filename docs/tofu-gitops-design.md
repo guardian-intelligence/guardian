@@ -80,8 +80,9 @@ shell. Its tofu is pinned to the same version as the multitool tofu the
 break-glass path runs (`TestTofuRunnerTracksMultitoolPin`), so an in-cluster
 apply and a hand apply plan identically. `tofu init` is hermetic: the baked
 CLI config resolves providers only from the mirror — no `direct` fallback —
-so a tick downloads nothing, a registry or GitHub outage cannot fail a
-reconcile, and a provider missing from the mirror fails init loudly.
+so a tick downloads nothing, a registry or GitHub-releases outage cannot
+fail provider installation (plan and apply still need the root's provider
+API), and a provider missing from the mirror fails init loudly.
 The mirror ships the registry release zips pinned in `MODULE.bazel`; each
 pin's sha256 must appear among the consuming roots' `.terraform.lock.hcl`
 `zh:` hashes (`TestTofuRunnerProviderMirrorTracksRootLockfiles`), so the
