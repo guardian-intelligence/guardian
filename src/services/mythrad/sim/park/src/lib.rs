@@ -49,6 +49,11 @@
 //!   8 boost_set     { id u64, on u8 }     held-button 2x speed; only
 //!                                         transitions journal (a no-op
 //!                                         set rejects with ERR_NOOP)
+//!   9 clock_skip    { to_tick u64 }       system event; jumps the tick
+//!                                         forward without stepping — the
+//!                                         journaled repayment of authority
+//!                                         downtime. Dogs, energy, and day
+//!                                         are untouched; forward only
 //!
 //! Snapshot encoding (canonical; dogs strictly sorted by id; park energy
 //! is cumulative — departed dogs' contributions persist — so it is state,
@@ -86,6 +91,7 @@ pub const EV_DAY_RESET: u16 = 5;
 pub const EV_EPOCH_ADVANCE: u16 = 6;
 pub const EV_TERRAIN_SET: u16 = 7;
 pub const EV_BOOST_SET: u16 = 8;
+pub const EV_CLOCK_SKIP: u16 = 9;
 
 pub const OK: u32 = 0;
 pub const ERR_ENCODING: u32 = 1;
@@ -98,6 +104,7 @@ pub const ERR_EPOCH: u32 = 7;
 pub const ERR_TARGET: u32 = 8;
 pub const ERR_TERRAIN: u32 = 9;
 pub const ERR_NOOP: u32 = 10;
+pub const ERR_TICK: u32 = 11;
 
 const CHECK_IN_ENERGY: u32 = 10;
 /// A standing dog rolls to wander once per this many ticks on average
@@ -529,6 +536,17 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
                 return ERR_ENCODING;
             };
             park().day = day;
+            OK
+        }
+        EV_CLOCK_SKIP => {
+            let Some(to) = read_u64_exact(body, len) else {
+                return ERR_ENCODING;
+            };
+            let p = park();
+            if to <= p.tick {
+                return ERR_TICK;
+            }
+            p.tick = to;
             OK
         }
         EV_EPOCH_ADVANCE => {
@@ -989,6 +1007,7 @@ mod tests {
             }
             let code = match kind {
                 EV_DAY_RESET => ev(EV_DAY_RESET, &(a as u32).to_le_bytes()),
+                EV_CLOCK_SKIP => ev(EV_CLOCK_SKIP, &a.to_le_bytes()),
                 EV_EPOCH_ADVANCE => {
                     let mut p = (a as u32).to_le_bytes().to_vec();
                     p.extend_from_slice(&0u64.to_le_bytes());
@@ -1040,6 +1059,64 @@ mod tests {
         run_journal(&j, 900);
         assert_eq!(sim_hash(), h1);
         assert_eq!(snapshot_vec(), s1);
+    }
+
+    #[test]
+    fn clock_skip_jumps_forward_only() {
+        let _g = setup(5);
+        assert_eq!(ev_id(EV_JOIN, 3), OK);
+        for _ in 0..10 {
+            sim_step();
+        }
+        assert_eq!(ev(EV_CLOCK_SKIP, &10u64.to_le_bytes()), ERR_TICK);
+        assert_eq!(ev(EV_CLOCK_SKIP, &3u64.to_le_bytes()), ERR_TICK);
+        assert_eq!(ev(EV_CLOCK_SKIP, &10u32.to_le_bytes()), ERR_ENCODING);
+        let d_before = dog(3);
+        let day_before = park().day;
+        assert_eq!(ev(EV_CLOCK_SKIP, &1_000_000u64.to_le_bytes()), OK);
+        assert_eq!(sim_tick(), 1_000_000);
+        // The jump moves time and nothing else.
+        let d = dog(3);
+        let before = (d_before.x, d_before.y, d_before.energy);
+        assert_eq!((d.x, d.y, d.energy), before);
+        assert_eq!(park().day, day_before);
+    }
+
+    #[test]
+    fn replay_across_clock_skip_is_deterministic() {
+        let _g = setup(31);
+        let mut j = journal();
+        j.push((320, EV_CLOCK_SKIP, 100_000, 0));
+        j.push((100_005, EV_JOIN, 21, 0));
+        run_journal(&j, 100_300);
+        let h1 = sim_hash();
+        let s1 = snapshot_vec();
+        assert_eq!(sim_init(31, 42, 1), OK);
+        run_journal(&j, 100_300);
+        assert_eq!(sim_hash(), h1);
+        assert_eq!(snapshot_vec(), s1);
+    }
+
+    #[test]
+    fn snapshot_after_clock_skip_resumes_identically() {
+        let _g = setup(13);
+        assert_eq!(ev_id(EV_JOIN, 7), OK);
+        assert_eq!(ev_id(EV_JOIN, 3), OK);
+        for _ in 0..50 {
+            sim_step();
+        }
+        assert_eq!(ev(EV_CLOCK_SKIP, &1_000_000u64.to_le_bytes()), OK);
+        let s = snapshot_vec();
+        for _ in 0..200 {
+            sim_step();
+        }
+        let h_end = sim_hash();
+        restore_vec(&s);
+        assert_eq!(sim_tick(), 1_000_000);
+        for _ in 0..200 {
+            sim_step();
+        }
+        assert_eq!(sim_hash(), h_end);
     }
 
     #[test]
