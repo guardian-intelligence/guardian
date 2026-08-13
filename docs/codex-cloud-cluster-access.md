@@ -10,7 +10,9 @@ Cloudflare Tunnel. Cloudflare Access authenticates the environment's transport
 with a service token; Kubernetes authenticates the agent as the existing
 `platform-agent` read persona. The persona can inspect Flux, Kargo, Flagger,
 workloads, and cluster-scoped state, cannot read Secrets, and is denied every
-write except pod port-forward.
+write except pod port-forward and TokenRequests for explicitly declared,
+15-minute product capabilities. Wake Up Mythra exposes the first pair through
+`aspect mythra`: a read-only journal observer and a pod-restart operator.
 
 The two boundaries are independent:
 
@@ -57,6 +59,7 @@ kubectl auth whoami
 kubectl get kustomizations.kustomize.toolkit.fluxcd.io -A
 kubectl get stages.kargo.akuity.io,warehouses.kargo.akuity.io,promotions.kargo.akuity.io -A
 kubectl get canaries.flagger.app -A
+aspect mythra status
 ! kubectl get secrets -A
 ! kubectl create namespace codex-cloud-write-denial --dry-run=server -o name
 ```

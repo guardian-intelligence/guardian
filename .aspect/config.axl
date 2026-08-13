@@ -43,6 +43,14 @@ load(
     tidy = "tidy",
 )
 load(
+    ".aspect/tasks/mythra.axl",
+    mythra_dump = "dump",
+    mythra_logs = "logs",
+    mythra_psql = "psql",
+    mythra_restart = "restart",
+    mythra_status = "status",
+)
+load(
     ".aspect/tasks/tools.axl",
     tools_install = "install",
     tools_install_agent_cloud = "install_agent_cloud",
@@ -77,6 +85,13 @@ def config(ctx):
     ctx.tasks.add(infra_upgrade_cozystack)
     ctx.tasks.add(infra_validate)
     ctx.tasks.add(infra_watch)
+
+    # aspect mythra ...
+    ctx.tasks.add(mythra_status)
+    ctx.tasks.add(mythra_logs)
+    ctx.tasks.add(mythra_psql)
+    ctx.tasks.add(mythra_dump)
+    ctx.tasks.add(mythra_restart)
 
     # aspect tidy
     ctx.tasks.add(tidy)

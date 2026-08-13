@@ -26,6 +26,7 @@ go_test(
         "keycloak_customer_realm_test.go",
         "log_pipeline_health_test.go",
         "log_redaction_test.go",
+        "mythra_agent_operations_test.go",
         "openbao_config_parse_test.go",
         "persona_ladder_lockstep_test.go",
         "persona_secrets_writer_invariants_test.go",

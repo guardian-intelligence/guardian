@@ -1,0 +1,365 @@
+"""Product-scoped live operations for Wake Up Mythra.
+
+Read-only status and logs use the standing platform-agent persona. Journal
+queries and immediate service recovery mint separate, 15-minute Kubernetes
+capability tokens; the corresponding RBAC and fail-closed admission policies
+live in deployments/mythra/prod/agent-ops.yaml.
+"""
+
+load(
+    ".aspect/lib/helpers.axl",
+    "bazel_output_file",
+    "checked_spawn",
+    "ws_path",
+)
+
+KUBECTL_TARGET = "@multitool//tools/kubectl"
+NAMESPACE = "tenant-guardian-prod"
+API_AUDIENCE = "https://10.8.0.250:6443"
+OBSERVER = "guardian-mythra-observer"
+OPERATOR = "guardian-mythra-operator"
+CONSOLE = "mythra-journal-console-0"
+
+def _kubectl_path(ctx):
+    path = bazel_output_file(ctx, KUBECTL_TARGET)
+    if path == "":
+        return None
+    return path
+
+def _kubectl_args(ctx, args, kubeconfig_override = ""):
+    out = []
+    if kubeconfig_override != "":
+        out.extend(["--kubeconfig", kubeconfig_override])
+    elif ctx.args.kubeconfig != "":
+        kubeconfig = ctx.args.kubeconfig
+        if not kubeconfig.startswith("/"):
+            kubeconfig = ws_path(ctx, kubeconfig)
+        out.extend(["--kubeconfig", kubeconfig])
+    if ctx.args.request_timeout != "":
+        out.append("--request-timeout=" + ctx.args.request_timeout)
+    out.extend(args)
+    return out
+
+def _capture(ctx, program, args, label):
+    cmd = ctx.std.process.command(program).args(args).current_dir(ws_path(ctx))
+    if ctx.std.io.stderr.is_tty:
+        ctx.std.io.stderr.write("$ " + label + "\n")
+    result = cmd.stdout("piped").stderr("piped").spawn().wait_with_output()
+    if result.status.code != 0:
+        ctx.std.io.stderr.write("ERROR: " + label + " failed\n")
+        if result.stdout != "":
+            ctx.std.io.stderr.write(result.stdout)
+        if result.stderr != "":
+            ctx.std.io.stderr.write(result.stderr)
+        return None
+    return result.stdout.strip()
+
+def _mint_capability(ctx, kubectl, service_account):
+    return _capture(
+        ctx,
+        kubectl,
+        _kubectl_args(ctx, [
+            "-n",
+            NAMESPACE,
+            "create",
+            "token",
+            service_account,
+            "--audience=" + API_AUDIENCE,
+            "--duration=15m",
+        ]),
+        "mint 15-minute " + service_account + " capability",
+    )
+
+def _capability_kubeconfig(ctx, kubectl, service_account):
+    token = _mint_capability(ctx, kubectl, service_account)
+    if token == None or token == "":
+        return None
+    raw_config = _capture(
+        ctx,
+        kubectl,
+        _kubectl_args(ctx, ["config", "view", "--raw", "--minify", "-o", "json"]),
+        "read active cluster endpoint",
+    )
+    if raw_config == None:
+        return None
+    config = json.decode(raw_config)
+    contexts = config.get("contexts", [])
+    if len(contexts) != 1:
+        ctx.std.io.stderr.write("ERROR: active kubeconfig must resolve to exactly one context\n")
+        return None
+
+    capability_user = "mythra-capability"
+    config["users"] = [{"name": capability_user, "user": {"token": token}}]
+    contexts[0]["context"]["user"] = capability_user
+    config["current-context"] = contexts[0]["name"]
+
+    tempdir = ctx.std.fs.mkdtemp(prefix = "guardian-mythra-capability-")
+    kubeconfig = tempdir + "/kubeconfig"
+    ctx.std.fs.write(kubeconfig, json.encode(config))
+    return {"path": kubeconfig, "tempdir": tempdir}
+
+def _remove_capability_kubeconfig(ctx, capability):
+    if capability != None and ctx.std.fs.exists(capability["tempdir"]):
+        ctx.std.fs.remove_dir_all(capability["tempdir"])
+
+def _wait_for_console(ctx, kubectl):
+    return checked_spawn(
+        ctx,
+        kubectl,
+        _kubectl_args(ctx, [
+            "-n",
+            NAMESPACE,
+            "wait",
+            "--for=condition=Ready",
+            "pod/" + CONSOLE,
+            "--timeout=" + ctx.args.wait_timeout,
+        ]),
+        cwd = ws_path(ctx),
+        label = "wait for Mythra journal console",
+    )
+
+def _observer_exec(ctx, command):
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+    rc = _wait_for_console(ctx, kubectl)
+    if rc != 0:
+        return rc
+    capability = _capability_kubeconfig(ctx, kubectl, OBSERVER)
+    if capability == None:
+        return 1
+    exec_args = ["-n", NAMESPACE, "exec", "-i"]
+    exec_args.extend([CONSOLE, "-c", "console", "--"] + command)
+    rc = checked_spawn(
+        ctx,
+        kubectl,
+        _kubectl_args(ctx, exec_args, kubeconfig_override = capability["path"]),
+        cwd = ws_path(ctx),
+        label = "Mythra read-only journal " + command[0],
+    )
+    _remove_capability_kubeconfig(ctx, capability)
+    return rc
+
+def _status_impl(ctx):
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+    rc = checked_spawn(
+        ctx,
+        kubectl,
+        _kubectl_args(ctx, [
+            "-n",
+            NAMESPACE,
+            "get",
+            "deployment/mythrad",
+            "statefulset/mythra-journal-console",
+            "pod/" + CONSOLE,
+        ]),
+        cwd = ws_path(ctx),
+        label = "Mythra workloads",
+    )
+    if rc != 0:
+        return rc
+    return checked_spawn(
+        ctx,
+        kubectl,
+        _kubectl_args(ctx, [
+            "-n",
+            NAMESPACE,
+            "get",
+            "pods",
+            "-l",
+            "app.kubernetes.io/name=mythrad",
+            "-o",
+            "wide",
+        ]),
+        cwd = ws_path(ctx),
+        label = "Mythra game-server pods",
+    )
+
+def _logs_impl(ctx):
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+    args = ["-n", NAMESPACE, "logs", "deployment/mythrad", "-c", "mythrad"]
+    if ctx.args.follow:
+        args.append("--follow")
+    if ctx.args.previous:
+        args.append("--previous")
+    if ctx.args.since != "":
+        args.append("--since=" + ctx.args.since)
+    if ctx.args.tail != "":
+        args.append("--tail=" + ctx.args.tail)
+    return checked_spawn(
+        ctx,
+        kubectl,
+        _kubectl_args(ctx, args),
+        cwd = ws_path(ctx),
+        label = "Mythra game-server logs",
+    )
+
+def _psql_impl(ctx):
+    command = ["psql", "-X", "--set=ON_ERROR_STOP=1"]
+    if ctx.args.expanded:
+        command.append("--expanded")
+    if ctx.args.tuples_only:
+        command.append("--tuples-only")
+    if ctx.args.query != "":
+        command.extend(["--command", ctx.args.query])
+    return _observer_exec(ctx, command)
+
+def _dump_impl(ctx):
+    if ctx.args.schema_only and ctx.args.data_only:
+        ctx.std.io.stderr.write("ERROR: --schema-only and --data-only are mutually exclusive\n")
+        return 2
+    command = ["pg_dump", "--no-owner", "--no-privileges"]
+    if ctx.args.schema_only:
+        command.append("--schema-only")
+    if ctx.args.data_only:
+        command.append("--data-only")
+    return _observer_exec(ctx, command)
+
+def _restart_impl(ctx):
+    kubectl = _kubectl_path(ctx)
+    if kubectl == None:
+        return 1
+    raw_pods = _capture(
+        ctx,
+        kubectl,
+        _kubectl_args(ctx, [
+            "-n",
+            NAMESPACE,
+            "get",
+            "pods",
+            "-l",
+            "app.kubernetes.io/name=mythrad",
+            "-o",
+            "name",
+        ]),
+        "find Mythra game-server pods",
+    )
+    if raw_pods == None:
+        return 1
+    pods = []
+    for line in raw_pods.split("\n"):
+        pod = line.strip()
+        if pod != "":
+            pods.append(pod)
+    if len(pods) == 0:
+        ctx.std.io.stderr.write("ERROR: no mythrad Deployment pod found\n")
+        return 1
+
+    capability = _capability_kubeconfig(ctx, kubectl, OPERATOR)
+    if capability == None:
+        return 1
+    for pod in pods:
+        rc = checked_spawn(
+            ctx,
+            kubectl,
+            _kubectl_args(
+                ctx,
+                ["-n", NAMESPACE, "delete", pod, "--wait=false"],
+                kubeconfig_override = capability["path"],
+            ),
+            cwd = ws_path(ctx),
+            label = "restart " + pod,
+        )
+        if rc != 0:
+            _remove_capability_kubeconfig(ctx, capability)
+            return rc
+        rc = checked_spawn(
+            ctx,
+            kubectl,
+            _kubectl_args(ctx, [
+                "-n",
+                NAMESPACE,
+                "wait",
+                "--for=delete",
+                pod,
+                "--timeout=" + ctx.args.wait_timeout,
+            ]),
+            cwd = ws_path(ctx),
+            label = "wait for old " + pod + " to leave",
+        )
+        if rc != 0:
+            _remove_capability_kubeconfig(ctx, capability)
+            return rc
+    _remove_capability_kubeconfig(ctx, capability)
+    return checked_spawn(
+        ctx,
+        kubectl,
+        _kubectl_args(ctx, [
+            "-n",
+            NAMESPACE,
+            "rollout",
+            "status",
+            "deployment/mythrad",
+            "--timeout=" + ctx.args.wait_timeout,
+        ]),
+        cwd = ws_path(ctx),
+        label = "wait for Mythra game-server recovery",
+    )
+
+def _common_args(extra = {}):
+    out = {
+        "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
+        "request_timeout": args.string(default = "15s", description = "kubectl API request timeout."),
+    }
+    out.update(extra)
+    return out
+
+status = task(
+    implementation = _status_impl,
+    name = "status",
+    group = ["mythra"],
+    summary = "Show the live Mythra game server and read-only journal console using the standing read persona.",
+    args = _common_args(),
+)
+
+logs = task(
+    implementation = _logs_impl,
+    name = "logs",
+    group = ["mythra"],
+    summary = "Read live mythrad logs using the standing read persona.",
+    args = _common_args({
+        "follow": args.boolean(default = False, description = "Follow the log stream."),
+        "previous": args.boolean(default = False, description = "Read the previous mythrad container instance."),
+        "since": args.string(default = "30m", description = "Only return logs newer than this relative duration; empty means all available logs."),
+        "tail": args.string(default = "200", description = "Maximum lines to return; empty uses kubectl's default."),
+    }),
+)
+
+psql = task(
+    implementation = _psql_impl,
+    name = "psql",
+    group = ["mythra"],
+    summary = "Query the production Mythra journal as a database-native readonly user through a 15-minute observer capability.",
+    args = _common_args({
+        "expanded": args.boolean(default = False, description = "Use psql expanded output."),
+        "query": args.string(default = "", description = "SQL to execute. Empty opens an interactive read-only psql session."),
+        "tuples_only": args.boolean(default = False, description = "Print rows without headers or footers."),
+        "wait_timeout": args.string(default = "1m", description = "Timeout waiting for the journal console to become Ready."),
+    }),
+)
+
+dump = task(
+    implementation = _dump_impl,
+    name = "dump",
+    group = ["mythra"],
+    summary = "Stream a read-only pg_dump of the production Mythra journal to stdout through a 15-minute observer capability.",
+    args = _common_args({
+        "data_only": args.boolean(default = False, description = "Dump table data only."),
+        "schema_only": args.boolean(default = False, description = "Dump schema only."),
+        "wait_timeout": args.string(default = "1m", description = "Timeout waiting for the journal console to become Ready."),
+    }),
+)
+
+restart = task(
+    implementation = _restart_impl,
+    name = "restart",
+    group = ["mythra"],
+    summary = "Recycle the live mythrad pod with a 15-minute operator capability and wait for its Git-declared Deployment to recover.",
+    args = _common_args({
+        "wait_timeout": args.string(default = "5m", description = "Timeout for old-pod deletion and Deployment recovery."),
+    }),
+)

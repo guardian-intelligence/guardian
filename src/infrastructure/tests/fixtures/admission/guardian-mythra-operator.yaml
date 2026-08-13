@@ -1,0 +1,112 @@
+# The derived operator is the immediate-recovery role: it may recycle only a
+# real, labeled mythrad pod. The Deployment recreates the Git-declared revision.
+policy: guardian-mythra-operator
+cases:
+  - name: restart a mythrad Deployment pod
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: mythrad-59b449c48f-h84js
+    object:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: mythrad-59b449c48f-h84js
+        namespace: tenant-guardian-prod
+        labels:
+          app.kubernetes.io/name: mythrad
+          guardian.dev/product: mythra
+    user:
+      username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-operator
+      groups: ["system:serviceaccounts", "system:authenticated"]
+    expect: allow
+  - name: delete a mythrad-shaped unlabeled pod
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: mythrad-lookalike-abc
+    object:
+      apiVersion: v1
+      kind: Pod
+      metadata: {name: mythrad-lookalike-abc, namespace: tenant-guardian-prod}
+    user:
+      username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-operator
+      groups: ["system:serviceaccounts", "system:authenticated"]
+    expect: deny
+  - name: delete another product pod
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: payments-8bffcdbdc-h7vkd
+    object:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: payments-8bffcdbdc-h7vkd
+        namespace: tenant-guardian-prod
+        labels:
+          app.kubernetes.io/name: payments
+          guardian.dev/product: payments
+    user:
+      username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-operator
+      groups: ["system:serviceaccounts", "system:authenticated"]
+    expect: deny
+  - name: delete a labeled mythrad pod outside prod
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: mythrad-preview-abc
+    object:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: mythrad-preview-abc
+        namespace: tenant-root
+        labels:
+          app.kubernetes.io/name: mythrad
+          guardian.dev/product: mythra
+    user:
+      username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-operator
+      groups: ["system:serviceaccounts", "system:authenticated"]
+    expect: deny
+  - name: exec into the journal console
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: exec
+    objectName: mythra-journal-console-0
+    object:
+      apiVersion: v1
+      kind: PodExecOptions
+      metadata: {namespace: tenant-guardian-prod}
+      container: console
+      command: [psql]
+      stdout: true
+    user:
+      username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-operator
+      groups: ["system:serviceaccounts", "system:authenticated"]
+    expect: deny
+  - name: create a Secret
+    operation: CREATE
+    resource: {group: "", version: v1, resource: secrets}
+    objectName: stolen
+    object:
+      apiVersion: v1
+      kind: Secret
+      metadata: {name: stolen, namespace: tenant-guardian-prod}
+    user:
+      username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-operator
+      groups: ["system:serviceaccounts", "system:authenticated"]
+    expect: deny
+  - name: platform-agent is not matched directly
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: mythrad-59b449c48f-h84js
+    object:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: mythrad-59b449c48f-h84js
+        namespace: tenant-guardian-prod
+        labels:
+          app.kubernetes.io/name: mythrad
+          guardian.dev/product: mythra
+    user:
+      username: keycloak:cozy#platform-agent
+      groups: ["guardian-persona-read", "system:authenticated"]
+    expect: no-match

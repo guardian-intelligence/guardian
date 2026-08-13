@@ -1,0 +1,119 @@
+# The derived observer reaches one fixed console whose database credential is
+# native read-only. RBAC pins the pod; this fail-closed boundary also pins the
+# container and the only two client programs the Aspect tasks invoke.
+policy: guardian-mythra-observer
+cases:
+  - name: query the Mythra journal
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: exec
+    objectName: mythra-journal-console-0
+    object:
+      apiVersion: v1
+      kind: PodExecOptions
+      metadata: {namespace: tenant-guardian-prod}
+      container: console
+      command: [psql, -X, -c, "SELECT count(*) FROM park_events"]
+      stdout: true
+    user:
+      username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-observer
+      groups: ["system:serviceaccounts", "system:authenticated"]
+    expect: allow
+  - name: dump the Mythra journal
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: exec
+    objectName: mythra-journal-console-0
+    object:
+      apiVersion: v1
+      kind: PodExecOptions
+      metadata: {namespace: tenant-guardian-prod}
+      container: console
+      command: [pg_dump, --no-owner, --no-privileges]
+      stdout: true
+    user:
+      username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-observer
+      groups: ["system:serviceaccounts", "system:authenticated"]
+    expect: allow
+  - name: open an arbitrary console shell
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: exec
+    objectName: mythra-journal-console-0
+    object:
+      apiVersion: v1
+      kind: PodExecOptions
+      metadata: {namespace: tenant-guardian-prod}
+      container: console
+      command: [/bin/sh]
+      stdin: true
+      stdout: true
+    user:
+      username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-observer
+      groups: ["system:serviceaccounts", "system:authenticated"]
+    expect: deny
+  - name: exec into the game server
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: exec
+    objectName: mythrad-59b449c48f-h84js
+    object:
+      apiVersion: v1
+      kind: PodExecOptions
+      metadata: {namespace: tenant-guardian-prod}
+      container: mythrad
+      command: [psql]
+      stdout: true
+    user:
+      username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-observer
+      groups: ["system:serviceaccounts", "system:authenticated"]
+    expect: deny
+  - name: run psql in another console container
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: exec
+    objectName: mythra-journal-console-0
+    object:
+      apiVersion: v1
+      kind: PodExecOptions
+      metadata: {namespace: tenant-guardian-prod}
+      container: sidecar
+      command: [psql]
+      stdout: true
+    user:
+      username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-observer
+      groups: ["system:serviceaccounts", "system:authenticated"]
+    expect: deny
+  - name: delete the game server
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: mythrad-59b449c48f-h84js
+    object:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: mythrad-59b449c48f-h84js
+        namespace: tenant-guardian-prod
+        labels:
+          app.kubernetes.io/name: mythrad
+          guardian.dev/product: mythra
+    user:
+      username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-observer
+      groups: ["system:serviceaccounts", "system:authenticated"]
+    expect: deny
+  - name: platform-agent is not matched directly
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: exec
+    objectName: mythra-journal-console-0
+    object:
+      apiVersion: v1
+      kind: PodExecOptions
+      metadata: {namespace: tenant-guardian-prod}
+      container: console
+      command: [psql]
+      stdout: true
+    user:
+      username: keycloak:cozy#platform-agent
+      groups: ["guardian-persona-read", "system:authenticated"]
+    expect: no-match

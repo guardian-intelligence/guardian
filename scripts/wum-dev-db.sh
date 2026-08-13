@@ -8,6 +8,7 @@
 #   scripts/wum-dev-db.sh [start|stop|wipe|from-prod|url]
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAME=wum-dev-pg
 VOLUME=wum-dev-pg-data
 PORT="${WUM_DEV_PG_PORT:-55432}"
@@ -54,34 +55,14 @@ wipe)
   start
   ;;
 from-prod)
-  # Requires cluster read access (docs/agent-environment-authentication.md)
-  # and the postgres credentials Secret. The dump runs through pg_dump
-  # inside the local container so no postgres client is needed on the host.
+  # The JIT Mythra observer runs pg_dump in the credential-isolated console;
+  # neither this process nor the standing platform-agent reads a Secret.
   start
   echo "wum-dev-db: dumping prod mythra journal…" >&2
-  # The password comes from the operator (most personas cannot read the
-  # Secret); kubectl is the fallback for personas that can.
-  PW="${WUM_PROD_PG_PASSWORD:-}"
-  if [ -z "$PW" ]; then
-    PW="$(kubectl get secret -n tenant-guardian-prod postgres-products-credentials \
-      -o jsonpath='{.data.mythra}' | base64 -d)" || {
-      echo "wum-dev-db: cannot read the prod credentials Secret with this persona;" >&2
-      echo "set WUM_PROD_PG_PASSWORD (see docs/agent-environment-authentication.md)" >&2
-      exit 1
-    }
-  fi
-  kubectl port-forward -n tenant-guardian-prod svc/postgres-products-rw 55433:5432 >/dev/null 2>&1 &
-  PF=$!
-  trap 'kill $PF 2>/dev/null' EXIT
-  for _ in $(seq 1 30); do
-    docker exec -e PGPASSWORD="$PW" "$NAME" \
-      pg_isready -h host.docker.internal -p 55433 -U mythra >/dev/null 2>&1 && break
-    sleep 1
-  done
   docker exec "$NAME" psql -U mythra -d postgres -q \
     -c "DROP DATABASE IF EXISTS mythra WITH (FORCE)" -c "CREATE DATABASE mythra OWNER mythra"
-  docker exec -e PGPASSWORD="$PW" "$NAME" sh -c \
-    "pg_dump -h host.docker.internal -p 55433 -U mythra -d mythra --no-owner --no-privileges | psql -q -U mythra -d mythra"
+  (cd "${ROOT}" && aspect mythra dump) | docker exec -i "$NAME" \
+    psql -q -v ON_ERROR_STOP=1 -U mythra -d mythra
   echo "wum-dev-db: prod journal restored locally" >&2
   ;;
 url)

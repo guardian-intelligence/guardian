@@ -227,6 +227,15 @@ spec:
         (request.operation == "CREATE" && request.resource.group == "" &&
           request.resource.resource == "serviceaccounts" &&
           has(request.subResource) && request.subResource == "token" &&
+          has(request.name) && request.name in ["guardian-mythra-observer", "guardian-mythra-operator"] &&
+          request.namespace == "tenant-guardian-prod" &&
+          has(object.spec.expirationSeconds) &&
+          object.spec.expirationSeconds <= 900 &&
+          size(object.spec.audiences) == 1 &&
+          object.spec.audiences[0] == "https://10.8.0.250:6443") ||
+        (request.operation == "CREATE" && request.resource.group == "" &&
+          request.resource.resource == "serviceaccounts" &&
+          has(request.subResource) && request.subResource == "token" &&
           has(request.name) &&
           request.name in ["guardian-cloud-agent-cursor", "guardian-cloud-agent-devin"] &&
           request.namespace == "tenant-root" &&
@@ -235,8 +244,9 @@ spec:
           size(object.spec.audiences) == 1 &&
           object.spec.audiences[0] == "https://10.8.0.250:6443")
       message: >-
-        platform-agent is read-only except for pod port-forwards and
-        one-hour-or-shorter delivery-read cloud-agent tokens
+        platform-agent is read-only except for pod port-forwards, 15-minute
+        Mythra capability tokens, and one-hour-or-shorter delivery-read
+        cloud-agent tokens
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
