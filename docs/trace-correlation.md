@@ -33,8 +33,17 @@ server span's TraceId — no joins through intermediate ids.
 
 ## The cookbook
 
-Port-forward ClickHouse (see AGENTS.md observability block), then with a
-trace id `T` (32 hex chars):
+Reach ClickHouse, then work with a trace id `T` (32 hex chars):
+
+```sh
+kubectl port-forward -n tenant-root svc/chendpoint-clickhouse-analytics 9000:9000
+kubectl get secret -n guardian-analytics analytics-ch-ingest -o jsonpath='{.data.ingest}' | base64 -d
+clickhouse-client --host 127.0.0.1 --user ingest
+```
+
+`SHOW CREATE TABLE guardian_analytics.events` / `guardian_analytics.otel_traces`
+gives the schema actually being served; the source is
+`src/infrastructure/deployments/analytics/system/{ddl-configmap.yaml,traces-configmap.yaml}`.
 
 ```sql
 -- What the browser saw: the event carrying this id, and the rest of that

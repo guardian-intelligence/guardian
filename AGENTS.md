@@ -1,16 +1,8 @@
-This is a Bazel polyglot monorepo for Guardian, a free open-source reference architecture for a bootstrapped software company.
-
-The purpose is to create a free and open-source system for any one to convert a source of compute into a self-healing intelligent system (in our case, a secure, disaster-proof software company capable of generating revenue by providing value to the world) as a platform to build sophisticated software products such as Postflight, a GitHub App that speeds up your CI.
+This is a Bazel polyglot monorepo and a free open-source repository housing all code including infrastructure and applications for Guardian Intelligence, a company founded by the user.
 
 Read `docs/TRIBAL_KNOWLEDGE.md` before making changes to this repository.
 
 The management cluster runs Cozystack, variant `isp-full` with opt-in Gateway API.
-
-Reference https://github.com/guardian-intelligence/verself/tree/main/docs for information relating to:
-
-* Zvol architecture
-* "Golden Image" pattern
-* Snapshot/restore (Verself uses just-in-time firecracker, this repo uses QEMU warmpool on SEV-SNP-compatible hardware)
 
 <operations_guidelines>
 * GitOps: never maintain manual configuration, apply changes through IaC. Things that don't belong in git: Secrets, data, cluster/node state.
@@ -21,7 +13,7 @@ Reference https://github.com/guardian-intelligence/verself/tree/main/docs for in
 </operations_guidelines>
 
 <development_loop>
-Not all tasks require this loop. Use this loop when pursuing autonomous development that requires a change to the repository's source code.
+Use this loop when pursuing autonomous development that requires a change to the repository's source code.
 
 The loop is: worktree → change → PR/CI → merge → babysit convergence → babysit promotion/canary → babysit user signals → report to user. You are done when the change has converged and is healthy in the cluster.
 
@@ -59,21 +51,10 @@ Common post-merge issues:
 
 House rules:
 - Do not use administration CLIs as a second control plane, use them for reads. Rely on Flux to converge the cluster after merge.
-- Authentication, persona selection, provider-cloud credentials, and breakglass are routed by `docs/agent-environment-authentication.md`. Select the execution-environment row before cluster access; never copy an authentication path between environments or assume an agent product implies authority.
-- If relevant to your task, clean up any hanging resources post-merge.
+- If relevant to your task, clean up any hanging resources in the cluster post-merge.
 </development_loop>
 
-<observability>
-- Logs: `kubectl port-forward -n tenant-root svc/vlselect-generic 9471:9471`, then LogsQL via `curl 127.0.0.1:9471/select/logsql/query --data-urlencode 'query=...'`.
-- Metrics: `kubectl port-forward -n tenant-root svc/vmselect-shortterm 8481:8481`, then PromQL via `curl 127.0.0.1:8481/select/0/prometheus/api/v1/query --data-urlencode 'query=...'`.
-- Traces, spans, and analytics events: `kubectl port-forward -n tenant-root svc/chendpoint-clickhouse-analytics 9000:9000`, get the `ingest` password from `kubectl get secret -n guardian-analytics analytics-ch-ingest -o jsonpath='{.data.ingest}' | base64 -d`, then `clickhouse-client --host 127.0.0.1 --user ingest` and `SHOW CREATE TABLE guardian_analytics.events` / `guardian_analytics.otel_traces` for the schema actually being served.
-- Schema source: `src/infrastructure/deployments/analytics/system/{ddl-configmap.yaml,traces-configmap.yaml}`.
-- Dropped network flows: the Cilium agents export every `DROPPED`/`ERROR` flow as JSON on stdout, so they land in VictoriaLogs with the rest of the container logs. `hubble_drop_total` says a namespace is being denied; this says which peer, port, and policy. LogsQL: `kubernetes_container_name:cilium-agent AND _msg:POLICY_DENIED | unpack_json | keep _time, source, destination, IP, l4, drop_reason_desc, egress_denied_by`. There is no Hubble relay to query — see `src/infrastructure/base/platform-patches/cozystack-networking-hubble.yaml` for why.
-</observability>
-
 <coding_guidelines>
-* Improvements and refactors should leave no trace that the old approach ever existed unless someone spelunks through git history. This means that comments should not reference the previous approach nor should any compatibility shims be provided. E.g. if migrating from Cozystack v1.4.0 -> v1.5.0 avoid comments like "this is required for 1.5.0 whereas 1.4.0 did XYZ".
-* Only add comments for genuinely complex workarounds for bugs or surprising deviations from best practices. Clean up comments that don't adhere to this rule.
 * Do not use GitHub Actions workflow YAMLs as a second control plane. Prefer to move tasks including but not limited to: generating Preview Deployments, generating/signing images, scheduled jobs, and so on, into the source code, rather than hairpinning cluster administration through GitHub.
 </coding_guidelines>
 
@@ -81,3 +62,4 @@ Product Surfaces:
 
 - Postflight - GitHub App, Blacksmith.sh but using QEMU warm pool, CRIU, on SEV-SNP hardware, ZFS for caching build artifacts and memory snapshots to create a "golden image" per repo. (In Progress)
 - PrivateCut - rumi.engineering, browser-native video clipper: up to a minute of any video at the best quality that fits under a hard user-selected size cap — 4 MB by default, up to 100 MB (mediabunny in a worker, measured-size acceptance gate, no upload). (In Progress)
+- "Wake Up, Mythra!" (WUM) - Web game (native mobile apps planned) online cooperative city simulation tied to real-world dog parks. Rust -> `wazero` core + client crate for camera, device bindings, interpolation, reconnect logic. Go service.
