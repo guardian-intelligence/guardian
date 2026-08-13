@@ -99,7 +99,7 @@ Mark: **KEEP / REWRITE / STRIKE.**
       notification becomes a city-wide summons to drive over and tag in.
 - [ ] **Nobody's harvest can hurt anyone else's odds.** Checking in at a
       quiet hour never decreases the chances for others; only showing up
-      *together* multiplies them.
+      _together_ multiplies them.
 - [ ] **Showing up when everyone shows up is the whole game.** Staying
       longer buys nothing. We don't create artificial pressure to stay
       longer than a dog's comfortable — in-and-out in 30 seconds counts.
@@ -152,7 +152,7 @@ Mark: **KEEP / REWRITE / STRIKE.**
 
 ---
 
-*Vocabulary lives in the glossary (Trainer, Dog, Pack, Dog Park, Check In,
+_Vocabulary lives in the glossary (Trainer, Dog, Pack, Dog Park, Check In,
 Mythra, Mythraforge, Rosieforge, the Pile, tending weeks, festival week).
 Numbers live in the parameter sheet, not in prose. System mechanics each
-get a one-pager that cites the pillar it serves.*
+get a one-pager that cites the pillar it serves._

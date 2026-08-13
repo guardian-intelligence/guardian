@@ -66,7 +66,11 @@ impl Node {
         Node(idx | DECK_BIT)
     }
     pub fn at(idx: u16, on_deck: bool) -> Node {
-        if on_deck { Node::deck(idx) } else { Node::ground(idx) }
+        if on_deck {
+            Node::deck(idx)
+        } else {
+            Node::ground(idx)
+        }
     }
     pub fn idx(self) -> u16 {
         self.0 & (DECK_BIT - 1)

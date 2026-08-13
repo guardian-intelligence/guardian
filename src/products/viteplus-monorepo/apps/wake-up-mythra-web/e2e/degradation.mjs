@@ -20,7 +20,8 @@ import { chromium } from "playwright";
 
 const APP = process.env.WUM_APP_URL ?? "http://127.0.0.1:4254";
 const CTL = process.env.NETSIM_CONTROL ?? "http://127.0.0.1:14434";
-const ctl = (path) => fetch(`${CTL}${path}`, { method: path.startsWith("/state") ? "GET" : "POST" });
+const ctl = (path) =>
+  fetch(`${CTL}${path}`, { method: path.startsWith("/state") ? "GET" : "POST" });
 
 const browser = await chromium.launch({ args: ["--enable-features=WebTransport"] });
 const page = await browser.newPage();

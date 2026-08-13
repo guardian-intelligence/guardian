@@ -294,8 +294,11 @@ mod tests {
             self.now_ms += 16;
             if self.now_ms - self.last_check >= self.check_ms {
                 self.last_check = self.now_ms;
-                self.clock
-                    .sample(self.now_ms - self.rtt_ms, self.now_ms, self.server_tick(self.now_ms));
+                self.clock.sample(
+                    self.now_ms - self.rtt_ms,
+                    self.now_ms,
+                    self.server_tick(self.now_ms),
+                );
             }
             let d = self.clock.frame(self.now_ms, self.replica_tick, 8_000);
             if d & F_SNAPSHOT != 0 {

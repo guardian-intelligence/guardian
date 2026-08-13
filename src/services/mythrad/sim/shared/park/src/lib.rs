@@ -435,7 +435,14 @@ fn step_dog(p: &mut Park, t: &Terrain, i: usize) {
     }
     let mut on_deck = d.flags & FLAG_DECK != 0;
     let boosted = d.flags & FLAG_BOOST != 0;
-    let outcome = nav::step_toward(t, &mut d.x, &mut d.y, &mut on_deck, Node(d.waypoint), boosted);
+    let outcome = nav::step_toward(
+        t,
+        &mut d.x,
+        &mut d.y,
+        &mut on_deck,
+        Node(d.waypoint),
+        boosted,
+    );
     d.flags = if on_deck {
         d.flags | FLAG_DECK
     } else {
