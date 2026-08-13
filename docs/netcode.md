@@ -44,7 +44,7 @@ event stream as everything else).
 | `sim/nav` | deterministic A* | pathing, `path_cost`; movement is state (position, waypoint, target — all hashed), never a cache |
 | `sim/clock` (wasm, no_std) | client tick discipline | Acquiring → Locked (±2% slew) → FastForward (big deficits) → SnapshotRequired (beyond the ring). No floats, no host clocks — the host feeds it times and executes its step-count directives |
 | `sim/client` (wasm) | presentation | render smoothing; re-exports the clock. Never feeds back into world state |
-| `mythrad/park.go` | the authority | tick loop, event stamping, journal append, hash ring, snapshot cadence, the module-swap lane |
+| `mythrad/park.go` | the authority | the anchored tick schedule, event stamping, journal append, hash ring, snapshot cadence, the module-swap lane |
 | `mythrad/session.go` | transport | WebTransport sessions, OIDC-ticket admission, intent→actor binding, fan-out |
 | `mythrad/journal` | durability | Postgres `park_events` / `park_snapshots` / `park_terrain`; per-park seq is dense and single-writer; `journaltest.Run` is the conformance suite |
 | web `client.ts` | the host | moves opaque bytes between wire, wasm, and screen. If TypeScript (or Go) can read a game rule, the rule is in the wrong place |
@@ -88,13 +88,33 @@ journal is the acknowledgment. Rejects go only to the sender.
 - **Snapshots are not compaction.** A snapshot is a resync payload and a
   replay floor. Deleting journal rows behind a *verified* snapshot is a
   separate future job ("journal retention") — see the FAQ.
+- **A tick number is a timestamp.** Tick N is *defined* as `wallEpoch +
+  N/tick_rate` plus a per-park phase offset derived from the immutable park
+  id (voteable metadata can never move a park's clock; co-located parks
+  stagger their tick work for free). The scheduler chases that definition
+  instead of free-counting ticks, so hitches and downtime are always repaid
+  and drift cannot accumulate — real-world mechanics (harvests, meetups,
+  check-in windows) compile to plain tick arithmetic inside the clock-free
+  sim. `mythra_tick_lag_seconds` measures the server against its own
+  schedule.
 
 ## FAQ
 
 **What actually happens on pod restart?** Restore the latest snapshot,
 replay events after it, refuse to serve if the replayed hash mismatches the
-recorded one (never serve divergence). Measured: a park minutes deep reopens
-in under a second; drilled live three times with a player connected.
+recorded one (never serve divergence), then repay the downtime before the
+doors open: a gap under a minute is stepped through (the world lived while
+the server was away), a longer one journals a single `clock_skip` event that
+jumps the tick to the schedule and re-floors the snapshot. Either way the
+park reopens on exactly the tick the wall clock defines. Measured: a park
+minutes deep reopens in under a second; drilled live three times with a
+player connected.
+
+**What if the wall clock itself jumps?** Forward: the schedule demands
+catch-up ticks, bounded per wakeup; past the hash ring the park closes and
+repays the gap through the dark reopen path. Backward (NTP step, lying
+RTC): the park never unticks and never idles backward — it simply waits for
+reality to catch up, visible as negative `mythra_tick_lag_seconds`.
 
 **A client sends an intent during a server blip — then what?** Today: lost.
 Intents are idempotent by `(actor, intent_id)`, so client-side

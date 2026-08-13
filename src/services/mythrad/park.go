@@ -22,17 +22,44 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/journal"
 )
 
-// hashRingTicks bounds how stale a client check (and a rejoin's fast-
-// forward) may be: ~30s at 24Hz. Older checks answer "unknown", which the
-// client counts as a strike; rejoins further behind get a snapshot (the
-// compute bound from docs/netcode.md).
 const (
-	tickHz         = 24
-	hashRingTicks  = 30 * tickHz
 	snapshotEvery  = 512 // events between durable snapshots
 	snapshotMaxAge = 15 * time.Minute
 	dedupWindow    = 4096 // remembered (actor, intent_id) pairs per park
+
+	// ringSeconds bounds how stale a client check (and a rejoin's fast-
+	// forward) may be. Older checks answer "unknown", which the client
+	// counts as a strike; rejoins further behind get a snapshot (the
+	// compute bound from docs/netcode.md).
+	ringSeconds = 30
+
+	// catchupBurst caps ticks repaid per scheduler wakeup, so attach
+	// requests stay serviced while a hitch is being worked off.
+	catchupBurst = 8
+
+	// darkStepWindow bounds the downtime the reopen path repays by
+	// stepping tick-by-tick (the world keeps living through a short
+	// restart). Longer gaps journal a clock_skip instead, keeping replay
+	// cost bounded and making the jump an event every replica sees.
+	darkStepWindow = 60 * time.Second
 )
+
+// wallEpoch is the instant of tick 0 for every park: tick N is defined as
+// wallEpoch + N*tickDur + the park's phase offset. The mapping is a
+// definition, not a measurement — the scheduler chases it, so hitches and
+// downtime are always repaid and a tick number doubles as a timestamp.
+var wallEpoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// timing is the tick schedule an authority runs under. now is the wall
+// clock, injectable so tests and simulation harnesses own time. Rates
+// other than 24Hz are server-side experiments for now: sim/clock in
+// shipped clients paces at 24.
+type timing struct {
+	hz  int
+	now func() time.Time
+}
+
+func (tm timing) tickDur() time.Duration { return time.Second / time.Duration(tm.hz) }
 
 // parkHost wraps one wazero instance of the park module (the game state
 // machine). Not goroutine-safe: owned by its authority's loop.
@@ -279,6 +306,17 @@ type authority struct {
 	j    journal.Journal
 	mods *modules
 
+	// The tick schedule: anchor + phase define every tick's wall-clock
+	// instant (tickInstant). anchor is wallEpoch, or a process-local
+	// stand-in when the module cannot journal a clock_skip yet. phase
+	// staggers co-located parks' tick work across the tick interval,
+	// derived from the immutable park id so player-votable metadata can
+	// never move a park's clock.
+	tm      timing
+	tickDur time.Duration
+	phase   time.Duration
+	anchor  time.Time
+
 	// The active terrain artifact, cached for welcome/snapshot lines so
 	// clients know which blob to fetch before restoring, and as raw bytes
 	// for candidate modules under soak. Written only by the boot path and
@@ -303,7 +341,7 @@ type authority struct {
 	mu       sync.Mutex
 	staged   []stagedIntent
 	subs     map[*session]bool
-	ring     [hashRingTicks]ringEntry
+	ring     []ringEntry // ringSeconds*hz entries
 	ringHead uint64
 	lastSeq  int64
 	closed   bool
@@ -421,11 +459,11 @@ func (a *authority) promote(t uint64) {
 	a.mu.Lock()
 	// The ring entry for the boundary tick and any cached snapshot line
 	// were computed by the old module; re-anchor both.
-	a.ring[t%hashRingTicks] = ringEntry{tick: t, wh: wh}
+	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: wh}
 	a.snapCache = snapCacheEntry{}
 	a.mu.Unlock()
 	a.eventsSinceSnap = 0
-	a.lastSnapAt = time.Now()
+	a.lastSnapAt = a.tm.now()
 	log.Printf("park %s: epoch %d — module %s live (was %s), wh %016x", a.name, a.host.Epoch(), a.moduleHash, prev, wh)
 	mEpochSwaps.WithLabelValues("committed").Inc()
 }
@@ -454,24 +492,36 @@ func (a *authority) setTerrain(blob []byte) error {
 }
 
 // openAuthority restores the park from its journal (genesis-snapshotting a
-// brand new one on the genesis terrain) and starts its loop. A park whose
+// brand new one on the genesis terrain), repays the gap between the
+// replayed tick and the wall-clock schedule while the doors are still
+// closed, and hands back an authority ready for run(). A park whose
 // snapshot does not replay to its recorded world hash is refused, never
 // served wrong.
-func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, j journal.Journal, mods *modules) (*authority, error) {
+func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, j journal.Journal, mods *modules, tm timing) (*authority, error) {
+	if tm.hz <= 0 {
+		tm.hz = 24
+	}
+	if tm.now == nil {
+		tm.now = time.Now
+	}
 	host, err := newParkHost(module)
 	if err != nil {
 		return nil, err
 	}
 	a := &authority{
 		name: name, id: parkIDFor(name), host: host, j: j, mods: mods,
+		tm: tm, tickDur: tm.tickDur(), anchor: wallEpoch,
 		moduleHash: displayHash(module),
 		subs:       map[*session]bool{},
+		ring:       make([]ringEntry, ringSeconds*tm.hz),
 		seen:       map[string]struct{}{},
 		attach:     make(chan attachReq),
 		stop:       make(chan struct{}),
-		lastSnapAt: time.Now(),
-		utcDay:     uint32(time.Now().Unix() / 86400),
+		lastSnapAt: tm.now(),
+		// utcDay 0: the first tick after every open stages a day_reset, so
+		// a park that slept across midnight wakes with the right day.
 	}
+	a.phase = time.Duration(uint64(a.id) % uint64(a.tickDur))
 	fail := func(err error) (*authority, error) {
 		host.close()
 		return nil, fmt.Errorf("park %s: %w", name, err)
@@ -560,8 +610,68 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 			return fail(err)
 		}
 	}
+	// Repay the schedule before the doors open: replay brought the park to
+	// its stored tick; the wall clock says which tick it should be on.
+	if target := a.targetTick(tm.now()); target > host.Tick() {
+		if time.Duration(target-host.Tick())*a.tickDur <= darkStepWindow {
+			// The world lives through a short restart: step it, filling
+			// the ring so rejoining clients keep their fast-forward lane.
+			for host.Tick() < target {
+				host.Step()
+				t := host.Tick()
+				a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: host.Hash()}
+			}
+			a.ringHead = host.Tick()
+		} else if err := a.clockSkip(ctx, target); err != nil {
+			return fail(err)
+		}
+	}
 	// The caller starts run(); tests drive tickOnce directly instead.
 	return a, nil
+}
+
+// clockSkip journals the repayment of a long gap: one event that jumps sim
+// time to target without stepping through it. What a skip means for the
+// world is the module's decision — the host only moves bytes.
+func (a *authority) clockSkip(ctx context.Context, target uint64) error {
+	tick, epoch := a.host.Tick(), a.host.Epoch()
+	var p [8]byte
+	binary.LittleEndian.PutUint64(p[:], target)
+	if code := a.host.Apply(encodeEvent(evClockSkip, p[:])); code != 0 {
+		// A module from before clock_skip existed (mount skew during a
+		// deploy): anchor to this process so the schedule holds drift-free
+		// for the instance's life; the real repayment lands on the first
+		// reopen under a skip-capable module.
+		a.anchor = a.tm.now().Add(-time.Duration(tick)*a.tickDur - a.phase)
+		log.Printf("park %s: module rejected clock_skip (code %d) — process-anchored until the module lane converges", a.name, code)
+		return nil
+	}
+	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: evClockSkip, Actor: "system", Payload: p[:]}
+	firstSeq, err := a.j.Append(ctx, a.id, a.lastSeq, []journal.Event{ev})
+	if err != nil {
+		// State is ahead of the journal: never serve it.
+		return fmt.Errorf("clock_skip append: %w", err)
+	}
+	a.lastSeq = firstSeq
+	mEventsAppended.Inc()
+	mClockSkips.Inc()
+	t := a.host.Tick()
+	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: a.host.Hash()}
+	a.ringHead = t
+	// A fresh floor so future replays restore past the gap instead of
+	// re-crossing it. Failure is not fatal: replay re-applies the skip.
+	if err := a.j.PutSnapshot(ctx, a.id, journal.Snapshot{
+		Seq: a.lastSeq, Tick: t, Epoch: epoch, WH: a.host.Hash(),
+		TerrainID: a.host.TerrainID(), State: a.host.Snapshot(),
+	}); err != nil {
+		log.Printf("park %s: snapshot after clock_skip failed: %v", a.name, err)
+	} else {
+		mSnapshots.Inc()
+		a.lastSnapAt = a.tm.now()
+	}
+	log.Printf("park %s: clock_skip %d -> %d (%s of downtime repaid)",
+		a.name, tick, t, time.Duration(t-tick)*a.tickDur)
+	return nil
 }
 
 func encodeEvent(kind uint16, payload []byte) []byte {
@@ -614,7 +724,7 @@ func (a *authority) detach(s *session) {
 func (a *authority) verdictFor(tick, wh uint64) (ok *bool, now uint64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	e := a.ring[tick%hashRingTicks]
+	e := a.ring[tick%uint64(len(a.ring))]
 	if e.tick != tick {
 		return nil, a.ringHead
 	}
@@ -622,10 +732,30 @@ func (a *authority) verdictFor(tick, wh uint64) (ok *bool, now uint64) {
 	return &v, a.ringHead
 }
 
+// tickInstant is the wall-clock moment tick t is scheduled to run.
+func (a *authority) tickInstant(t uint64) time.Time {
+	return a.anchor.Add(a.phase + time.Duration(t)*a.tickDur)
+}
+
+// targetTick is the tick whose instant most recently passed: the tick the
+// park should be on right now.
+func (a *authority) targetTick(now time.Time) uint64 {
+	d := now.Sub(a.anchor) - a.phase
+	if d < 0 {
+		return 0
+	}
+	return uint64(d / a.tickDur)
+}
+
 // run is the authority loop: the single goroutine touching the parkHost.
+// Ticks are scheduled against the wall clock, never free-counted: each
+// wakeup runs every tick whose instant has passed (bounded per wakeup),
+// then sleeps until the next tick's instant. A short hitch repays itself;
+// the sim never runs ahead of its schedule — if the wall clock steps
+// backward, the park idles until reality catches up.
 func (a *authority) run() {
-	ticker := time.NewTicker(time.Second / tickHz)
-	defer ticker.Stop()
+	timer := time.NewTimer(0)
+	defer timer.Stop()
 	for {
 		select {
 		case <-a.stop:
@@ -636,8 +766,28 @@ func (a *authority) run() {
 			return
 		case req := <-a.attach:
 			req.done <- a.handleAttach(req)
-		case <-ticker.C:
-			a.tickOnce()
+		case <-timer.C:
+			now := a.tm.now()
+			target := a.targetTick(now)
+			if cur := a.host.Tick(); target > cur+uint64(len(a.ring)) {
+				// A live gap past the hash ring (process pause, clock step
+				// forward): every client is beyond fast-forward range
+				// anyway, so repay the gap where gaps are repaid — the
+				// dark reopen path.
+				log.Printf("park %s: %d ticks behind schedule — closing to repay the gap dark", a.name, target-cur)
+				a.close()
+				continue
+			}
+			for n := 0; n < catchupBurst && a.host.Tick() < target; n++ {
+				a.tickOnce()
+			}
+			cur := a.host.Tick()
+			mTickLag.WithLabelValues(a.name).Set(now.Sub(a.tickInstant(cur)).Seconds())
+			wait := a.tickInstant(cur + 1).Sub(a.tm.now())
+			if wait < 0 {
+				wait = 0
+			}
+			timer.Reset(wait)
 		}
 	}
 }
@@ -646,7 +796,7 @@ func (a *authority) tickOnce() {
 	start := time.Now()
 	// Wall clock enters the sim only as a journal event: the day index
 	// becomes day_reset here and is never read inside the module.
-	if day := uint32(time.Now().Unix() / 86400); day != a.utcDay {
+	if day := uint32(a.tm.now().Unix() / 86400); day != a.utcDay {
 		a.utcDay = day
 		var p [4]byte
 		binary.LittleEndian.PutUint32(p[:], day)
@@ -739,7 +889,7 @@ func (a *authority) tickOnce() {
 	t := a.host.Tick()
 	wh := a.host.Hash()
 	a.mu.Lock()
-	a.ring[t%hashRingTicks] = ringEntry{tick: t, wh: wh}
+	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: wh}
 	a.ringHead = t
 	a.mu.Unlock()
 
@@ -747,9 +897,9 @@ func (a *authority) tickOnce() {
 		a.promote(t)
 	}
 
-	if a.eventsSinceSnap >= snapshotEvery || (a.eventsSinceSnap > 0 && time.Since(a.lastSnapAt) > snapshotMaxAge) {
+	if a.eventsSinceSnap >= snapshotEvery || (a.eventsSinceSnap > 0 && a.tm.now().Sub(a.lastSnapAt) > snapshotMaxAge) {
 		a.eventsSinceSnap = 0
-		a.lastSnapAt = time.Now()
+		a.lastSnapAt = a.tm.now()
 		snap := journal.Snapshot{
 			Seq: a.lastSeq, Tick: t, Epoch: a.host.Epoch(), WH: wh,
 			TerrainID: a.host.TerrainID(), State: a.host.Snapshot(),
@@ -816,7 +966,7 @@ var errPastAttach = errors.New("past attach position")
 // at the attach seq — anything newer is already on its way.
 func (a *authority) catchupLines(sinceSeq int64, sinceTick uint64, res attachResult) [][]byte {
 	snapLine := snapshotLineFrom(res.seq, res.tick, res.epoch, res.wh, res.terrain, res.state)
-	if sinceSeq > 0 && sinceSeq <= res.seq && sinceTick+hashRingTicks >= res.tick {
+	if sinceSeq > 0 && sinceSeq <= res.seq && sinceTick+uint64(len(a.ring)) >= res.tick {
 		var events [][]byte
 		eventBytes := 0
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -914,10 +1064,11 @@ type parks struct {
 	genesis []byte // terrain artifact every brand-new park is born with
 	j       journal.Journal
 	mods    *modules
+	tm      timing
 }
 
-func newParks(module func() []byte, genesis []byte, j journal.Journal, mods *modules) *parks {
-	return &parks{byName: map[string]*authority{}, module: module, genesis: genesis, j: j, mods: mods}
+func newParks(module func() []byte, genesis []byte, j journal.Journal, mods *modules, tm timing) *parks {
+	return &parks{byName: map[string]*authority{}, module: module, genesis: genesis, j: j, mods: mods, tm: tm}
 }
 
 func (p *parks) get(ctx context.Context, name string) (*authority, error) {
@@ -929,7 +1080,7 @@ func (p *parks) get(ctx context.Context, name string) (*authority, error) {
 	p.mu.Unlock()
 	// Open outside the registry lock (journal replay takes a moment); the
 	// rare double-open race resolves to the first registered instance.
-	a, err := openAuthority(ctx, name, p.module(), p.genesis, p.j, p.mods)
+	a, err := openAuthority(ctx, name, p.module(), p.genesis, p.j, p.mods, p.tm)
 	if err != nil {
 		return nil, err
 	}

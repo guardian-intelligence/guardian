@@ -96,6 +96,12 @@ var (
 		Help:    "Wall time of one authority tick incl. validation, batch append, and fan-out.",
 		Buckets: []float64{.0005, .001, .0025, .005, .01, .02, .03, .0417, .06, .1, .25},
 	})
+	mTickLag = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "mythra_tick_lag_seconds",
+		Help: "How far the park runs behind its wall-clock tick schedule. Steady state sits inside one tick; sustained growth means the sim cannot keep up; strongly negative means the wall clock stepped backward.",
+	}, []string{"park"})
+	mClockSkips = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_clock_skips_total", Help: "clock_skip events journaled to repay authority downtime."})
 	mAppendDur = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "mythra_journal_append_seconds",
 		Help:    "Tick-batched journal append commit time (the Append call alone).",
@@ -471,6 +477,10 @@ func main() {
 	publicAddr := envStr("PUBLIC_ADDR", "") // "host:port" advertised to clients
 	allowedOrigins := envStr("ALLOWED_ORIGINS", "")
 	maxSessions := envInt("MAX_SESSIONS", 4000)
+	tickHz := envInt("TICK_HZ", 24)
+	if tickHz != 24 {
+		log.Printf("TICK_HZ=%d: shipped clients pace at 24Hz — non-default rates are for server-side experiments", tickHz)
+	}
 	issuer := envStr("OIDC_ISSUER", "https://auth.wakeupmythra.com/realms/wakeupmythra.com")
 	jwksURL := envStr("OIDC_JWKS_URL", "")
 	clientIDs := envStr("OIDC_CLIENT_IDS", "wake-up-mythra,mythra-loadgen")
@@ -550,7 +560,7 @@ func main() {
 	defer traceShutdown(context.Background())
 
 	mods := &modules{client: client, park: parkMod}
-	registry := newParks(func() []byte { b, _ := parkMod.get(); return b }, fixtureTerrain, j, mods)
+	registry := newParks(func() []byte { b, _ := parkMod.get(); return b }, fixtureTerrain, j, mods, timing{hz: tickHz})
 	handlers := &gameHandlers{
 		parks: registry, tickets: newTicketMint(), maxSessions: maxSessions,
 		allowedParks: allowedParks, anonMints: newAnonLimiter(),

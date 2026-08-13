@@ -27,6 +27,7 @@ const (
 	evEpochAdvance = 6
 	evTerrainSet   = 7
 	evBoostSet     = 8
+	evClockSkip    = 9
 )
 
 // dogIDFor derives the actor's dog id: the binding between OIDC subject
@@ -208,11 +209,11 @@ func (h *gameHandlers) handleSession(sess *webtransport.Session) {
 		}
 		tokens--
 		var m struct {
-			Type   string `json:"type"`
-			ID     uint64 `json:"id"`
-			Kind   uint16 `json:"kind"`
-			P      []byte `json:"p"`
-			Have   int64  `json:"have"`
+			Type string `json:"type"`
+			ID   uint64 `json:"id"`
+			Kind uint16 `json:"kind"`
+			P    []byte `json:"p"`
+			Have int64  `json:"have"`
 		}
 		if json.Unmarshal(sc.Bytes(), &m) != nil {
 			continue
