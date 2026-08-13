@@ -56,8 +56,6 @@ spec:
             # Internal Keycloak over HTTP: the driver has no CA bundle.
             - name: TOKEN_URL
               value: http://keycloak.tenant-guardian-prod.svc/realms/wakeupmythra.com/protocol/openid-connect/token
-            - name: PARK_WASM
-              value: http://mythrad.tenant-guardian-prod.svc/behavior/park.wasm
             - name: CLIENT_SECRET_FILE
               value: /etc/loadgen/client-secret
             - name: SESSIONS
@@ -70,8 +68,6 @@ spec:
               value: "600"
             - name: ACT_SEC
               value: "30"
-            - name: CHECK_SEC
-              value: "5"
             - name: VM_IMPORT_URL
               value: http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus?extra_label=run_source%3Djournal2000&extra_label=surface%3Dmythra
           volumeMounts:

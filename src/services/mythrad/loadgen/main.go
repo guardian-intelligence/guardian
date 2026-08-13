@@ -1,9 +1,10 @@
 // The Wake Up Mythra load driver, journal protocol (docs/netcode.md):
 // bots authenticate through the real admission path (Keycloak client
 // credentials -> POST /session -> ticketed hello), receive the event
-// stream, act at human rate, and pull hash checks like real clients. One
-// bot per park (the verifier) runs the actual park module and feeds every
-// bot's checks; the rest exercise fan-out, admission, and intent flow.
+// stream, and act at human rate, exercising fan-out, admission, and
+// intent flow. The driver asserts liveness (intent -> visible latency),
+// not correctness: correctness is certified offline by replaying the
+// journal against stored snapshots (docs/netcode.md).
 //
 // The connect path sits behind a circuit breaker: consecutive dial
 // failures open it and pause the fleet, so a struggling server sees a
@@ -15,8 +16,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
-	"compress/flate"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -39,8 +38,6 @@ import (
 
 	"github.com/quic-go/quic-go/http3"
 	webtransport "github.com/quic-go/webtransport-go"
-	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
 )
 
 func envInt(k string, d int) int {
@@ -59,16 +56,15 @@ func envStr(k, d string) string {
 // ---------- metrics (pushed as Prometheus text) ----------
 
 var (
-	lgSessions   atomic.Int64
-	lgBytes      atomic.Int64
-	lgEvents     atomic.Int64
-	lgIntents    atomic.Int64
-	lgRejects    atomic.Int64
-	lgBreaker    atomic.Int64
-	lgConnects   sync.Map // result -> *atomic.Int64
-	lgChecks     sync.Map // result -> *atomic.Int64
-	latMu        sync.Mutex
-	latSamples   []float64 // intent -> visible seconds
+	lgSessions atomic.Int64
+	lgBytes    atomic.Int64
+	lgEvents   atomic.Int64
+	lgIntents  atomic.Int64
+	lgRejects  atomic.Int64
+	lgBreaker  atomic.Int64
+	lgConnects sync.Map // result -> *atomic.Int64
+	latMu      sync.Mutex
+	latSamples []float64 // intent -> visible seconds
 )
 
 func counter(m *sync.Map, key string) *atomic.Int64 {
@@ -86,10 +82,6 @@ func metricsText() string {
 	fmt.Fprintf(&b, "lg_breaker_open %d\n", lgBreaker.Load())
 	lgConnects.Range(func(k, v any) bool {
 		fmt.Fprintf(&b, "lg_connects_total{result=%q} %d\n", k, v.(*atomic.Int64).Load())
-		return true
-	})
-	lgChecks.Range(func(k, v any) bool {
-		fmt.Fprintf(&b, "lg_checks_total{result=%q} %d\n", k, v.(*atomic.Int64).Load())
 		return true
 	})
 	latMu.Lock()
@@ -168,175 +160,6 @@ func (t *tokenSource) get(ctx context.Context) (string, string, error) {
 	return t.token, t.sub, nil
 }
 
-// ---------- shared park replica (the verifier's sim) ----------
-
-type replica struct {
-	mu         sync.Mutex
-	rt         wazero.Runtime
-	mem        api.Memory
-	ioPtr      uint32
-	terrainPtr uint32
-	f          map[string]api.Function
-	terrainHex string // identity of the loaded terrain blob
-	valid      bool
-	seq        int64
-	tick       uint64
-	wh         string
-	lastEvent  time.Time
-}
-
-func newReplica(module []byte) (*replica, error) {
-	ctx := context.Background()
-	rt := wazero.NewRuntime(ctx)
-	mod, err := rt.Instantiate(ctx, module)
-	if err != nil {
-		return nil, err
-	}
-	r := &replica{rt: rt, mem: mod.Memory(), f: map[string]api.Function{}}
-	for _, n := range []string{"io_buf", "terrain_buf", "sim_set_terrain", "sim_restore", "sim_step", "sim_apply", "sim_hash", "sim_tick"} {
-		fn := mod.ExportedFunction(n)
-		if fn == nil {
-			return nil, fmt.Errorf("park module missing %s", n)
-		}
-		r.f[n] = fn
-	}
-	p, err := r.f["io_buf"].Call(ctx)
-	if err != nil {
-		return nil, err
-	}
-	r.ioPtr = uint32(p[0])
-	p, err = r.f["terrain_buf"].Call(ctx)
-	if err != nil {
-		return nil, err
-	}
-	r.terrainPtr = uint32(p[0])
-	return r, nil
-}
-
-func (r *replica) call(n string, args ...uint64) uint64 {
-	res, err := r.f[n].Call(context.Background(), args...)
-	if err != nil {
-		panic(err)
-	}
-	if len(res) == 0 {
-		return 0
-	}
-	return res[0]
-}
-
-// call32 truncates i32-returning exports: wazero's raw result slots are
-// unspecified above the result width.
-func (r *replica) call32(n string, args ...uint64) uint32 {
-	return uint32(r.call(n, args...))
-}
-
-// ensureTerrain loads the named blob into the replica before a restore,
-// fetching it from the service's content-addressed lane on first sight.
-func (r *replica) ensureTerrain(hex string, fetch func(hex string) ([]byte, error)) bool {
-	r.mu.Lock()
-	loaded := r.terrainHex
-	r.mu.Unlock()
-	if hex == "" || hex == loaded {
-		return true
-	}
-	blob, err := fetch(hex)
-	if err != nil {
-		log.Printf("terrain %s fetch failed: %v", hex, err)
-		return false
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.mem.Write(r.terrainPtr, blob)
-	if code := r.call32("sim_set_terrain", uint64(len(blob))); code != 0 {
-		log.Printf("terrain %s rejected by replica: code %d", hex, code)
-		return false
-	}
-	r.terrainHex = hex
-	r.valid = false // any prior state was for another world
-	return true
-}
-
-// reload swaps the replica onto new module bytes (an epoch_advance landed
-// in the stream). The terrain buffer died with the old instance, so the
-// terrain identity resets and the next snapshot's ensureTerrain refetches;
-// valid=false makes the verifier's check ticker request that snapshot.
-func (r *replica) reload(module []byte) error {
-	nr, err := newReplica(module)
-	if err != nil {
-		return err
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.rt.Close(context.Background())
-	r.rt, r.mem, r.ioPtr, r.terrainPtr, r.f = nr.rt, nr.mem, nr.ioPtr, nr.terrainPtr, nr.f
-	r.terrainHex = ""
-	r.valid = false
-	return nil
-}
-
-func (r *replica) restore(state []byte, seq int64) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.mem.Write(r.ioPtr, state)
-	if r.call32("sim_restore", uint64(len(state))) != 0 {
-		return false
-	}
-	r.valid = true
-	r.seq = seq
-	r.refreshLocked()
-	return true
-}
-
-func (r *replica) applyAt(tick uint64, seq int64, kind uint16, payload []byte) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if !r.valid || seq != r.seq+1 {
-		return
-	}
-	if tick < r.call("sim_tick") {
-		r.valid = false // late event; the verifier resyncs on next snapshot
-		return
-	}
-	for r.call("sim_tick") < tick {
-		r.call("sim_step")
-	}
-	buf := make([]byte, 2+len(payload))
-	binary.LittleEndian.PutUint16(buf, kind)
-	copy(buf[2:], payload)
-	r.mem.Write(r.ioPtr, buf)
-	if r.call32("sim_apply", uint64(len(buf))) != 0 {
-		r.valid = false
-		return
-	}
-	r.seq = seq
-	r.lastEvent = time.Now()
-	r.refreshLocked()
-}
-
-// stepIdle keeps the replica's clock moving through event lulls, but only
-// once the stream has been quiet for 2s — staying deliberately behind live
-// so arriving events are never "late" for the replica.
-func (r *replica) stepIdle() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if !r.valid || time.Since(r.lastEvent) < 2*time.Second {
-		return
-	}
-	r.call("sim_step")
-	r.refreshLocked()
-}
-
-func (r *replica) refreshLocked() {
-	r.tick = r.call("sim_tick")
-	r.wh = fmt.Sprintf("%016x", r.call("sim_hash"))
-}
-
-func (r *replica) latest() (uint64, string, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.tick, r.wh, r.valid
-}
-
 // ---------- circuit breaker ----------
 
 var (
@@ -376,14 +199,11 @@ func dogID(sub string) uint64 {
 type bot struct {
 	idx         int
 	park        string
-	verifier    bool
-	rep         *replica
 	sessionURL  string
 	targetURL   string
 	terrainBase string // "<http base>/terrain/"
 	toks        *tokenSource
 	actSec      int
-	checkSec    int
 
 	seq       int64
 	sinceTick uint64
@@ -391,7 +211,6 @@ type bot struct {
 	intentID  atomic.Uint64
 	pending   sync.Map // id -> time.Time
 	sub       string
-	moduleURL string
 }
 
 // terrainDims caches w<<16|h per terrain hex process-wide, so the fleet
@@ -543,9 +362,7 @@ func (b *bot) runOnce(ctx context.Context) error {
 	// act at human rate; checks pull from the shared replica
 	go func() {
 		act := time.NewTicker(time.Duration(b.actSec)*time.Second + time.Duration(rand.Intn(1000*b.actSec))*time.Millisecond)
-		check := time.NewTicker(time.Duration(b.checkSec) * time.Second)
 		defer act.Stop()
-		defer check.Stop()
 		for {
 			select {
 			case <-done:
@@ -580,41 +397,9 @@ func (b *bot) runOnce(ctx context.Context) error {
 					binary.LittleEndian.PutUint16(p[8:], uint16(rand.Intn(int(w*h))))
 					sendIntent(4, p)
 				}
-			case <-check.C:
-				if tick, wh, ok := b.rep.latest(); ok {
-					msg, _ := json.Marshal(map[string]any{"type": "check", "tick": tick, "wh": wh, "ct": time.Now().UnixMilli()})
-					wtSess.SendDatagram(msg)
-				} else if b.verifier {
-					send(map[string]any{"type": "resync", "have": b.seq})
-				}
 			}
 		}
 	}()
-	go func() {
-		for {
-			data, err := wtSess.ReceiveDatagram(ctx)
-			if err != nil {
-				return
-			}
-			lgBytes.Add(int64(len(data)))
-			var m struct {
-				Type string `json:"type"`
-				OK   *bool  `json:"ok"`
-			}
-			if json.Unmarshal(data, &m) != nil || m.Type != "verdict" {
-				continue
-			}
-			switch {
-			case m.OK == nil:
-				counter(&lgChecks, "unknown").Add(1)
-			case *m.OK:
-				counter(&lgChecks, "ok").Add(1)
-			default:
-				counter(&lgChecks, "mismatch").Add(1)
-			}
-		}
-	}()
-
 	sc := bufio.NewScanner(stream)
 	sc.Buffer(make([]byte, 512*1024), 512*1024)
 	joined := false
@@ -622,18 +407,11 @@ func (b *bot) runOnce(ctx context.Context) error {
 		lgBytes.Add(int64(len(sc.Bytes()) + 1))
 		var m struct {
 			Type    string `json:"type"`
-			Role    string `json:"role"`
 			Seq     int64  `json:"seq"`
 			Tick    uint64 `json:"tick"`
-			Kind    uint16 `json:"kind"`
 			Actor   string `json:"actor"`
 			Intent  uint64 `json:"intent"`
-			P       []byte `json:"p"`
-			Z       []byte `json:"z"`
-			Epoch   uint32 `json:"epoch"`
-			WH      string `json:"wh"`
 			Terrain string `json:"terrain"`
-			Reason  uint32 `json:"reason"`
 		}
 		if json.Unmarshal(sc.Bytes(), &m) != nil {
 			continue
@@ -649,31 +427,10 @@ func (b *bot) runOnce(ctx context.Context) error {
 		case "snapshot":
 			b.seq = m.Seq
 			b.sinceTick = m.Tick
-			if b.verifier && b.rep.ensureTerrain(m.Terrain, b.fetchTerrain) {
-				fr := flate.NewReader(bytes.NewReader(m.Z))
-				state, err := io.ReadAll(fr)
-				if err == nil {
-					b.rep.restore(state, m.Seq)
-				}
-			}
 		case "event":
 			lgEvents.Add(1)
 			b.seq = m.Seq
 			b.sinceTick = m.Tick
-			if b.verifier {
-				b.rep.applyAt(m.Tick, m.Seq, m.Kind, m.P)
-				// An epoch boundary: follow the swap the way clients do —
-				// refetch the module, rebuild, resync via the check ticker.
-				if m.Kind == 6 {
-					if mod, err := fetchBytes(b.moduleURL); err != nil {
-						log.Printf("bot %d: module refetch failed: %v", b.idx, err)
-					} else if err := b.rep.reload(mod); err != nil {
-						log.Printf("bot %d: module reload failed: %v", b.idx, err)
-					} else {
-						log.Printf("bot %d: park module swapped at seq %d", b.idx, m.Seq)
-					}
-				}
-			}
 			if m.Actor == b.sub {
 				if v, ok := b.pending.LoadAndDelete(m.Intent); ok {
 					latMu.Lock()
@@ -695,10 +452,8 @@ func main() {
 	rampRate := envInt("RAMP_RATE", 50)
 	holdSec := envInt("HOLD_SEC", 300)
 	actSec := envInt("ACT_SEC", 30)
-	checkSec := envInt("CHECK_SEC", 5)
 	targetURL := envStr("TARGET_URL", "https://mythrad:4433/wt")
 	sessionURL := envStr("SESSION_URL", "http://mythrad.tenant-guardian-prod.svc/session")
-	parkWasm := envStr("PARK_WASM", "http://mythrad.tenant-guardian-prod.svc/behavior/park.wasm")
 	importURL := os.Getenv("VM_IMPORT_URL")
 	secretFile := envStr("CLIENT_SECRET_FILE", "/etc/loadgen/client-secret")
 
@@ -712,30 +467,13 @@ func main() {
 		secret:   strings.TrimSpace(string(secret)),
 	}
 
-	module, err := fetchBytes(parkWasm)
-	if err != nil {
-		log.Fatalf("fetch park module: %v", err)
-	}
-
 	go pushMetrics(importURL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(holdSec)*time.Second+10*time.Minute)
 	defer cancel()
 
-	log.Printf("loadgen: %d sessions across %d park(s), ramp %d/s, hold %ds, act %ds, check %ds",
-		sessions, parksN, rampRate, holdSec, actSec, checkSec)
-
-	reps := make([]*replica, parksN)
-	for i := range reps {
-		if reps[i], err = newReplica(module); err != nil {
-			log.Fatalf("replica: %v", err)
-		}
-		go func(r *replica) {
-			for range time.Tick(time.Second / 24) {
-				r.stepIdle()
-			}
-		}(reps[i])
-	}
+	log.Printf("loadgen: %d sessions across %d park(s), ramp %d/s, hold %ds, act %ds",
+		sessions, parksN, rampRate, holdSec, actSec)
 
 	var wg sync.WaitGroup
 	interval := time.Second / time.Duration(max(1, rampRate))
@@ -747,12 +485,11 @@ func main() {
 			park = name
 		}
 		b := &bot{
-			idx: i, park: park, verifier: i < parksN, rep: reps[i%parksN],
+			idx: i, park: park,
 			sessionURL: sessionURL, targetURL: targetURL,
 			terrainBase: strings.TrimSuffix(sessionURL, "/session") + "/terrain/",
 			toks:        toks,
-			actSec:      actSec, checkSec: checkSec,
-			moduleURL: parkWasm,
+			actSec:      actSec,
 		}
 		wg.Add(1)
 		go func() {
