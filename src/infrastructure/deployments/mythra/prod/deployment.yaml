@@ -74,6 +74,10 @@ spec:
               value: "4000"
             - name: GOMEMLIMIT
               value: "750MiB"
+            # The desired tick rate; the world converges to it via a
+            # journaled rate_set on reopen (docs/netcode.md).
+            - name: TICK_HZ
+              value: "48"
             - name: OIDC_ISSUER
               value: "https://auth.wakeupmythra.com/realms/wakeupmythra.com"
             # Tokens carry the public iss, but this hostNetwork distroless
