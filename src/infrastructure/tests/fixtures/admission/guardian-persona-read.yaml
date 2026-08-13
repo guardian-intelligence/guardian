@@ -1,6 +1,7 @@
 # The read persona is the rung agent sessions hold unattended, so its boundary
 # is the one a leaked offline token buys. It may only open a port-forward or
-# derive an exact, shorter-lived delivery-read credential, and the identity
+# derive an exact, shorter-lived delivery-read or Mythra capability credential,
+# and the identity
 # must be matched by group as well as by username — a token that arrives
 # without a groups claim must not fail open into an unmatched session.
 policy: guardian-persona-read
@@ -47,6 +48,62 @@ cases:
         expirationSeconds: 1800
     user: {username: "keycloak:cozy#other", groups: ["guardian-persona-read", "system:authenticated"]}
     expect: allow
+  - name: mint fifteen-minute Mythra operator token
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-mythra-operator
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-mythra-operator, namespace: tenant-guardian-prod}
+      spec:
+        audiences: [https://10.8.0.250:6443]
+        expirationSeconds: 900
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: allow
+  - name: mint fifteen-minute Mythra observer token matched by group
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-mythra-observer
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-mythra-observer, namespace: tenant-guardian-prod}
+      spec:
+        audiences: [https://10.8.0.250:6443]
+        expirationSeconds: 900
+    user: {username: "keycloak:cozy#other", groups: ["guardian-persona-read", "system:authenticated"]}
+    expect: allow
+  - name: mint Mythra operator token longer than fifteen minutes
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-mythra-operator
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-mythra-operator, namespace: tenant-guardian-prod}
+      spec:
+        audiences: [https://10.8.0.250:6443]
+        expirationSeconds: 901
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
+  - name: mint Mythra operator token outside prod
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-mythra-operator
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-mythra-operator, namespace: tenant-root}
+      spec:
+        audiences: [https://10.8.0.250:6443]
+        expirationSeconds: 900
+    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    expect: deny
   - name: mint cloud agent token longer than one hour
     operation: CREATE
     resource: {group: "", version: v1, resource: serviceaccounts}

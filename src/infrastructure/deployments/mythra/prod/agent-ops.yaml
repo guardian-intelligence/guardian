@@ -1,0 +1,392 @@
+# Product capabilities are derived from the unattended platform-agent instead
+# of widening that long-lived identity. The observer can enter one read-only
+# journal console; the operator can recycle only mythrad Deployment pods.
+# Each TokenRequest is capped at 15 minutes by both platform-agent VAPs.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: guardian-mythra-observer
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: guardian-mythra-observer
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: guardian-mythra-operator
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: guardian-mythra-operator
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: guardian-mythra-token-minter
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: guardian-mythra-operations
+    app.kubernetes.io/part-of: guardian
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts/token
+    resourceNames:
+      - guardian-mythra-observer
+      - guardian-mythra-operator
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: guardian-mythra-token-minter
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: guardian-mythra-operations
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: guardian-mythra-token-minter
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: guardian-persona-read
+---
+# Observation is not general pods/exec: RBAC fixes the destination pod and the
+# VAP fixes the container and client program. The console itself holds only a
+# database-native readonly role.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: guardian-mythra-observer
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: guardian-mythra-observer
+    app.kubernetes.io/part-of: guardian
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods/exec
+    resourceNames:
+      - mythra-journal-console-0
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: guardian-mythra-observer
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: guardian-mythra-observer
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: guardian-mythra-observer
+subjects:
+  - kind: ServiceAccount
+    name: guardian-mythra-observer
+    namespace: tenant-guardian-prod
+---
+# Immediate service recovery is intentionally narrower than write-basic: the
+# operator can delete a mythrad pod and let its Deployment recreate the exact
+# Git-declared revision. It cannot scale, patch, exec, or touch another product.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: guardian-mythra-operator
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: guardian-mythra-operator
+    app.kubernetes.io/part-of: guardian
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: guardian-mythra-operator
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: guardian-mythra-operator
+    app.kubernetes.io/part-of: guardian
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: guardian-mythra-operator
+subjects:
+  - kind: ServiceAccount
+    name: guardian-mythra-operator
+    namespace: tenant-guardian-prod
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-mythra-observer
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - "*"
+        apiVersions:
+          - "*"
+        operations:
+          - CREATE
+          - UPDATE
+          - DELETE
+          - CONNECT
+        resources:
+          - "*/*"
+  matchConditions:
+    - name: mythra-observer-identity
+      expression: >-
+        request.userInfo.username ==
+          "system:serviceaccount:tenant-guardian-prod:guardian-mythra-observer"
+  validations:
+    - expression: >-
+        request.operation == "CONNECT" && request.resource.group == "" &&
+        request.resource.resource == "pods" &&
+        has(request.subResource) && request.subResource == "exec" &&
+        request.namespace == "tenant-guardian-prod" &&
+        has(request.name) && request.name == "mythra-journal-console-0" &&
+        has(object.container) && object.container == "console" &&
+        has(object.command) && size(object.command) > 0 &&
+        object.command[0] in ["psql", "pg_dump"]
+      message: >-
+        the Mythra observer may only run psql or pg_dump in the fixed read-only
+        journal console
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-mythra-observer
+spec:
+  policyName: guardian-mythra-observer
+  validationActions:
+    - Deny
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-mythra-operator
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - "*"
+        apiVersions:
+          - "*"
+        operations:
+          - CREATE
+          - UPDATE
+          - DELETE
+          - CONNECT
+        resources:
+          - "*/*"
+  matchConditions:
+    - name: mythra-operator-identity
+      expression: >-
+        request.userInfo.username ==
+          "system:serviceaccount:tenant-guardian-prod:guardian-mythra-operator"
+  validations:
+    - expression: >-
+        request.operation == "DELETE" && request.resource.group == "" &&
+        request.resource.resource == "pods" && !has(request.subResource) &&
+        request.namespace == "tenant-guardian-prod" &&
+        has(request.name) && request.name.startsWith("mythrad-") &&
+        oldObject != null && has(oldObject.metadata.labels) &&
+        "app.kubernetes.io/name" in oldObject.metadata.labels &&
+        oldObject.metadata.labels["app.kubernetes.io/name"] == "mythrad" &&
+        "guardian.dev/product" in oldObject.metadata.labels &&
+        oldObject.metadata.labels["guardian.dev/product"] == "mythra"
+      message: >-
+        the Mythra operator may only restart a labeled mythrad Deployment pod;
+        configuration changes belong in Git
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-mythra-operator
+spec:
+  policyName: guardian-mythra-operator
+  validationActions:
+    - Deny
+---
+# A fixed-name, network-confined psql target avoids exec on the shared
+# postgres-products pods (equivalent to superuser access over payments and
+# Directus). It receives only the mythra_observer database credential and no
+# Kubernetes workload identity.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mythra-journal-console
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: mythra-journal-console
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: mythra-journal-console
+  # Governing Service for the StatefulSet only; nothing connects to this port.
+  ports:
+    - name: unused-postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mythra-journal-console
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: mythra-journal-console
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+spec:
+  serviceName: mythra-journal-console
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mythra-journal-console
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mythra-journal-console
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: journal-console
+        guardian.dev/product: mythra
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      priorityClassName: guardian-standard
+      terminationGracePeriodSeconds: 5
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: console
+          # Reuse the already-rendered restore client image; no new image enters
+          # the cold-bootstrap inventory for this operations surface.
+          image: docker.io/library/postgres:18.1@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f
+          command:
+            - /bin/sleep
+            - infinity
+          env:
+            - name: PGHOST
+              value: postgres-products-rw
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: mythra
+            - name: PGUSER
+              value: mythra_observer
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-products-credentials
+                  key: mythra_observer
+            - name: PGSSLMODE
+              value: verify-full
+            - name: PGSSLROOTCERT
+              value: /tls/ca.crt
+            - name: PGAPPNAME
+              value: guardian-mythra-observer
+            - name: HOME
+              value: /tmp
+            - name: PSQLRC
+              value: /dev/null
+            - name: PSQL_HISTORY
+              value: /tmp/.psql_history
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - --quiet
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+              ephemeral-storage: 16Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+              ephemeral-storage: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: database-ca
+              mountPath: /tls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: database-ca
+          secret:
+            secretName: postgres-products-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: mythra-journal-console
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: mythra-journal-console
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: mythra-journal-console
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: postgres-products
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP

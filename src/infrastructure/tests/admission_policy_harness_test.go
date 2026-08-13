@@ -686,12 +686,17 @@ func fixtureInputs(tc fixtureCase) (*admission.VersionedAttributes, schema.Group
 	}
 
 	var obj runtime.Object
+	var oldObj runtime.Object
 	gvk := schema.GroupVersionKind{Version: tc.Resource.Version}
 	name, ns := tc.ObjectName, ""
 	namespace := &corev1.Namespace{}
 	if tc.Object != nil {
 		unstructuredObj := &unstructured.Unstructured{Object: tc.Object}
-		obj = unstructuredObj
+		if operation == admission.Delete {
+			oldObj = unstructuredObj
+		} else {
+			obj = unstructuredObj
+		}
 		gvk = unstructuredObj.GroupVersionKind()
 		if name == "" {
 			name = unstructuredObj.GetName()
@@ -704,10 +709,15 @@ func fixtureInputs(tc fixtureCase) (*admission.VersionedAttributes, schema.Group
 	}
 
 	attrs := admission.NewAttributesRecord(
-		obj, nil, gvk, ns, name, gvr, tc.SubResource, operation, nil, false,
+		obj, oldObj, gvk, ns, name, gvr, tc.SubResource, operation, nil, false,
 		&user.DefaultInfo{Name: username, Groups: tc.User.Groups},
 	)
-	versioned := &admission.VersionedAttributes{Attributes: attrs, VersionedKind: gvk, VersionedObject: obj}
+	versioned := &admission.VersionedAttributes{
+		Attributes:         attrs,
+		VersionedKind:      gvk,
+		VersionedObject:    obj,
+		VersionedOldObject: oldObj,
+	}
 	return versioned, gvr, namespace
 }
 

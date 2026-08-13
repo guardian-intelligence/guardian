@@ -8,9 +8,11 @@
 # A session chooses how much authority it carries by which identity it logs in
 # as. The rungs, weakest first:
 #
-#   read        cluster-wide read plus port-forward, nothing else. The default
-#               for agent sessions and for subagents that only need to observe.
-#               Holds offline_access, so it runs unattended indefinitely.
+#   read        cluster-wide read plus port-forward. The default for agent
+#               sessions; it may derive narrowly scoped, 15-minute product
+#               capabilities such as Mythra observer/operator, but holds no
+#               direct workload write. Holds offline_access, so it runs
+#               unattended indefinitely.
 #   write-basic read plus the routine repair verbs: delete pods and jobs, scale
 #               workloads, and mint non-root secrets-writer tokens.
 #   write-all   cluster-admin, for emergencies on sensitive systems.
@@ -21,10 +23,10 @@
 #
 # The human-in-the-loop property is enforced by offline_access, not by a gate
 # anyone had to build. Only `read` carries the realm role, so only `read` can
-# refresh unattended; every write persona expires with its Keycloak session and
-# needs a fresh device approval from the operator to come back. Withholding one
-# realm role is what makes "an agent may observe freely but must ask before it
-# changes anything" true.
+# refresh unattended; every general-purpose write persona expires with its
+# Keycloak session and needs a fresh device approval from the operator to come
+# back. Product-specific derived identities are the deliberate exception: each
+# is short-lived, namespaced, and fail-closed to a tiny operation allowlist.
 #
 # `--persona` names the rung a session is asking for; the authority it actually
 # receives is whatever the identity that approves the device login already has.
@@ -463,6 +465,15 @@ spec:
         (request.operation == "CREATE" && request.resource.group == "" &&
           request.resource.resource == "serviceaccounts" &&
           has(request.subResource) && request.subResource == "token" &&
+          has(request.name) && request.name in ["guardian-mythra-observer", "guardian-mythra-operator"] &&
+          request.namespace == "tenant-guardian-prod" &&
+          has(object.spec.expirationSeconds) &&
+          object.spec.expirationSeconds <= 900 &&
+          size(object.spec.audiences) == 1 &&
+          object.spec.audiences[0] == "https://10.8.0.250:6443") ||
+        (request.operation == "CREATE" && request.resource.group == "" &&
+          request.resource.resource == "serviceaccounts" &&
+          has(request.subResource) && request.subResource == "token" &&
           has(request.name) &&
           request.name in ["guardian-cloud-agent-cursor", "guardian-cloud-agent-devin"] &&
           request.namespace == "tenant-root" &&
@@ -471,9 +482,10 @@ spec:
           size(object.spec.audiences) == 1 &&
           object.spec.audiences[0] == "https://10.8.0.250:6443")
       message: >-
-        the read persona may only open pod port-forwards and mint one-hour-or-
-        shorter delivery-read cloud-agent tokens; every other write is denied.
-        Re-authenticate as a write persona for repair verbs
+        the read persona may only open pod port-forwards, mint a 15-minute
+        Mythra capability token, or mint one-hour-or-shorter delivery-read
+        cloud-agent tokens; every other write is denied. Re-authenticate as a
+        write persona for other repair verbs
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

@@ -25,7 +25,9 @@ User must pay $10/mo to enable CloudFlare LB with 3 endpoints (1 for each ingres
 - The kube API is reachable via the default `~/.kube/config`, whose only
   standing identity is the `read` persona (the `platform-agent` OIDC context,
   set up with `aspect infra auth`): cluster-wide read plus port-forward, and the
-  only rung that refreshes unattended. Repair verbs come from
+  only rung that refreshes unattended. Product-specific operations derive
+  short-lived capability identities (`aspect mythra ...` is the first); repair
+  verbs outside those narrow roles come from
   `--persona=write-basic` (non-root secret writes only) and tenant-root secret
   writes or emergencies from `--persona=write-all`; neither write persona
   holds `offline_access`, so each costs an operator device approval and expires

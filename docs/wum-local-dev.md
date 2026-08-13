@@ -66,6 +66,32 @@ stuck-behind-after-CPU-stall crawl that the sim/clock module will flip.
 ```sh
 scripts/wum-dev-db.sh wipe        # fresh empty journal
 scripts/wum-dev-db.sh from-prod   # maintainers: wipe, then re-seed from the
-                                  # prod journal (needs cluster read access)
+                                  # prod journal through the JIT read-only
+                                  # Mythra observer capability
                                   # to replay real park history locally
 ```
+
+## Production operations
+
+Authenticate once with the unattended read persona. The Aspect tasks mint
+their own 15-minute, product-scoped capability only when needed. Token bytes
+are never printed or placed in process arguments; the task removes its private
+temporary kubeconfig as soon as the operation finishes.
+
+```sh
+aspect infra auth --persona=read
+aspect mythra status
+aspect mythra logs --since=10m --tail=500
+aspect mythra psql --query='SELECT * FROM park_events ORDER BY seq DESC LIMIT 10'
+aspect mythra dump > mythra.sql
+aspect mythra restart
+```
+
+`status` and `logs` use standing read authority. `psql` and `dump` derive
+`guardian-mythra-observer`, which can exec only `psql`/`pg_dump` in a fixed,
+network-confined console carrying PostgreSQL's native `mythra_readonly` role.
+`restart` derives `guardian-mythra-operator`, which can only delete a labeled
+`mythrad` pod; the Deployment recreates the Git-declared revision. Neither role
+can read Kubernetes Secrets, exec into mythrad or the shared Postgres pods, or
+touch payments/Directus. Scaling, image, behavior, and configuration changes
+remain Git/Flux operations.
