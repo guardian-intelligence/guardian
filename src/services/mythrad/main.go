@@ -98,8 +98,8 @@ var (
 	})
 	mAppendDur = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "mythra_journal_append_seconds",
-		Help:    "Tick-batched journal append commit time.",
-		Buckets: []float64{.0005, .001, .0025, .005, .01, .02, .0417, .1, .5},
+		Help:    "Tick-batched journal append commit time (the Append call alone).",
+		Buckets: []float64{.0005, .001, .0025, .005, .01, .02, .03, .0417, .06, .1, .25, .5},
 	})
 	mSessions = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "mythra_sessions", Help: "Connected sessions."}, []string{"role"})

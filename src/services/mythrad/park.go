@@ -706,9 +706,10 @@ func (a *authority) tickOnce() {
 	// divergence).
 	if len(accepted) > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		commitStart := time.Now()
 		firstSeq, err := a.j.Append(ctx, a.id, a.lastSeq, accepted)
+		mAppendDur.Observe(time.Since(commitStart).Seconds())
 		cancel()
-		mAppendDur.Observe(time.Since(start).Seconds())
 		if err != nil {
 			mAppendErrors.Inc()
 			log.Printf("park %s: journal append failed (%v) — closing for a journal-clean reopen", a.name, err)
