@@ -60,7 +60,7 @@ bits on arm64.
 
 Wire (WebTransport; players and spectators share it): `POST /session` with an
 OIDC bearer mints a short-lived HMAC ticket → one ordered stream (`hello`,
-`intent` / `welcome`, `event`, `reject`, `snapshot`) plus datagrams
+`intent` / `welcome{..., hz}`, `event`, `reject`, `snapshot`) plus datagrams
 (`check{tick, wh}` / `verdict{tick_now, ok, cw, pw}`). There is no ack: an
 accepted intent comes back as an `event` carrying its `intent_id` — the
 journal is the acknowledgment. Rejects go only to the sender.
@@ -88,15 +88,25 @@ journal is the acknowledgment. Rejects go only to the sender.
 - **Snapshots are not compaction.** A snapshot is a resync payload and a
   replay floor. Deleting journal rows behind a *verified* snapshot is a
   separate future job ("journal retention") — see the FAQ.
-- **A tick number is a timestamp.** Tick N is *defined* as `wallEpoch +
-  N/tick_rate` plus a per-park phase offset derived from the immutable park
-  id (voteable metadata can never move a park's clock; co-located parks
-  stagger their tick work for free). The scheduler chases that definition
-  instead of free-counting ticks, so hitches and downtime are always repaid
-  and drift cannot accumulate — real-world mechanics (harvests, meetups,
-  check-in windows) compile to plain tick arithmetic inside the clock-free
-  sim. `mythra_tick_lag_seconds` measures the server against its own
-  schedule.
+- **A tick number is a timestamp.** The sim's state carries a rate segment
+  `(rate_hz, anchor_tick, anchor_ns)`: tick `anchor_tick` falls at
+  `wallEpoch + anchor_ns` (plus a per-park phase offset derived from the
+  immutable park id — voteable metadata can never move a park's clock, and
+  co-located parks stagger their tick work for free), and later ticks
+  advance at `rate_hz`. The scheduler chases that definition instead of
+  free-counting ticks, so hitches and downtime are always repaid and drift
+  cannot accumulate — real-world mechanics (harvests, meetups, check-in
+  windows) compile to plain tick arithmetic inside the clock-free sim.
+  `mythra_tick_lag_seconds` measures the server against its own schedule.
+- **The tick rate is world state, not deployment config.** `TICK_HZ` only
+  expresses the *desired* rate: a park whose journaled rate differs
+  converges via one `rate_set` event in the dark phase (reopen), which
+  re-anchors the mapping piecewise — so raising, lowering, or rolling back
+  a rate never stalls or forks a schedule, and every pod generation
+  derives the same one from the journal. Clients pace from `welcome.hz`;
+  a connection sees exactly one rate. (What changes with rate: game
+  tuning is tick-denominated — wander odds, soak windows — so a rate
+  change is also a balance change until constants are wall-derived.)
 
 ## FAQ
 

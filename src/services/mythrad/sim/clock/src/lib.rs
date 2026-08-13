@@ -8,15 +8,20 @@
 //!
 //! States and their bounded exits:
 //!   Acquiring         no server sample yet; step nothing.
-//!   Locked            |error| small: 0..=4 steps/frame from a fractional
-//!                     accumulator, slewed by a proportional controller
-//!                     (clamped ±2%, ±¼-tick deadband) — smooth, no jumps.
-//!   FastForward       behind by > 12 ticks: step as hard as the host's
-//!                     per-frame compute budget allows until within 2.
+//!   Locked            |error| small: a few steps/frame (rate-scaled cap)
+//!                     from a fractional accumulator, slewed by a
+//!                     proportional controller (clamped ±2%, ±¼-tick
+//!                     deadband) — smooth, no jumps.
+//!   FastForward       behind by > 12 ticks: step deficit plus per-frame
+//!                     accrual, as hard as the host's compute budget
+//!                     allows, until within 2.
 //!   SnapshotRequired  behind by > 30s (the server hash ring: past it,
 //!                     stepping wastes battery and checks can't verify)
 //!                     or AHEAD by > 2s (never step backward): ask the
 //!                     host to resync; only clock_reset leaves this state.
+//!
+//! The tick rate arrives per connection (`welcome.hz` -> `set_rate`); the
+//! wall-time thresholds above derive from it.
 //!
 //! The server-tick model is a reference point (ref_ms, ref_tick) advanced
 //! by the local monotonic clock and corrected by verdict samples through
@@ -28,22 +33,27 @@
 
 const ONE: i64 = 1 << 16;
 
-pub const TICK_HZ: u64 = 24;
+/// The rate every park is born at; the wire (`welcome.hz`) overrides it
+/// per connection via `set_rate` before the first sample.
+pub const GENESIS_HZ: u64 = 24;
 /// The replica deliberately trails server-now (events in flight arrive
 /// before their tick is stepped).
 pub const LAG_TICKS: i64 = 6;
 
 const ENTER_FF_Q16: i64 = 12 * ONE;
 const EXIT_FF_Q16: i64 = 2 * ONE;
-const SNAPSHOT_BEHIND_Q16: i64 = 720 * ONE; // the 30s server hash ring
-const SNAPSHOT_AHEAD_Q16: i64 = 48 * ONE;
+/// Behind by more than the server's 30s hash ring: past it, stepping
+/// wastes battery and checks can't verify — expressed in wall time so it
+/// tracks the ring at any tick rate.
+const SNAPSHOT_BEHIND_SECS: i64 = 30;
+/// Ahead by more than 2s (never step backward): resync.
+const SNAPSHOT_AHEAD_SECS: i64 = 2;
 const DEADBAND_Q16: i64 = ONE / 4;
 const SLEW_MAX_Q16: i64 = (2 * ONE) / 100; // ±2% tick-rate adjustment
 /// err/SLEW_DIV = adjustment: reaches the ±2% clamp near the FF border.
 const SLEW_DIV: i64 = 64;
 /// Advisory pacing for FastForward: how much host budget one step costs.
 const STEP_COST_US: u32 = 30;
-const LOCKED_MAX_STEPS: u32 = 4;
 const FF_MAX_STEPS: u32 = 4096;
 /// Re-ask for a snapshot while stuck (the first request can race a
 /// transport death).
@@ -62,6 +72,7 @@ pub enum State {
 
 pub struct Clock {
     state: State,
+    hz: u64,
     ref_ms: u64,
     ref_tick_q16: i64, // server tick (Q16) at ref_ms
     rtt_ms_q16: i64,
@@ -70,13 +81,10 @@ pub struct Clock {
     last_req_ms: u64,
 }
 
-fn ticks_q16(ms: u64) -> i64 {
-    ((ms as i64) * (TICK_HZ as i64) * ONE) / 1000
-}
-
 impl Clock {
     pub const NEW: Clock = Clock {
         state: State::Acquiring,
+        hz: GENESIS_HZ,
         ref_ms: 0,
         ref_tick_q16: 0,
         rtt_ms_q16: 0,
@@ -84,6 +92,28 @@ impl Clock {
         last_frame_ms: 0,
         last_req_ms: 0,
     };
+
+    fn ticks_q16(&self, ms: u64) -> i64 {
+        ((ms as i64) * (self.hz as i64) * ONE) / 1000
+    }
+
+    /// The park's tick rate, from the welcome line. Rate changes only
+    /// happen while the server is dark, so a connection sees exactly one
+    /// rate: set it before the first sample.
+    pub fn set_rate(&mut self, hz: u64) {
+        self.hz = hz.clamp(1, 1000);
+    }
+
+    pub fn rate(&self) -> u64 {
+        self.hz
+    }
+
+    /// Locked never steps a burst — that is FastForward's job — but the
+    /// per-frame cap must clear the nominal ticks-per-frame at any rate
+    /// (a 30fps host on a 120Hz park owes 4 per frame).
+    fn locked_max_steps(&self) -> u32 {
+        (self.hz as u32 / 6).max(4)
+    }
 
     pub fn state(&self) -> State {
         self.state
@@ -98,7 +128,7 @@ impl Clock {
     /// datagram send and receive.
     pub fn sample(&mut self, send_ms: u64, recv_ms: u64, server_tick: u64) {
         let rtt = (recv_ms.saturating_sub(send_ms)).clamp(1, 10_000) as i64;
-        let measured = (server_tick as i64) * ONE + ticks_q16((rtt / 2) as u64);
+        let measured = (server_tick as i64) * ONE + self.ticks_q16((rtt / 2) as u64);
         if self.state == State::Acquiring {
             self.rtt_ms_q16 = rtt * ONE;
             self.ref_ms = recv_ms;
@@ -109,7 +139,7 @@ impl Clock {
         self.rtt_ms_q16 += (rtt * ONE - self.rtt_ms_q16) / 5; // EWMA 0.8/0.2
         // Offset filter: blend the measurement into the model's prediction
         // at recv time (1/8 gain), then re-anchor the reference there.
-        let predicted = self.ref_tick_q16 + ticks_q16(recv_ms.saturating_sub(self.ref_ms));
+        let predicted = self.ref_tick_q16 + self.ticks_q16(recv_ms.saturating_sub(self.ref_ms));
         let blended = predicted + (measured - predicted) / 8;
         self.ref_ms = recv_ms;
         self.ref_tick_q16 = blended;
@@ -125,7 +155,7 @@ impl Clock {
     }
 
     fn target_q16(&self, now_ms: u64) -> i64 {
-        self.ref_tick_q16 + ticks_q16(now_ms.saturating_sub(self.ref_ms)) - LAG_TICKS * ONE
+        self.ref_tick_q16 + self.ticks_q16(now_ms.saturating_sub(self.ref_ms)) - LAG_TICKS * ONE
     }
 
     /// Once per frame: returns steps to run now (low 16 bits) and the
@@ -140,7 +170,9 @@ impl Clock {
         let err_q16 = self.target_q16(now_ms) - (replica_tick as i64) * ONE;
 
         let was = self.state;
-        if err_q16 > SNAPSHOT_BEHIND_Q16 || err_q16 < -SNAPSHOT_AHEAD_Q16 {
+        let behind_q16 = SNAPSHOT_BEHIND_SECS * (self.hz as i64) * ONE;
+        let ahead_q16 = SNAPSHOT_AHEAD_SECS * (self.hz as i64) * ONE;
+        if err_q16 > behind_q16 || err_q16 < -ahead_q16 {
             self.state = State::SnapshotRequired;
         }
         match self.state {
@@ -161,9 +193,13 @@ impl Clock {
                 }
                 if self.state == State::FastForward {
                     if err_q16 > EXIT_FF_Q16 {
-                        // ceil, not floor: an error sitting just past the
-                        // exit band must still make progress every frame
-                        let deficit = (((err_q16 - EXIT_FF_Q16) >> 16) as u32) + 1;
+                        // Repay the deficit PLUS the ticks that accrue
+                        // during this frame (ceil both): at rates where
+                        // ticks-per-frame rivals the exit band, deficit
+                        // alone reaches equilibrium just outside the band
+                        // and never exits.
+                        let accrual = ((self.ticks_q16(dt_ms) >> 16) as u32) + 1;
+                        let deficit = (((err_q16 - EXIT_FF_Q16) >> 16) as u32) + 1 + accrual;
                         return deficit.min(budget_us / STEP_COST_US).min(FF_MAX_STEPS);
                     }
                     self.state = State::Locked;
@@ -174,11 +210,11 @@ impl Clock {
                 } else {
                     (err_q16 / SLEW_DIV).clamp(-SLEW_MAX_Q16, SLEW_MAX_Q16)
                 };
-                self.frac_q16 += (ticks_q16(dt_ms) * (ONE + adj)) >> 16;
+                self.frac_q16 += (self.ticks_q16(dt_ms) * (ONE + adj)) >> 16;
                 if self.frac_q16 < 0 {
                     self.frac_q16 = 0;
                 }
-                let steps = ((self.frac_q16 >> 16) as u32).min(LOCKED_MAX_STEPS);
+                let steps = ((self.frac_q16 >> 16) as u32).min(self.locked_max_steps());
                 self.frac_q16 -= (steps as i64) * ONE;
                 if self.frac_q16 > ONE {
                     self.frac_q16 = ONE; // dt spike: no windup past one tick
@@ -214,6 +250,7 @@ mod tests {
     // real time. Returns (clock, replica_tick, sim_now).
     struct Harness {
         clock: Clock,
+        hz: u64,
         now_ms: u64,
         replica_tick: u64,
         server_tick0: u64, // server tick at now=0
@@ -225,9 +262,14 @@ mod tests {
 
     impl Harness {
         fn new(deficit_ticks: u64, rtt_ms: u64) -> Harness {
+            Harness::at_rate(GENESIS_HZ, deficit_ticks, rtt_ms)
+        }
+
+        fn at_rate(hz: u64, deficit_ticks: u64, rtt_ms: u64) -> Harness {
             let server_tick0 = 10_000;
             let mut h = Harness {
                 clock: Clock::NEW,
+                hz,
                 now_ms: 0,
                 replica_tick: server_tick0 - LAG_TICKS as u64 - deficit_ticks,
                 server_tick0,
@@ -236,6 +278,7 @@ mod tests {
                 last_check: 0,
                 snapshots: 0,
             };
+            h.clock.set_rate(hz);
             // welcome sample seeds the model
             h.clock
                 .sample(0, h.rtt_ms, h.server_tick(0).saturating_sub(0));
@@ -243,7 +286,7 @@ mod tests {
         }
 
         fn server_tick(&self, at_ms: u64) -> u64 {
-            self.server_tick0 + at_ms * TICK_HZ / 1000
+            self.server_tick0 + at_ms * self.hz / 1000
         }
 
         // run one 60fps frame with an 8ms step budget
@@ -352,12 +395,35 @@ mod tests {
         let start_ms = h.now_ms;
         h.run_ms(5_000);
         let stepped = (h.replica_tick - start_tick) as i64;
-        let nominal = ((h.now_ms - start_ms) * TICK_HZ / 1000) as i64;
+        let nominal = ((h.now_ms - start_ms) * h.hz / 1000) as i64;
         let excess = stepped - nominal;
         // 5s at +2% is ~2.4 extra ticks; the initial 8-tick error plus
         // slack bounds the total overshoot
         assert!(excess <= 11, "slew exceeded clamp: +{excess} ticks");
         assert_eq!(h.snapshots, 0);
+    }
+
+    #[test]
+    fn high_rate_parks_lock_and_snapshot_at_the_same_wall_thresholds() {
+        // steady state at 120Hz: locked within a tick, no resyncs
+        // tolerance is wall time, not ticks: 5 ticks at 120Hz is ~42ms,
+        // tighter than the 24Hz suite's 2-tick (83ms) bar
+        let mut h = Harness::at_rate(120, 0, 100);
+        h.run_ms(30_000);
+        assert_eq!(h.clock.state(), State::Locked);
+        assert!(h.err_ticks().abs() <= 5, "err={} ticks", h.err_ticks());
+        assert_eq!(h.snapshots, 0);
+        // ~42s behind at 120Hz (past the 30s ring): resync, never step
+        let mut g = Harness::at_rate(120, 5000, 100);
+        g.run_ms(1_000);
+        assert!(g.snapshots >= 1, "must resync past the wall-time ring");
+        assert_eq!(g.clock.state(), State::Locked);
+        // ~25s behind: inside the ring, so FastForward grinds it out
+        let mut f = Harness::at_rate(120, 3000, 100);
+        f.run_ms(10_000);
+        assert_eq!(f.snapshots, 0, "inside the ring must not resync");
+        assert_eq!(f.clock.state(), State::Locked);
+        assert!(f.err_ticks().abs() <= 5, "err={} ticks", f.err_ticks());
     }
 
     #[test]

@@ -28,6 +28,7 @@ const (
 	evTerrainSet   = 7
 	evBoostSet     = 8
 	evClockSkip    = 9
+	evRateSet      = 10
 )
 
 // dogIDFor derives the actor's dog id: the binding between OIDC subject

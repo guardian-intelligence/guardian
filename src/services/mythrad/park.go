@@ -50,16 +50,14 @@ const (
 // downtime are always repaid and a tick number doubles as a timestamp.
 var wallEpoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// timing is the tick schedule an authority runs under. now is the wall
-// clock, injectable so tests and simulation harnesses own time. Rates
-// other than 24Hz are server-side experiments for now: sim/clock in
-// shipped clients paces at 24.
+// timing carries the desired tick rate (the actual rate is world state:
+// the sim's journaled rate segment, which the dark phase converges toward
+// hz via rate_set) and the wall clock, injectable so tests and simulation
+// harnesses own time.
 type timing struct {
 	hz  int
 	now func() time.Time
 }
-
-func (tm timing) tickDur() time.Duration { return time.Second / time.Duration(tm.hz) }
 
 // parkHost wraps one wazero instance of the park module (the game state
 // machine). Not goroutine-safe: owned by its authority's loop.
@@ -73,6 +71,10 @@ type parkHost struct {
 
 	fInit, fRestore, fSnapshot, fStep, fApply, fHash, fTick, fEpoch,
 	fSetTerrain, fTerrainID api.Function
+
+	// Optional (absent on modules from before rates existed, which run
+	// the genesis segment): the sim's rate and mapping anchor.
+	fRate, fAnchorTick, fAnchorNs api.Function
 }
 
 func newParkHost(module []byte) (*parkHost, error) {
@@ -89,6 +91,7 @@ func newParkHost(module []byte) (*parkHost, error) {
 	h.fStep, h.fApply, h.fHash = get("sim_step"), get("sim_apply"), get("sim_hash")
 	h.fTick, h.fEpoch = get("sim_tick"), get("sim_epoch")
 	h.fSetTerrain, h.fTerrainID = get("sim_set_terrain"), get("sim_terrain_id")
+	h.fRate, h.fAnchorTick, h.fAnchorNs = get("sim_rate"), get("sim_anchor_tick"), get("sim_anchor_ns")
 	ioBuf, ioCap := get("io_buf"), get("io_cap")
 	terrainBuf, terrainCap := get("terrain_buf"), get("terrain_cap")
 	if h.mem == nil || h.fInit == nil || h.fRestore == nil || h.fSnapshot == nil ||
@@ -192,6 +195,29 @@ func (h *parkHost) Step()         { h.call(h.fStep) }
 func (h *parkHost) Hash() uint64  { return h.call(h.fHash) }
 func (h *parkHost) Tick() uint64  { return h.call(h.fTick) }
 func (h *parkHost) Epoch() uint32 { return h.call32(h.fEpoch) }
+
+// Rate and the mapping anchor come from state; a pre-rate module runs the
+// genesis segment (24Hz anchored at tick 0 = wallEpoch).
+func (h *parkHost) Rate() int {
+	if h.fRate == nil {
+		return 24
+	}
+	return int(h.call32(h.fRate))
+}
+
+func (h *parkHost) AnchorTick() uint64 {
+	if h.fAnchorTick == nil {
+		return 0
+	}
+	return h.call(h.fAnchorTick)
+}
+
+func (h *parkHost) AnchorNs() uint64 {
+	if h.fAnchorNs == nil {
+		return 0
+	}
+	return h.call(h.fAnchorNs)
+}
 
 // Candidate-safe variants: errors instead of panics, used only while a
 // new module soaks in the dark before an epoch swap.
@@ -306,16 +332,19 @@ type authority struct {
 	j    journal.Journal
 	mods *modules
 
-	// The tick schedule: anchor + phase define every tick's wall-clock
-	// instant (tickInstant). anchor is wallEpoch, or a process-local
-	// stand-in when the module cannot journal a clock_skip yet. phase
-	// staggers co-located parks' tick work across the tick interval,
-	// derived from the immutable park id so player-votable metadata can
-	// never move a park's clock.
-	tm      timing
-	tickDur time.Duration
-	phase   time.Duration
-	anchor  time.Time
+	// The tick schedule, derived from the sim's journaled rate segment
+	// (refreshSchedule): tick anchorTick falls at anchor, later ticks
+	// advance at tickDur. anchor degrades to a process-local stand-in
+	// when the module cannot journal a clock_skip yet. phase staggers
+	// co-located parks' tick work across the tick interval, derived from
+	// the immutable park id so player-votable metadata can never move a
+	// park's clock.
+	tm         timing
+	hz         int
+	tickDur    time.Duration
+	phase      time.Duration
+	anchor     time.Time
+	anchorTick uint64
 
 	// The active terrain artifact, cached for welcome/snapshot lines so
 	// clients know which blob to fetch before restoring, and as raw bytes
@@ -510,10 +539,9 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 	}
 	a := &authority{
 		name: name, id: parkIDFor(name), host: host, j: j, mods: mods,
-		tm: tm, tickDur: tm.tickDur(), anchor: wallEpoch,
+		tm:         tm,
 		moduleHash: displayHash(module),
 		subs:       map[*session]bool{},
-		ring:       make([]ringEntry, ringSeconds*tm.hz),
 		seen:       map[string]struct{}{},
 		attach:     make(chan attachReq),
 		stop:       make(chan struct{}),
@@ -521,7 +549,6 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 		// utcDay 0: the first tick after every open stages a day_reset, so
 		// a park that slept across midnight wakes with the right day.
 	}
-	a.phase = time.Duration(uint64(a.id) % uint64(a.tickDur))
 	fail := func(err error) (*authority, error) {
 		host.close()
 		return nil, fmt.Errorf("park %s: %w", name, err)
@@ -610,8 +637,10 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 			return fail(err)
 		}
 	}
-	// Repay the schedule before the doors open: replay brought the park to
-	// its stored tick; the wall clock says which tick it should be on.
+	// The schedule is world state: derive it from the restored rate
+	// segment, then repay the gap between the stored tick and the wall
+	// clock before the doors open.
+	a.refreshSchedule()
 	if target := a.targetTick(tm.now()); target > host.Tick() {
 		if time.Duration(target-host.Tick())*a.tickDur <= darkStepWindow {
 			// The world lives through a short restart: step it, filling
@@ -626,8 +655,56 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 			return fail(err)
 		}
 	}
+	// Still dark: converge the world's rate toward the deployment's
+	// desired rate, so a rate change is a reopen and no live session
+	// ever straddles two rates.
+	if tm.hz != a.hz {
+		if err := a.rateChange(ctx, tm.hz); err != nil {
+			return fail(err)
+		}
+	}
 	// The caller starts run(); tests drive tickOnce directly instead.
 	return a, nil
+}
+
+// rateChange journals the desired tick rate as a rate_set at the current
+// tick. The sim re-anchors the piecewise mapping; the boundary snapshot
+// re-floors replay under the new segment.
+func (a *authority) rateChange(ctx context.Context, hz int) error {
+	tick, epoch := a.host.Tick(), a.host.Epoch()
+	var p [4]byte
+	binary.LittleEndian.PutUint32(p[:], uint32(hz))
+	if code := a.host.Apply(encodeEvent(evRateSet, p[:])); code != 0 {
+		// A module from before rates existed (mount skew during a
+		// deploy): hold the world's rate; the desired rate lands on the
+		// first reopen under a rate-capable module.
+		log.Printf("park %s: module rejected rate_set %dHz (code %d) — holding %dHz", a.name, hz, code, a.hz)
+		return nil
+	}
+	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: evRateSet, Actor: "system", Payload: p[:]}
+	firstSeq, err := a.j.Append(ctx, a.id, a.lastSeq, []journal.Event{ev})
+	if err != nil {
+		// State is ahead of the journal: never serve it.
+		return fmt.Errorf("rate_set append: %w", err)
+	}
+	a.lastSeq = firstSeq
+	mEventsAppended.Inc()
+	mRateChanges.Inc()
+	a.refreshSchedule()
+	t := a.host.Tick()
+	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: a.host.Hash()}
+	a.ringHead = t
+	if err := a.j.PutSnapshot(ctx, a.id, journal.Snapshot{
+		Seq: a.lastSeq, Tick: t, Epoch: epoch, WH: a.host.Hash(),
+		TerrainID: a.host.TerrainID(), State: a.host.Snapshot(),
+	}); err != nil {
+		log.Printf("park %s: snapshot after rate_set failed: %v", a.name, err)
+	} else {
+		mSnapshots.Inc()
+		a.lastSnapAt = a.tm.now()
+	}
+	log.Printf("park %s: rate_set %dHz at tick %d", a.name, hz, t)
+	return nil
 }
 
 // clockSkip journals the repayment of a long gap: one event that jumps sim
@@ -642,7 +719,8 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 		// deploy): anchor to this process so the schedule holds drift-free
 		// for the instance's life; the real repayment lands on the first
 		// reopen under a skip-capable module.
-		a.anchor = a.tm.now().Add(-time.Duration(tick)*a.tickDur - a.phase)
+		a.anchorTick = tick
+		a.anchor = a.tm.now().Add(-a.phase)
 		log.Printf("park %s: module rejected clock_skip (code %d) — process-anchored until the module lane converges", a.name, code)
 		return nil
 	}
@@ -732,9 +810,25 @@ func (a *authority) verdictFor(tick, wh uint64) (ok *bool, now uint64) {
 	return &v, a.ringHead
 }
 
+// refreshSchedule derives the tick schedule from the sim's rate segment —
+// state, not config, so every pod generation (and rollback) computes the
+// identical mapping. Called only while dark: the ring may be reallocated.
+func (a *authority) refreshSchedule() {
+	a.hz = a.host.Rate()
+	a.tickDur = time.Second / time.Duration(a.hz)
+	a.phase = time.Duration(uint64(a.id) % uint64(a.tickDur))
+	a.anchorTick = a.host.AnchorTick()
+	a.anchor = wallEpoch.Add(time.Duration(a.host.AnchorNs()))
+	if need := ringSeconds * a.hz; len(a.ring) != need {
+		a.mu.Lock()
+		a.ring = make([]ringEntry, need)
+		a.mu.Unlock()
+	}
+}
+
 // tickInstant is the wall-clock moment tick t is scheduled to run.
 func (a *authority) tickInstant(t uint64) time.Time {
-	return a.anchor.Add(a.phase + time.Duration(t)*a.tickDur)
+	return a.anchor.Add(a.phase + time.Duration(t-a.anchorTick)*a.tickDur)
 }
 
 // targetTick is the tick whose instant most recently passed: the tick the
@@ -742,9 +836,9 @@ func (a *authority) tickInstant(t uint64) time.Time {
 func (a *authority) targetTick(now time.Time) uint64 {
 	d := now.Sub(a.anchor) - a.phase
 	if d < 0 {
-		return 0
+		return a.anchorTick
 	}
-	return uint64(d / a.tickDur)
+	return a.anchorTick + uint64(d/a.tickDur)
 }
 
 // run is the authority loop: the single goroutine touching the parkHost.
@@ -933,9 +1027,12 @@ func (a *authority) handleAttach(req attachReq) attachResult {
 	}
 	// The terrain hex is the only terrain fact on the wire: dimensions and
 	// schema live in the content-addressed blob every consumer fetches.
+	// hz is a read-out of the world's journaled rate — a connection sees
+	// exactly one rate, since rate changes only happen while dark.
 	welcome, _ := json.Marshal(map[string]any{
 		"type": "welcome", "park": a.name, "role": s.role, "epoch": a.host.Epoch(),
 		"seq": a.lastSeq, "tick": a.host.Tick(), "terrain": a.terrainHex,
+		"hz": a.hz,
 	})
 	res := attachResult{
 		welcome: append(welcome, '\n'),

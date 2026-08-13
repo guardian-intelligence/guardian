@@ -480,8 +480,11 @@ export function startGame(): void {
       role = m.role;
       $("role").textContent = `${role} @ ${m.park}`;
       logLine(
-        `welcome: ${role}, park ${m.park}, epoch ${m.epoch}, journal seq ${m.seq}, tick ${m.tick}`,
+        `welcome: ${role}, park ${m.park}, epoch ${m.epoch}, journal seq ${m.seq}, tick ${m.tick}, ${m.hz ?? 24}Hz`,
       );
+      // the park's tick rate paces the clock for this whole connection
+      // (rate changes only happen while the server is dark)
+      smoother?.clock_set_rate?.(BigInt(m.hz ?? 24));
       // the welcome is the clock's first sample (rtt unknown: same-ms echo)
       smoother?.clock_sample(BigInt(Date.now()), BigInt(Date.now()), BigInt(m.tick));
       await ensureTerrain(m.terrain);

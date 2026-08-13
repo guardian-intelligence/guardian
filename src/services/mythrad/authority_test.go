@@ -358,3 +358,96 @@ func TestReopenRepaysDowntime(t *testing.T) {
 		t.Fatal("two reopens at the same instant diverged (across a clock_skip)")
 	}
 }
+
+// The rate lane end to end: the deployment's desired rate converges the
+// world via one journaled rate_set in the dark, the schedule re-anchors
+// piecewise (so lowering the rate later never stalls the park), and
+// reopens across rate boundaries stay deterministic.
+func TestReopenConvergesToDesiredRate(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	j := journal.NewPg(pool)
+	if err := j.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mods := &modules{client: &clientModule{slot: "client"}, park: &clientModule{slot: "park"}}
+	a, err := openAuthority(ctx, "park-rated", defaultParkModule, fixtureTerrain, j, mods, fixedClock(wallEpoch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &session{sub: "gale", out: make(chan []byte, 16)}
+	a.stageIntent(s, 1, evJoin, dog8(dogIDFor("gale")))
+	for i := 0; i < 5; i++ {
+		a.tickOnce()
+	}
+	seqBefore := a.lastSeq
+	if a.hz != 24 {
+		t.Fatalf("genesis rate = %dHz, want 24", a.hz)
+	}
+	a.host.close()
+
+	// Reopen wanting 120Hz: repay the 10s gap under the stored 24Hz
+	// segment first, then exactly one rate_set re-anchors at that tick.
+	at120 := wallEpoch.Add(10 * time.Second)
+	b, err := openAuthority(ctx, "park-rated", defaultParkModule, fixtureTerrain, j, mods, timing{hz: 120, now: func() time.Time { return at120 }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.hz != 120 || b.host.Rate() != 120 {
+		t.Fatalf("rate = %d/%d after reopen, want 120", b.hz, b.host.Rate())
+	}
+	if b.lastSeq != seqBefore+1 {
+		t.Fatalf("rate convergence journaled %d events, want exactly one rate_set", b.lastSeq-seqBefore)
+	}
+	if got, want := b.host.AnchorTick(), b.host.Tick(); got != want {
+		t.Fatalf("segment anchored at tick %d, want the boundary tick %d", got, want)
+	}
+	// The repayment ran at 24Hz granularity, so up to one old tick of
+	// wall time (5 ticks at 120Hz) is still owed at the boundary — the
+	// live loop's first catch-up burst repays it. Anything larger would
+	// be a real discontinuity.
+	if got, want := b.targetTick(at120), b.host.Tick(); got < want || got > want+5 {
+		t.Fatalf("schedule discontinuity: target %d vs tick %d at the boundary", got, want)
+	}
+	if len(b.ring) != ringSeconds*120 {
+		t.Fatalf("ring holds %d entries, want a 30s window at 120Hz (%d)", len(b.ring), ringSeconds*120)
+	}
+	snap, ok, err := j.LatestSnapshot(ctx, b.id)
+	if err != nil || !ok || snap.Tick != b.host.Tick() {
+		t.Fatalf("boundary snapshot: ok=%v err=%v tick=%d want %d", ok, err, snap.Tick, b.host.Tick())
+	}
+	b.host.close()
+
+	// Lower the rate back at +20s: the 120Hz segment repays ~10s of gap
+	// first (no stall — the mapping is piecewise, not global), then one
+	// rate_set back to 24.
+	at24 := wallEpoch.Add(20 * time.Second)
+	c, err := openAuthority(ctx, "park-rated", defaultParkModule, fixtureTerrain, j, mods, timing{hz: 24, now: func() time.Time { return at24 }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.host.close()
+	if c.hz != 24 || c.host.Rate() != 24 {
+		t.Fatalf("rate = %d/%d after lowering, want 24", c.hz, c.host.Rate())
+	}
+	if got, want := c.targetTick(at24), c.host.Tick(); got != want {
+		t.Fatalf("lowering the rate stalled the schedule: target %d != tick %d", got, want)
+	}
+	// ~10s repaid at 120Hz between the two segment boundaries
+	if repaid := c.host.AnchorTick() - snap.Tick; repaid < 1100 || repaid > 1300 {
+		t.Fatalf("repaid %d ticks across the 120Hz segment, want ~1200", repaid)
+	}
+	// determinism across two rate boundaries
+	d, err := openAuthority(ctx, "park-rated", defaultParkModule, fixtureTerrain, j, mods, timing{hz: 24, now: func() time.Time { return at24 }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.host.close()
+	if c.host.Hash() != d.host.Hash() {
+		t.Fatal("two reopens at the same instant diverged (across rate boundaries)")
+	}
+}
