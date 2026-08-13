@@ -34,6 +34,7 @@
 //!   sim_apply(len: u32) -> u32        0 ok, else reject code
 //!   sim_hash() -> u64                 canonical state hash
 //!   sim_tick() -> u64, sim_epoch() -> u32, sim_terrain_id() -> u64
+//!   sim_rate() -> u32, sim_anchor_tick() -> u64, sim_anchor_ns() -> u64
 //!   sim_view() -> u32                 render data written to io, len
 //!
 //! Event encoding (little-endian): kind u16, then payload —
@@ -54,14 +55,26 @@
 //!                                         journaled repayment of authority
 //!                                         downtime. Dogs, energy, and day
 //!                                         are untouched; forward only
+//!  10 rate_set      { hz u32 }            system event; changes the tick
+//!                                         rate and re-anchors the piecewise
+//!                                         tick<->wall mapping at this tick.
+//!                                         The rate is world state so every
+//!                                         pod generation (and rollback)
+//!                                         derives the same schedule
 //!
 //! Snapshot encoding (canonical; dogs strictly sorted by id; park energy
 //! is cumulative — departed dogs' contributions persist — so it is state,
 //! not a derivable aggregate):
-//!   magic "MYP2", epoch u32, park_id u64, seed u64, tick u64, day u32,
-//!   n u32, energy u64, terrain_schema u32, terrain_id u64, then n *
+//!   magic "MYP3", epoch u32, park_id u64, seed u64, tick u64, day u32,
+//!   n u32, energy u64, terrain_schema u32, terrain_id u64,
+//!   rate_hz u32, anchor_tick u64, anchor_ns u64, then n *
 //!   { id u64, x i32, y i32, energy u32, checked_in_day u32, target u16,
 //!     waypoint u16, flags u8, pad u8 }
+//!   The anchor pair defines the current rate segment: the wall instant of
+//!   tick T (T >= anchor_tick) is epoch + anchor_ns + (T-anchor_tick)/hz.
+//!   Stored "MYP2" snapshots (the pre-rate era) restore with the genesis
+//!   rate (24Hz, anchors 0) and hash identically to how their era hashed
+//!   them — the rate fields join the hash only once non-default.
 //!   x, y are Q16.16 park-cell coordinates; target/waypoint are nav nodes
 //!   (0xFFFF = none); flags bit 0 = standing on a deck, bit 1 = boosting.
 #![cfg_attr(not(test), no_std)]
@@ -78,10 +91,17 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 
 pub const MAX_DOGS: usize = 2048;
 const IO_CAP: usize = 64 * 1024;
+// MAGIC (the MYP2 constant) stays first in the hash stream forever: it is
+// domain separation, not data, and swapping it would orphan every stored
+// world hash. MAGIC3 versions only the snapshot byte encoding.
 const MAGIC: u32 = u32::from_le_bytes(*b"MYP2");
+const MAGIC3: u32 = u32::from_le_bytes(*b"MYP3");
 const NEVER: u32 = u32::MAX;
 const DOG_REC: usize = 30;
 const HEADER: usize = 60;
+const HEADER3: usize = 80;
+pub const GENESIS_HZ: u32 = 24;
+pub const MAX_HZ: u32 = 1000;
 
 pub const EV_JOIN: u16 = 1;
 pub const EV_LEAVE: u16 = 2;
@@ -92,6 +112,7 @@ pub const EV_EPOCH_ADVANCE: u16 = 6;
 pub const EV_TERRAIN_SET: u16 = 7;
 pub const EV_BOOST_SET: u16 = 8;
 pub const EV_CLOCK_SKIP: u16 = 9;
+pub const EV_RATE_SET: u16 = 10;
 
 pub const OK: u32 = 0;
 pub const ERR_ENCODING: u32 = 1;
@@ -147,6 +168,13 @@ struct Park {
     energy: u64,
     terrain_schema: u32,
     terrain_id: u64,
+    // The current rate segment of the piecewise tick<->wall mapping: tick
+    // anchor_tick sits anchor_ns nanoseconds after the wall epoch, and
+    // later ticks advance at rate_hz. State — not host config — so every
+    // pod generation and every replay derives the identical schedule.
+    rate_hz: u32,
+    anchor_tick: u64,
+    anchor_ns: u64,
     n: usize,
     dogs: [Dog; MAX_DOGS],
 }
@@ -160,6 +188,9 @@ static mut PARK: Park = Park {
     energy: 0,
     terrain_schema: 0,
     terrain_id: 0,
+    rate_hz: GENESIS_HZ,
+    anchor_tick: 0,
+    anchor_ns: 0,
     n: 0,
     dogs: [EMPTY_DOG; MAX_DOGS],
 };
@@ -242,6 +273,9 @@ pub extern "C" fn sim_init(seed: u64, park_id: u64, epoch: u32) -> u32 {
         energy: 0,
         terrain_schema: t.schema,
         terrain_id: t.id,
+        rate_hz: GENESIS_HZ,
+        anchor_tick: 0,
+        anchor_ns: 0,
         n: 0,
         dogs: [EMPTY_DOG; MAX_DOGS],
     };
@@ -261,6 +295,21 @@ pub extern "C" fn sim_epoch() -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn sim_terrain_id() -> u64 {
     park().terrain_id
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sim_rate() -> u32 {
+    park().rate_hz
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sim_anchor_tick() -> u64 {
+    park().anchor_tick
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sim_anchor_ns() -> u64 {
+    park().anchor_ns
 }
 
 fn node_of(t: &Terrain, d: &Dog) -> Node {
@@ -549,6 +598,27 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             p.tick = to;
             OK
         }
+        EV_RATE_SET => {
+            let Some(hz) = read_u32_exact(body, len) else {
+                return ERR_ENCODING;
+            };
+            if hz == 0 || hz > MAX_HZ {
+                return ERR_ENCODING;
+            }
+            let p = park();
+            if hz == p.rate_hz {
+                return ERR_NOOP;
+            }
+            // Close the old rate segment: the elapsed wall time of its
+            // ticks folds into the anchor, so the mapping stays piecewise
+            // exact. u128 keeps tick*1e9 from overflowing; integer ns
+            // division is the canonical rounding every replica shares.
+            let elapsed = (p.tick - p.anchor_tick) as u128;
+            p.anchor_ns += (elapsed * 1_000_000_000u128 / p.rate_hz as u128) as u64;
+            p.anchor_tick = p.tick;
+            p.rate_hz = hz;
+            OK
+        }
         EV_EPOCH_ADVANCE => {
             if len != body + 12 {
                 return ERR_ENCODING;
@@ -671,9 +741,9 @@ fn insert(p: &mut Park, d: Dog) {
 pub extern "C" fn sim_snapshot() -> u32 {
     let p = park();
     let n = p.n;
-    let total = HEADER + n * DOG_REC;
+    let total = HEADER3 + n * DOG_REC;
     let buf = io();
-    buf[0..4].copy_from_slice(&MAGIC.to_le_bytes());
+    buf[0..4].copy_from_slice(&MAGIC3.to_le_bytes());
     buf[4..8].copy_from_slice(&p.epoch.to_le_bytes());
     buf[8..16].copy_from_slice(&p.park_id.to_le_bytes());
     buf[16..24].copy_from_slice(&p.seed.to_le_bytes());
@@ -683,7 +753,10 @@ pub extern "C" fn sim_snapshot() -> u32 {
     buf[40..48].copy_from_slice(&p.energy.to_le_bytes());
     buf[48..52].copy_from_slice(&p.terrain_schema.to_le_bytes());
     buf[52..60].copy_from_slice(&p.terrain_id.to_le_bytes());
-    let mut at = HEADER;
+    buf[60..64].copy_from_slice(&p.rate_hz.to_le_bytes());
+    buf[64..72].copy_from_slice(&p.anchor_tick.to_le_bytes());
+    buf[72..80].copy_from_slice(&p.anchor_ns.to_le_bytes());
+    let mut at = HEADER3;
     for d in &p.dogs[..n] {
         buf[at..at + 8].copy_from_slice(&d.id.to_le_bytes());
         buf[at + 8..at + 12].copy_from_slice(&d.x.to_le_bytes());
@@ -709,13 +782,30 @@ pub extern "C" fn sim_restore(len: u32) -> u32 {
         return 4;
     };
     let buf = io();
-    if u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) != MAGIC {
-        return 1;
-    }
+    // MYP2 is the stored pre-rate era: same layout, no rate segment, and
+    // its worlds ran at the genesis rate with the genesis anchor.
+    let header = match u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) {
+        m if m == MAGIC3 => HEADER3,
+        m if m == MAGIC => HEADER,
+        _ => return 1,
+    };
     let n = u32::from_le_bytes([buf[36], buf[37], buf[38], buf[39]]) as usize;
-    if n > MAX_DOGS || len != HEADER + n * DOG_REC {
+    if n > MAX_DOGS || len != header + n * DOG_REC {
         return 2;
     }
+    let (rate_hz, anchor_tick, anchor_ns) = if header == HEADER3 {
+        let mut b8 = [0u8; 8];
+        let hz = u32::from_le_bytes([buf[60], buf[61], buf[62], buf[63]]);
+        if hz == 0 || hz > MAX_HZ {
+            return 2;
+        }
+        b8.copy_from_slice(&buf[64..72]);
+        let at = u64::from_le_bytes(b8);
+        b8.copy_from_slice(&buf[72..80]);
+        (hz, at, u64::from_le_bytes(b8))
+    } else {
+        (GENESIS_HZ, 0, 0)
+    };
     let schema = u32::from_le_bytes([buf[48], buf[49], buf[50], buf[51]]);
     let mut b8 = [0u8; 8];
     b8.copy_from_slice(&buf[52..60]);
@@ -727,7 +817,7 @@ pub extern "C" fn sim_restore(len: u32) -> u32 {
     }
     let mut dogs = [EMPTY_DOG; MAX_DOGS];
     let mut prev: Option<u64> = None;
-    let mut at = HEADER;
+    let mut at = header;
     for slot in dogs.iter_mut().take(n) {
         let mut b8 = [0u8; 8];
         b8.copy_from_slice(&buf[at..at + 8]);
@@ -784,6 +874,9 @@ pub extern "C" fn sim_restore(len: u32) -> u32 {
     p.energy = u64::from_le_bytes(b8);
     p.terrain_schema = schema;
     p.terrain_id = tid;
+    p.rate_hz = rate_hz;
+    p.anchor_tick = anchor_tick;
+    p.anchor_ns = anchor_ns;
     p.n = n;
     p.dogs = dogs;
     0
@@ -806,6 +899,14 @@ pub extern "C" fn sim_hash() -> u64 {
     h.u64(p.energy);
     h.u32(p.terrain_schema);
     h.u64(p.terrain_id);
+    // The rate segment joins the hash stream only once it leaves the
+    // genesis value: every world hash minted before rates existed remains
+    // valid, so stored snapshots verify across the format bump.
+    if (p.rate_hz, p.anchor_tick, p.anchor_ns) != (GENESIS_HZ, 0, 0) {
+        h.u32(p.rate_hz);
+        h.u64(p.anchor_tick);
+        h.u64(p.anchor_ns);
+    }
     for d in &p.dogs[..p.n] {
         h.u64(d.id);
         h.u32(d.x as u32);
@@ -1008,6 +1109,7 @@ mod tests {
             let code = match kind {
                 EV_DAY_RESET => ev(EV_DAY_RESET, &(a as u32).to_le_bytes()),
                 EV_CLOCK_SKIP => ev(EV_CLOCK_SKIP, &a.to_le_bytes()),
+                EV_RATE_SET => ev(EV_RATE_SET, &(a as u32).to_le_bytes()),
                 EV_EPOCH_ADVANCE => {
                     let mut p = (a as u32).to_le_bytes().to_vec();
                     p.extend_from_slice(&0u64.to_le_bytes());
@@ -1095,6 +1197,67 @@ mod tests {
         run_journal(&j, 100_300);
         assert_eq!(sim_hash(), h1);
         assert_eq!(snapshot_vec(), s1);
+    }
+
+    #[test]
+    fn rate_set_reanchors_the_piecewise_mapping() {
+        let _g = setup(3);
+        for _ in 0..48 {
+            sim_step(); // 2s at the genesis 24Hz
+        }
+        assert_eq!(ev(EV_RATE_SET, &0u32.to_le_bytes()), ERR_ENCODING);
+        assert_eq!(ev(EV_RATE_SET, &2000u32.to_le_bytes()), ERR_ENCODING);
+        assert_eq!(ev(EV_RATE_SET, &24u32.to_le_bytes()), ERR_NOOP);
+        assert_eq!(ev(EV_RATE_SET, &120u32.to_le_bytes()), OK);
+        assert_eq!(sim_rate(), 120);
+        assert_eq!(sim_anchor_tick(), 48);
+        assert_eq!(sim_anchor_ns(), 2_000_000_000);
+        for _ in 0..120 {
+            sim_step(); // 1s at the new rate
+        }
+        assert_eq!(ev(EV_RATE_SET, &24u32.to_le_bytes()), OK);
+        assert_eq!(sim_anchor_tick(), 168);
+        assert_eq!(sim_anchor_ns(), 3_000_000_000);
+    }
+
+    #[test]
+    fn replay_across_rate_set_is_deterministic() {
+        let _g = setup(47);
+        let mut j = journal();
+        j.push((320, EV_RATE_SET, 120, 0));
+        j.push((400, EV_JOIN, 21, 0));
+        run_journal(&j, 700);
+        let h1 = sim_hash();
+        let s1 = snapshot_vec();
+        assert_eq!(sim_init(47, 42, 1), OK);
+        run_journal(&j, 700);
+        assert_eq!(sim_hash(), h1);
+        assert_eq!(snapshot_vec(), s1);
+        // and the snapshot round-trips with the rate segment intact
+        restore_vec(&s1);
+        assert_eq!(sim_rate(), 120);
+        assert_eq!(sim_anchor_tick(), 320);
+        assert_eq!(sim_hash(), h1);
+    }
+
+    #[test]
+    fn myp2_snapshots_restore_with_genesis_rate_and_identical_hash() {
+        let _g = setup(9);
+        let j = journal();
+        run_journal(&j, 500); // never touches the rate: hash omits it
+        let h = sim_hash();
+        let s3 = snapshot_vec();
+        // Rewrite the MYP3 bytes as their MYP2 era form: old magic, no
+        // rate segment — exactly what pre-rate rows in park_snapshots hold.
+        let mut s2 = Vec::with_capacity(s3.len() - 20);
+        s2.extend_from_slice(&s3[..HEADER]);
+        s2[0..4].copy_from_slice(&MAGIC.to_le_bytes());
+        s2.extend_from_slice(&s3[HEADER3..]);
+        restore_vec(&s2);
+        assert_eq!(sim_rate(), GENESIS_HZ);
+        assert_eq!((sim_anchor_tick(), sim_anchor_ns()), (0, 0));
+        assert_eq!(sim_hash(), h, "pre-rate hash must survive the format bump");
+        assert_eq!(snapshot_vec(), s3);
     }
 
     #[test]
@@ -1295,7 +1458,7 @@ mod tests {
         assert_eq!(ev_boost(4, 2), ERR_ENCODING);
         // an out-of-contract flag bit in a snapshot is refused on restore
         let mut bad = snapshot_vec();
-        bad[HEADER + 28] |= 0x04;
+        bad[HEADER3 + 28] |= 0x04;
         io()[..bad.len()].copy_from_slice(&bad);
         assert_eq!(sim_restore(bad.len() as u32), 5);
     }
@@ -1403,7 +1566,7 @@ mod tests {
         }
         assert_eq!(ev_id(EV_JOIN, 5000), ERR_FULL);
         let len = sim_snapshot() as usize;
-        assert_eq!(len, HEADER + MAX_DOGS * DOG_REC);
+        assert_eq!(len, HEADER3 + MAX_DOGS * DOG_REC);
         assert!(len <= IO_CAP);
         let view_len = sim_view() as usize;
         assert_eq!(view_len, 4 + MAX_DOGS * 20);
@@ -1422,7 +1585,7 @@ mod tests {
         assert_eq!(sim_restore(bad.len() as u32), 1);
         // swap the two dog records: ids out of order
         let mut unsorted = s.clone();
-        let (a, b) = (HEADER, HEADER + DOG_REC);
+        let (a, b) = (HEADER3, HEADER3 + DOG_REC);
         let rec: Vec<u8> = unsorted[a..a + DOG_REC].to_vec();
         unsorted.copy_within(b..b + DOG_REC, a);
         unsorted[b..b + DOG_REC].copy_from_slice(&rec);
@@ -1438,9 +1601,14 @@ mod tests {
         assert_eq!(sim_restore(other.len() as u32), 4);
         // a dog standing outside the world is refused
         let mut oob = s.clone();
-        oob[HEADER + 8..HEADER + 12].copy_from_slice(&(200i32 << 16).to_le_bytes());
+        oob[HEADER3 + 8..HEADER3 + 12].copy_from_slice(&(200i32 << 16).to_le_bytes());
         io()[..oob.len()].copy_from_slice(&oob);
         assert_eq!(sim_restore(oob.len() as u32), 5);
+        // an out-of-range rate is refused
+        let mut badrate = s.clone();
+        badrate[60..64].copy_from_slice(&0u32.to_le_bytes());
+        io()[..badrate.len()].copy_from_slice(&badrate);
+        assert_eq!(sim_restore(badrate.len() as u32), 2);
         restore_vec(&s);
         assert_eq!(snapshot_vec(), s);
     }

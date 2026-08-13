@@ -102,6 +102,8 @@ var (
 	}, []string{"park"})
 	mClockSkips = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "mythra_clock_skips_total", Help: "clock_skip events journaled to repay authority downtime."})
+	mRateChanges = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_rate_changes_total", Help: "rate_set events journaled to converge a park to the deployment's tick rate."})
 	mAppendDur = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "mythra_journal_append_seconds",
 		Help:    "Tick-batched journal append commit time (the Append call alone).",
@@ -477,10 +479,10 @@ func main() {
 	publicAddr := envStr("PUBLIC_ADDR", "") // "host:port" advertised to clients
 	allowedOrigins := envStr("ALLOWED_ORIGINS", "")
 	maxSessions := envInt("MAX_SESSIONS", 4000)
+	// The desired tick rate: parks whose journaled rate differs converge
+	// to it via a dark-phase rate_set on their next open. Clients pace
+	// from the welcome line, so no client change is needed.
 	tickHz := envInt("TICK_HZ", 24)
-	if tickHz != 24 {
-		log.Printf("TICK_HZ=%d: shipped clients pace at 24Hz — non-default rates are for server-side experiments", tickHz)
-	}
 	issuer := envStr("OIDC_ISSUER", "https://auth.wakeupmythra.com/realms/wakeupmythra.com")
 	jwksURL := envStr("OIDC_JWKS_URL", "")
 	clientIDs := envStr("OIDC_CLIENT_IDS", "wake-up-mythra,mythra-loadgen")

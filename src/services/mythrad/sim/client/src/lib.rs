@@ -15,6 +15,8 @@
 //!
 //! Clock discipline (mythra_sim_clock; the host executes directives and
 //! never does time arithmetic itself):
+//!   clock_set_rate(hz u64)         the park's tick rate, from welcome —
+//!                                  call before the first sample
 //!   clock_sample(send_ms u64, recv_ms u64, server_tick u64)  verdict echo
 //!   clock_reset(server_tick u64, now_ms u64)   after restore/module swap
 //!   clock_frame(now_ms u64, replica_tick u64, budget_us u32) -> u32
@@ -39,6 +41,11 @@ static mut CLOCK: Clock = Clock::NEW;
 
 fn clock() -> &'static mut Clock {
     unsafe { &mut *(&raw mut CLOCK) }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn clock_set_rate(hz: u64) {
+    clock().set_rate(hz);
 }
 
 #[unsafe(no_mangle)]
