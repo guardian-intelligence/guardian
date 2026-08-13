@@ -19,7 +19,13 @@ func TestMythraAgentOperationCapabilities(t *testing.T) {
 		}
 	}
 
-	assertSingleCapabilityRule(t, docs, "guardian-mythra-observer", "pods/exec", "create", []string{"mythra-journal-console-0"})
+	observerRole := findDoc(t, docs, "Role", "guardian-mythra-observer")
+	observerRules := sliceValue(observerRole["rules"])
+	if len(observerRules) != 2 {
+		t.Fatalf("Role guardian-mythra-observer rules = %d, want 2", len(observerRules))
+	}
+	assertCapabilityRule(t, observerRules[0], "guardian-mythra-observer", "pods", "get", []string{"mythra-journal-console-0"})
+	assertCapabilityRule(t, observerRules[1], "guardian-mythra-observer", "pods/exec", "create", []string{"mythra-journal-console-0"})
 	assertSingleCapabilityRule(t, docs, "guardian-mythra-operator", "pods", "delete", nil)
 	assertSingleCapabilityRule(t, docs, "guardian-mythra-token-minter", "serviceaccounts/token", "create", []string{
 		"guardian-mythra-observer",
@@ -86,7 +92,12 @@ func assertSingleCapabilityRule(t *testing.T, docs []map[string]interface{}, rol
 	if len(rules) != 1 {
 		t.Fatalf("Role %s rules = %d, want 1", roleName, len(rules))
 	}
-	rule := mapValue(rules[0])
+	assertCapabilityRule(t, rules[0], roleName, resource, verb, resourceNames)
+}
+
+func assertCapabilityRule(t *testing.T, rawRule interface{}, roleName, resource, verb string, resourceNames []string) {
+	t.Helper()
+	rule := mapValue(rawRule)
 	resources := sliceValue(rule["resources"])
 	verbs := sliceValue(rule["verbs"])
 	if len(resources) != 1 || stringValue(resources[0]) != resource {
