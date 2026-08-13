@@ -83,6 +83,44 @@ http_archive(
     url = "https://github.com/opentofu/opentofu/releases/download/v1.12.5/tofu_1.12.5_linux_amd64.zip",
 )
 
+# The provider release zips the tofu-runner image bakes as its filesystem
+# mirror, so `tofu init` in-cluster resolves providers without network egress
+# (a per-tick GitHub download was the runner's dominant transient failure).
+# Each sha256 is the registry-published shasum and appears among the `zh:`
+# hashes of the consuming roots' .terraform.lock.hcl, so the mirror can only
+# ship bytes the lockfiles already trust — tofu re-verifies against the
+# lockfile at init. Renovate bumps a root's versions.tf but cannot recompute
+# these pins, so TestTofuRunnerProviderMirrorTracksRootLockfiles is the
+# doorbell: a provider bump turns it red until the root's lockfile and this
+# mirror move together.
+http_file(
+    name = "tofu_provider_cloudflare_linux_amd64",
+    downloaded_file_path = "terraform-provider-cloudflare_5.21.1_linux_amd64.zip",
+    sha256 = "586ea42ef74d6c5bc4c9b89da6b1f8618a19f4e80272fe8d615e7d5b11c491af",
+    url = "https://github.com/cloudflare/terraform-provider-cloudflare/releases/download/v5.21.1/terraform-provider-cloudflare_5.21.1_linux_amd64.zip",
+)
+
+http_file(
+    name = "tofu_provider_github_linux_amd64",
+    downloaded_file_path = "terraform-provider-github_6.13.0_linux_amd64.zip",
+    sha256 = "5dd05dee677f6ebdbed00cbb1b9be444ab2d1062d345cbc9ec50a47cb41b8622",
+    url = "https://github.com/integrations/terraform-provider-github/releases/download/v6.13.0/terraform-provider-github_6.13.0_linux_amd64.zip",
+)
+
+http_file(
+    name = "tofu_provider_latitudesh_linux_amd64",
+    downloaded_file_path = "terraform-provider-latitudesh_3.5.3_linux_amd64.zip",
+    sha256 = "833a3d9474d608fbe1efd411854822e84952ab26f87366aa1e86dde5683f8f45",
+    url = "https://github.com/latitudesh/terraform-provider-latitudesh/releases/download/v3.5.3/terraform-provider-latitudesh_3.5.3_linux_amd64.zip",
+)
+
+http_file(
+    name = "tofu_provider_stripe_linux_amd64",
+    downloaded_file_path = "terraform-provider-stripe_0.2.3_linux_amd64.zip",
+    sha256 = "26180861749da9a02de742e3eda7b79e8de954d6c2ae3628ad7fbcab491d5c7f",
+    url = "https://github.com/stripe/terraform-provider-stripe/releases/download/v0.2.3/terraform-provider-stripe_0.2.3_linux_amd64.zip",
+)
+
 # BGP-derived IP->ASN ranges (public routing data), mirrored from
 # iptoasn.com as a repo release because the upstream URL is mutable.
 # Refresh: src/infrastructure/runbooks/ip2asn-refresh.md.

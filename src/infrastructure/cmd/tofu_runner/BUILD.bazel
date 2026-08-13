@@ -1,6 +1,16 @@
 load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
+# The mirror layout list below is conformance surface:
+# TestTofuRunnerProviderMirrorTracksRootLockfiles reads this file to prove
+# every provider the roots lock is laid into the image.
+filegroup(
+    name = "build_file",
+    srcs = ["BUILD.bazel"],
+    visibility = ["//src/infrastructure/tests:__pkg__"],
+)
 
 go_library(
     name = "tofu_runner_lib",
@@ -28,12 +38,43 @@ pkg_tar(
         ":tofu_runner": "app/tofu-runner",
         "@opentofu_linux_amd64//:tofu": "usr/local/bin/tofu",
         "@cacert_pem//file": "etc/ssl/certs/ca-certificates.crt",
+        "tofurc": "usr/local/share/tofu/tofurc",
     },
     modes = {
         "app/tofu-runner": "0755",
         "usr/local/bin/tofu": "0755",
         "etc/ssl/certs/ca-certificates.crt": "0644",
+        "usr/local/share/tofu/tofurc": "0644",
     },
+)
+
+# The packed filesystem mirror tofurc points tofu at: the registry release
+# zips (pinned in MODULE.bazel, verified against the roots' lockfiles by
+# TestTofuRunnerProviderMirrorTracksRootLockfiles) laid out under
+# <mirror>/<registry-host>/<namespace>/<type>/<zip>. Its own layer so a
+# provider bump does not re-ship the runner binary layer.
+[
+    pkg_files(
+        name = "mirror_" + name,
+        srcs = ["@tofu_provider_" + name + "_linux_amd64//file"],
+        prefix = "usr/local/share/tofu/providers/registry.opentofu.org/" + address,
+    )
+    for name, address in [
+        ("cloudflare", "cloudflare/cloudflare"),
+        ("github", "integrations/github"),
+        ("latitudesh", "latitudesh/latitudesh"),
+        ("stripe", "stripe/stripe"),
+    ]
+]
+
+pkg_tar(
+    name = "provider_mirror_layer",
+    srcs = [
+        ":mirror_cloudflare",
+        ":mirror_github",
+        ":mirror_latitudesh",
+        ":mirror_stripe",
+    ],
 )
 
 oci_image(
@@ -46,15 +87,21 @@ oci_image(
     base = "@distroless_cc_base_linux_amd64",
     entrypoint = ["/app/tofu-runner"],
     env = {
-        # tofu shells out to providers over public TLS; the layered Mozilla
-        # bundle is the system trust store. HOME lands tofu's .terraform.d and
-        # plugin cache inside the writable /workspace emptyDir, so the pod can
-        # run with a read-only root filesystem under restricted PSA.
+        # tofu talks TLS to the R2 state backend and provider APIs; the
+        # layered Mozilla bundle is the system trust store. HOME lands tofu's
+        # .terraform.d inside the writable /workspace emptyDir, so the pod can
+        # run with a read-only root filesystem under restricted PSA. Provider
+        # binaries never ride that egress: TF_CLI_CONFIG_FILE selects the
+        # baked filesystem mirror, making init hermetic.
         "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
         "HOME": "/workspace",
         "WORKDIR": "/workspace",
+        "TF_CLI_CONFIG_FILE": "/usr/local/share/tofu/tofurc",
     },
-    tars = [":runner_layer"],
+    tars = [
+        ":runner_layer",
+        ":provider_mirror_layer",
+    ],
     visibility = ["//visibility:public"],
 )
 

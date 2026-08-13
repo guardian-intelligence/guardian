@@ -266,13 +266,18 @@
       automerge: false,
     },
 
-    // Tofu provider pins: doorbell tier. Applying a root is a custody
-    // operation, so the PR is a signal, not a deploy.
+    // Tofu provider pins: doorbell tier. Renovate rewrites a root's
+    // versions.tf but cannot regenerate its .terraform.lock.hcl or the
+    // provider mirror the runner image bakes, so the PR is a signal, not a
+    // deploy.
     {
       matchManagers: ["terraform"],
       addLabels: ["substrate-upgrade"],
       minimumReleaseAge: null,
       automerge: false,
+      prBodyNotes: [
+        "Complete the bump by hand: `tofu init -upgrade` in the root to regenerate .terraform.lock.hcl, then move the matching tofu_provider_*_linux_amd64 mirror pin in MODULE.bazel (url, zip name, and sha256 — the registry shasum, which must appear among the new lockfile's zh: hashes). TestTofuRunnerProviderMirrorTracksRootLockfiles keeps this PR red until all three move together.",
+      ],
     },
 
     // Substrate doorbells: every regex-managed pin that is not a lockfile

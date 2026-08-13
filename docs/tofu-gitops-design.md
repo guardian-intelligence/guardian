@@ -69,17 +69,25 @@ wait is too long (the runbook has the recipe).
 
 **Signalling is by exit code, not an Alerta credential the pod would have to
 hold.** A tofu error, a failed apply, or drift on a page-on-drift root fails
-the Job; the `tofu-runner-health` VMRule pages on `kube_job_status_failed`,
-staleness, and KSM going blind — the same posture as the etcd-snapshot
-CronJob. Drift on a `plan`-mode root exits 0 on purpose (the soak) and is read
-from the log.
+the Job; the `tofu-runner-health` VMRule pages on a terminal Job failure not
+yet superseded by a success, staleness, and KSM going blind — the same
+posture as the etcd-snapshot CronJob. Drift on a `plan`-mode root exits 0 on
+purpose (the soak) and is read from the log.
 
-**The runner image** is first-party and slim: the pinned OpenTofu binary plus
-a CA bundle on a distroless base, no shell. Its tofu is pinned to the same
-version as the multitool tofu the break-glass path runs
-(`TestTofuRunnerTracksMultitoolPin`), so an in-cluster apply and a hand apply
-plan identically. Flux image automation moves the digest like any other
-first-party workload.
+**The runner image** is first-party and slim: the pinned OpenTofu binary, a
+CA bundle, and a packed provider filesystem mirror on a distroless base, no
+shell. Its tofu is pinned to the same version as the multitool tofu the
+break-glass path runs (`TestTofuRunnerTracksMultitoolPin`), so an in-cluster
+apply and a hand apply plan identically. `tofu init` is hermetic: the baked
+CLI config resolves providers only from the mirror — no `direct` fallback —
+so a tick downloads nothing, a registry or GitHub outage cannot fail a
+reconcile, and a provider missing from the mirror fails init loudly.
+The mirror ships the registry release zips pinned in `MODULE.bazel`; each
+pin's sha256 must appear among the consuming roots' `.terraform.lock.hcl`
+`zh:` hashes (`TestTofuRunnerProviderMirrorTracksRootLockfiles`), so the
+image can only ship bytes the lockfiles already trust, and a Renovate
+provider bump goes red until the lockfile and mirror move together. Flux
+image automation moves the digest like any other first-party workload.
 
 ## The six roots
 

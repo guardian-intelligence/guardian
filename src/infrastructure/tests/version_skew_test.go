@@ -289,6 +289,91 @@ func tofuLinuxVersion(t *testing.T, runfile string) string {
 	return m[1]
 }
 
+const tofuRunnerBuildRunfile = "src/infrastructure/cmd/tofu_runner/BUILD.bazel"
+
+var tofuRootNames = []string{
+	"guardian-github",
+	"guardian-mgmt",
+	"guardian-mgmt-cloudflare-tokens",
+	"guardian-mgmt-dns",
+	"guardian-mgmt-edge-policy",
+	"guardian-stripe-sandbox",
+}
+
+// The runner image bakes a packed provider filesystem mirror and its tofurc
+// has no direct{} fallback, so a provider a root locks but the mirror lacks
+// fails init in-cluster. A provider pin therefore lives in three places that
+// must move together: the root's .terraform.lock.hcl, the MODULE.bazel
+// mirror archive, and the mirror layout list in the runner's BUILD file.
+// Renovate bumps a root's versions.tf but cannot recompute the mirror pins,
+// so this test is the doorbell: the bump PR goes red until the lockfile and
+// MODULE.bazel move with it. The mirror sha256 must also be one of the
+// lockfile's zh: hashes, so the image can only ship bytes the root already
+// trusts — tofu re-verifies the same hash at init.
+func TestTofuRunnerProviderMirrorTracksRootLockfiles(t *testing.T) {
+	type mirrorPin struct {
+		version string
+		sha256  string
+	}
+	pinRe := regexp.MustCompile(
+		`(?s)downloaded_file_path = "terraform-provider-([a-z0-9]+)_([0-9.]+)_linux_amd64\.zip",\s*sha256 = "([0-9a-f]{64})",`)
+	pins := map[string]mirrorPin{}
+	for _, m := range pinRe.FindAllStringSubmatch(readText(t, runfilePath(moduleBazelRunfile)), -1) {
+		if _, dup := pins[m[1]]; dup {
+			t.Fatalf("MODULE.bazel: two mirror pins for provider type %q", m[1])
+		}
+		pins[m[1]] = mirrorPin{version: m[2], sha256: m[3]}
+	}
+	if len(pins) == 0 {
+		t.Fatalf("%s: no tofu provider mirror pins found", moduleBazelRunfile)
+	}
+
+	mirrorLayout := readText(t, runfilePath(tofuRunnerBuildRunfile))
+	providerBlockRe := regexp.MustCompile(`(?s)provider "registry\.opentofu\.org/([a-z0-9-]+/[a-z0-9-]+)" \{(.*?)\n\}`)
+	versionRe := regexp.MustCompile(`version\s*=\s*"([0-9.]+)"`)
+	zhRe := regexp.MustCompile(`"zh:([0-9a-f]{64})"`)
+
+	locked := map[string]bool{}
+	for _, root := range tofuRootNames {
+		lockfile := "src/infrastructure/bootstrap/" + root + "/.terraform.lock.hcl"
+		blocks := providerBlockRe.FindAllStringSubmatch(readText(t, runfilePath(lockfile)), -1)
+		if len(blocks) == 0 {
+			t.Fatalf("%s: no provider blocks found", lockfile)
+		}
+		for _, block := range blocks {
+			address := block[1]
+			providerType := address[strings.LastIndex(address, "/")+1:]
+			pin, ok := pins[providerType]
+			if !ok {
+				t.Fatalf("%s locks %s but MODULE.bazel has no tofu_provider_%s_linux_amd64 mirror pin: the runner image could not init this root", root, address, providerType)
+			}
+			version := versionRe.FindStringSubmatch(block[2])
+			if version == nil {
+				t.Fatalf("%s: no version in the %s block", lockfile, address)
+			}
+			if version[1] != pin.version {
+				t.Fatalf("%s locks %s %s but the MODULE.bazel mirror ships %s: move the lockfile and the mirror pin together", root, address, version[1], pin.version)
+			}
+			trusted := false
+			for _, zh := range zhRe.FindAllStringSubmatch(block[2], -1) {
+				trusted = trusted || zh[1] == pin.sha256
+			}
+			if !trusted {
+				t.Fatalf("MODULE.bazel mirror sha256 %s for %s is not among %s's zh: lockfile hashes: the image would ship a zip the root does not trust", pin.sha256, address, root)
+			}
+			if !strings.Contains(mirrorLayout, `"`+address+`"`) {
+				t.Fatalf("%s locks %s but the mirror layout list in %s does not lay its zip into the image", root, address, tofuRunnerBuildRunfile)
+			}
+			locked[providerType] = true
+		}
+	}
+	for providerType := range pins {
+		if !locked[providerType] {
+			t.Fatalf("MODULE.bazel mirror pin tofu_provider_%s_linux_amd64 matches no root's lockfile: prune it or fix its zip name", providerType)
+		}
+	}
+}
+
 func scalarValue(t *testing.T, raw, path, key string, re *regexp.Regexp) string {
 	t.Helper()
 	match := re.FindStringSubmatch(raw)
