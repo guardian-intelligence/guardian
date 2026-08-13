@@ -1,10 +1,10 @@
 # Wake Up Mythra netcode
 
-Status: contract (2026-08). Product/platform plan: docs/wake-up-mythra-development.md.
+"Wake Up, Mythra!" uses a shared server-authoritative deterministic simulation with periodic reconciliation. Clients send inputs which are logged to a journal and broadcast to all connected clients. Product/platform plan: docs/wake-up-mythra-development.md.
 
 ## Goals
 
-Every surface — server, browser, load bot — runs the identical fixed-point
+Every surface — server, browser — runs the identical fixed-point
 wasm simulation. The server never streams world state; it streams an ordered
 list of **events** (the journal), and every replica derives the same world
 from it. The design optimizes for four things, in order: **correctness you
@@ -15,26 +15,21 @@ bandwidth** (an idle session costs ~zero bytes/tick; data moves when a human
 acts), and **shipping game rules to a live world** (code swaps ride the same
 event stream as everything else).
 
-## The five laws
+## Guiding principles
 
-1. **Replicate events, not state.** The server appends events to a list; the
-   list's order — not wall-clock time — is the law. Every replica applies
+1. **Replicate events, not state.** The server appends events to a list; the list's order — not wall-clock time — is the law. Every replica applies
    tick T's events in list order, then simulates tick T. There are no
    timestamps inside the sim, so "simultaneous" events cannot diverge.
 2. **Durable before visible.** An event is written to Postgres before it is
    applied anywhere — including the server's own world. Flipped, a crash
    between fan-out and write would leave clients having applied an event
    that replay has never heard of: permanent divergence.
-3. **The hash check answers exactly one question** — "is your state at tick T
+3. **The hash check answers one question** — "is your state at tick T
    bit-identical to mine?" — and only for T inside the server's ~30s hash
    ring. It is structurally blind to a client that is *correct but stale*;
    liveness belongs to the clock (`sim/clock`), correctness to the checks.
-4. **Replaying events onto corrupt state cannot repair it.** Replay is a
-   function of (base state, events); a wrong base plus right events is still
-   wrong. Divergence is always repaired with a snapshot.
-5. **A code swap and a snapshot happen at the same tick, atomically.** So
-   restart-replay never runs any event through the wrong version of the
-   rules, and old journals never meet new rules.
+4. **Replaying events onto corrupt state cannot repair it.** Replay is a function of (base state, events); a wrong base plus right events is still wrong. Client divergence is always repaired with a snapshot.
+5. **A code swap and a snapshot happen at the same tick, atomically.** So restart-replay never runs any event through the wrong version of the rules, and old journals never meet new rules.
 
 ## Modules
 
@@ -107,6 +102,81 @@ journal is the acknowledgment. Rejects go only to the sender.
   a connection sees exactly one rate. (What changes with rate: game
   tuning is tick-denominated — wander odds, soak windows — so a rate
   change is also a balance change until constants are wall-derived.)
+
+## Architecture invariants
+
+1. **Server-authoritative simulation.** The server's world state is the only
+   truth. Clients never mutate world state; they send intents, the sim
+   applies them. Anything purchasable or rankable (Energy, Coin, Favor, Fur,
+   Crystals, prizes, check-ins) is computed server-side without exception.
+
+2. **Journaled deterministic simulation.** Every surface runs the identical
+   sim; the server streams an ordered event journal, never state, and the
+   journal is also the durable truth (Postgres) — replay, restore, rejoin,
+   and spectating are the same operation. Clients predict only their own
+   intents and reconcile smoothly; divergence is detected by client-pulled
+   world-hash checks and repaired by snapshot resync. The full contract —
+   wire protocol, batching, epochs, catch-up, corrections — is the rest of
+   this document. Steady-state downlink for an idle session is a few
+   bytes of hash checks; the cellular-usage promise is a headline product
+   metric.
+
+3. **One deterministic core, unchanged, on every surface.** Game logic
+   compiles from the shared Rust structural core (`//src/services/mythrad/sim`)
+   to wasm. The module bytes are the portability contract. Three rules keep
+   the determinism absolute:
+   - **Fixed-point only.** The sim is integer arithmetic throughout
+     (fractional values in Q16.16); float types are banned from the wasm
+     modules and enforced at build time twice — a source token gate
+     (`sim:no_float_test`) and a wasm binary scan for float value-type
+     declarations (`mythrad_test`). No FPU, rounding mode, or NaN payload
+     on any surface can ever matter.
+   - **Shared randomness seed.** Each dog park gets a server-minted seed,
+     broadcast in `welcome`/`presence`; every roll is `det_rand(seed, tick,
+     entity)` — a pure function — so any surface holding the seed
+     reproduces the server's dice exactly. Time sync is a non-issue: a
+     single pod owns each park's simulation and its tick counter.
+   - **The `world_hash` oracle.** The core exports an order-independent
+     world-state hash; the server stamps it on one tick per second, and
+     every client re-derives it from its own snapshot through the client
+     module and displays ✓/✗. This is the cross-surface determinism
+     assertion the QA harness scripts against.
+   Per surface, only the embedding varies: wazero (server, compiled),
+   browser WebAssembly (web, JIT), interpreter → app-store AOT (iOS/iPadOS
+   app), WebView or JNI runtime (Android app). If a surface cannot run the
+   identical bytes, the design is wrong, not the surface.
+
+4. **Seamless updates: the ladder.** Every layer updates live, in order of
+   blast radius, and the running session survives all of them:
+   - assets: content-addressed, streamed on first reference;
+   - server behavior: dark launch (shadow slot evaluated every tick on live
+     inputs, divergence exported as metrics, world untouched) → switch flip
+     (promotion moves shadow bytes into the live slot; connected clients see
+     the hash flip mid-session);
+   - client presentation module: hash rides every pong; a flip hot-swaps the
+     module mid-session on web. iOS app lane: OTA updates run interpreted,
+     with an in-game indicator to update the app for the AOT build (gated by
+     app-store update checks);
+   - server binary: image roll (sessions rejoin by journal catch-up);
+   - network/routing: no coordination — see invariant 5.
+
+5. **Clients auto-reconnect seamlessly.** Severed connections are
+   unavoidable, so any change to the network or routing layer may sever them
+   without ceremony: every client redials with backoff and rejoins by
+   journal catch-up (`since_seq`), and the server sends whichever of
+   missed-events or snapshot is cheaper and the replica converges. An involuntary disconnect is invisible
+   to game semantics — pack membership and park presence live in the
+   journal, not in the connection.
+
+6. **Feature flags are presentation and product gating — never sim inputs.**
+   Client-side flagging uses the OpenFeature SDK evaluating over OFREP
+   against the same-origin /features mount, with a read-only SSE
+   subscription to the flag-set epoch so flips propagate live without
+   reload (docs/feature-flags.md). The hard rule: a flag must never
+   influence a behavior module's step function or any server-side resource
+   computation — sim changes go through the dark-launch/promotion ladder
+   where divergence is measured, not through flags. Flags gate UI, features,
+   rollout cohorts, and kill switches.
 
 ## FAQ
 
