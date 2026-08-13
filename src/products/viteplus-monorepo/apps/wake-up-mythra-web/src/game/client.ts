@@ -794,8 +794,7 @@ export function startGame(): void {
     const st = CLOCK_STATES[smoother.clock_state()] ?? "?";
     $("dbg-clock").textContent =
       `clock ${st}${stepsFrozen() ? " (frozen)" : ""} · rtt ${smoother.clock_rtt_ms()}ms`;
-    $("dbg-desync").textContent =
-      `desync ${err.toFixed(1)} ticks (${(err / 24).toFixed(2)}s)`;
+    $("dbg-desync").textContent = `desync ${err.toFixed(1)} ticks (${(err / 24).toFixed(2)}s)`;
     $("dbg-verdict").textContent = `verdict ${lastVerdictTxt}`;
   }
 

@@ -1,0 +1,49 @@
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_shared_library", "rust_test")
+load("//src/services/mythrad/sim:wasm.bzl", "wasm_module")
+
+# Client tier: executed only by clients — mythrad distributes client.wasm
+# but never runs it. Presentation timing and netcode policy; reads sim
+# state, never defines it.
+
+SIM_ROOT = ["//src/services/mythrad/sim:__pkg__"]
+
+filegroup(
+    name = "sources",
+    srcs = [
+        "clock/src/lib.rs",
+        "module/src/lib.rs",
+    ],
+    visibility = SIM_ROOT,
+)
+
+rust_library(
+    name = "clock",
+    srcs = ["clock/src/lib.rs"],
+    crate_name = "mythra_sim_clock",
+    edition = "2024",
+)
+
+rust_test(
+    name = "clock_test",
+    crate = ":clock",
+    edition = "2024",
+)
+
+rust_shared_library(
+    name = "client_cdylib",
+    srcs = ["module/src/lib.rs"],
+    crate_name = "mythra_sim_client",
+    edition = "2024",
+    target_compatible_with = ["@platforms//cpu:wasm32"],
+    deps = [
+        ":clock",
+        "//src/services/mythrad/sim/shared:core",
+    ],
+)
+
+wasm_module(
+    name = "client_wasm",
+    lib = ":client_cdylib",
+    out = "client.wasm",
+    visibility = SIM_ROOT,
+)

@@ -1,0 +1,124 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_shared_library", "rust_test")
+load("//src/services/mythrad/sim:wasm.bzl", "wasm_module")
+
+# Shared tier: everything here runs byte-identically under wazero on the
+# server and in every client — anything that can influence sim_hash.
+
+TIER_PKGS = [
+    "//src/services/mythrad/sim/client:__pkg__",
+    "//src/services/mythrad/sim/server:__pkg__",
+]
+
+SIM_ROOT = ["//src/services/mythrad/sim:__pkg__"]
+
+filegroup(
+    name = "sources",
+    srcs = [
+        "core/src/lib.rs",
+        "nav/src/lib.rs",
+        "park/src/lib.rs",
+        "terrain/fixture/main.rs",
+        "terrain/src/lib.rs",
+    ],
+    visibility = SIM_ROOT,
+)
+
+rust_library(
+    name = "core",
+    srcs = ["core/src/lib.rs"],
+    crate_name = "mythra_sim_core",
+    edition = "2024",
+    visibility = TIER_PKGS,
+)
+
+rust_test(
+    name = "core_test",
+    crate = ":core",
+    edition = "2024",
+)
+
+rust_library(
+    name = "terrain",
+    srcs = ["terrain/src/lib.rs"],
+    crate_name = "mythra_sim_terrain",
+    edition = "2024",
+    visibility = TIER_PKGS,
+    deps = [":core"],
+)
+
+rust_test(
+    name = "terrain_test",
+    crate = ":terrain",
+    edition = "2024",
+)
+
+rust_library(
+    name = "nav",
+    srcs = ["nav/src/lib.rs"],
+    crate_name = "mythra_sim_nav",
+    edition = "2024",
+    visibility = TIER_PKGS,
+    deps = [
+        ":core",
+        ":terrain",
+    ],
+)
+
+rust_test(
+    name = "nav_test",
+    crate = ":nav",
+    edition = "2024",
+)
+
+rust_binary(
+    name = "fixture_gen",
+    srcs = ["terrain/fixture/main.rs"],
+    edition = "2024",
+    deps = [":terrain"],
+)
+
+genrule(
+    name = "fixture_park",
+    outs = ["fixture_park.bin"],
+    cmd = "$(location :fixture_gen) $@",
+    tools = [":fixture_gen"],
+    visibility = SIM_ROOT,
+)
+
+rust_library(
+    name = "park_lib",
+    srcs = ["park/src/lib.rs"],
+    crate_name = "mythra_sim_park",
+    edition = "2024",
+    deps = [
+        ":core",
+        ":nav",
+        ":terrain",
+    ],
+)
+
+rust_test(
+    name = "park_test",
+    crate = ":park_lib",
+    edition = "2024",
+)
+
+rust_shared_library(
+    name = "park_cdylib",
+    srcs = ["park/src/lib.rs"],
+    crate_name = "mythra_sim_park",
+    edition = "2024",
+    target_compatible_with = ["@platforms//cpu:wasm32"],
+    deps = [
+        ":core",
+        ":nav",
+        ":terrain",
+    ],
+)
+
+wasm_module(
+    name = "park_wasm",
+    lib = ":park_cdylib",
+    out = "park.wasm",
+    visibility = SIM_ROOT,
+)
