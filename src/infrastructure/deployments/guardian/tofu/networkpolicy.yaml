@@ -38,9 +38,11 @@ spec:
         - ports:
             - port: "9790"
               protocol: TCP
-    # tofu providers, GitHub, and the R2 state backend are all TLS on 443.
-    # world:443 rather than an FQDN allowlist because toFQDNs needs the L7
-    # DNS proxy the chained datapath rules out (same as the promotion lane).
+    # The provider APIs and the R2 state backend are TLS on 443. Provider
+    # binaries never ride this rule: init resolves them from the mirror baked
+    # into the runner image. world:443 rather than an FQDN allowlist because
+    # toFQDNs needs the L7 DNS proxy the chained datapath rules out (same as
+    # the promotion lane).
     - toEntities:
         - world
       toPorts:

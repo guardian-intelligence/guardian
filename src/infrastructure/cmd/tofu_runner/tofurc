@@ -1,0 +1,13 @@
+# Baked into the runner image and selected via TF_CLI_CONFIG_FILE: tofu init
+# resolves providers only from the image's packed filesystem mirror (the
+# registry release zips pinned in MODULE.bazel), so a tick performs no
+# provider downloads. Deliberately no direct {} fallback — a provider absent
+# from the mirror fails init loudly instead of quietly reaching for the
+# network, and TestTofuRunnerProviderMirrorTracksRootLockfiles keeps the
+# mirror complete before that can happen. Lockfile verification still applies:
+# tofu checks the mirrored zips against each root's .terraform.lock.hcl.
+provider_installation {
+  filesystem_mirror {
+    path = "/usr/local/share/tofu/providers"
+  }
+}

@@ -19,21 +19,96 @@ spec:
     - name: tofu-runner-health.rules
       interval: 60s
       rules:
+        # Scheduled reconcile failure. Terminal only — failed pods, no
+        # success, no pod still running — not the bare kube_job_status_failed
+        # pod counter, which also counts a backoff retry inside a Job that
+        # then or still could succeed (KSM here does not export the
+        # kube_job_failed condition metric, verified live). The label_replace
+        # derives the owning CronJob from the Job name; the two or-branches
+        # are the same failed-Job vector compared against the root's last
+        # success: newer-than-last-success fires and auto-resolves on the
+        # next scheduled success, while no-success-series-at-all (a root
+        # never green, or recreated with reset status) fires unconditionally
+        # rather than dropping out of the join. Manually created Jobs are
+        # excluded here — TofuManualJobFailed below owns them with latch
+        # semantics, because a later scheduled plan-mode success must not
+        # silence a failed manual apply.
         - alert: TofuRootJobFailed
-          expr: max by (job_name) (kube_job_status_failed{namespace="tofu-system", job_name=~"tofu-.*"}) > 0
+          expr: >-
+            (
+              max by (cronjob) (
+                label_replace(
+                  kube_job_status_start_time{namespace="tofu-system", job_name=~"tofu-.*", job_name!~".*-manual-.*"}
+                    and on(job_name) (kube_job_status_failed{namespace="tofu-system"} > 0)
+                    unless on(job_name) (kube_job_status_succeeded{namespace="tofu-system"} > 0)
+                    unless on(job_name) (kube_job_status_active{namespace="tofu-system"} > 0),
+                  "cronjob", "$1", "job_name", "(.+?)-[0-9]+$"
+                )
+              )
+              > on(cronjob)
+              max by (cronjob) (kube_cronjob_status_last_successful_time{namespace="tofu-system"})
+            )
+            or
+            (
+              max by (cronjob) (
+                label_replace(
+                  kube_job_status_start_time{namespace="tofu-system", job_name=~"tofu-.*", job_name!~".*-manual-.*"}
+                    and on(job_name) (kube_job_status_failed{namespace="tofu-system"} > 0)
+                    unless on(job_name) (kube_job_status_succeeded{namespace="tofu-system"} > 0)
+                    unless on(job_name) (kube_job_status_active{namespace="tofu-system"} > 0),
+                  "cronjob", "$1", "job_name", "(.+?)-[0-9]+$"
+                )
+              )
+              unless on(cronjob)
+              max by (cronjob) (kube_cronjob_status_last_successful_time{namespace="tofu-system"})
+            )
           for: 10m
           labels:
             severity: warning
             guardian_component: iac
           annotations:
-            summary: 'tofu root reconcile failed ({{ $labels.job_name }})'
+            summary: 'tofu root reconcile failed ({{ $labels.cronjob }})'
             description: >-
-              A tofu-runner Job has failed and no later attempt has replaced
-              it. This is a tofu error, a failed apply, or — on the token
-              minter — a plan with changes, which for that root means a
-              Cloudflare token was minted or revoked out of band. Read the
-              Job's pod log and see
-              src/infrastructure/runbooks/tofu-runner-operations.md.
+              This root's most recent completed scheduled reconcile failed
+              and no scheduled run has succeeded since. This is a tofu error,
+              a failed apply, or — on the token minter — a plan with changes,
+              which for that root means a Cloudflare token was minted or
+              revoked out of band. Read the failed Job's pod log and see
+              src/infrastructure/runbooks/tofu-runner-operations.md. The
+              alert resolves on the root's next scheduled success; after
+              remediating by hand, delete the failed Job object to close it
+              early.
+        # Manually created Jobs (the runbook's apply-now recipe, or any other
+        # hand-spawned tofu-* Job): a failure latches until the failed Job
+        # object is deleted — that deletion is the acknowledgement, per the
+        # runbook — because with roots in plan-mode soak a manual Job is the
+        # only apply path, and the next scheduled plan exits 0 over the very
+        # drift a failed apply leaves behind. The second selector catches
+        # failed tofu-* Jobs whose names don't parse as scheduled ticks, so
+        # an off-recipe name still pages here instead of falling through
+        # TofuRootJobFailed's join.
+        - alert: TofuManualJobFailed
+          expr: >-
+            (
+              kube_job_status_failed{namespace="tofu-system", job_name=~"tofu-.*-manual-.*"}
+                or kube_job_status_failed{namespace="tofu-system", job_name=~"tofu-.*", job_name!~"tofu-.*-[0-9]+"}
+            ) > 0
+            unless on(job_name) (kube_job_status_succeeded{namespace="tofu-system"} > 0)
+            unless on(job_name) (kube_job_status_active{namespace="tofu-system"} > 0)
+          for: 10m
+          labels:
+            severity: warning
+            guardian_component: iac
+          annotations:
+            summary: 'manual tofu Job failed ({{ $labels.job_name }})'
+            description: >-
+              A hand-created tofu Job failed — with roots in plan-mode soak
+              this is how an apply fails, and a scheduled plan succeeding
+              afterwards does not mean the failure was handled. Read the pod
+              log, remediate per
+              src/infrastructure/runbooks/tofu-runner-operations.md, then
+              delete the failed Job object to close this alert — the
+              deletion is the acknowledgement.
         - alert: TofuReconcileStale
           expr: time() - max by (cronjob) (kube_cronjob_status_last_successful_time{namespace="tofu-system"}) > 10800
           for: 15m

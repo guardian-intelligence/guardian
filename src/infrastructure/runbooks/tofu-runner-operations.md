@@ -45,6 +45,14 @@ It runs the identical pod. `concurrencyPolicy: Forbid` does not apply to
 manually created Jobs, so avoid firing one while a scheduled Job is mid-run
 — `use_lockfile` will still serialize them, but the second waits on the lock.
 
+If a manual Job fails, `TofuManualJobFailed` pages and latches: a later
+scheduled success does not clear it, because on a plan-mode root the next
+scheduled plan exits 0 over the very drift a failed apply leaves behind.
+Read the pod log, remediate, then delete the failed Job object — the
+deletion is the acknowledgement that closes the alert. (A failed *scheduled*
+Job pages `TofuRootJobFailed` instead, which resolves on the root's next
+scheduled success on its own.)
+
 ## Pause a root (incident-time manual changes)
 
 An apply-mode root will revert a manual provider-console change on its next
