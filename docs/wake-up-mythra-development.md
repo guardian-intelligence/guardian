@@ -1,9 +1,9 @@
 # Wake Up Mythra — development plan of record
 
 Status: plan of record (2026-08). The wasm behavior stack and update ladder
-described here are live at wakeupmythra.com; the netcode and persistence
-plane is specified in docs/netcode.md and landing now; everything in
-[Gaps and sequencing](#gaps-and-sequencing) is not.
+described here are live at wakeupmythra.com; the architecture invariants,
+netcode, and persistence plane are specified in docs/netcode.md and landing
+now; everything in [Gaps and sequencing](#gaps-and-sequencing) is not.
 
 ## Work backwards from the surfaces
 
@@ -103,96 +103,7 @@ Social events broadcast live to all clients in the park with a tight SLA —
 to act on. Target: p99 ≤ 2s end-to-end for social/presence events; world
 sim ticks at 24Hz.
 
-## Architecture invariants
-
-1. **Server-authoritative simulation.** The server's world state is the only
-   truth. Clients never mutate world state; they send intents, the sim
-   applies them. Anything purchasable or rankable (Energy, Coin, Favor, Fur,
-   Crystals, prizes, check-ins) is computed server-side without exception.
-
-2. **Journaled deterministic simulation.** Every surface runs the identical
-   sim; the server streams an ordered event journal, never state, and the
-   journal is also the durable truth (Postgres) — replay, restore, rejoin,
-   and spectating are the same operation. Clients predict only their own
-   intents and reconcile smoothly; divergence is detected by client-pulled
-   world-hash checks and repaired by snapshot resync. The full contract —
-   wire protocol, batching, epochs, catch-up, corrections — is
-   docs/netcode.md. Steady-state downlink for an idle session is a few
-   bytes of hash checks; the cellular-usage promise is a headline product
-   metric.
-
-3. **One deterministic core, unchanged, on every surface.** Game logic
-   compiles from the shared Rust structural core (`//src/services/mythrad/sim`)
-   to wasm. The module bytes are the portability contract. Three rules keep
-   the determinism absolute:
-   - **Fixed-point only.** The sim is integer arithmetic throughout
-     (fractional values in Q16.16); float types are banned from the wasm
-     modules and enforced at build time twice — a source token gate
-     (`sim:no_float_test`) and a wasm binary scan for float value-type
-     declarations (`mythrad_test`). No FPU, rounding mode, or NaN payload
-     on any surface can ever matter.
-   - **Shared randomness seed.** Each dog park gets a server-minted seed,
-     broadcast in `welcome`/`presence`; every roll is `det_rand(seed, tick,
-     entity)` — a pure function — so any surface holding the seed
-     reproduces the server's dice exactly. Time sync is a non-issue: a
-     single pod owns each park's simulation and its tick counter.
-   - **The `world_hash` oracle.** The core exports an order-independent
-     world-state hash; the server stamps it on one tick per second, and
-     every client re-derives it from its own snapshot through the client
-     module and displays ✓/✗. This is the cross-surface determinism
-     assertion the QA harness scripts against.
-   Per surface, only the embedding varies: wazero (server, compiled),
-   browser WebAssembly (web, JIT), interpreter → app-store AOT (iOS/iPadOS
-   app), WebView or JNI runtime (Android app). If a surface cannot run the
-   identical bytes, the design is wrong, not the surface.
-
-4. **Seamless updates: the ladder.** Every layer updates live, in order of
-   blast radius, and the running session survives all of them:
-   - assets: content-addressed, streamed on first reference;
-   - server behavior: dark launch (shadow slot evaluated every tick on live
-     inputs, divergence exported as metrics, world untouched) → switch flip
-     (promotion moves shadow bytes into the live slot; connected clients see
-     the hash flip mid-session);
-   - client presentation module: hash rides every pong; a flip hot-swaps the
-     module mid-session on web. iOS app lane: OTA updates run interpreted,
-     with an in-game indicator to update the app for the AOT build (gated by
-     app-store update checks);
-   - server binary: image roll (sessions rejoin by journal catch-up);
-   - network/routing: no coordination — see invariant 5.
-
-5. **Disconnection is routine; clients auto-reconnect.** Any change to the
-   network or routing layer may sever connections without ceremony, because
-   every client redials with backoff and rejoins by journal catch-up
-   (`since_seq`): the server sends whichever of missed-events or snapshot is
-   cheaper and the replica converges. An involuntary disconnect is invisible
-   to game semantics — pack membership and park presence live in the
-   journal, not in the connection.
-
-6. **Feature flags are presentation and product gating — never sim inputs.**
-   Client-side flagging uses the OpenFeature SDK evaluating over OFREP
-   against the same-origin /features mount, with a read-only SSE
-   subscription to the flag-set epoch so flips propagate live without
-   reload (docs/feature-flags.md). The hard rule: a flag must never
-   influence a behavior module's step function or any server-side resource
-   computation — sim changes go through the dark-launch/promotion ladder
-   where divergence is measured, not through flags. Flags gate UI, features,
-   rollout cohorts, and kill switches.
-
-7. **The economy is a ledger.** Energy/Coin/Favor/Fur/Crystals are TigerBeetle
-   accounts and transfers (the payments plane already runs TigerBeetle;
-   game currencies get their own ledgers). Purchases normalize through one
-   entitlements service regardless of source: Apple IAP receipts and Google
-   Play billing (mandatory for Crystals in app-store builds — a
-   merchant-of-record cannot take those flows), Steam wallet if Steam
-   graduates, and a MoR for web checkout (which MoR is TBD; not necessarily
-   Stripe — the existing Stripe integration is sandbox-only and
-   production-shaped, so the entitlements interface must stay
-   provider-neutral). Fur is never purchasable by design; enforce it in the
-   ledger topology, not in UI.
-
 ## Artifact inventory
-
-The honest current decomposition, including what is *not* yet separated.
 
 ### Client-delivered
 
