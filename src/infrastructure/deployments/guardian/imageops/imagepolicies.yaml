@@ -7,35 +7,6 @@
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
 metadata:
-  name: cloud-agent-federation
-  namespace: guardian-imageops
-  labels:
-    app.kubernetes.io/part-of: guardian
-spec:
-  image: ghcr.io/guardian-intelligence/cloud-agent-federation
-  interval: 1m0s
----
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImagePolicy
-metadata:
-  name: cloud-agent-federation
-  namespace: guardian-imageops
-  labels:
-    app.kubernetes.io/part-of: guardian
-spec:
-  imageRepositoryRef:
-    name: cloud-agent-federation
-  filterTags:
-    pattern: '^edge$'
-  policy:
-    alphabetical:
-      order: asc
-  digestReflectionPolicy: Always
-  interval: 1m0s
----
-apiVersion: image.toolkit.fluxcd.io/v1
-kind: ImageRepository
-metadata:
   name: company-site
   namespace: guardian-imageops
   labels:
