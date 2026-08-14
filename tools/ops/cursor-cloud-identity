@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+audience="${GUARDIAN_CURSOR_OIDC_AUDIENCE:-https://cursor-auth.guardianintelligence.org}"
+socket="${CURSOR_AGENT_SOCKET:-/run/cursor/api.sock}"
+
+if [[ ! -S "${socket}" ]]; then
+  echo "Cursor agent identity socket is unavailable: ${socket}" >&2
+  exit 1
+fi
+
+response="$(curl --fail --silent --show-error \
+  --unix-socket "${socket}" \
+  -H 'Content-Type: application/json' \
+  -d "$(printf '{\"audience\":\"%s\"}' "${audience}")" \
+  http://localhost/v1/tokens/oidc)"
+
+# Decode only the signed, non-secret identity claims needed to configure the
+# Guardian verifier. Never print or persist the bearer token itself.
+python3 - "${response}" <<'PY'
+import base64
+import json
+import sys
+
+response = json.loads(sys.argv[1])
+token = response.get("token")
+if not isinstance(token, str):
+    raise SystemExit("Cursor OIDC response did not contain a token")
+
+parts = token.split(".")
+if len(parts) != 3:
+    raise SystemExit("Cursor OIDC response was not a JWT")
+
+payload = parts[1] + "=" * (-len(parts[1]) % 4)
+claims = json.loads(base64.urlsafe_b64decode(payload))
+selected = {
+    key: claims.get(key)
+    for key in (
+        "iss",
+        "sub",
+        "aud",
+        "agent_runtime",
+        "owner_user_id",
+        "repo_url",
+        "repo_urls",
+        "repo_count",
+        "environment_id",
+        "source",
+    )
+}
+print(json.dumps(selected, indent=2, sort_keys=True))
+PY
