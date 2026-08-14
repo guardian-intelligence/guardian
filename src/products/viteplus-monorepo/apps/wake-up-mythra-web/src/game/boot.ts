@@ -5,7 +5,7 @@
 // host asks for, and the controls.
 
 import type { Ports } from "@guardian/chunkies";
-import { WumGame, browserRandom32, type RoleName } from "@guardian/wum-client";
+import { WumGame, WumRenderer, browserRandom32, type RoleName } from "@guardian/wum-client";
 import { OpenFeature } from "@openfeature/web-sdk";
 import * as v from "valibot";
 import {
@@ -20,7 +20,6 @@ import {
 import { createDebugPanel, type DebugPanel } from "./debug";
 import { createHud, type Hud } from "./hud";
 import { createJank } from "./jank";
-import { createRenderer } from "./renderer";
 import { createStatsPane, type StatsPane } from "./stats";
 import {
   createTelemetry,
@@ -183,7 +182,13 @@ async function run(hud: Hud): Promise<void> {
     // Under the probe the harness reads the spans alongside the frames:
     // the frames show a rewind, the spans say which repair asked for it.
     if (probe) tapSpans(jank.recordSpan);
-    const renderer = createRenderer({ game, hud, jank, myDog: () => identity.myDog });
+    const canvas = v.parse(v.instance(HTMLCanvasElement), document.getElementById("grid"));
+    const renderer = new WumRenderer(canvas, game, {
+      diag: hud.diag,
+      showRecenter: hud.showRecenter,
+      setRoster: hud.setRoster,
+      sample: jank.sample,
+    });
 
     const onSignIn = async (o: SignInOutcome): Promise<void> => {
       if (o.status === "error") {
