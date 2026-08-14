@@ -35,8 +35,13 @@ func TestMythraAgentOperationCapabilities(t *testing.T) {
 	minterBinding := findDoc(t, docs, "RoleBinding", "guardian-mythra-token-minter")
 	assertNestedString(t, minterBinding, "guardian-mythra-token-minter", "roleRef", "name")
 	subjects := sliceValue(minterBinding["subjects"])
-	if len(subjects) != 1 || stringValue(mapValue(subjects[0])["name"]) != "guardian-persona-read" {
-		t.Fatalf("Mythra token minter subjects = %v, want only guardian-persona-read", subjects)
+	if len(subjects) != 2 ||
+		stringValue(mapValue(subjects[0])["kind"]) != "Group" ||
+		stringValue(mapValue(subjects[0])["name"]) != "guardian-persona-read" ||
+		stringValue(mapValue(subjects[1])["kind"]) != "ServiceAccount" ||
+		stringValue(mapValue(subjects[1])["name"]) != "guardian-cloud-agent-cursor" ||
+		stringValue(mapValue(subjects[1])["namespace"]) != "tenant-root" {
+		t.Fatalf("Mythra token minter subjects = %v, want read persona and Cursor cloud ServiceAccount", subjects)
 	}
 
 	for _, name := range []string{"guardian-mythra-observer", "guardian-mythra-operator"} {

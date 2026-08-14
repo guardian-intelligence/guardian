@@ -12,7 +12,7 @@ cases:
       username: system:serviceaccount:tenant-root:guardian-cloud-agent-devin
       groups: [system:serviceaccounts, system:authenticated]
     expect: deny
-  - name: Cursor cannot open a port-forward
+  - name: Cursor is not matched by the Devin delivery-read policy
     operation: CONNECT
     resource: {group: "", version: v1, resource: pods}
     subResource: portforward
@@ -20,7 +20,7 @@ cases:
     user:
       username: system:serviceaccount:tenant-root:guardian-cloud-agent-cursor
       groups: [system:serviceaccounts, system:authenticated]
-    expect: deny
+    expect: no-match
   - name: unrelated ServiceAccount is not matched
     operation: CREATE
     resource: {group: "", version: v1, resource: configmaps}

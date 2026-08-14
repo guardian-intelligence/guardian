@@ -20,9 +20,16 @@ mkdir -p "${HOME}/.local/bin"
 for tool in cloudflared kubectl; do
   ln -sfn "${repo_root}/.guardian/tools/bin/${tool}" "${HOME}/.local/bin/${tool}"
 done
+for tool in aspect bazelisk; do
+  ln -sfn "$(command -v "${tool}")" "${HOME}/.local/bin/${tool}"
+done
 "${repo_root}/tools/ops/agent-cloud-tunnel" start
 kubectl --request-timeout=15s auth whoami >/dev/null || {
   echo "the JIT cluster credential expired; mint and inject a new session credential" >&2
   exit 1
 }
-echo "Guardian ${provider} delivery-read path is ready."
+if [[ "${provider}" == "cursor" ]]; then
+  echo "Guardian cursor platform-read path is ready."
+else
+  echo "Guardian devin delivery-read path is ready."
+fi

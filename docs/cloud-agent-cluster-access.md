@@ -15,15 +15,24 @@ The two access boundaries are independent:
 1. Cloudflare Access accepts a distinct transport service token for Cursor or
    Devin. A token can be revoked without interrupting the other provider.
 2. Kubernetes accepts a TokenRequest credential for that provider's exact
-   ServiceAccount. It expires within one hour and carries only the
-   `guardian-persona-delivery-read` ClusterRole.
+   ServiceAccount. It expires within one hour. Devin carries only
+   `guardian-persona-delivery-read`; Cursor carries the platform-read
+   capability set under its own attributable ServiceAccount identity.
 
-The delivery-read role can follow Flux sources and reconciliations, Kargo
+Devin's delivery-read role can follow Flux sources and reconciliations, Kargo
 freight and promotions, Flagger canaries, Kubernetes workload status, events,
 and pod logs. It cannot read Secrets, RBAC, admission configuration, nodes,
 storage, or Cilium state. It cannot exec, attach, port-forward, or mutate any
-resource. A fail-closed ValidatingAdmissionPolicy denies every write and
-CONNECT operation even if RBAC is accidentally widened later.
+resource.
+
+Cursor needs to close the production verification loop, so its one-hour
+ServiceAccount is authority-equivalent to `platform-agent`: cluster read,
+pod port-forward, and TokenRequests for the explicitly declared 15-minute
+Mythra observer/operator capabilities. It still cannot read Secrets or perform
+general writes, cannot renew its own bootstrap token, and is independently
+attributable and revocable. Provider-specific fail-closed
+ValidatingAdmissionPolicies preserve both boundaries even if RBAC is widened
+later.
 
 ## Credential lifecycle
 
@@ -36,14 +45,14 @@ tools/ops/agent-cloud-token devin --output /dev/shm/guardian-devin-token
 tools/ops/agent-cloud-token cursor --output /dev/shm/guardian-cursor-token
 ```
 
-The read persona already carries broader cluster read authority than either
-provider ServiceAccount, so minting the derived credential does not cross a
+The read persona already carries the Cursor capability set and broader
+authority than Devin, so minting either derived credential does not cross a
 privilege boundary. RBAC pins the mint to the two exact ServiceAccounts and the
 read persona's admission policy requires the Kubernetes audience and a lifetime
-of no more than one hour. Store it only as a Devin `session_secret` or in the
-Cursor environment immediately before one cloud run, and remove any temporary
-file immediately after injection. Reusing an expired environment intentionally
-fails closed.
+of no more than one hour. Store it only as a Devin `session_secret` or as a
+Cursor Runtime Secret immediately before one cloud run, and remove any
+temporary file immediately after injection. Reusing an expired environment
+intentionally fails closed.
 
 The accepted audience is the management API server's service-account issuer,
 `https://10.8.0.250:6443`, which is also the `apiServerEndpoint` in the
@@ -60,11 +69,46 @@ Each provider environment receives:
 - `GUARDIAN_AGENT_CF_ACCESS_CLIENT_SECRET`: the matching sensitive provider
   output from `guardian-mgmt-dns`.
 
-Run `scripts/agent-cloud-setup.sh` during initial setup and
-`scripts/agent-cloud-maintenance.sh` when resuming the same environment. Setup
-materializes secrets to mode-0600 files and unsets them before invoking the
-repository build/tool bootstrap. It writes a named kubeconfig and never
-replaces `~/.kube/config`.
+Cursor resolves the committed [`.cursor/environment.json`](../.cursor/environment.json)
+before saved personal or team environments. Its install command prepares only
+the pinned tools; its start command runs `scripts/agent-cloud-setup.sh` after
+the VM boots so an expiring Kubernetes credential is never captured in a
+Build. Devin runs setup explicitly. Use `scripts/agent-cloud-maintenance.sh`
+only when resuming the same provider VM.
+
+Setup materializes secrets to mode-0600 files and unsets them before invoking
+repository-controlled build/tool code. It writes a named kubeconfig and links
+it as the VM default only when no other default exists; it refuses to overwrite
+another identity.
+
+## Cursor write-basic on demand
+
+Do not store a `platform-agent` password or refresh cache, a write-persona
+password, or a write-persona token in Cursor Secrets or an environment
+snapshot. Cursor's default JIT identity already provides the safe
+platform-agent capability set without reusing the long-lived Keycloak account.
+
+When a task genuinely needs routine repair outside the product-scoped Mythra
+operator, start a fresh device flow inside that Cursor VM:
+
+```sh
+eval "$(scripts/bootstrap.sh path)"
+aspect infra auth \
+  --persona=write-basic \
+  --install-path ~/.kube/guardian-cursor-write-basic
+export KUBECONFIG="$HOME/.kube/guardian-cursor-write-basic"
+kubectl auth whoami
+```
+
+The command prints a device URL that can be approved on any trusted machine.
+Approve it as `platform-write-basic`; the agent must pause for the operator at
+that point. This identity has no `offline_access`, expires with its Keycloak
+session, and remains subject to the write-basic fail-closed admission policy.
+Return to the provider identity with:
+
+```sh
+export KUBECONFIG="$HOME/.kube/guardian-cursor-cloud"
+```
 
 ## Local development
 
@@ -75,13 +119,13 @@ aspect infra auth --persona=read
 ```
 
 That path keeps the Keycloak refresh cache on the laptop and does not upload it
-to either provider. It is the broader operations-read persona; use the
-provider-hosted delivery-read credential for cloud tasks.
+to either provider. Cursor Cloud uses its attributable, expiring
+platform-read-equivalent identity; Devin uses delivery-read.
 
 ## Cloud proof contract
 
-A provider task is complete only when the provider reports success and the
-session itself returns all of the following from the live cluster:
+A Cursor task is complete only when Cursor reports success and the session
+itself returns all of the following from the live cluster:
 
 ```sh
 tools/ops/agent-cloud-tunnel status
@@ -89,14 +133,23 @@ kubectl auth whoami
 kubectl get kustomizations.kustomize.toolkit.fluxcd.io -A
 kubectl get stages.kargo.akuity.io,warehouses.kargo.akuity.io,promotions.kargo.akuity.io -A
 kubectl get canaries.flagger.app -A
+aspect mythra status
+aspect mythra psql --query='SELECT 1'
 ! kubectl get secrets -A
 ! kubectl create namespace cloud-agent-write-denial --dry-run=server -o name
 ! kubectl exec -n cozy-fluxcd deploy/source-controller -- true
 ```
 
-The expected identities are
-`system:serviceaccount:tenant-root:guardian-cloud-agent-devin` and
-`system:serviceaccount:tenant-root:guardian-cloud-agent-cursor`.
+The expected identity is
+`system:serviceaccount:tenant-root:guardian-cloud-agent-cursor`. `SELECT 1`
+proves the session can derive and use the read-only Mythra observer without
+revealing production journal data. Do not use `aspect mythra restart` as a
+routine proof: it is intentionally available, but it recycles the live game
+server.
+
+For Devin, omit the two `aspect mythra` commands and retain the additional
+negative port-forward check from its delivery-read proof; its expected identity is
+`system:serviceaccount:tenant-root:guardian-cloud-agent-devin`.
 
 ## Durable federation follow-up
 
@@ -106,8 +159,9 @@ the local mint-and-inject step while preserving the same ServiceAccounts and
 RBAC:
 
 - Devin exchanges its native per-session, audience-bound workload OIDC token.
-- Cursor exchanges its automatically refreshed one-hour AWS AssumeRole
-  identity.
+- Cursor exchanges a native five-minute, audience-bound OIDC token from
+  `https://api.cursor.com`, restricted to the managed runtime and the complete
+  `github.com/guardian-intelligence/guardian` repository set.
 - OpenBao authenticates the provider identity and uses its built-in Kubernetes
   secrets engine to issue the same short Kubernetes credential.
 
@@ -122,5 +176,6 @@ Primary provider references:
 - <https://docs.devin.ai/product-guides/secrets>
 - <https://cursor.com/docs/cloud-agent/setup>
 - <https://cursor.com/docs/cloud-agent/security-network>
+- <https://cursor.com/docs/cloud-agent/identity>
 - <https://openbao.org/docs/auth/jwt/>
 - <https://openbao.org/docs/plugins/>

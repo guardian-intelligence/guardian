@@ -45,6 +45,7 @@ go_test(
         "//:.aspect/config.axl",
         "//:.aspect/tasks/infra.axl",
         "//:.aspect/tasks/tools.axl",
+        "//:.cursor/environment.json",
         "//:AGENTS.md",
         "//:MODULE.bazel",
         "//:scripts/agent-cloud-setup.sh",

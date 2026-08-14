@@ -157,7 +157,7 @@ install_agent_cloud = task(
     implementation = _install_agent_cloud_impl,
     name = "install-agent-cloud",
     group = ["tools"],
-    summary = "Install the pinned CLIs required by provider-hosted delivery-read sessions.",
+    summary = "Install the pinned CLIs required by provider-hosted cluster sessions.",
     args = {
         "bin_dir": args.string(default = ".guardian/tools/bin", description = "Directory for agent cloud CLI shims."),
     },

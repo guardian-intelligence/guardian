@@ -52,6 +52,18 @@ House rules:
 - If relevant to your task, clean up any hanging resources in the cluster post-merge.
 </development_loop>
 
+<cursor_cloud>
+Cursor Cloud uses the repo-defined `.cursor/environment.json`, which runs
+`scripts/agent-cloud-setup.sh` at session start. Its default
+`guardian-cloud-agent-cursor` identity is platform-read-equivalent: cluster
+read, port-forward, and the 15-minute product capabilities behind
+`aspect mythra`, but no Secrets or general writes. Follow
+`docs/cloud-agent-cluster-access.md` for the proof contract and the
+device-approved `write-basic` escalation path. Never place a platform Keycloak
+password, offline refresh cache, or write-persona token in a Cursor secret or
+environment snapshot.
+</cursor_cloud>
+
 Product Surfaces:
 
 - Postflight - GitHub App, Blacksmith.sh but using QEMU warm pool, CRIU, on SEV-SNP hardware, ZFS for caching build artifacts and memory snapshots to create a "golden image" per repo. (In Progress)
