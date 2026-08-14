@@ -49,10 +49,11 @@ The low-end rack device is the release gate, not the median device.
 
 ### Per-surface release gates
 
-Every supported surface has e2e automation that gates the full release of
-the components that reach it. One command (`//qa:surfaces`, see QA section)
-runs the same scripted session — join → spectate → behavior hot-flip →
-reconnect/resume — against every surface and asserts the shared oracle
+Every supported surface gets e2e automation that gates the full release of
+the components that reach it. One command (the planned `//qa:surfaces`
+runner — not yet built, see QA section) runs the same scripted session —
+join → spectate → behavior hot-flip → reconnect/resume — against every
+surface and asserts the shared oracle
 (below). CI tier: browser engines + simulators, deterministic, per-PR.
 Physical tier: the device rack, nightly and pre-release. A component's
 release is gated only by the surfaces it ships to.
