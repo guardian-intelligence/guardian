@@ -4,6 +4,7 @@
   "private": true,
   "description": "Dev/test-only quarantine for the Wake Up Mythra host: the TypeScript copy of the proto-4 wire codec and the DST rig that impersonates the authority. Never imported by app production code.",
   "files": [
+    "goldens",
     "src"
   ],
   "type": "module",
@@ -12,6 +13,7 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./goldens/records.json": "./goldens/records.json",
     "./package.json": "./package.json"
   },
   "scripts": {

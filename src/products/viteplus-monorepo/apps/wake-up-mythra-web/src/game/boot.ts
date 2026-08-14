@@ -25,6 +25,7 @@ import {
   createTelemetry,
   jank as jankSpan,
   reportBootFailure,
+  reportFrameFailure,
   signInFailed,
   signedIn,
   tapSpans,
@@ -219,15 +220,27 @@ async function run(hud: Hud): Promise<void> {
       if (document.hidden) core.setBoost(false);
     });
 
+    // The loop re-arms only after a frame that completed: a throw from the
+    // wasm boundary stops it dead instead of repeating per frame forever,
+    // reports once, and leaves the HUD telling the player the way back.
     const frame = (now: number): void => {
+      try {
+        // A frozen pump is a zero step budget, not a skipped call: the clock
+        // keeps observing and events keep applying, the replica just stops
+        // advancing. Skipping would stop the session dead.
+        if (debug?.frozen()) core.pump(0);
+        else core.pump();
+        renderer.frame(now);
+        debug?.update();
+      } catch (e) {
+        const id = reportFrameFailure(e);
+        const detail = e instanceof Error ? e.message : String(e);
+        hud.setStatus("error");
+        hud.setWho(`The park stopped (${detail}) — refresh to rejoin.`);
+        hud.log(`frame failed: ${detail} [err ${id}]`);
+        return;
+      }
       requestAnimationFrame(frame);
-      // A frozen pump is a zero step budget, not a skipped call: the clock
-      // keeps observing and events keep applying, the replica just stops
-      // advancing. Skipping would stop the session dead.
-      if (debug?.frozen()) core.pump(0);
-      else core.pump();
-      renderer.frame(now);
-      debug?.update();
     };
     requestAnimationFrame(frame);
 

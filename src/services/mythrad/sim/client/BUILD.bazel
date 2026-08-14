@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library", "rust_shared_library", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_shared_library", "rust_test")
 load("//src/services/mythrad/sim:wasm.bzl", "wasm_module")
 
 # Client tier: executed only by clients — mythrad distributes client.wasm
@@ -17,7 +17,9 @@ filegroup(
     name = "sources",
     srcs = [
         "clock/src/lib.rs",
+        "goldens/main.rs",
         "module/src/lib.rs",
+        "tablegen/main.rs",
     ] + SESSION_SRCS,
     visibility = SIM_ROOT,
 )
@@ -48,6 +50,40 @@ rust_test(
     name = "session_test",
     crate = ":session",
     edition = "2024",
+)
+
+rust_binary(
+    name = "tablegen",
+    srcs = ["tablegen/main.rs"],
+    edition = "2024",
+    deps = [":session"],
+)
+
+genrule(
+    name = "telemetry_gen_ts",
+    outs = ["telemetry.gen.ts"],
+    cmd = "$(location :tablegen) $@",
+    tools = [":tablegen"],
+    visibility = SIM_ROOT,
+)
+
+rust_binary(
+    name = "goldens_gen",
+    srcs = ["goldens/main.rs"],
+    edition = "2024",
+    deps = [
+        ":session",
+        "//src/services/mythrad/sim/shared:park_lib",
+        "//src/services/mythrad/sim/shared:terrain",
+    ],
+)
+
+genrule(
+    name = "goldens_json",
+    outs = ["records.json"],
+    cmd = "$(location :goldens_gen) $@",
+    tools = [":goldens_gen"],
+    visibility = SIM_ROOT,
 )
 
 rust_shared_library(

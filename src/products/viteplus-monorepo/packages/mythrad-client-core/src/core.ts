@@ -14,13 +14,19 @@
 // is what a snapshot frame carries.
 import { inflateSync } from "fflate";
 import {
+  ABI_VERSION,
+  abiViolations,
+  CLIENT_EXPORTS,
+  clockStateOf,
   decodeDiag,
   decodeHud,
-  clockStateOf,
   decodeWelcomeEmit,
   DIAG_BYTES,
+  HOST_IMPORTS,
   HUD_BYTES,
+  PARK_EXPORTS,
   PumpFlag,
+  VIEW_RECORD_BYTES,
   type ClientExports,
   type Diag,
   type HostImports,
@@ -77,9 +83,6 @@ export const GLIDE_MAX_CELLS = 4;
 
 /** Q16.16, the fixed point the view and the sim share. */
 export const Q16 = 65536;
-
-/** id u64, x i32, y i32, then the per-dog byte fields. */
-const VIEW_RECORD_BYTES = 20;
 
 /** Re-check for departed dogs about every four seconds of a 60Hz loop. */
 const GLIDE_PRUNE_FRAMES = 256;
@@ -284,9 +287,18 @@ export class Core {
       this.#ports.fetchBehavior("park", refs?.park),
       this.#ports.fetchBehavior("client", refs?.client),
     ]);
+    // Verified before the casts below make any name reachable: a module
+    // that fails here is a refused boot with a nameable cause, not a
+    // TypeError on every frame of a session already underway.
+    const clientModule = await WebAssembly.compile(clientBytes);
+    refuseAbiDrift("client.wasm", clientModule, {
+      exports: CLIENT_EXPORTS,
+      imports: HOST_IMPORTS,
+    });
     const imports = { host: this.#hostImports() } as unknown as WebAssembly.Imports;
-    const client = (await WebAssembly.instantiate(clientBytes, imports)).instance
+    const client = (await WebAssembly.instantiate(clientModule, imports))
       .exports as unknown as ClientExports;
+    refuseAbiVersion("client.wasm", client.abi_version());
     this.#client = client;
 
     const parkWord = await this.#wordOf(parkBytes);
@@ -1023,9 +1035,31 @@ export class Core {
   }
 }
 
+/** Verifies and instantiates park bytes — the boot and the module-swap lane both come through here. */
 async function instantiatePark(bytes: ArrayBuffer): Promise<ParkExports> {
-  const { instance } = await WebAssembly.instantiate(bytes);
-  return instance.exports as unknown as ParkExports;
+  const module = await WebAssembly.compile(bytes);
+  refuseAbiDrift("park.wasm", module, { exports: PARK_EXPORTS, imports: [] });
+  const instance = await WebAssembly.instantiate(module);
+  const park = instance.exports as unknown as ParkExports;
+  refuseAbiVersion("park.wasm", park.abi_version());
+  return park;
+}
+
+function refuseAbiDrift(
+  name: string,
+  module: WebAssembly.Module,
+  required: { readonly exports: readonly string[]; readonly imports: readonly string[] },
+): void {
+  const violations = abiViolations(module, required);
+  if (violations.length > 0) {
+    throw new Error(`${name} does not fit this host: ${violations.join(", ")}`);
+  }
+}
+
+function refuseAbiVersion(name: string, got: number): void {
+  if (got !== ABI_VERSION) {
+    throw new Error(`${name} speaks ABI v${got}; this host expects v${ABI_VERSION}`);
+  }
 }
 
 function loadTerrainInto(park: ParkExports, blob: Uint8Array, hex: string): void {

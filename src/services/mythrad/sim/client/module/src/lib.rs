@@ -9,6 +9,9 @@
 //!
 //! Session core (mythra_sim_session). There is one park — the journal
 //! replica — and the renderer and HUD read it directly:
+//!   abi_version() -> u32           the host refuses a version it does not
+//!                                  know at boot; additions never bump it,
+//!                                  removals and re-typings must
 //!   session_buf() -> *mut u8, session_cap() -> u32
 //!                                  inbound bytes and the ticket stage here
 //!   session_init(my_dog u64, role u32, check_ms u32, nonce u32,
@@ -181,6 +184,11 @@ impl Host for Wasm {
     fn emit(&mut self, kind: u32, a: u64, b: u64) {
         unsafe { host::emit(kind, a, b) }
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn abi_version() -> u32 {
+    1
 }
 
 #[unsafe(no_mangle)]

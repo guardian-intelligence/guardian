@@ -3,7 +3,13 @@ load("@npm//:defs.bzl", "npm_link_all_packages")
 
 npm_link_all_packages()
 
+exports_files(
+    ["goldens/records.json"],
+    visibility = ["//src/services/mythrad/sim:__pkg__"],
+)
+
 CHUNKIES_TESTKIT_SRCS = glob([
+    "goldens/**/*",
     "package.json",
     "src/**/*",
     "tsconfig.json",

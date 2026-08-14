@@ -760,7 +760,7 @@ impl Session {
         dst[32..40].copy_from_slice(&self.seq.to_le_bytes());
         dst[40..44].copy_from_slice(&(mythra_sim_clock::TRAIL_TARGET_TICKS as u32).to_le_bytes());
         dst[44..48].copy_from_slice(&(mythra_sim_clock::LAG_TICKS as u32).to_le_bytes());
-        for (i, s) in self.stats.iter().enumerate() {
+        for (i, s) in self.stats[..(DIAG_BYTES - 48) / 8].iter().enumerate() {
             let at = 48 + i * 8;
             dst[at..at + 8].copy_from_slice(&s.to_le_bytes());
         }
