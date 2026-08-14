@@ -32,7 +32,7 @@ import { Role, moduleWordHex, hex64, type RoleName } from "./wire.ts";
 const BACKOFF_MIN_MS = 300;
 const BACKOFF_MAX_MS = 5000;
 const BACKOFF_JITTER_MS = 250;
-/** Frame CPU the clock may spend stepping, matching the proto-3 client. */
+/** Frame CPU the clock may spend stepping per pump. */
 export const DEFAULT_STEP_BUDGET_US = 8000;
 /** How long a failed module fetch waits before trying again. */
 const MODULE_RETRY_MS = 3000;

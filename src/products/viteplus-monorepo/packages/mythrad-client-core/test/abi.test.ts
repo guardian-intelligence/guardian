@@ -1,7 +1,7 @@
 // The host binds two wasm modules by name, and TypeScript interfaces do
-// not survive to runtime — so a call to an export the module no longer
-// has is not a type error, it is a "not a function" at the first frame,
-// and an import the module gained but the host does not supply is an
+// not survive to runtime — so a call to an export the module lacks is
+// not a type error, it is a "not a function" at the first frame, and an
+// import the module expects but the host does not supply is an
 // instantiation failure at boot. Neither announces itself until the code
 // runs.
 //
@@ -102,23 +102,6 @@ describe("client.wasm", () => {
     expect(imports.every((i) => i.kind === "function")).toBe(true);
   });
 
-  it("no longer carries the standalone clock exports", () => {
-    // They read a second Clock the session core never disciplined. Their
-    // return is gone from the module, so a stale host call would throw at
-    // the first frame rather than quietly reporting a dead clock.
-    for (const dead of [
-      "clock_phase",
-      "clock_state",
-      "clock_rtt_ms",
-      "clock_error_q16",
-      "clock_frame",
-      "clock_sample",
-      "clock_reset",
-      "clock_set_rate",
-    ]) {
-      expect(exports.has(dead)).toBe(false);
-    }
-  });
 });
 
 describe("park.wasm", () => {

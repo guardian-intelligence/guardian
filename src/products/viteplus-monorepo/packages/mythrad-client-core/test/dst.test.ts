@@ -140,8 +140,8 @@ describe("invariant 2: seq-dense application", () => {
 
 describe("invariant 2/7: rollback", () => {
   it("a late event inside the ring rolls back, applies, and does NOT resync", async () => {
-    // Deliberately different from proto 3, whose ring was dead code: every
-    // late event there fell through to a resync.
+    // A resync costs a full snapshot; the ring exists so that mere
+    // lateness never pays that price (docs/netcode.md invariant 2).
     const r = await rig();
     await r.establish();
     await r.run(RING_WARMUP_MS);
@@ -469,9 +469,9 @@ describe("invariant 8: the prediction overlay", () => {
     expect(r.core.state.dogCount).toBe(1);
   });
 
-  // Regression: `on_reject` used to drop the pending entry without
-  // setting `dirty`, so the overlay was never rebuilt and slot 1 kept
-  // showing an intent the authority had refused.
+  // A reject must reach the presented slot, not just the pending map:
+  // an intent the authority refused may not linger visibly as if it
+  // had happened.
   it("drops the overlay entry when the intent is rejected", async () => {
     const r = await rig({ role: "player", myDog: 0x778n });
     await r.establish();
@@ -962,9 +962,9 @@ describe("pump status and the read surface", () => {
     expect(view!.phaseQ16).toBeGreaterThanOrEqual(0);
   });
 
-  // Regression: the phase used to come from the module's standalone
-  // Clock static, which the session core does not drive, so the render
-  // alpha never moved. It now comes from `session_phase_q16`.
+  // The render alpha is only meaningful if the clock producing it is
+  // the one the session disciplines — a phase that never moves renders
+  // every dog frozen between ticks.
   it("advances the render phase between ticks", async () => {
     const r = await rig();
     await r.establish();
