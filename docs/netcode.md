@@ -38,27 +38,35 @@ event stream as everything else).
 | `sim/park` (wasm, no_std) | the game rules | all state, validation (`sim_apply` rejects without mutating), hashing, snapshots |
 | `sim/nav` | deterministic A* | pathing, `path_cost`; movement is state (position, waypoint, target — all hashed), never a cache |
 | `sim/clock` (wasm, no_std) | client tick discipline | Acquiring → Locked (±2% slew) → FastForward (big deficits) → SnapshotRequired (beyond the ring). No floats, no host clocks — the host feeds it times and executes its step-count directives |
-| `sim/client` (wasm) | presentation | render smoothing; re-exports the clock. Never feeds back into world state |
+| `sim/session` (wasm, no_std) | the replica session | the wire codec, seq-dense event ordering, snapshot ring + rollback, resync/strike policy, intent identity + resend, and the own-intent prediction overlay over two host-held park slots (journal replica / presented). Time and transport are inputs; the host executes its verbs |
+| `sim/client` (wasm) | presentation + the session ABI | render smoothing; re-exports the clock and the session. Never feeds back into world state |
 | `mythrad/park.go` | the authority | the anchored tick schedule, event stamping, journal append, hash ring, snapshot cadence, the module-swap lane |
 | `mythrad/session.go` | transport | WebTransport sessions, OIDC-ticket admission, intent→actor binding, fan-out |
 | `mythrad/journal` | durability | Postgres `park_events` / `park_snapshots` / `park_terrain`; per-park seq is dense and single-writer; `journaltest.Run` is the conformance suite |
-| web `client.ts` | the host | moves opaque bytes between wire, wasm, and screen. If TypeScript (or Go) can read a game rule, the rule is in the wrong place |
+| `packages/mythrad-client-core` | the host | moves opaque bytes between wire, wasm, and screen: two park slots, the client module, the transport, and the read surface a renderer and HUD consume. If TypeScript (or Go) can read a game rule, the rule is in the wrong place |
+| `apps/wake-up-mythra-web/src/game` | the surface | platform adapters (WebTransport, fetch, auth), the isometric renderer, the HUD, and the telemetry mapping. No protocol |
 
 ## Interfaces
 
 Sim ABI (identical on every host): `sim_set_terrain`, `sim_init`,
 `sim_restore` (refuses wrong terrain), `sim_snapshot`, `sim_step`,
 `sim_apply` (validation and application in one — no separate `validate()` to
-drift), `sim_hash`, `sim_tick`, `sim_epoch`, `sim_view`. Go hosts must
+drift), `sim_hash`, `sim_tick`, `sim_epoch`, `sim_rate` /
+`sim_anchor_tick` / `sim_anchor_ns` (the rate segment), `sim_view`, and
+`sim_hud` (the 28-byte HUD projection keyed on the viewer's dog). Go hosts must
 truncate i32 results (`uint32(res[0])`) — wazero leaves garbage in the high
 bits on arm64.
 
 Wire (WebTransport; players and spectators share it): `POST /session` with an
-OIDC bearer mints a short-lived HMAC ticket → one ordered stream (`hello`,
-`intent` / `welcome{..., hz}`, `event`, `reject`, `snapshot`) plus datagrams
-(`check{tick, wh}` / `verdict{tick_now, ok, cw, pw}`). There is no ack: an
-accepted intent comes back as an `event` carrying its `intent_id` — the
-journal is the acknowledgment. Rejects go only to the sender.
+OIDC bearer mints a short-lived HMAC ticket → one ordered stream of binary
+frames — QUIC-varint length, kind byte, little-endian fields (proto 4;
+`mythrad/wire` and `sim/session` are the two codecs, pinned to shared golden
+bytes) — carrying `hello`, `intent` / `welcome{..., hz}`, `event`, `reject`,
+`snapshot`, plus fixed-layout datagrams (`check{tick, wh, ct}` /
+`verdict{tick, now, ct, flags, cw, pw}`). There is no ack: an accepted intent
+comes back as an `event` carrying its intent id — the journal is the
+acknowledgment, and the id (a per-connection nonce over a counter) is the
+only handle that marks an event as yours. Rejects go only to the sender.
 
 ## Decisions (and why)
 

@@ -7,12 +7,18 @@ load("//src/services/mythrad/sim:wasm.bzl", "wasm_module")
 
 SIM_ROOT = ["//src/services/mythrad/sim:__pkg__"]
 
+SESSION_SRCS = [
+    "session/src/lib.rs",
+    "session/src/tests.rs",
+    "session/src/wire.rs",
+]
+
 filegroup(
     name = "sources",
     srcs = [
         "clock/src/lib.rs",
         "module/src/lib.rs",
-    ],
+    ] + SESSION_SRCS,
     visibility = SIM_ROOT,
 )
 
@@ -29,6 +35,21 @@ rust_test(
     edition = "2024",
 )
 
+rust_library(
+    name = "session",
+    srcs = SESSION_SRCS,
+    crate_name = "mythra_sim_session",
+    crate_root = "session/src/lib.rs",
+    edition = "2024",
+    deps = [":clock"],
+)
+
+rust_test(
+    name = "session_test",
+    crate = ":session",
+    edition = "2024",
+)
+
 rust_shared_library(
     name = "client_cdylib",
     srcs = ["module/src/lib.rs"],
@@ -37,6 +58,7 @@ rust_shared_library(
     target_compatible_with = ["@platforms//cpu:wasm32"],
     deps = [
         ":clock",
+        ":session",
         "//src/services/mythrad/sim/shared:core",
     ],
 )

@@ -1,33 +1,85 @@
-//! Client presentation module: per-frame smoothing over the shared core,
-//! exported for the browser (and later the app's interpreter). The page
-//! writes one Q16.16 quad per dog into the frame buffer, calls
-//! smooth_frame with its frame phase, and reads the presented positions
-//! back from the first two slots of each quad. Presentation only —
-//! interpolation, corrections, and every other smoothing concern live
-//! exclusively on this side of the wire; nothing here ever feeds back
-//! into world state.
+//! The client module: everything a replica host runs that isn't the park
+//! itself — the session core (wire protocol, ordering, rollback, resync,
+//! prediction), clock discipline, and frame smoothing. The host moves
+//! bytes and owns platform verbs; every netcode decision is made in here,
+//! so a browser, an app interpreter, and a load bot behave identically.
 //!
-//! ABI (all integers; fractional values Q16.16):
+//! ABI (all integers; fractional values Q16.16). Payloads move through the
+//! staging buffer, which is the host's only window into this module.
+//!
+//! Session core (mythra_sim_session; slot 0 is the journal replica, slot 1
+//! the presented world the renderer reads):
+//!   session_buf() -> *mut u8, session_cap() -> u32
+//!                                  inbound bytes and the ticket stage here
+//!   session_init(my_dog u64, role u32, check_ms u32, nonce u32,
+//!                now_ms u64)       role 0 spectator, 1 player; nonce is
+//!                                  the high half of every intent id this
+//!                                  page load mints
+//!   session_connected(ticket_len u32, now_ms u64) -> u32
+//!                                  ticket bytes are in the staging buffer;
+//!                                  0 ok, 1 ticket too long
+//!   session_disconnected()         the transport died
+//!   session_on_stream(len u32, now_ms u64)     staged bytes, any framing
+//!   session_on_datagram(len u32, now_ms u64)   one whole datagram
+//!   session_pump(now_ms u64, budget_us u32) -> u32
+//!                                  one frame of stepping, applying,
+//!                                  checking, and overlay rebuild; returns
+//!                                  status bits: 1 have_state, 2 resyncing,
+//!                                  4 stepped, 8 waiting on terrain,
+//!                                  16 waiting on a module, clock state at
+//!                                  bit 8. budget_us 0 observes without
+//!                                  stepping — the clock still escalates
+//!                                  and can still demand a snapshot, and
+//!                                  events still apply, but no tick
+//!                                  advances (the dev-loop freeze)
+//!   session_reidentify(my_dog u64, role u32, nonce u32, now_ms u64)
+//!                                  sign-in upgrade: new dog, role, and
+//!                                  intent id space; pending intents drop,
+//!                                  replica bookkeeping survives so the
+//!                                  redial's hello keeps its since_seq
+//!   session_set_visible(v u32)     hidden replicas send no checks
+//!   session_terrain_ready(id u64, ok u32)      host loaded terrain `id`
+//!   session_module_swapped(pw u32) host replaced both slots' modules
+//!   intent_join(now_ms u64) -> u64             every intent returns its id
+//!   intent_check_in(now_ms u64) -> u64
+//!   intent_move_to(node u32, now_ms u64) -> u64
+//!   intent_boost(on u32, now_ms u64) -> u64
+//!   session_tick() -> u64, session_seq() -> i64
+//!   session_stat(kind u32) -> u64  1 events, 2 rollbacks, 3 resyncs,
+//!                                  4 checks, 5 mismatches, 6 rejects
+//!
+//! Imports (module `host`): park_apply(slot, ptr, len) -> u32,
+//! park_step(slot), park_snapshot(slot, dst, cap) -> u32,
+//! park_restore(slot, ptr, len) -> u32, park_hash(slot) -> u64,
+//! park_tick(slot) -> u64, send_stream(ptr, len), send_datagram(ptr, len),
+//! inflate(src, slen, dst, cap) -> u32, request(kind, a),
+//! emit(kind, a, b). Host requests: 1 need_terrain(id),
+//! 2 need_module(pw), 3 resync_wanted(reason). A module word (`pw`) is
+//! always the little-endian load of the sha256 prefix's four wire bytes,
+//! never a re-formatting of them.
+//!
+//! Presentation: the page writes one Q16.16 quad per dog into the frame
+//! buffer, calls smooth_frame with its frame phase, and reads the presented
+//! positions back from the first two slots of each quad. Interpolation and
+//! corrections live exclusively on this side of the wire; nothing here ever
+//! feeds back into world state.
 //!   frame_cap() -> u32             max dogs per frame
 //!   frame_buf() -> *mut i32        quads of [prev_x, prev_y, curr_x, curr_y]
-//!   smooth_frame(n: u32, alpha_q16: u32, snap_q16: u32)
+//!   smooth_frame(n u32, alpha_q16 u32, snap_q16 u32)
 //!                                  rewrites slots 0,1 of each quad in place
 //!
-//! Clock discipline (mythra_sim_clock; the host executes directives and
-//! never does time arithmetic itself):
-//!   clock_set_rate(hz u64)         the park's tick rate, from welcome —
-//!                                  call before the first sample
-//!   clock_sample(send_ms u64, recv_ms u64, server_tick u64)  verdict echo
-//!   clock_reset(server_tick u64, now_ms u64)   after restore/module swap
-//!   clock_frame(now_ms u64, replica_tick u64, budget_us u32) -> u32
-//!                                  low 16 bits: sim steps to run now;
-//!                                  bit 16: request a snapshot resync
-//!   clock_phase() -> u32           Q16 frame phase (render alpha)
-//!   clock_state() -> u32           0 acquiring, 1 locked, 2 fast-forward,
-//!                                  3 snapshot-required (diagnostics)
+//! Clock discipline belongs to the session — `session_pump` samples,
+//! resets, and steps it — so the only clock surface here is read-only and
+//! reads the clock that is actually being disciplined:
+//!   session_phase_q16() -> u32     Q16 frame phase (render alpha)
+//!   session_rtt_ms() -> u32        smoothed round trip
+//!   session_error_q16(now_ms u64) -> i64
+//!                                  phase error in Q16 ticks, positive when
+//!                                  the replica trails (diagnostics)
+//! The clock's state rides `session_pump`'s return at bit 8.
 #![no_std]
 
-use mythra_sim_clock::{Clock, State};
+use mythra_sim_session::{Host, Session};
 
 #[cfg(target_arch = "wasm32")]
 #[panic_handler]
@@ -35,57 +87,202 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable()
 }
 
+mod host {
+    #[link(wasm_import_module = "host")]
+    unsafe extern "C" {
+        pub fn park_apply(slot: u32, ptr: u32, len: u32) -> u32;
+        pub fn park_step(slot: u32);
+        pub fn park_snapshot(slot: u32, dst: u32, cap: u32) -> u32;
+        pub fn park_restore(slot: u32, ptr: u32, len: u32) -> u32;
+        pub fn park_hash(slot: u32) -> u64;
+        pub fn park_tick(slot: u32) -> u64;
+        pub fn send_stream(ptr: u32, len: u32);
+        pub fn send_datagram(ptr: u32, len: u32);
+        pub fn inflate(src: u32, slen: u32, dst: u32, cap: u32) -> u32;
+        pub fn request(kind: u32, a: u64);
+        pub fn emit(kind: u32, a: u64, b: u64);
+    }
+}
+
 const MAX_DOGS: usize = 2048;
+const STAGE_CAP: usize = 64 * 1024;
+
 static mut FRAME: [i32; MAX_DOGS * 4] = [0; MAX_DOGS * 4];
-static mut CLOCK: Clock = Clock::NEW;
+static mut SESSION: Session = Session::NEW;
+static mut STAGE: [u8; STAGE_CAP] = [0; STAGE_CAP];
 
-fn clock() -> &'static mut Clock {
-    unsafe { &mut *(&raw mut CLOCK) }
+fn session() -> &'static mut Session {
+    unsafe { &mut *(&raw mut SESSION) }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn clock_set_rate(hz: u64) {
-    clock().set_rate(hz);
+fn staged(len: u32) -> &'static [u8] {
+    let len = (len as usize).min(STAGE_CAP);
+    unsafe { core::slice::from_raw_parts(&raw const STAGE as *const u8, len) }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn clock_sample(send_ms: u64, recv_ms: u64, server_tick: u64) {
-    clock().sample(send_ms, recv_ms, server_tick);
-}
+struct Wasm;
 
-#[unsafe(no_mangle)]
-pub extern "C" fn clock_reset(server_tick: u64, now_ms: u64) {
-    clock().reset(server_tick, now_ms);
-}
+impl Host for Wasm {
+    fn park_apply(&mut self, slot: u32, ev: &[u8]) -> u32 {
+        unsafe { host::park_apply(slot, ev.as_ptr() as u32, ev.len() as u32) }
+    }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn clock_frame(now_ms: u64, replica_tick: u64, budget_us: u32) -> u32 {
-    clock().frame(now_ms, replica_tick, budget_us)
-}
+    fn park_step(&mut self, slot: u32) {
+        unsafe { host::park_step(slot) }
+    }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn clock_phase() -> u32 {
-    clock().phase_q16()
-}
+    fn park_snapshot(&mut self, slot: u32, dst: &mut [u8]) -> u32 {
+        unsafe { host::park_snapshot(slot, dst.as_mut_ptr() as u32, dst.len() as u32) }
+    }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn clock_state() -> u32 {
-    match clock().state() {
-        State::Acquiring => 0,
-        State::Locked => 1,
-        State::FastForward => 2,
-        State::SnapshotRequired => 3,
+    fn park_restore(&mut self, slot: u32, state: &[u8]) -> u32 {
+        unsafe { host::park_restore(slot, state.as_ptr() as u32, state.len() as u32) }
+    }
+
+    fn park_hash(&mut self, slot: u32) -> u64 {
+        unsafe { host::park_hash(slot) }
+    }
+
+    fn park_tick(&mut self, slot: u32) -> u64 {
+        unsafe { host::park_tick(slot) }
+    }
+
+    fn send_stream(&mut self, frame: &[u8]) {
+        unsafe { host::send_stream(frame.as_ptr() as u32, frame.len() as u32) }
+    }
+
+    fn send_datagram(&mut self, datagram: &[u8]) {
+        unsafe { host::send_datagram(datagram.as_ptr() as u32, datagram.len() as u32) }
+    }
+
+    fn inflate(&mut self, src: &[u8], dst: &mut [u8]) -> u32 {
+        unsafe {
+            host::inflate(
+                src.as_ptr() as u32,
+                src.len() as u32,
+                dst.as_mut_ptr() as u32,
+                dst.len() as u32,
+            )
+        }
+    }
+
+    fn request(&mut self, kind: u32, a: u64) {
+        unsafe { host::request(kind, a) }
+    }
+
+    fn emit(&mut self, kind: u32, a: u64, b: u64) {
+        unsafe { host::emit(kind, a, b) }
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn clock_error_q16(now_ms: u64, replica_tick: u64) -> i64 {
-    clock().error_q16(now_ms, replica_tick)
+pub extern "C" fn session_buf() -> *mut u8 {
+    &raw mut STAGE as *mut u8
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn clock_rtt_ms() -> u32 {
-    (clock().rtt_ms_q16() >> 16) as u32
+pub extern "C" fn session_cap() -> u32 {
+    STAGE_CAP as u32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_init(my_dog: u64, role: u32, check_ms: u32, nonce: u32, now_ms: u64) {
+    session().init(my_dog, role, check_ms, nonce, now_ms);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_connected(ticket_len: u32, now_ms: u64) -> u32 {
+    session().connected(&mut Wasm, staged(ticket_len), now_ms)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_disconnected() {
+    session().disconnected();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_on_stream(len: u32, now_ms: u64) {
+    session().on_stream(&mut Wasm, staged(len), now_ms);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_on_datagram(len: u32, now_ms: u64) {
+    session().on_datagram(&mut Wasm, staged(len), now_ms);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_pump(now_ms: u64, budget_us: u32) -> u32 {
+    session().pump(&mut Wasm, now_ms, budget_us)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_reidentify(my_dog: u64, role: u32, nonce: u32, now_ms: u64) {
+    session().reidentify(my_dog, role, nonce, now_ms);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_set_visible(v: u32) {
+    session().set_visible(v != 0);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_terrain_ready(id: u64, ok: u32) {
+    session().terrain_ready(&mut Wasm, id, ok != 0);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_module_swapped(pw: u32) {
+    session().module_swapped(&mut Wasm, pw);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn intent_join(now_ms: u64) -> u64 {
+    session().intent_join(&mut Wasm, now_ms)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn intent_check_in(now_ms: u64) -> u64 {
+    session().intent_check_in(&mut Wasm, now_ms)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn intent_move_to(node: u32, now_ms: u64) -> u64 {
+    session().intent_move_to(&mut Wasm, node, now_ms)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn intent_boost(on: u32, now_ms: u64) -> u64 {
+    session().intent_boost(&mut Wasm, on != 0, now_ms)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_tick() -> u64 {
+    session().tick()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_seq() -> i64 {
+    session().seq()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_stat(kind: u32) -> u64 {
+    session().stat(kind)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_phase_q16() -> u32 {
+    session().phase_q16()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_rtt_ms() -> u32 {
+    session().rtt_ms()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn session_error_q16(now_ms: u64) -> i64 {
+    session().error_q16(now_ms)
 }
 
 #[unsafe(no_mangle)]

@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { startFlags } from "~/flags/client";
 import { FlagsCanary } from "~/flags/canary";
-import { startGame } from "~/game/client";
+import { startGame } from "~/game/boot";
 
 export const Route = createFileRoute("/")({
   component: Page,
