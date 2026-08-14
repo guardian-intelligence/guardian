@@ -26,6 +26,7 @@ import {
   hex64,
 } from "../src/wire.ts";
 import { Harness, type HarnessOptions } from "./fakes.ts";
+import type { ClientFrame } from "../src/wire.ts";
 
 /** Repo-relative, because these artifacts are committed and the suite must use those bytes. */
 function repoFile(rel: string): Uint8Array {
@@ -146,8 +147,14 @@ export class Authority {
     return this.park.sim_tick();
   }
 
+  /**
+   * The world hash, unsigned. `sim_hash` is declared i64, so wasm hands
+   * JS a SIGNED bigint, while the wire carries the same bits unsigned —
+   * comparing the two directly reports a mismatch for every hash with its
+   * top bit set, which is half of them.
+   */
   hash(): bigint {
-    return this.park.sim_hash();
+    return BigInt.asUintN(64, this.park.sim_hash());
   }
 
   step(n = 1): void {
@@ -186,10 +193,14 @@ export class Authority {
 
   /** Applies an event to the canonical world and returns the frame announcing it. */
   apply(kind: number, payload: Uint8Array, intent = 0n): Uint8Array {
+    // The tick the event is journalled AT, read before the event can move
+    // it. Only `clock_skip` does, and stamping one with its own
+    // destination would announce it from a tick the park had not reached.
+    const at = this.tick;
     const code = applyTo(this.park, kind, payload);
     if (code !== 0) throw new Error(`authority refused kind ${kind} (code ${code})`);
     this.seq += 1n;
-    return encodeEvent({ seq: this.seq, tick: this.tick, kind, intent, p: payload });
+    return encodeEvent({ seq: this.seq, tick: at, kind, intent, p: payload });
   }
 
   /**
@@ -382,6 +393,22 @@ export type Rig = {
   ): number;
   /** Waits until at least `n` check datagrams have been sent. */
   waitForChecks(n: number, ms?: number): Promise<boolean>;
+  /**
+   * Answers any resync the core has asked for and not been given, the way
+   * a park does: a snapshot delivered IN-STREAM, a round trip later.
+   *
+   * In-stream is the whole of it. The authority queues its snapshot into
+   * the same ordered stream as the events, so everything already sent
+   * arrived ahead of it and is folded into the state it carries — which is
+   * why the core is right to drop what it had queued when one lands. A
+   * harness that answers out of band stops modelling that, and a harness
+   * that does not answer at all leaves the session holding everything it
+   * has been sent, waiting for a snapshot that is never coming. Both look
+   * exactly like a permanently stalled client, and neither is one.
+   *
+   * Returns how many requests it answered.
+   */
+  answerResyncs(): number;
   /** Telemetry codes seen so far, for asserting a choreography. */
   codes(): number[];
   /** How many times a telemetry code has been emitted. */
@@ -501,6 +528,23 @@ export async function rig(options: RigOptions = {}): Promise<Rig> {
   const waitForChecks = (n: number, ms = 6000): Promise<boolean> =>
     until(() => harness.transport.sentDatagrams.length >= n, ms);
 
+  let resyncsAnswered = 0;
+  const answerResyncs: Rig["answerResyncs"] = () => {
+    const asked = harness.transport.sentFrames().filter((f) => f.kind === "resync").length;
+    let n = 0;
+    for (; resyncsAnswered < asked; resyncsAnswered++, n++) {
+      harness.clock.schedule(() => {
+        try {
+          deliver([authority.snapshot()]);
+        } catch {
+          // The connection went away before the answer arrived, which is
+          // one of the things a resync has to survive.
+        }
+      }, options.rttMs ?? DEFAULT_RTT_MS);
+    }
+    return n;
+  };
+
   const codes = (): number[] => harness.emitted.map((e) => e.code);
   const count = (code: number): number =>
     harness.emitted.reduce((n, e) => n + (e.code === code ? 1 : 0), 0);
@@ -517,7 +561,53 @@ export async function rig(options: RigOptions = {}): Promise<Rig> {
     answerChecks,
     answerChecksOverRtt,
     waitForChecks,
+    answerResyncs,
     codes,
     count,
   };
+}
+
+/** Intent frames of one kind the client has written, oldest first. */
+export function intentsSent(r: Rig, kind: number): ClientFrame[] {
+  return r.harness.transport
+    .sentFrames()
+    .filter((f) => f.kind === "intent" && f.value.kind === kind);
+}
+
+export function intentId(frame: ClientFrame | undefined): bigint {
+  return frame?.kind === "intent" ? frame.value.id : 0n;
+}
+
+/**
+ * Answers the join the core sent on connect, so the dog is really in the
+ * park. Intents that need presence are held until this has happened, and
+ * the journal is the only thing that grants it.
+ */
+export async function bringTheDogIn(r: Rig, dog: bigint): Promise<void> {
+  await r.run(100);
+  const id = intentId(intentsSent(r, Ev.join)[0]);
+  r.deliver([r.emit(Ev.join, dogPayload(dog), id)]);
+  const present = await r.until(() => r.core.state.present, 2000);
+  if (!present) throw new Error("the journal never placed the dog");
+}
+
+/**
+ * The other way a dog's presence is established: the park already holds
+ * it, so the reconnecting join is answered "already present" rather than
+ * with the journal event that placed it.
+ */
+export async function bringTheDogInViaPresent(r: Rig, dog: bigint): Promise<void> {
+  await r.run(100);
+  // The park already holds this dog — that is what makes the join it just
+  // received a duplicate. So the world the client is given contains it,
+  // and the reject is what tells the SESSION the dog is there: the
+  // journal event that placed it happened before this connection existed
+  // and is never coming.
+  r.authority.apply(Ev.join, dogPayload(dog));
+  r.deliver([r.authority.snapshot()]);
+  const inWorld = await r.until(() => r.core.state.present, 2000);
+  if (!inWorld) throw new Error("the snapshot did not carry the dog");
+  const id = intentId(intentsSent(r, Ev.join).at(-1));
+  r.deliver([r.authority.reject(id, Reject.present)]);
+  await r.run(200);
 }

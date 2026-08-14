@@ -145,7 +145,7 @@ describe("a player attaching to a running park", () => {
       await r.harness.settle();
     }
     // Bystanders: dogs already in the park when we attach, with nothing to
-    // do with the event or with our prediction.
+    // do with the event that arrives late.
     for (let i = 0; i < 8; i++) r.authority.apply(Ev.join, dogPayload(BigInt(0x7200 + i)));
     r.deliver([r.authority.welcome(Role.player), r.authority.snapshot()]);
 
@@ -188,10 +188,9 @@ describe("a player attaching to a running park", () => {
       );
     }
 
-    // And a bystander seen at the same tick must be in the same place: the
+    // And a dog seen at the same tick must be in the same place: the
     // repair reproduces the world it rewound through, it does not re-roll
-    // it. Our own dog is excluded — its position is a prediction, and
-    // predictions are the next case.
+    // it.
     const after = frames[settled]!;
     expect(after.tick).toBeGreaterThanOrEqual(before.tick);
     if (after.tick === before.tick) {
@@ -208,11 +207,9 @@ describe("a player attaching to a running park", () => {
   });
 
   it("shows our dog once the journal places it, and not before", async () => {
-    // Where a joining dog lands is drawn at the tick the join is applied,
-    // so there is no such thing as predicting it: a guess would be redrawn
-    // every time the overlay rebuilt, and the dog would wander the park
-    // until the journal answered. The presented world simply does not
-    // carry a dog the journal has not placed.
+    // Where a joining dog lands is decided at the tick the join is
+    // applied, which is the park's to decide and no one else's. The world
+    // simply does not carry a dog the journal has not placed.
     const RTT = 200;
     const r = await rig({ role: "player", checkMs: 200, myDog: 0x7005n, rttMs: RTT });
     const step = liveWorld(r);
@@ -244,7 +241,7 @@ describe("a player attaching to a running park", () => {
     expect(r.core.state.dogCount).toBe(4);
     expect(seen.size).toBe(0);
 
-    // Other dogs arriving rebuild the overlay repeatedly; ours still is
+    // Other dogs keep arriving and the world keeps changing; ours still is
     // not in it, because nothing has placed it yet.
     for (let i = 0; i < 4; i++) {
       r.deliver([r.authority.apply(Ev.join, dogPayload(BigInt(0x7600 + i)))]);
@@ -350,8 +347,9 @@ describe("a player attaching to a running park", () => {
     // Nothing on a clean leg is beyond local repair.
     expect(Number(r.core.state.resyncs)).toBe(0);
 
-    // One repair per own action at most — the journal has nothing else to
-    // tell us that we did not already predict.
+    // One repair per own action at most: our own events are journalled at
+    // the authority's tick and so arrive behind a replica that has already
+    // stepped past it, and nothing else on a clean leg is late at all.
     expect(rolls.length).toBeLessThanOrEqual(moves + 1);
 
     for (const roll of rolls) {

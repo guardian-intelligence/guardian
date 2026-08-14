@@ -4,6 +4,9 @@
 // host is the only thing that can see both linear memories, and copying
 // between them is its whole job on the park verbs.
 //
+// There is one world, and the park verbs address it directly: what the
+// session applies is what the renderer reads.
+//
 // wasm i64 crosses the boundary as bigint, so every u64/i64 here is a
 // bigint and every u32/i32 a number. Getting that wrong is a silent
 // truncation, not a type error, at the wasm boundary.
@@ -73,7 +76,7 @@ export interface ClientExports {
    * reassembly buffer corrupts the next connection's first read.
    */
   session_disconnected(): void;
-  /** Drives the clock, steps both slots, applies ready events. Returns status flags. */
+  /** Drives the clock, steps the world, applies ready events. Returns status flags. */
   session_pump(nowMs: bigint, budgetUs: number): number;
   session_terrain_ready(id: bigint, ok: number): void;
   session_module_swapped(pw: number): void;
@@ -107,22 +110,18 @@ export interface ClientExports {
 
 /** The `host` import object the session core links against. */
 export interface HostImports {
-  park_apply(slot: number, ptr: number, len: number): number;
-  park_step(slot: number): void;
-  park_snapshot(slot: number, dst: number, cap: number): number;
-  park_restore(slot: number, ptr: number, len: number): number;
-  park_hash(slot: number): bigint;
-  park_tick(slot: number): bigint;
+  park_apply(ptr: number, len: number): number;
+  park_step(): void;
+  park_snapshot(dst: number, cap: number): number;
+  park_restore(ptr: number, len: number): number;
+  park_hash(): bigint;
+  park_tick(): bigint;
   send_stream(ptr: number, len: number): void;
   send_datagram(ptr: number, len: number): void;
   inflate(src: number, slen: number, dst: number, cap: number): number;
   request(kind: number, a: bigint): void;
   emit(kind: number, a: bigint, b: bigint): void;
 }
-
-/** Slot 0 is the journal replica; slot 1 is what the renderer and HUD read. */
-export const SLOT_JOURNAL = 0;
-export const SLOT_PRESENTED = 1;
 
 /** Bytes in the `sim_hud` record. */
 export const HUD_BYTES = 28;
@@ -181,6 +180,14 @@ export const PumpFlag = {
   waitingTerrain: 1 << 3,
   /** A module swap is latched and waiting for the host to land it. */
   waitingModule: 1 << 4,
+  /**
+   * The world was corrected on this pump — a snapshot restored it, or a
+   * repair rewound and replayed it — so dogs may have moved without time
+   * passing. The host owes the screen a glide from where it last showed
+   * them, on THIS frame: a frame later is a frame too late, because by
+   * then the jump has been drawn. See `Core.view`.
+   */
+  corrected: 1 << 5,
 } as const;
 
 /** Where the clock state sits in `session_pump`'s return, above the flag bits. */

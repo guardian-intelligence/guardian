@@ -1,14 +1,14 @@
 //! The client module: everything a replica host runs that isn't the park
-//! itself — the session core (wire protocol, ordering, rollback, resync,
-//! prediction), clock discipline, and frame smoothing. The host moves
+//! itself — the session core (wire protocol, ordering, rollback, resync),
+//! clock discipline, and frame smoothing. The host moves
 //! bytes and owns platform verbs; every netcode decision is made in here,
 //! so a browser, an app interpreter, and a load bot behave identically.
 //!
 //! ABI (all integers; fractional values Q16.16). Payloads move through the
 //! staging buffer, which is the host's only window into this module.
 //!
-//! Session core (mythra_sim_session; slot 0 is the journal replica, slot 1
-//! the presented world the renderer reads):
+//! Session core (mythra_sim_session). There is one park — the journal
+//! replica — and the renderer and HUD read it directly:
 //!   session_buf() -> *mut u8, session_cap() -> u32
 //!                                  inbound bytes and the ticket stage here
 //!   session_init(my_dog u64, role u32, check_ms u32, nonce u32,
@@ -22,12 +22,17 @@
 //!   session_on_stream(len u32, now_ms u64)     staged bytes, any framing
 //!   session_on_datagram(len u32, now_ms u64)   one whole datagram
 //!   session_pump(now_ms u64, budget_us u32) -> u32
-//!                                  one frame of stepping, applying,
-//!                                  checking, and overlay rebuild; returns
+//!                                  one frame of stepping, applying and
+//!                                  checking; returns
 //!                                  status bits: 1 have_state, 2 resyncing,
 //!                                  4 stepped, 8 waiting on terrain,
-//!                                  16 waiting on a module, clock state at
-//!                                  bit 8. budget_us 0 observes without
+//!                                  16 waiting on a module, 32 the world
+//!                                  was corrected this pump — a restore, a
+//!                                  repair, or a terrain change, which is
+//!                                  every way it moves without a step — so
+//!                                  absorb the discontinuity on THIS
+//!                                  frame; clock state at bit 8.
+//!                                  budget_us 0 observes without
 //!                                  stepping — the clock still escalates
 //!                                  and can still demand a snapshot, and
 //!                                  events still apply, but no tick
@@ -39,7 +44,7 @@
 //!                                  redial's hello keeps its since_seq
 //!   session_set_visible(v u32)     hidden replicas send no checks
 //!   session_terrain_ready(id u64, ok u32)      host loaded terrain `id`
-//!   session_module_swapped(pw u32) host replaced both slots' modules
+//!   session_module_swapped(pw u32) host replaced the park module
 //!   intent_join(now_ms u64) -> u64             every intent returns its id
 //!   intent_check_in(now_ms u64) -> u64
 //!   intent_move_to(node u32, now_ms u64) -> u64
@@ -48,10 +53,10 @@
 //!   session_stat(kind u32) -> u64  1 events, 2 rollbacks, 3 resyncs,
 //!                                  4 checks, 5 mismatches, 6 rejects
 //!
-//! Imports (module `host`): park_apply(slot, ptr, len) -> u32,
-//! park_step(slot), park_snapshot(slot, dst, cap) -> u32,
-//! park_restore(slot, ptr, len) -> u32, park_hash(slot) -> u64,
-//! park_tick(slot) -> u64, send_stream(ptr, len), send_datagram(ptr, len),
+//! Imports (module `host`): park_apply(ptr, len) -> u32, park_step(),
+//! park_snapshot(dst, cap) -> u32, park_restore(ptr, len) -> u32,
+//! park_hash() -> u64, park_tick() -> u64,
+//! send_stream(ptr, len), send_datagram(ptr, len),
 //! inflate(src, slen, dst, cap) -> u32, request(kind, a),
 //! emit(kind, a, b). Host requests: 1 need_terrain(id),
 //! 2 need_module(pw), 3 resync_wanted(reason), 4 teardown(reason) — the
@@ -93,12 +98,12 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 mod host {
     #[link(wasm_import_module = "host")]
     unsafe extern "C" {
-        pub fn park_apply(slot: u32, ptr: u32, len: u32) -> u32;
-        pub fn park_step(slot: u32);
-        pub fn park_snapshot(slot: u32, dst: u32, cap: u32) -> u32;
-        pub fn park_restore(slot: u32, ptr: u32, len: u32) -> u32;
-        pub fn park_hash(slot: u32) -> u64;
-        pub fn park_tick(slot: u32) -> u64;
+        pub fn park_apply(ptr: u32, len: u32) -> u32;
+        pub fn park_step();
+        pub fn park_snapshot(dst: u32, cap: u32) -> u32;
+        pub fn park_restore(ptr: u32, len: u32) -> u32;
+        pub fn park_hash() -> u64;
+        pub fn park_tick() -> u64;
         pub fn send_stream(ptr: u32, len: u32);
         pub fn send_datagram(ptr: u32, len: u32);
         pub fn inflate(src: u32, slen: u32, dst: u32, cap: u32) -> u32;
@@ -126,28 +131,28 @@ fn staged(len: u32) -> &'static [u8] {
 struct Wasm;
 
 impl Host for Wasm {
-    fn park_apply(&mut self, slot: u32, ev: &[u8]) -> u32 {
-        unsafe { host::park_apply(slot, ev.as_ptr() as u32, ev.len() as u32) }
+    fn park_apply(&mut self, ev: &[u8]) -> u32 {
+        unsafe { host::park_apply(ev.as_ptr() as u32, ev.len() as u32) }
     }
 
-    fn park_step(&mut self, slot: u32) {
-        unsafe { host::park_step(slot) }
+    fn park_step(&mut self) {
+        unsafe { host::park_step() }
     }
 
-    fn park_snapshot(&mut self, slot: u32, dst: &mut [u8]) -> u32 {
-        unsafe { host::park_snapshot(slot, dst.as_mut_ptr() as u32, dst.len() as u32) }
+    fn park_snapshot(&mut self, dst: &mut [u8]) -> u32 {
+        unsafe { host::park_snapshot(dst.as_mut_ptr() as u32, dst.len() as u32) }
     }
 
-    fn park_restore(&mut self, slot: u32, state: &[u8]) -> u32 {
-        unsafe { host::park_restore(slot, state.as_ptr() as u32, state.len() as u32) }
+    fn park_restore(&mut self, state: &[u8]) -> u32 {
+        unsafe { host::park_restore(state.as_ptr() as u32, state.len() as u32) }
     }
 
-    fn park_hash(&mut self, slot: u32) -> u64 {
-        unsafe { host::park_hash(slot) }
+    fn park_hash(&mut self) -> u64 {
+        unsafe { host::park_hash() }
     }
 
-    fn park_tick(&mut self, slot: u32) -> u64 {
-        unsafe { host::park_tick(slot) }
+    fn park_tick(&mut self) -> u64 {
+        unsafe { host::park_tick() }
     }
 
     fn send_stream(&mut self, frame: &[u8]) {

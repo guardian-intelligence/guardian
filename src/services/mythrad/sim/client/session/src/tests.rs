@@ -12,13 +12,17 @@ const TERRAIN: u64 = 0x1122_3344_5566_7788;
 const HZ: u64 = 24;
 const PARK_A: u32 = 0x1111_1111;
 const PARK_B: u32 = 0x2222_2222;
+/// Park ABI values the core does not name for itself, so the mock can
+/// stand in for the two events that move the world sideways.
+const EV_CLOCK_SKIP: u16 = 9;
+const ERR_TICK: u32 = 11;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Verb {
-    Apply(u32, u16),
-    Step(u32),
-    Snapshot(u32),
-    Restore(u32),
+    Apply(u16),
+    Step,
+    Snapshot,
+    Restore,
 }
 
 // A recording stand-in for the park module: enough state that rollback,
@@ -28,9 +32,24 @@ enum Verb {
 struct Toy {
     tick: u64,
     acc: u64,
+    /// Edits already standing in this world. The park does not mutate on
+    /// a repeat — a second move_to names the same target, a second boost
+    /// or check-in is refused — so a replayed event lands on the same
+    /// state twice without moving it twice.
+    seen: [u64; 8],
+    seen_len: usize,
 }
 
 const TOY_BYTES: usize = 18;
+
+/// The payload `intent_move_to` puts on the wire, which is also what the
+/// journal echoes back when it answers.
+fn move_payload(node: u16) -> [u8; 10] {
+    let mut p = [0u8; 10];
+    p[..8].copy_from_slice(&DOG.to_le_bytes());
+    p[8..].copy_from_slice(&node.to_le_bytes());
+    p
+}
 
 fn toy_state(tick: u64, acc: u64) -> [u8; TOY_BYTES] {
     let mut b = [0u8; TOY_BYTES];
@@ -38,6 +57,16 @@ fn toy_state(tick: u64, acc: u64) -> [u8; TOY_BYTES] {
     b[2..10].copy_from_slice(&tick.to_le_bytes());
     b[10..18].copy_from_slice(&acc.to_le_bytes());
     b
+}
+
+/// One event's contribution to the toy world, as both the mock park and
+/// the reference timeline compute it.
+fn edit_of(ev: &[u8]) -> u64 {
+    toy_hash(
+        u16::from_le_bytes([ev[0], ev[1]]) as u64,
+        ev.iter()
+            .fold(0u64, |a, &b| a.wrapping_mul(31).wrapping_add(b as u64)),
+    )
 }
 
 fn toy_hash(tick: u64, acc: u64) -> u64 {
@@ -49,20 +78,25 @@ fn toy_hash(tick: u64, acc: u64) -> u64 {
 }
 
 struct Mock {
-    parks: [Toy; 2],
+    park: Toy,
     verbs: Vec<Verb>,
     sent: Vec<Vec<u8>>,
     dgs: Vec<Vec<u8>>,
     reqs: Vec<(u32, u64)>,
     emits: Vec<(u32, u64, u64)>,
     restore_code: u32,
-    reject: Option<(u32, u16, u32)>,
+    reject: Option<(u16, u32)>,
 }
 
 impl Mock {
     fn new() -> Mock {
         Mock {
-            parks: [Toy { tick: 0, acc: 0 }; 2],
+            park: Toy {
+                tick: 0,
+                acc: 0,
+                seen: [0; 8],
+                seen_len: 0,
+            },
             verbs: Vec::new(),
             sent: Vec::new(),
             dgs: Vec::new(),
@@ -124,11 +158,11 @@ impl Mock {
             .collect()
     }
 
-    fn applies(&self, slot: u32) -> Vec<u16> {
+    fn applies(&self) -> Vec<u16> {
         self.verbs
             .iter()
             .filter_map(|v| match v {
-                Verb::Apply(s, k) if *s == slot => Some(*k),
+                Verb::Apply(k) => Some(*k),
                 _ => None,
             })
             .collect()
@@ -140,34 +174,58 @@ impl Mock {
 }
 
 impl Host for Mock {
-    fn park_apply(&mut self, slot: u32, ev: &[u8]) -> u32 {
+    fn park_apply(&mut self, ev: &[u8]) -> u32 {
         let kind = u16::from_le_bytes([ev[0], ev[1]]);
-        self.verbs.push(Verb::Apply(slot, kind));
-        if let Some((s, k, code)) = self.reject
-            && s == slot
+        self.verbs.push(Verb::Apply(kind));
+        if let Some((k, code)) = self.reject
             && k == kind
         {
             return code;
         }
-        let p = &mut self.parks[slot as usize];
-        p.acc = toy_hash(p.acc ^ kind as u64, ev.len() as u64);
+        // The one park event that is not an edit on top of the tick it
+        // lands in: it moves the tick, with no step behind it, and only
+        // ever forward.
+        if kind == EV_CLOCK_SKIP && ev.len() == 10 {
+            let mut t = [0u8; 8];
+            t.copy_from_slice(&ev[2..10]);
+            let to = u64::from_le_bytes(t);
+            if to <= self.park.tick {
+                return ERR_TICK;
+            }
+            self.park.tick = to;
+            return 0;
+        }
+        let edit = edit_of(ev);
+        let p = &mut self.park;
+        if p.seen[..p.seen_len].contains(&edit) {
+            return 0; // already standing; nothing to change
+        }
+        if p.seen_len < p.seen.len() {
+            p.seen[p.seen_len] = edit;
+            p.seen_len += 1;
+        }
+        // Order-independent, because the park's is: an edit lands on one
+        // dog's record, so two edits to different dogs commute and the
+        // world does not care which arrived first. A fold would make this
+        // mock stricter than the thing it stands in for.
+        p.acc ^= edit;
         0
     }
 
-    fn park_step(&mut self, slot: u32) {
-        self.verbs.push(Verb::Step(slot));
-        self.parks[slot as usize].tick += 1;
+    fn park_step(&mut self) {
+        self.verbs.push(Verb::Step);
+        self.park.tick += 1;
     }
 
-    fn park_snapshot(&mut self, slot: u32, dst: &mut [u8]) -> u32 {
-        self.verbs.push(Verb::Snapshot(slot));
-        let p = self.parks[slot as usize];
+    fn park_snapshot(&mut self, dst: &mut [u8]) -> u32 {
+        self.verbs.push(Verb::Snapshot);
+        let p = self.park;
         dst[..TOY_BYTES].copy_from_slice(&toy_state(p.tick, p.acc));
         TOY_BYTES as u32
     }
 
-    fn park_restore(&mut self, slot: u32, state: &[u8]) -> u32 {
-        self.verbs.push(Verb::Restore(slot));
+    fn park_restore(&mut self, state: &[u8]) -> u32 {
+        self.verbs.push(Verb::Restore);
         if self.restore_code != 0 {
             return self.restore_code;
         }
@@ -178,20 +236,21 @@ impl Host for Mock {
         let mut a = [0u8; 8];
         t.copy_from_slice(&state[2..10]);
         a.copy_from_slice(&state[10..18]);
-        self.parks[slot as usize] = Toy {
+        self.park = Toy {
             tick: u64::from_le_bytes(t),
             acc: u64::from_le_bytes(a),
+            seen: [0; 8],
+            seen_len: 0,
         };
         0
     }
 
-    fn park_hash(&mut self, slot: u32) -> u64 {
-        let p = self.parks[slot as usize];
-        toy_hash(p.tick, p.acc)
+    fn park_hash(&mut self) -> u64 {
+        toy_hash(self.park.tick, self.park.acc)
     }
 
-    fn park_tick(&mut self, slot: u32) -> u64 {
-        self.parks[slot as usize].tick
+    fn park_tick(&mut self) -> u64 {
+        self.park.tick
     }
 
     fn send_stream(&mut self, frame: &[u8]) {
@@ -229,8 +288,29 @@ struct Rig {
     role: u32,
 }
 
+thread_local! {
+    static RIG_LIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+impl Drop for Rig {
+    fn drop(&mut self) {
+        RIG_LIVE.with(|f| f.set(false));
+    }
+}
+
 impl Rig {
     fn new(role: u32) -> Rig {
+        // Two rigs on one thread would deadlock on the lock below rather
+        // than fail, and `let mut r = ...` twice in a scope does NOT drop
+        // the first. Say so instead of hanging until the test times out.
+        RIG_LIVE.with(|f| {
+            assert!(
+                !f.get(),
+                "a Rig is already live on this thread: they share the module's \
+                 statics, so scope one before building the next"
+            );
+            f.set(true);
+        });
         let g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let s = unsafe { &mut *(&raw mut SESSION) };
         s.init(DOG, role, 5000, NONCE, 0);
@@ -265,6 +345,35 @@ impl Rig {
             states.push((self.s.pump(&mut self.m, self.now, 0) >> S_CLOCK_SHIFT) & 3);
         }
         states
+    }
+
+    /// The journal answers the join this connection sent, which is what
+    /// tells the core its dog is in the park.
+    fn confirm_join(&mut self) {
+        let i = self
+            .s
+            .pending_kind(EV_JOIN)
+            .expect("no join is waiting to be answered");
+        let id = bufs().intents[i].id;
+        let seq = self.s.seq() + 1;
+        let tick = self.s.tick();
+        self.event(seq, tick, EV_JOIN, id, &DOG.to_le_bytes());
+        self.pump();
+        assert!(self.s.presence, "the join was not acknowledged");
+    }
+
+    /// Pumps until the journal has been taken up to `seq`, and answers
+    /// with the status of the pump that took it — the frame the host would
+    /// have absorbed the event on.
+    fn pump_until_seq(&mut self, seq: i64) -> u32 {
+        for _ in 0..400 {
+            self.now += 16;
+            let flags = self.pump();
+            if self.s.seq() >= seq {
+                return flags;
+            }
+        }
+        panic!("event never applied (at seq {})", self.s.seq());
     }
 
     fn run_to_tick(&mut self, tick: u64) {
@@ -330,6 +439,26 @@ impl Rig {
         let mut buf = [0u8; 32];
         let n = wire::encode_reject(&mut buf, intent, reason);
         self.feed(&buf[..n]);
+    }
+
+    /// A verdict naming both the checked tick and where the authority
+    /// stood when it answered.
+    fn verdict_at(&mut self, tick: u64, now: u64, known: bool, ok: bool) {
+        let mut buf = [0u8; 64];
+        let flags = (known as u8) | ((known && ok) as u8) << 1;
+        let n = wire::encode_verdict(
+            &mut buf,
+            &wire::Verdict {
+                tick,
+                now,
+                ct_ms: self.now,
+                flags,
+                cw: [0; 4],
+                pw: [0; 4],
+            },
+        );
+        let dg = buf[..n].to_vec();
+        self.s.on_datagram(&mut self.m, &dg, self.now);
     }
 
     fn verdict(&mut self, tick: u64, known: bool, ok: bool, pw: u32) {
@@ -807,7 +936,7 @@ fn events_apply_in_seq_order_at_their_tick() {
         vec![(101, t), (102, t), (103, t)]
     );
     assert_eq!(r.s.seq(), 103);
-    assert_eq!(r.m.applies(SLOT_JOURNAL), vec![1, 3, 3]);
+    assert_eq!(r.m.applies(), vec![1, 3, 3]);
 }
 
 #[test]
@@ -858,17 +987,121 @@ fn a_late_event_rolls_back_through_the_ring_and_replays() {
     let late = early + 2;
     r.event(102, late, 3, 0, &DOG.to_le_bytes());
     r.pump();
-    assert_eq!(r.m.count(Verb::Restore(SLOT_JOURNAL)), 1, "one rollback");
-    assert_eq!(r.m.emits_of(T_ROLLBACK), vec![(was - 1032, 1032)]);
+    assert_eq!(r.m.count(Verb::Restore), 1, "one rollback");
+    // (late_ticks, rewound_ticks): how late the event was, and how far
+    // back the repair reached to place it. This one is later than the
+    // dense window, so the rewind falls back to the cadence entry.
+    assert_eq!(r.m.emits_of(T_ROLLBACK), vec![(was - late, was - 1032)]);
     assert_eq!(r.s.stat(STAT_ROLLBACKS), 1);
     assert_eq!(r.s.seq(), 102);
-    assert_eq!(r.s.tick(), late, "the late event applies where it belongs");
     // the event since the ring entry was replayed, then the late one landed
-    assert_eq!(r.m.applies(SLOT_JOURNAL), vec![1, 3]);
-    // and the deficit the rewind opened is just stepping to the clock
-    r.advance(1000);
-    assert!(r.s.tick() > was);
+    assert_eq!(r.m.applies(), vec![1, 3]);
+    // ...and the pump ends where it began: the rewind never reaches a frame
+    assert_eq!(
+        r.s.tick(),
+        was,
+        "the pump left the replica in the past: the renderer would rewind"
+    );
     assert_eq!(r.s.stat(STAT_RESYNCS), 0);
+}
+
+#[test]
+fn a_late_event_converges_on_the_same_world_as_an_early_one() {
+    // Delivery order is not allowed to change the world. Same journal,
+    // same ticks, one delivered late: the states must be bit-identical,
+    // which is what makes a rollback invisible to every dog but the actor.
+    fn journal(late: bool) -> (u64, u64) {
+        let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
+        r.run_to_tick(1040);
+        let a = r.s.tick();
+        r.event(101, a, 1, 0, &DOG.to_le_bytes());
+        r.pump();
+        if late {
+            r.run_to_tick(1060);
+            r.event(102, a + 2, 3, 0, &DOG.to_le_bytes());
+            r.pump();
+        } else {
+            r.run_to_tick(a + 2);
+            r.event(102, a + 2, 3, 0, &DOG.to_le_bytes());
+            r.pump();
+            r.run_to_tick(1060);
+        }
+        r.run_to_tick(1100);
+        (r.s.tick(), r.m.park.acc)
+    }
+    let ordered = journal(false);
+    let late = journal(true);
+    assert_eq!(late, ordered, "a late event forked the world");
+}
+
+#[test]
+fn a_rewind_too_deep_for_the_frame_resyncs_instead_of_half_rewinding() {
+    let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
+    r.run_to_tick(1040);
+    let early = r.s.tick();
+    r.event(101, early, 1, 0, &DOG.to_le_bytes());
+    r.pump();
+    r.run_to_tick(1060);
+    let was = r.s.tick();
+    r.m.clear();
+    r.event(102, early + 2, 3, 0, &DOG.to_le_bytes());
+    // a budget that cannot pay for the walk back: refuse the whole repair
+    r.s.pump(&mut r.m, r.now, 30);
+    assert_eq!(r.s.tick(), was, "the replica rewound on a budget it lacked");
+    assert_eq!(r.m.count(Verb::Restore), 0, "restored anyway");
+    assert_eq!(r.s.stat(STAT_ROLLBACKS), 0);
+    assert_eq!(
+        r.m.emits_of(T_RESYNC_REQUESTED),
+        vec![(R_LATE_EVENT as u64, 101)]
+    );
+}
+
+#[test]
+fn the_same_rewind_goes_through_on_a_real_frame_budget() {
+    let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
+    r.run_to_tick(1040);
+    let early = r.s.tick();
+    r.event(101, early, 1, 0, &DOG.to_le_bytes());
+    r.pump();
+    r.run_to_tick(1060);
+    let was = r.s.tick();
+    r.event(102, early + 2, 3, 0, &DOG.to_le_bytes());
+    r.pump();
+    assert_eq!((r.s.tick(), r.s.seq()), (was, 102));
+    assert_eq!(r.s.stat(STAT_ROLLBACKS), 1);
+    assert_eq!(r.s.stat(STAT_RESYNCS), 0);
+}
+
+#[test]
+fn a_restored_world_can_absorb_a_late_event_immediately() {
+    // Cadence ring entries only appear on the second. Without a floor at
+    // the restore itself, every late event in that first second costs a
+    // snapshot — which empties the ring again. The loop repairs nothing
+    // and the user watches the world teleport once per round trip.
+    let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
+    r.m.clear();
+    r.snapshot(500, 5000, 7, TERRAIN);
+    r.pump();
+    assert_eq!(r.s.tick(), 5000);
+    assert_eq!(r.s.ring_len, 1, "the restore left no rollback floor");
+    // a handful of ticks later, still short of the first cadence entry
+    r.advance(200);
+    let was = r.s.tick();
+    assert!(
+        was < 5000 + HZ,
+        "test drifted past the first cadence snapshot"
+    );
+    r.m.clear();
+    r.event(501, was - 2, 1, 0, &DOG.to_le_bytes());
+    r.pump();
+    assert_eq!(r.s.stat(STAT_ROLLBACKS), 1, "no floor to roll back to");
+    assert_eq!(
+        r.s.stat(STAT_RESYNCS),
+        0,
+        "answered a snapshot by asking for another"
+    );
+    assert_eq!(r.s.seq(), 501);
+    assert_eq!(r.s.tick(), was);
 }
 
 #[test]
@@ -894,14 +1127,14 @@ fn the_ring_entry_is_the_state_before_the_ticks_own_events() {
     r.run_to_tick(1030);
     let t = r.s.tick();
     let entry = r.s.hash_get(t).expect("hash at the current tick");
-    assert_eq!(entry, toy_hash(t, r.m.parks[0].acc));
+    assert_eq!(entry, toy_hash(t, r.m.park.acc));
     // apply an event stamped for this very tick, without leaving it
     r.event(101, t, 1, 0, &DOG.to_le_bytes());
     r.pump();
     assert_eq!(r.s.tick(), t, "wall time did not move");
     assert_eq!(r.s.seq(), 101);
     assert_ne!(
-        toy_hash(t, r.m.parks[0].acc),
+        toy_hash(t, r.m.park.acc),
         entry,
         "the event must have moved the world"
     );
@@ -1026,12 +1259,12 @@ fn a_snapshot_waits_for_its_terrain_then_lands() {
     assert_eq!(r.m.reqs_of(REQ_NEED_TERRAIN), vec![TERRAIN]);
     r.m.clear();
     r.snapshot(500, 2000, 9, TERRAIN);
-    assert_eq!(r.m.count(Verb::Restore(SLOT_JOURNAL)), 0, "restored blind");
+    assert_eq!(r.m.count(Verb::Restore), 0, "restored blind");
     assert_eq!(r.m.reqs_of(REQ_NEED_TERRAIN), vec![TERRAIN]);
     assert!(!r.s.have_state);
     r.s.terrain_ready(&mut r.m, TERRAIN, true);
     r.pump();
-    assert_eq!(r.m.count(Verb::Restore(SLOT_JOURNAL)), 1);
+    assert_eq!(r.m.count(Verb::Restore), 1);
     assert!(r.s.have_state);
     assert_eq!(r.s.seq(), 500);
     assert_eq!(r.s.tick(), 2000);
@@ -1047,6 +1280,7 @@ fn a_restore_clears_the_queues_and_resends_unanswered_intents() {
     let mut r = Rig::boot(ROLE_PLAYER, 1008);
     r.run_to_tick(1040);
     // an intent the journal has not answered, and a future event queued
+    let join_id = r.m.intents()[0].0;
     let id = r.s.intent_check_in(&mut r.m, r.now);
     r.event(400, 5000, 1, 0, &DOG.to_le_bytes());
     r.m.clear();
@@ -1055,12 +1289,23 @@ fn a_restore_clears_the_queues_and_resends_unanswered_intents() {
     assert_eq!(r.s.seq(), 300);
     assert_eq!(r.s.tick(), 4000);
     assert_eq!(r.s.queued_len, 0, "the queue does not survive a restore");
-    assert_eq!(r.s.ring_len, 0);
     assert_eq!(r.s.recent_len, 0);
-    // the join from connect() and the check-in both ride again
-    let resent = r.m.intents();
-    assert_eq!(resent.len(), 2);
-    assert!(resent.contains(&(id, EV_CHECK_IN)));
+    // the restored state itself is the only ring entry: nothing older
+    // survives, but the world is never left without a rollback floor
+    assert_eq!(r.s.ring_len, 1);
+    // nothing rides again: this connection already carried both
+    assert!(
+        r.m.intents().is_empty(),
+        "a restore resent intents the connection had already delivered"
+    );
+    // ...but a fresh connection carries them, exactly once each
+    r.s.disconnected();
+    r.m.clear();
+    r.s.connected(&mut r.m, b"ticket", r.now);
+    let sent = r.m.intents();
+    assert_eq!(sent.len(), 1, "the join rides the new connection");
+    assert!(sent.contains(&(join_id, EV_JOIN)));
+    let _ = id;
     assert_eq!(clock_state_code(r.s.clock.state()), 1, "clock re-seeded");
 }
 
@@ -1094,18 +1339,14 @@ fn a_snapshot_for_the_wrong_world_is_surfaced_not_looped() {
     r.m.restore_code = RESTORE_WRONG_TERRAIN;
     r.snapshot(300, 3000, 5, TERRAIN);
     r.pump();
-    assert_eq!(
-        r.m.count(Verb::Restore(SLOT_JOURNAL)),
-        1,
-        "tried exactly once"
-    );
+    assert_eq!(r.m.count(Verb::Restore), 1, "tried exactly once");
     assert_eq!(
         r.m.emits_of(T_RESTORE_FAILED),
         vec![(RESTORE_WRONG_TERRAIN as u64, 300)]
     );
     r.advance(30_000);
     assert_eq!(
-        r.m.count(Verb::Restore(SLOT_JOURNAL)),
+        r.m.count(Verb::Restore),
         1,
         "a terrain mismatch must not become a resync loop"
     );
@@ -1174,82 +1415,45 @@ fn a_verdict_naming_another_module_is_the_backstop() {
         r.m.emits_of(T_RESYNC_REQUESTED),
         vec![(R_MODULE_SWAPPED as u64, 100)]
     );
-    assert_eq!(
-        r.m.count(Verb::Step(SLOT_JOURNAL)),
-        0,
-        "no stepping without a world"
-    );
+    assert_eq!(r.m.count(Verb::Step), 0, "no stepping without a world");
     r.snapshot(700, 9000, 3, TERRAIN);
     r.pump();
     assert!(r.s.have_state);
     assert_eq!(r.s.tick(), 9000);
 }
 
-// ---- invariant 8: the prediction overlay ----
-
-#[test]
-fn pending_intents_ride_on_the_presented_slot_until_the_journal_answers() {
-    let mut r = Rig::boot(ROLE_PLAYER, 1008);
-    // connect() sent the join, the restore resent it, and the overlay
-    // carries it until the journal answers
-    let joined = r.m.intents();
-    assert_eq!(joined.len(), 2, "sent on connect, resent after the restore");
-    assert!(joined.iter().all(|i| *i == joined[0]));
-    assert_eq!(joined[0].1, EV_JOIN);
-    r.m.clear();
-    let id = r.s.intent_move_to(&mut r.m, 42, r.now);
-    assert_eq!(
-        id >> 32,
-        NONCE as u64,
-        "intent ids carry the page-load nonce"
-    );
-    r.pump();
-    assert_eq!(
-        r.m.count(Verb::Restore(SLOT_PRESENTED)),
-        1,
-        "overlay rebuilt"
-    );
-    assert_eq!(r.m.applies(SLOT_PRESENTED), vec![EV_JOIN, EV_MOVE_TO]);
-    assert!(
-        r.m.applies(SLOT_JOURNAL).is_empty(),
-        "predictions never touch slot 0"
-    );
-
-    // the journal answers the move: the prediction stops being an overlay
-    r.m.clear();
-    r.event(101, r.s.tick(), EV_MOVE_TO, id, &[0u8; 10]);
-    r.pump();
-    assert_eq!(r.m.applies(SLOT_JOURNAL), vec![EV_MOVE_TO]);
-    assert_eq!(r.m.applies(SLOT_PRESENTED), vec![EV_JOIN]);
-    assert_eq!(r.s.intents_len, 1);
-}
+// ---- invariant 8: an event is ours only under our own intent id ----
 
 #[test]
 fn only_an_exact_intent_id_acknowledges_a_pending_intent() {
     // The wire dropped the actor, so the intent id is the only handle back
     // to a sender. A bare counter would collide across senders and page
     // loads; these two ids share a counter and differ in nonce, and the
-    // foreign one must not touch our pending set or our overlay.
+    // foreign one must not touch our pending set.
     let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    r.confirm_join();
     r.m.clear();
     let mine = r.s.intent_move_to(&mut r.m, 42, r.now);
     assert_eq!(mine >> 32, NONCE as u64);
     let theirs = ((NONCE as u64 ^ 0xFFFF) << 32) | (mine & 0xFFFF_FFFF);
     assert_ne!(mine, theirs);
     let before = r.s.intents_len;
-    r.event(101, r.s.tick(), EV_MOVE_TO, theirs, &[0u8; 10]);
+    let next = r.s.seq() + 1;
+    r.event(next, r.s.tick(), EV_MOVE_TO, theirs, &move_payload(9));
     r.pump();
     assert_eq!(
         r.s.intents_len, before,
         "a foreign event cleared our intent"
     );
-    assert_eq!(r.m.applies(SLOT_PRESENTED), vec![EV_JOIN, EV_MOVE_TO]);
+    // it lands on the world, as every journal event does — what it must
+    // not do is retire our pending entry
+    assert_eq!(r.m.applies(), vec![EV_MOVE_TO]);
     // and the real acknowledgment still lands
     r.m.clear();
-    r.event(102, r.s.tick(), EV_MOVE_TO, mine, &[0u8; 10]);
+    let next = r.s.seq() + 1;
+    r.event(next, r.s.tick(), EV_MOVE_TO, mine, &move_payload(42));
     r.pump();
     assert_eq!(r.s.intents_len, before - 1);
-    assert_eq!(r.m.applies(SLOT_PRESENTED), vec![EV_JOIN]);
 }
 
 #[test]
@@ -1295,44 +1499,10 @@ fn signing_in_swaps_identity_without_reloading_the_world() {
 }
 
 #[test]
-fn the_overlay_rebuilds_after_every_slot_zero_mutation() {
-    let mut r = Rig::boot(ROLE_PLAYER, 1008);
-    r.run_to_tick(1030);
-    r.m.clear();
-    r.advance(500);
-    let idle_rebuilds = r.m.count(Verb::Restore(SLOT_PRESENTED));
-    assert_eq!(idle_rebuilds, 0, "lockstep stepping needs no rebuild");
-    let steps0 = r.m.count(Verb::Step(SLOT_JOURNAL));
-    assert_eq!(
-        r.m.count(Verb::Step(SLOT_PRESENTED)),
-        steps0,
-        "both slots step in lockstep"
-    );
-    r.m.clear();
-    r.event(101, r.s.tick(), EV_CHECK_IN, 0, &DOG.to_le_bytes());
-    r.pump();
-    assert_eq!(r.m.count(Verb::Restore(SLOT_PRESENTED)), 1);
-}
-
-#[test]
-fn an_overlay_reject_is_silent() {
-    let mut r = Rig::boot(ROLE_PLAYER, 1008);
-    r.m.reject = Some((SLOT_PRESENTED, EV_BOOST_SET, ERR_NOOP));
-    r.m.clear();
-    r.s.intent_boost(&mut r.m, true, r.now);
-    r.pump();
-    r.pump();
-    assert_eq!(r.m.applies(SLOT_PRESENTED), vec![EV_JOIN, EV_BOOST_SET]);
-    assert!(r.m.emits_of(T_RESYNC_REQUESTED).is_empty());
-    assert!(r.m.emits_of(T_REJECT).is_empty());
-    assert_eq!(r.s.stat(STAT_RESYNCS), 0);
-}
-
-#[test]
 fn an_event_the_replica_refuses_is_a_resync() {
     let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
     r.run_to_tick(1030);
-    r.m.reject = Some((SLOT_JOURNAL, EV_CHECK_IN, 5));
+    r.m.reject = Some((EV_CHECK_IN, 5));
     r.m.clear();
     r.event(101, r.s.tick(), EV_CHECK_IN, 0, &DOG.to_le_bytes());
     r.pump();
@@ -1341,6 +1511,107 @@ fn an_event_the_replica_refuses_is_a_resync() {
         vec![(R_EVENT_REJECTED as u64, 100)]
     );
     assert_eq!(r.s.seq(), 100, "a refused event never advances seq");
+}
+
+// ---- invariant 10: nothing moves the world without saying so ----
+
+#[test]
+fn every_path_that_corrects_the_world_announces_it() {
+    // The four are enumerated on S_CORRECTED itself. A path that moves
+    // rendered positions without raising the bit is a jump on screen with
+    // nothing to absorb it, and the presenter cannot tell that it missed
+    // one — so each is held here rather than trusted.
+    let mut r = Rig::boot(ROLE_SPECTATOR, 3000);
+    // (1) a snapshot restore, landing mid-frame the way one really does:
+    // the flag has to survive from the restore to the next pump
+    r.snapshot(500, 3200, 11, TERRAIN);
+    assert_eq!(r.s.tick(), 3200, "the snapshot never landed");
+    assert_ne!(
+        r.pump() & S_CORRECTED,
+        0,
+        "(1) a snapshot restore left the host nothing to absorb"
+    );
+
+    // (2) a repair: an event late by two ticks rewinds and replays
+    r.advance(200);
+    let was = r.s.tick();
+    r.event(r.s.seq() + 1, was - 2, EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    let flags = r.pump();
+    assert_eq!(r.s.stat(STAT_ROLLBACKS), 1, "the repair never happened");
+    assert_ne!(
+        flags & S_CORRECTED,
+        0,
+        "(2) a repair moved the world quietly"
+    );
+
+    // (3) has its own case below; (4) a module swap drops the world, and
+    // the restore that refills it is what the host hears about
+    r.s.module_swapped(&mut r.m, PARK_B);
+    assert!(!r.s.have_state, "a fresh instance holds no world");
+    r.pump();
+    r.snapshot(700, 9000, 3, TERRAIN);
+    let flags = r.pump();
+    assert!(r.s.have_state);
+    assert_ne!(
+        flags & S_CORRECTED,
+        0,
+        "(4) the world was replaced under the renderer in silence"
+    );
+}
+
+#[test]
+fn a_terrain_change_announces_itself_and_a_plain_edit_does_not() {
+    // S_CORRECTED is the host's only warning that dogs moved with no time
+    // behind it, so every mutation that is not the step function owes it —
+    // and no other one may raise it, or the presenter glides away motion
+    // the world meant.
+    let mut r = Rig::boot(ROLE_PLAYER, 2000);
+    r.confirm_join();
+
+    let at = r.s.tick() + 3;
+    r.event(r.s.seq() + 1, at, EV_MOVE_TO, 0, &move_payload(9));
+    let flags = r.pump_until_seq(r.s.seq() + 1);
+    assert_eq!(
+        flags & S_CORRECTED,
+        0,
+        "an edit the step function acts on later moved nothing now"
+    );
+
+    let at = r.s.tick() + 3;
+    let mut p = [0u8; 12];
+    p[..4].copy_from_slice(&7u32.to_le_bytes());
+    p[4..].copy_from_slice(&TERRAIN.to_le_bytes());
+    r.event(r.s.seq() + 1, at, EV_TERRAIN_SET, 0, &p);
+    let flags = r.pump_until_seq(r.s.seq() + 1);
+    assert_ne!(
+        flags & S_CORRECTED,
+        0,
+        "a terrain change puts dogs back on ground: the host is never told"
+    );
+    assert_eq!(
+        (r.s.stat(STAT_ROLLBACKS), r.s.stat(STAT_RESYNCS)),
+        (0, 0),
+        "neither event needed a repair, so the bit came from the apply"
+    );
+}
+
+#[test]
+fn a_clock_skip_leaves_the_core_standing_where_the_park_does() {
+    // The one event that moves the tick without a step. A core that
+    // assumed its own tick would keep stepping from where it thought it
+    // was, and every later event would be judged late or early against a
+    // clock the park had already left.
+    let mut r = Rig::boot(ROLE_SPECTATOR, 2000);
+    let at = r.s.tick() + 3;
+    let target = at + 5_000;
+    r.event(r.s.seq() + 1, at, EV_CLOCK_SKIP, 0, &target.to_le_bytes());
+    r.pump_until_seq(r.s.seq() + 1);
+    assert_eq!(
+        r.s.tick(),
+        r.m.park.tick,
+        "the core's tick is the park's, always"
+    );
+    assert!(r.s.tick() >= target, "the skip was not taken");
 }
 
 // ---- reject policy ----
@@ -1362,6 +1633,7 @@ fn a_join_the_park_already_honored_is_not_an_error() {
 #[test]
 fn a_boost_already_in_effect_is_not_an_error() {
     let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    r.confirm_join();
     r.m.clear();
     let id = r.s.intent_boost(&mut r.m, true, r.now);
     r.reject(id, ERR_NOOP);
@@ -1371,6 +1643,7 @@ fn a_boost_already_in_effect_is_not_an_error() {
 #[test]
 fn absent_on_a_players_intent_rejoins_the_park_once_per_window() {
     let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    r.confirm_join();
     r.m.clear();
     let id = r.s.intent_check_in(&mut r.m, r.now);
     r.reject(id, ERR_ABSENT);
@@ -1385,43 +1658,18 @@ fn absent_on_a_players_intent_rejoins_the_park_once_per_window() {
     assert_ne!(sent[0].0, sent[2].0);
 
     // a second absent inside the window does not re-join
+    r.s.presence = true;
     r.m.clear();
     let id2 = r.s.intent_check_in(&mut r.m, r.now);
     r.reject(id2, ERR_ABSENT);
     assert!(r.m.emits_of(T_AUTO_REJOIN).is_empty());
     // past the window it does
     r.now += 6000;
+    r.s.presence = true;
     r.m.clear();
     let id3 = r.s.intent_check_in(&mut r.m, r.now);
     r.reject(id3, ERR_ABSENT);
     assert_eq!(r.m.emits_of(T_AUTO_REJOIN).len(), 1);
-}
-
-#[test]
-fn a_rejected_intent_leaves_the_overlay_immediately() {
-    // A refused intent that stays predicted is a ghost: in a quiet park no
-    // later event would mark the overlay dirty, so slot 1 would show the
-    // authority's refusal as reality forever. Every reject that removes a
-    // pending entry must schedule the rebuild — including the two the core
-    // swallows, which remove it just the same.
-    for reason in [101, ERR_PRESENT] {
-        let mut r = Rig::boot(ROLE_PLAYER, 1008);
-        r.pump();
-        let join = r.m.intents()[0].0;
-        r.m.clear();
-        r.reject(join, reason);
-        r.pump();
-        assert_eq!(r.s.intents_len, 0, "reason {reason}");
-        assert_eq!(
-            r.m.count(Verb::Restore(SLOT_PRESENTED)),
-            1,
-            "reason {reason}: overlay not rebuilt"
-        );
-        assert!(
-            r.m.applies(SLOT_PRESENTED).is_empty(),
-            "reason {reason}: the refused intent is still predicted"
-        );
-    }
 }
 
 // A snapshot frame at the largest size the park can produce: the park's
@@ -1582,21 +1830,30 @@ fn a_zero_budget_observes_without_stepping() {
     let states = r.advance_starved(40_000);
     assert_eq!(r.s.tick(), frozen_at, "a zero budget must not step");
     assert_eq!(
-        r.m.count(Verb::Step(SLOT_JOURNAL)),
+        r.m.count(Verb::Step),
         0,
         "slot 0 stepped under a zero budget"
     );
-    assert_eq!(r.m.count(Verb::Step(SLOT_PRESENTED)), 0, "slot 1 stepped");
     assert!(states.contains(&2), "never escalated to fast-forward");
     assert_eq!(
         *states.last().unwrap(),
         3,
         "never reached snapshot-required"
     );
+    let asks = r.m.emits_of(T_RESYNC_REQUESTED);
     assert_eq!(
-        r.m.emits_of(T_RESYNC_REQUESTED),
-        vec![(R_CLOCK as u64, 100)],
-        "a starved replica must ask for a snapshot exactly once"
+        asks[0],
+        (R_CLOCK as u64, 100),
+        "the first ask names the clock"
+    );
+    assert!(asks.len() > 1, "nobody answered, so it has to ask again");
+    // A retry is the same request: same reason, same seq. One that
+    // renumbered itself would be asking for a different snapshot than the
+    // one it still needs, and one that renamed itself would show a
+    // dashboard two causes where there was one.
+    assert!(
+        asks.iter().all(|a| *a == asks[0]),
+        "a retry changed the request: {asks:?}"
     );
     // the clock kept observing, so it knows how far behind it is
     assert!(r.s.error_q16(r.now) >> 16 > 30 * HZ as i64);
@@ -1621,7 +1878,7 @@ fn a_zero_budget_still_applies_what_the_journal_delivered() {
     r.event(101, t, 1, 0, &DOG.to_le_bytes());
     r.s.pump(&mut r.m, r.now, 0);
     assert_eq!(r.s.seq(), 101, "a frozen replica still owes the journal");
-    assert_eq!(r.m.applies(SLOT_JOURNAL), vec![1]);
+    assert_eq!(r.m.applies(), vec![1]);
     assert_eq!(r.s.tick(), t, "applying is not stepping");
 }
 
@@ -1676,6 +1933,61 @@ fn the_clock_readouts_come_from_the_clock_being_disciplined() {
     );
     assert_eq!(clock_state_code(r.s.clock.state()), 1);
     assert!(r.s.phase_q16() < 65536);
+}
+
+#[test]
+fn a_redial_carries_the_same_join_rather_than_minting_another() {
+    // The park is being asked to admit a dog it is already being asked to
+    // admit. A second id is a second join on the wire, and the authority
+    // can only answer the newcomer with a refusal.
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    let first = r.m.intents()[0].0;
+    r.s.disconnected();
+    r.m.clear();
+    r.s.connected(&mut r.m, b"ticket", r.now);
+    let sent = r.m.intents();
+    assert_eq!(sent.len(), 1, "the redial put a second join on the wire");
+    assert_eq!(sent[0], (first, EV_JOIN), "the join was minted afresh");
+    assert_eq!(r.s.intents_len, 1);
+}
+
+#[test]
+fn an_intent_that_needs_a_dog_waits_for_the_join_to_be_answered() {
+    // Racing the join earns an ABSENT refusal, which triggers a re-join
+    // and a retry — a spiral out of one tap on the boost button.
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    r.m.clear();
+    let boost = r.s.intent_boost(&mut r.m, true, r.now);
+    let node = r.s.intent_move_to(&mut r.m, 7, r.now);
+    r.pump();
+    assert!(
+        r.m.intents().is_empty(),
+        "presence-requiring intents raced the join"
+    );
+    assert_ne!(boost, 0, "a held intent still gets its id");
+    // held means held: the wait is the round trip, and nothing is shown
+    // of an action the park has not been told about
+    r.pump();
+
+    // the journal answers the join, and everything held goes at once
+    r.confirm_join();
+    let sent = r.m.intents();
+    assert_eq!(
+        sent,
+        vec![(boost, EV_BOOST_SET), (node, EV_MOVE_TO)],
+        "held intents did not flush in order, under their own ids"
+    );
+    assert!(r.s.presence);
+}
+
+#[test]
+fn a_spectator_acts_without_waiting_for_a_dog() {
+    // A spectator has no join to wait on; gating one would mean their
+    // intents never leave at all.
+    let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
+    r.m.clear();
+    r.s.intent_check_in(&mut r.m, r.now);
+    assert_eq!(r.m.intents().len(), 1);
 }
 
 #[test]
@@ -1759,4 +2071,335 @@ fn two_frames_in_one_read_both_land() {
     r.s.on_stream(&mut r.m, &both, r.now);
     r.pump();
     assert_eq!(r.s.seq(), 102);
+}
+
+#[test]
+fn an_unanswered_intent_rides_the_next_connection() {
+    // The connection that died never got it to the park, so the next one
+    // has to say it again — once, and only after the dog is back.
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    r.confirm_join();
+    r.m.clear();
+    let check = r.s.intent_check_in(&mut r.m, r.now);
+    assert_eq!(
+        r.m.intents(),
+        vec![(check, EV_CHECK_IN)],
+        "sent on this connection"
+    );
+
+    r.s.disconnected();
+    r.m.clear();
+    r.s.connected(&mut r.m, b"ticket", r.now);
+    let rejoin = r.m.intents()[0].0;
+    assert!(
+        !r.m.intents().iter().any(|i| i.1 == EV_CHECK_IN),
+        "the check-in raced the new connection's join"
+    );
+    r.snapshot(600, 7000, 5, TERRAIN);
+    r.pump();
+    assert!(
+        !r.m.intents().iter().any(|i| i.1 == EV_CHECK_IN),
+        "the restore sent it before presence was re-established"
+    );
+    // the park already holds the dog, so the rejoin comes back present
+    r.reject(rejoin, ERR_PRESENT);
+    let sent = r.m.intents();
+    assert_eq!(
+        sent.iter().filter(|i| i.1 == EV_CHECK_IN).count(),
+        1,
+        "the held intent did not ride the new connection: {sent:?}"
+    );
+    assert_eq!(sent.iter().find(|i| i.1 == EV_CHECK_IN).unwrap().0, check);
+}
+
+#[test]
+fn a_restore_never_presents_a_tick_the_viewer_has_passed() {
+    // The authority stamps a snapshot where it stood when it took it,
+    // which is behind where an optimistic replica has already run to.
+    // Presenting that verbatim rewinds the world on screen.
+    let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
+    r.run_to_tick(1040);
+    let was = r.s.tick();
+    r.m.clear();
+    r.snapshot(700, was - 3, 9, TERRAIN);
+    r.pump();
+    assert_eq!(r.s.seq(), 700, "the snapshot did not land");
+    assert_eq!(
+        r.s.tick(),
+        was,
+        "the restore left the replica behind where it had already been"
+    );
+    // a restore from much further back is a real correction, not a hiccup:
+    // show it rather than grinding forward through it
+    let deep = r.s.tick() - 5 * HZ;
+    r.snapshot(800, deep, 3, TERRAIN);
+    r.pump();
+    assert!(r.s.tick() < was, "a deep correction was ground through");
+    assert!(r.s.tick() >= deep);
+}
+
+#[test]
+fn a_repair_leaves_floors_behind_for_the_next_one() {
+    // Without floors recorded on the way back to the present, every repair
+    // reaches the same aging cadence entry, so each rewind is longer than
+    // the one before it — measured climbing 4, 5, 7, 9 ... 23 ticks for
+    // events that were each a single tick late.
+    let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
+    r.run_to_tick(1055);
+    let was = r.s.tick();
+
+    // the first repair has only the cadence entry to reach for
+    r.m.clear();
+    let seq = r.s.seq() + 1;
+    r.event(seq, was - 1, 3, 0, &DOG.to_le_bytes());
+    r.pump();
+    let first = r.m.emits_of(T_ROLLBACK)[0];
+    assert_eq!(first.0, 1, "late by one tick");
+    assert!(first.1 > 2, "this test needs a stale floor to start from");
+
+    // the next ones, over ticks that repair just walked, pay for their own
+    // lateness instead of inheriting the first repair's distance
+    for round in 0..4 {
+        let was = r.s.tick();
+        r.m.clear();
+        let seq = r.s.seq() + 1;
+        r.event(seq, was - 1, 3, 0, &DOG.to_le_bytes());
+        r.pump();
+        let (late, rewound) = r.m.emits_of(T_ROLLBACK)[0];
+        assert_eq!(late, 1);
+        assert!(
+            rewound <= 2,
+            "round {round}: rewound {rewound} for a 1-tick-late event"
+        );
+        assert_eq!(r.s.tick(), was);
+    }
+}
+
+#[test]
+fn a_journaled_skip_moves_the_clock_with_the_world() {
+    // A skip is the authority repaying a long gap: both worlds jump, and
+    // nothing is wrong. The replica's model of the authority has to jump
+    // with them, because a clock that still believes the old tick sees a
+    // replica hours ahead of the server, demands a snapshot, and pays a
+    // full download and a visible correction to repair a world that was
+    // never broken.
+    let mut r = Rig::boot(ROLE_SPECTATOR, 1000);
+    for _ in 0..40 {
+        r.now += 16;
+        r.pump();
+        let t = r.s.tick();
+        r.verdict_at(t, t + 6, true, true);
+    }
+    let skip_to = r.s.tick() + 5_000;
+    let seq = r.s.seq() + 1;
+    r.event(seq, r.s.tick(), EV_CLOCK_SKIP, 0, &skip_to.to_le_bytes());
+    r.pump();
+    assert_eq!(r.s.tick(), skip_to, "the skip did not land");
+    assert_eq!(r.s.tick(), r.m.park.tick, "the core's tick is the park's");
+
+    // and the stream keeps flowing: an event stamped past the destination
+    // applies on its own tick like any other
+    r.event(seq + 1, skip_to + 4, EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    for _ in 0..40 {
+        r.now += 16;
+        r.pump();
+    }
+    assert_eq!(r.s.seq(), seq + 1, "the journal stalled behind the skip");
+    assert_eq!(
+        r.s.stat(STAT_RESYNCS),
+        0,
+        "a skip is a repayment, not a divergence"
+    );
+}
+
+/// The authority's own history, computed the way it computes it: the world
+/// at entry to a tick carries every event stamped BEFORE that tick and none
+/// of the events stamped at it. `park.go` applies a tick's events while its
+/// park stands at that tick and rings the hash after stepping, so this is
+/// the same rule read from the other side of the wire.
+fn reference_hash(base_acc: u64, journal: &[(u64, u16, Vec<u8>)], tick: u64) -> u64 {
+    let acc = journal
+        .iter()
+        .filter(|(t, _, _)| *t < tick)
+        .fold(base_acc, |a, (_, kind, p)| {
+            let mut ev = kind.to_le_bytes().to_vec();
+            ev.extend_from_slice(p);
+            a ^ edit_of(&ev)
+        });
+    toy_hash(tick, acc)
+}
+
+/// Every tick the replica recorded a hash for must be the tick the authority
+/// would have produced from the same journal. A tick the replica stepped
+/// through while already holding an event stamped for it shows up here and
+/// nowhere else: the repair a frame later fixes the world, so the end state
+/// agrees and only the history disagrees — and the history is what a check
+/// datagram samples.
+fn assert_history_matches(r: &Rig, base_acc: u64, journal: &[(u64, u16, Vec<u8>)], when: &str) {
+    let mut checked = 0;
+    for i in 0..HASH_RING {
+        let e = bufs().hashes[i];
+        if !e.valid || e.tick > r.s.tick() {
+            continue;
+        }
+        assert_eq!(
+            e.hash,
+            reference_hash(base_acc, journal, e.tick),
+            "{when}: the replica's history at tick {} is not the authority's",
+            e.tick
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "{when}: no history to compare");
+}
+
+#[test]
+fn one_journal_two_consumers_agree_at_every_tick() {
+    // The differential: one journal through the real session and through the
+    // authority's own ordering, compared tick by tick rather than at the
+    // end. Comparing end states cannot see a replica that stepped over an
+    // event and repaired itself afterwards — the world converges, the
+    // history does not, and the history is what the authority answers.
+    const BASE: u64 = 7;
+    let mut r = Rig::boot(ROLE_SPECTATOR, 6000);
+    let mut journal: Vec<(u64, u16, Vec<u8>)> = Vec::new();
+    assert_history_matches(&r, BASE, &journal, "at rest");
+
+    // events that arrive before their tick: the ordinary case
+    for k in 0..3u64 {
+        let at = r.s.tick() + 4;
+        let seq = r.s.seq() + 1;
+        let p = DOG.wrapping_add(k).to_le_bytes().to_vec();
+        r.event(seq, at, EV_CHECK_IN, 0, &p);
+        journal.push((at, EV_CHECK_IN, p));
+        r.advance(300);
+        assert_history_matches(&r, BASE, &journal, "after an event that arrived early");
+    }
+
+    // and the adversarial delivery: one late enough to force a repair, one
+    // stamped inside the ground that repair walks back over, both landing
+    // together
+    let was = r.s.tick();
+    let seq = r.s.seq();
+    let late = DOG.wrapping_add(9).to_le_bytes().to_vec();
+    let inside = move_payload(9).to_vec();
+    r.event(seq + 1, was - 3, EV_CHECK_IN, 0, &late);
+    r.event(seq + 2, was - 1, EV_MOVE_TO, 0, &inside);
+    journal.push((was - 3, EV_CHECK_IN, late));
+    journal.push((was - 1, EV_MOVE_TO, inside));
+    r.pump();
+    assert_history_matches(
+        &r,
+        BASE,
+        &journal,
+        "after a repair walked back to the present",
+    );
+    assert_eq!(r.s.tick(), was, "the walk did not return to the present");
+}
+
+#[test]
+fn a_repair_applies_the_events_it_walks_back_over() {
+    // A repair rewinds, fixes the tick the late event belongs to, and then
+    // has to walk back to where the viewer was. Anything queued for the
+    // ticks it walks over has to land on the way: stepping past one makes
+    // it late the moment we arrive, which buys a rollback we caused
+    // ourselves — and that one walks too. One late event becomes a train
+    // of self-inflicted repairs, each a correction the host has to absorb.
+    let mut r = Rig::boot(ROLE_SPECTATOR, 5000);
+    r.advance(600);
+    let was = r.s.tick();
+    let seq = r.s.seq();
+    // both arrive in the same delivery: one late enough to force a repair,
+    // one stamped inside the ground that repair must walk back over
+    r.event(seq + 1, was - 3, EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    r.event(seq + 2, was - 1, EV_MOVE_TO, 0, &move_payload(9));
+    r.pump();
+    assert_eq!(r.s.seq(), seq + 2, "the second event never applied");
+    assert_eq!(
+        r.s.stat(STAT_ROLLBACKS),
+        1,
+        "the walk stranded an event and paid for a second repair"
+    );
+    assert_eq!(r.s.tick(), was, "the walk did not return to the present");
+}
+
+#[test]
+fn a_verdict_about_history_a_repair_has_replaced_is_not_a_strike() {
+    // A check carries the hash the replica held when it asked. If a late
+    // event then rewrites that tick, the authority answers "mismatch"
+    // about a history this replica has already replaced — true when we
+    // asked, stale by the time it lands. Two of those resync a replica
+    // that repaired itself correctly, which is the expensive way to be
+    // right.
+    let mut r = Rig::boot(ROLE_SPECTATOR, 4000);
+    r.advance(2000);
+    let checked = r.m.checks().last().expect("no check went out").0;
+    assert!(checked >= 4000, "the check named a tick before the world");
+    r.advance(200);
+
+    // a late event lands at the checked tick: rewind, replay, and the
+    // world at that tick is no longer what the check described
+    let seq = r.s.seq() + 1;
+    r.event(seq, checked, EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    r.pump();
+    assert_eq!(r.s.stat(STAT_ROLLBACKS), 1, "the repair never happened");
+
+    r.m.clear();
+    r.verdict_at(checked, r.s.tick(), true, false);
+    assert_eq!(
+        r.s.stat(STAT_MISMATCHES),
+        0,
+        "counted a repair we already made as a divergence"
+    );
+    assert!(
+        r.m.emits_of(T_MISMATCH).is_empty(),
+        "reported history we have since replaced as a mismatch"
+    );
+    r.verdict_at(checked, r.s.tick(), true, false);
+    assert!(
+        r.m.emits_of(T_RESYNC_REQUESTED).is_empty(),
+        "resynced a replica whose repair was correct"
+    );
+
+    // and a mismatch about history nothing has rewritten still strikes
+    r.advance(6000);
+    let fresh = r.m.checks().last().expect("no second check").0;
+    r.m.clear();
+    r.verdict_at(fresh, r.s.tick(), true, false);
+    r.verdict_at(fresh, r.s.tick(), true, false);
+    assert_eq!(
+        r.m.emits_of(T_RESYNC_REQUESTED).len(),
+        1,
+        "a real divergence must still resync"
+    );
+}
+
+#[test]
+fn a_check_that_outruns_the_authority_is_not_a_strike() {
+    // Right after a restore the replica sits at the snapshot's tick, ahead
+    // of its own lag target, so its checks name ticks the authority has
+    // not stamped yet. Its honest "I have never heard of that tick" is not
+    // evidence of staleness, and treating it as such resyncs a replica
+    // that is perfectly correct.
+    let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
+    r.advance(1000);
+    r.m.clear();
+    let ahead = r.s.tick();
+    for _ in 0..6 {
+        r.verdict_at(ahead, ahead - 6, false, false);
+    }
+    assert!(
+        r.m.emits_of(T_RESYNC_REQUESTED).is_empty(),
+        "a replica racing the authority's present resynced itself"
+    );
+    assert_eq!(r.s.stat(STAT_RESYNCS), 0);
+
+    // a genuinely stale check — a tick far below where the authority now
+    // stands — still strikes twice and resyncs
+    r.verdict_at(1, ahead, false, false);
+    r.verdict_at(1, ahead, false, false);
+    assert_eq!(
+        r.m.emits_of(T_RESYNC_REQUESTED),
+        vec![(R_CHECK_AGED_OUT as u64, 100)]
+    );
 }

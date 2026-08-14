@@ -13,7 +13,17 @@ import { describe, expect, it } from "vitest";
 import { Emit, HostEmit, ResyncReason, Stat } from "../src/ports.ts";
 import { PumpFlag, clockStateOf } from "../src/abi.ts";
 import { Role, decodeCheck, encodeEvent, type ClientFrame } from "../src/wire.ts";
-import { Ev, Reject, dogPayload, epochAdvancePayload, modules, rig } from "./wasm.ts";
+import {
+  bringTheDogIn,
+  Ev,
+  intentId,
+  intentsSent,
+  Reject,
+  dogPayload,
+  epochAdvancePayload,
+  modules,
+  rig,
+} from "./wasm.ts";
 
 /** One tick at the fixture park's 24Hz, in milliseconds. */
 const TICK_MS = 1000 / 24;
@@ -21,25 +31,39 @@ const TICK_MS = 1000 / 24;
 const RING_WARMUP_MS = 3000;
 /** Ten entries at one per second: past this, the oldest retained state is gone. */
 const RING_DEPTH_MS = 10_000;
+/** The cadence the session core repeats an unanswered resync request on. */
+const RESYNC_RETRY_MS = 2000;
 
-/** Intent frames of one kind the client has written, oldest first. */
-function intentsSent(r: Awaited<ReturnType<typeof rig>>, kind: number) {
-  return r.harness.transport
-    .sentFrames()
-    .filter((f) => f.kind === "intent" && f.value.kind === kind);
+/** Resync requests the core has written, oldest first. */
+function resyncFrames(r: Awaited<ReturnType<typeof rig>>): ClientFrame[] {
+  return r.harness.transport.sentFrames().filter((f) => f.kind === "resync");
 }
 
-function intentId(frame: ClientFrame | undefined): bigint {
-  return frame?.kind === "intent" ? frame.value.id : 0n;
+function haveSeqOf(frame: ClientFrame): bigint {
+  return frame.kind === "resync" ? frame.value.haveSeq : -1n;
 }
 
-/** Answers the join the core sent on connect, so the dog is really in the park. */
-async function bringTheDogIn(r: Awaited<ReturnType<typeof rig>>, dog: bigint): Promise<void> {
-  await r.run(100);
-  const id = intentId(intentsSent(r, Ev.join)[0]);
-  r.deliver([r.emit(Ev.join, dogPayload(dog), id)]);
-  const present = await r.until(() => r.core.state.present, 2000);
-  if (!present) throw new Error("the journal never placed the dog");
+/**
+ * Resync requests written since the last dial. Every connection opens with
+ * a hello, so that frame is where one stream ends and the next begins.
+ */
+function resyncsOnLatestStream(r: Awaited<ReturnType<typeof rig>>): number {
+  const sent = r.harness.transport.sentFrames();
+  const from = sent.map((f) => f.kind).lastIndexOf("hello");
+  return sent.slice(from).filter((f) => f.kind === "resync").length;
+}
+
+/**
+ * Runs the session while answering its checks, so a long stretch stays
+ * quiet: unanswered checks age out into strikes, and two strikes are a
+ * resync of their own — which would satisfy a case about resyncs without
+ * having anything to do with it.
+ */
+async function runAnsweringChecks(r: Awaited<ReturnType<typeof rig>>, ms: number): Promise<void> {
+  for (let t = 0; t < ms; t += 500) {
+    await r.run(Math.min(500, ms - t), 32);
+    r.answerChecks();
+  }
 }
 
 describe("boot and handshake", () => {
@@ -313,6 +337,85 @@ describe("invariant 4: two strikes, one resync", () => {
     expect(Number(r.core.state.resyncs)).toBe(0);
   });
 
+  it("loses nothing to a snapshot that answers a resync", async () => {
+    // A snapshot answering a resync is queued into the same ordered stream
+    // as the events, so everything sent before it arrived ahead of it and
+    // is folded into the state it carries. That is what entitles the core
+    // to drop whatever it still had queued when one lands — the events are
+    // not discarded, they are already IN there.
+    //
+    // The failure this pins is silent and total: a core that drops the
+    // queue without the snapshot containing those events loses them for
+    // good, and the only symptom is a park that is quietly missing dogs.
+    const r = await rig({ checkMs: 150, myDog: 0x9401n });
+    await r.establish();
+    await bringTheDogIn(r, 0x9401n);
+    const before = r.core.state.dogCount;
+
+    // Two strikes: the core asks for a snapshot and holds everything.
+    await r.waitForChecks(1);
+    r.answerChecks({ ok: false });
+    await r.waitForChecks(2);
+    r.answerChecks({ ok: false });
+    expect(await r.until(() => r.core.state.resyncs > 0, 2000)).toBe(true);
+    expect(r.core.pump() & PumpFlag.resyncing).toBe(PumpFlag.resyncing);
+
+    // Dogs keep arriving while it waits. These reach the client before the
+    // answer does, so they are exactly what a queue-clearing restore would
+    // throw away.
+    for (let i = 0; i < 3; i++) r.deliver([r.emit(Ev.join, dogPayload(BigInt(0x9410 + i)))]);
+    await r.run(100);
+
+    // Coverage: they must still be UNAPPLIED when the answer goes out, or
+    // this case is watching three ordinary joins land and proving nothing.
+    expect(r.core.state.dogCount, "dogs still held back").toBe(before);
+    expect(r.core.state.seq, "events still queued").toBeLessThan(r.authority.seq);
+    expect(r.answerResyncs(), "resync requests answered").toBe(1);
+    expect(await r.until(() => r.core.state.seq === r.authority.seq, 4000)).toBe(true);
+
+    // Nothing lost: the three that arrived mid-resync are in the world the
+    // snapshot brought, even though the queue holding them was cleared.
+    expect(r.core.state.dogCount, "dogs after the restore").toBe(before + 3);
+    expect(r.core.state.resyncs, "one resync, not a loop").toBe(1);
+  });
+
+  it("asks again when a resync goes unanswered", async () => {
+    // A resync request is one frame on a stream, and a frame can be lost
+    // with the connection still up — nothing about the transport will tell
+    // the session so. Asking once and waiting leaves a session that has
+    // already declared its own state unusable sitting quiet forever: the
+    // replica does not step, no event applies, and the only thing that
+    // ever moves again is the user reloading the page.
+    const r = await rig();
+    await r.establish();
+    // Long enough that the restored floor has been evicted, so the event
+    // below is genuinely out of reach — and quiet throughout, so the only
+    // resync in this case is the one it triggers on purpose.
+    await runAnsweringChecks(r, RING_DEPTH_MS + RING_WARMUP_MS);
+    expect(r.core.state.resyncs, "clean before the trigger").toBe(0);
+    expect(r.core.state.mismatches, "clean before the trigger").toBe(0);
+
+    r.deliver([r.authority.frame(r.core.state.seq + 1n, 1n, Ev.join, dogPayload(0xf7n))]);
+    expect(await r.until(() => r.core.state.resyncs > 0, 1000)).toBe(true);
+    const asked = resyncFrames(r).length;
+    expect(asked, "the first request went out").toBeGreaterThan(0);
+
+    // Nothing answers it. The session must keep asking.
+    await runAnsweringChecks(r, RESYNC_RETRY_MS * 2);
+    const again = resyncFrames(r);
+    expect(again.length, "requests sent while the first went unanswered").toBeGreaterThan(asked);
+    // Each one describes the same gap, because nothing has landed to
+    // change it: a request that renumbers itself is asking for a different
+    // snapshot than the one it still needs.
+    expect(new Set(again.map(haveSeqOf)).size, "every request describes the same gap").toBe(1);
+    // And they are that first request repeated, not new trouble — a second
+    // cause would satisfy the count above while proving nothing.
+    const reasons = new Set(
+      r.harness.emitted.filter((e) => e.code === Emit.resyncRequested).map((e) => Number(e.a)),
+    );
+    expect([...reasons], "one cause, asked about repeatedly").toEqual([ResyncReason.lateEvent]);
+  });
+
   it("a check aged out of the server ring counts as a strike", async () => {
     const r = await rig({ checkMs: 150 });
     await r.establish();
@@ -473,7 +576,7 @@ describe("invariant 7: module epoch", () => {
     // A new module refusing the terrain we hold is a real shape — the
     // schema tightening is exactly the sort of change that ships with a
     // module. Publishing the fresh instances before their terrain loaded
-    // would leave two worldless slots live, `session_module_swapped`
+    // would leave a worldless instance live, `session_module_swapped`
     // never called, and every retry failing identically: a frozen park.
     const r = await rig();
     await r.establish();
@@ -519,25 +622,10 @@ describe("invariant 7: module epoch", () => {
   });
 });
 
-describe("invariant 8: the prediction overlay", () => {
-  it("shows an own intent before the journal confirms it", async () => {
-    // The presented world is the journal plus what we have asked for and
-    // not yet been answered about, so an action reads as done the moment
-    // it is sent rather than a round trip later.
-    const r = await rig({ role: "player", myDog: 0x777n });
-    await r.establish();
-    await bringTheDogIn(r, 0x777n);
-    expect(r.core.state.boosting).toBe(false);
-    const seq = r.core.state.seq;
-
-    r.core.setBoost(true);
-    await r.run(150);
-    expect(r.core.state.boosting).toBe(true);
-    // Predicted, not journaled: slot 0 has heard nothing about it.
-    expect(r.core.state.seq).toBe(seq);
-  });
-
-  it("keeps the overlay after the journal answers, without double-applying", async () => {
+describe("invariant 8: intents and their answers", () => {
+  it("applies an answered join once, not twice", async () => {
+    // The join we sent and the journal event announcing it describe one
+    // arrival. Counting them separately would put two dogs in the park.
     const r = await rig({ role: "player", myDog: 0x777n });
     await r.establish();
     await r.run(100);
@@ -548,27 +636,6 @@ describe("invariant 8: the prediction overlay", () => {
     expect(await r.until(() => r.core.state.seq === r.authority.seq)).toBe(true);
     expect(r.core.state.present).toBe(true);
     expect(r.core.state.dogCount).toBe(1);
-  });
-
-  // A reject must reach the presented slot, not just the pending map:
-  // an intent the authority refused may not linger visibly as if it
-  // had happened.
-  it("drops the overlay entry when the intent is rejected", async () => {
-    // A refusal is the authority saying the prediction was wrong, so the
-    // presented world has to give it back rather than keep showing an
-    // action that never happened.
-    const r = await rig({ role: "player", myDog: 0x778n });
-    await r.establish();
-    await bringTheDogIn(r, 0x778n);
-
-    r.core.setBoost(true);
-    await r.run(150);
-    expect(r.core.state.boosting).toBe(true);
-
-    const id = intentId(intentsSent(r, Ev.boostSet)[0]);
-    r.deliver([r.authority.reject(id, Reject.notYours)]);
-    expect(await r.until(() => r.core.state.boosting === false, 1000)).toBe(true);
-    expect(r.core.state.rejects).toBe(1);
   });
 
   it("swallows the two rejects that describe the state we asked for", async () => {
@@ -710,7 +777,7 @@ describe("network abuse", () => {
     // One read, larger than session_cap, cut nowhere convenient.
     r.harness.transport.deliverStream(frame);
     expect(await r.until(() => r.count(Emit.snapshotRestored) > restores, 4000)).toBe(true);
-    // The restore lands inside the stream call; the presented slot is
+    // The restore lands inside the stream call; the world is
     // rebuilt on the next pump, which is where the roster becomes visible.
     expect(await r.until(() => r.core.state.dogCount === 2048, 2000)).toBe(true);
     expect(r.core.state.seq).toBe(r.authority.seq);
@@ -882,9 +949,7 @@ describe("connection lifecycle", () => {
     await r.waitForChecks(2);
     r.answerChecks({ ok: false });
     await r.run(200);
-    const resyncFrames = () =>
-      r.harness.transport.sentFrames().filter((f) => f.kind === "resync").length;
-    expect(resyncFrames()).toBe(1);
+    expect(resyncFrames(r).length).toBeGreaterThan(0);
     // Still outstanding: no snapshot has been delivered to answer it.
     expect(r.core.pump() & PumpFlag.resyncing).toBe(PumpFlag.resyncing);
 
@@ -892,13 +957,17 @@ describe("connection lifecycle", () => {
     expect(await r.until(() => r.harness.transport.dials > 1, 3000, 25)).toBe(true);
     expect(r.core.pump() & PumpFlag.resyncing).toBe(0);
 
-    // The same two strikes must be able to ask again, on the new stream.
+    // The same two strikes must be able to ask again, ON THE NEW STREAM —
+    // which is the only place the answer can be read. Counting requests
+    // across the whole session would not say that: a session that repeats
+    // an unanswered request would run the count up on the dead stream and
+    // look identical to one that recovered.
     await r.waitForChecks(3);
     r.answerChecks({ ok: false });
     await r.waitForChecks(4);
     r.answerChecks({ ok: false });
     await r.run(200);
-    expect(resyncFrames()).toBe(2);
+    expect(resyncsOnLatestStream(r), "requests written to the connection that can answer").toBe(1);
   });
 
   it("keeps the replica across a redial", async () => {
@@ -1043,7 +1112,7 @@ describe("pump status and the read surface", () => {
     expect(state).toBeGreaterThan(0);
   });
 
-  it("hands a renderer the presented world and the terrain planes", async () => {
+  it("hands a renderer the world and the terrain planes", async () => {
     const r = await rig();
     await r.establish();
     r.deliver([r.emit(Ev.join, dogPayload(0x51n))]);

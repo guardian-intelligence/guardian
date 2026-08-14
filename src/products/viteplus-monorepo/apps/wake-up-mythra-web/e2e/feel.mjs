@@ -67,19 +67,30 @@ const LEGS = [
     hiccupMs: 0,
     // An unimpaired path has even less excuse than a degraded one for
     // showing the world at a tick it already passed, or for moving a dog
-    // somewhere no walk could take it. The timing thresholds stay off:
-    // frame budget and stalls are the network's business, and there is no
-    // network here to blame.
-    gates: ["live", "backwardTicks", "ownDogJumps"],
+    // somewhere no walk could take it — and no excuse at all for needing a
+    // snapshot. The timing thresholds stay off: frame budget and stalls are
+    // the network's business, and there is no network here to blame.
+    gates: ["live", "backwardTicks", "ownDogJumps", "noResyncs", "lateRepairs"],
   },
   {
-    name: "home-wifi",
-    // 600ms is an access-point roam: the commonest dropout a living room
-    // produces, and long enough that the replica notices — shorter gaps
-    // disappear into QUIC's retransmits.
+    // A living room with no dropout. Every jump here is prediction-class
+    // jank, because there is no repair to attribute one to.
+    name: "home-wifi-steady",
+    impair: { latency_ms: 40, jitter_ms: 30, loss_pct: 0.5 },
+    hiccupMs: 0,
+    gates: ["live", "backwardTicks", "ownDogJumps", "rafGapP99Ms", "stallRuns"],
+  },
+  {
+    // The same living room, plus a 600ms access-point roam taken while the
+    // dog is mid-walk with an intent unanswered. This is the best teleport
+    // detector we have, but the repairs it provokes are honest ones and the
+    // lever for their size is the staged lag/jitter-buffer work, not this
+    // branch. So the gate is attribution, not count: a jump must have a
+    // repair span beside it, and an unexplained one still fails.
+    name: "home-wifi-dropout",
     impair: { latency_ms: 40, jitter_ms: 30, loss_pct: 0.5 },
     hiccupMs: 600,
-    gates: ["live", "backwardTicks", "ownDogJumps", "rafGapP99Ms", "stallRuns"],
+    gates: ["live", "backwardTicks", "jumpsAttributable", "rafGapP99Ms", "stallRuns"],
   },
   {
     name: "bad-lte",
@@ -91,28 +102,57 @@ const LEGS = [
   },
 ];
 
-// What "plays well" means, gated on the home-wifi leg only: a bad cell is
-// allowed to feel bad, a living room is not. Every threshold is a property
-// of frames drawn, and each one is here because its absence is a thing a
-// player says out loud.
+// What "plays well" means. A bad cell is allowed to feel bad; a living room
+// is not. Every threshold is a property of frames drawn, and each one is
+// here because its absence is a thing a player says out loud. Which legs
+// carry which check is on the legs above.
 //
-//   backwardTicks   "it jumped back" — the world un-happening on screen.
-//                   Rollback is legitimate; showing it is not, so any
-//                   frame-visible rewind fails.
-//   ownDogJumps     "my dog teleported" — displacement no walk explains
-//                   (>0.5 cell in a frame; see jank.ts). One per ~1800
-//                   frames is a resync landing; a stream of them is not.
-//   rafGapP99Ms     "it hitches" — the frame budget, not the network.
-//   stallRuns       "it froze" — the tick standing still for a quarter
-//                   second while frames keep drawing. One per leg absorbs a
-//                   single resync; more is a session that keeps stopping.
+//   backwardTicks       "it jumped back" — the world un-happening on
+//                       screen. Rollback is legitimate; showing it is not.
+//   ownDogJumps         "my dog teleported" — displacement no walk explains
+//                       (>0.5 cell in a frame; see jank.ts). Gated where
+//                       there is no dropout to blame, so a jump means
+//                       prediction, not repair.
+//   jumpsAttributable   the same teleport, judged differently where a
+//                       dropout IS in play: a jump must have a repair span
+//                       beside it. Honest repairs cost what they cost; a
+//                       jump nothing explains is still a bug.
+//   noResyncs           an unimpaired path should never need a snapshot.
+//                       Reasons are reported separately, because "check
+//                       aged out" and "world hash mismatch" are two
+//                       different failures wearing one number.
+//   rafGapP99Ms         "it hitches" — the frame budget, not the network.
+//   stallRuns           "it froze" — the tick standing still for a quarter
+//                       second while frames keep drawing.
+//   lateRepairs         a repair reaching back further than the lead can
+//                       explain. On an unimpaired path an event is late by
+//                       the lead and no more, so a repair that has to reach
+//                       back further is repairing something this replica did
+//                       to itself — an event stepped over rather than an
+//                       event that arrived behind. Counting repairs cannot
+//                       see that (at zero latency every own action costs
+//                       one, by design); their DEPTH can.
 const GATES = {
   backwardTicks: 0,
   ownDogJumps: 1,
   rafGapP99Ms: 100,
   stallRuns: 1,
+  /**
+   * Ticks a repair may reach back on an unimpaired path. Measured rather
+   * than chosen: across a full pass of clean legs the lateness was 1 tick
+   * 31 times, 2 ticks 40 times, 3 ticks 6 times and 4 ticks once, so four
+   * is the observed ceiling of an honest late event at zero latency.
+   */
+  lateRepairTicks: 4,
 };
 
+/**
+ * How close a repair has to be to a jump for the jump to be its doing. A
+ * correction lands within a frame or two of the repair that caused it; half
+ * a second is generous, which is the right direction to be generous in when
+ * the alternative is blaming an honest repair for prediction jank.
+ */
+const ATTRIBUTION_MS = 500;
 /** Tick stillness that counts as a stall, matching FREEZE_MS in jank.ts. */
 const STALL_MS = 250;
 /** Own-dog displacement that cannot be walking, matching JUMP_CELLS in jank.ts. */
@@ -213,7 +253,11 @@ function score(records) {
 // frames its worst jumps happened on: what the tick, the interpolation
 // phase and the population were doing on either side says which repair
 // path produced them.
-function worstJumps(records, count) {
+/**
+ * Jumps as incidents rather than frames: one correction spread over the
+ * frames the smoother took to chase it is one thing that happened.
+ */
+function jumpIncidents(records) {
   const found = [];
   let lastAt = -Infinity;
   for (let i = 1; i < records.length; i++) {
@@ -222,19 +266,96 @@ function worstJumps(records, count) {
     if (!r.mine || !prev.mine) continue;
     const d = Math.hypot(r.myX - prev.myX, r.myY - prev.myY) / Q16;
     if (d <= JUMP_CELLS) continue;
-    // One correction spread over the frames the smoother took to chase it
-    // is one incident, not four.
     if (i - lastAt <= 8) {
       const last = found[found.length - 1];
       if (last && d > last.cells) {
         last.cells = d;
         last.at = i;
+        last.t = r.t;
       }
     } else {
-      found.push({ at: i, cells: d });
+      found.push({ at: i, t: r.t, cells: d });
     }
     lastAt = i;
   }
+  return found;
+}
+
+/**
+ * Which jumps a repair explains. A rollback, resync or restore beside a
+ * jump makes it the visible cost of a repair the netcode chose to make; a
+ * jump with nothing beside it is the world moving our dog for no reason we
+ * can name, which is the thing this harness exists to catch.
+ */
+function attribute(records, spans) {
+  const repairs = spans.filter((s) =>
+    ["wum.netcode_rollback", "wum.netcode_resync", "wum.netcode_restore"].includes(s.name),
+  );
+  const attributed = [];
+  const unattributed = [];
+  for (const jump of jumpIncidents(records)) {
+    const near = repairs.find((s) => Math.abs(s.t - jump.t) <= ATTRIBUTION_MS);
+    (near ? attributed : unattributed).push({ ...jump, by: near?.name });
+  }
+  return { attributed, unattributed, repairs: repairs.length };
+}
+
+/**
+ * The decisive read on a surviving mismatch: was the tick we were asked
+ * about one a repair had already rewritten?
+ *
+ * A check carries the hash the replica held when it asked. If a repair
+ * then rewrites that tick, the authority answers about history we have
+ * already replaced — true when asked, stale when it lands, and no evidence
+ * of divergence. If NO repair touched the tick, the two worlds genuinely
+ * disagree about it, which is a different and much worse thing.
+ *
+ * The rollback span carries how far it reached but not where from, so the
+ * range is reconstructed from the frame the replica was drawing when the
+ * span fired. That is an inference, and it is why the output below prints
+ * the range rather than just the verdict.
+ */
+function mismatchCorrelation(records, spans) {
+  const tickAt = (t) => {
+    let best = null;
+    for (const r of records) {
+      if (r.t <= t && (best === null || r.t > best.t)) best = r;
+    }
+    return best?.tick ?? null;
+  };
+  const rollbacks = spans
+    .filter((s) => s.name === "wum.netcode_rollback")
+    .map((s) => {
+      const at = tickAt(s.t);
+      const rewound = Number(s.attrs["wum.rewound_ticks"] ?? 0);
+      return { t: s.t, at, from: at === null ? null : at - rewound, to: at };
+    });
+  return spans
+    .filter((s) => s.name === "wum.netcode_mismatch")
+    .map((s) => {
+      const tick = Number(s.attrs["wum.tick"]);
+      const covering = rollbacks.filter((r) => r.from !== null && tick >= r.from && tick <= r.to);
+      const nearest = rollbacks.reduce(
+        (best, r) => (best === null || Math.abs(r.t - s.t) < Math.abs(best.t - s.t) ? r : best),
+        null,
+      );
+      return { tick, covering, nearest, gapMs: nearest === null ? null : s.t - nearest.t };
+    });
+}
+
+/** Resyncs by the reason they gave, so two different causes never read as one number. */
+function resyncReasons(spans) {
+  const by = new Map();
+  for (const s of spans) {
+    if (s.name !== "wum.netcode_resync") continue;
+    const why = s.attrs["wum.why"];
+    by.set(why, (by.get(why) ?? 0) + 1);
+  }
+  return by;
+}
+
+function worstJumps(records, count) {
+  const found = jumpIncidents(records);
   found.sort((a, b) => b.cells - a.cells);
   return found.slice(0, count).map(({ at, cells }) => {
     const frame = (i) => {
@@ -261,6 +382,13 @@ function worstJumps(records, count) {
 // a rewind happened; these say which repair asked for it and how far back
 // it reached, which is the difference between a rollback that overshot and
 // a snapshot landing behind the replica.
+/** How late each repair's event was, in ticks, for the depth gate. */
+function repairLateness(spans) {
+  return spans
+    .filter((s) => s.name === "wum.netcode_rollback")
+    .map((s) => Number(s.attrs["wum.late_ticks"] ?? 0));
+}
+
 function repairs(spans) {
   const out = [];
   for (const s of spans) {
@@ -310,8 +438,21 @@ function fmt(card) {
   ].join("\n    ");
 }
 
-function gateFailures(card, session, gates) {
+function gateFailures(card, session, gates, evidence) {
   const fails = [];
+  if (gates.includes("jumpsAttributable") && evidence.attribution.unattributed.length > 0) {
+    const sizes = evidence.attribution.unattributed
+      .map((j) => `${j.cells.toFixed(2)} cells`)
+      .join(", ");
+    fails.push(
+      `${evidence.attribution.unattributed.length} own-dog jump(s) with no repair beside them` +
+        ` (${sizes}); ${evidence.attribution.attributed.length} of ${evidence.attribution.repairs} repairs accounted for the rest`,
+    );
+  }
+  if (gates.includes("noResyncs") && evidence.resyncs.size > 0) {
+    const named = [...evidence.resyncs].map(([why, n]) => `${why} x${n}`).join(", ");
+    fails.push(`resynced on an unimpaired path: ${named}`);
+  }
   // A scorecard from a session that journaled nothing is not evidence of
   // anything: no intents landed, so nothing was predicted, reconciled or
   // repaired, and every figure below would be a green zero.
@@ -329,6 +470,15 @@ function gateFailures(card, session, gates) {
   }
   if (gates.includes("stallRuns") && card.stallRuns > GATES.stallRuns) {
     fails.push(`stall runs ${card.stallRuns} > ${GATES.stallRuns}`);
+  }
+  if (gates.includes("lateRepairs")) {
+    const deep = evidence.lateness.filter((n) => n > GATES.lateRepairTicks);
+    if (deep.length > 0) {
+      fails.push(
+        `${deep.length} repair(s) reached back further than the lead explains` +
+          ` (${deep.join(", ")} ticks late, ceiling ${GATES.lateRepairTicks})`,
+      );
+    }
   }
   return fails;
 }
@@ -419,7 +569,26 @@ const canvas = await page.waitForSelector("#grid");
 const box = await canvas.boundingBox();
 const results = [];
 
-for (let run = 1; run <= RUNS; run++)
+for (let run = 1; run <= RUNS; run++) {
+  if (run > 1) {
+    // Runs must be independent or the measurement's subject quietly becomes
+    // session age: the follow camera clamps at map edges, so as the dog
+    // drifts across one long session the same SCREEN click resolves to a
+    // different WORLD cell, changing pending-move durations and with them
+    // every jump count. A reload restores the same starting situation; the
+    // signed-in identity survives it, so only the connect waits repeat.
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForFunction(
+      () => document.getElementById("status")?.textContent === "CONNECTED",
+      undefined,
+      { timeout: 30000 },
+    );
+    await page.waitForFunction(
+      () => document.getElementById("role")?.textContent?.startsWith("player"),
+      undefined,
+      { timeout: 30000 },
+    );
+  }
   for (const leg of LEGS) {
     const at = await modules();
     // The park hot-swaps modules under a running session by design, so the
@@ -463,8 +632,13 @@ for (let run = 1; run <= RUNS; run++)
       rejects: diagAfter.rejects - diagBefore.rejects,
     };
     const card = score(records);
-    const fails = gateFailures(card, session, leg.gates);
-    results.push({ leg, card, session, fails, run, client: at.clientWasm });
+    const evidence = {
+      attribution: attribute(records, spans),
+      resyncs: resyncReasons(spans),
+      lateness: repairLateness(spans),
+    };
+    const fails = gateFailures(card, session, leg.gates, evidence);
+    results.push({ leg, card, session, evidence, fails, run, client: at.clientWasm });
 
     console.log(`\n[${tag}] ${JSON.stringify(leg.impair)} hiccup=${leg.hiccupMs}ms x${CYCLES}`);
     console.log(`    ${fmt(card)}`);
@@ -474,6 +648,33 @@ for (let run = 1; run <= RUNS; run++)
       `    session: events=${session.events} rollbacks=${session.rollbacks}` +
         ` resyncs=${session.resyncs} mismatches=${session.mismatches} rejects=${session.rejects}`,
     );
+    // A surviving mismatch is the one thing that must never be read past,
+    // so its correlation prints whenever one happens — not only on a fail.
+    if (session.mismatches > 0) {
+      for (const m of mismatchCorrelation(records, spans)) {
+        const verdict =
+          m.covering.length > 0
+            ? `REWRITTEN by ${m.covering.length} repair(s)`
+            : "NO repair touched this tick — worlds genuinely disagree";
+        const near =
+          m.nearest === null
+            ? "no repair in the leg"
+            : `nearest repair ${m.gapMs.toFixed(0)}ms away covering ${m.nearest.from}..${m.nearest.to}`;
+        console.log(`    mismatch at tick ${m.tick}: ${verdict}; ${near}`);
+      }
+    }
+    // Resyncs by reason: two different causes must never read as one number.
+    if (evidence.resyncs.size > 0) {
+      const named = [...evidence.resyncs].map(([why, n]) => `${why} x${n}`).join(", ");
+      console.log(`    resync reasons: ${named}`);
+    }
+    // How many of the jumps a repair explains, and how many nothing does.
+    const { attributed, unattributed } = evidence.attribution;
+    if (attributed.length + unattributed.length > 0) {
+      console.log(
+        `    jumps: ${attributed.length} beside a repair, ${unattributed.length} unexplained`,
+      );
+    }
     // Each repair, named. A count says the leg repaired something; these say
     // what it thought was wrong and how far back it had to go.
     for (const line of repairs(spans)) console.log(`    ${line}`);
@@ -494,6 +695,7 @@ for (let run = 1; run <= RUNS; run++)
       }
     }
   }
+}
 
 await impair({ latency_ms: 0, jitter_ms: 0, loss_pct: 0 });
 await browser.close();

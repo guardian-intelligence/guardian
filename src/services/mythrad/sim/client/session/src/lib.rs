@@ -1,37 +1,77 @@
 //! The replica session core: everything between the wire and the park
 //! module that decides *what the world is*. Frame codec, seq-dense event
 //! ordering, temporal rollback, resync and strike policy, check cadence,
-//! intent identity and prediction, reject policy, and the module-swap
-//! choreography all live here, so every host — browser, app, load bot —
-//! inherits identical netcode behavior instead of reimplementing it.
+//! intent identity, reject policy, and the module-swap choreography all
+//! live here, so every host — browser, app, load bot — inherits identical
+//! netcode behavior instead of reimplementing it.
 //!
 //! Pure by construction: time is always a parameter, entropy arrives as
 //! the `init` nonce, and every effect leaves through the `Host` trait
-//! (park verbs by slot, transport writes, inflate, host requests,
-//! telemetry). No allocator, no floats, no clocks.
+//! (park verbs, transport writes, inflate, host requests, telemetry). No
+//! allocator, no floats, no clocks.
 //!
-//! Two park instances, addressed by slot:
-//!   slot 0 "journal replica"  journal events only, in dense seq order at
-//!                             their tick; snapshot ring (depth 10, one
-//!                             per second) + recent-event replay backs
-//!                             rollback. Hash ring and checks read here.
-//!   slot 1 "presented"        slot 0's state with this client's pending
-//!                             intents applied on top. Rebuilt whenever
-//!                             slot 0 mutates outside lockstep stepping
-//!                             or the pending set changes. Renderers and
-//!                             the HUD read here.
+//! One park: the journal replica. It carries journal events only, in
+//! dense seq order at their tick, and the renderer and HUD read it
+//! directly. A snapshot ring (depth 10, one per second) plus recent-event
+//! replay backs rollback; the hash ring and the checks read the same
+//! world. An intent is sent and tracked until the journal answers it, and
+//! is never applied here — the client shows what the authority has
+//! journaled, and the wait for it is the round trip and nothing more.
+//! Corrections that do arrive — a restore, a repair — are announced with
+//! S_CORRECTED so the host can absorb them at view level — every
+//! mutation of the world that is not the step function is announced.
+//!
+//! WHAT A CLIENT MAY SHOW AHEAD OF THE JOURNAL. The test is whether an
+//! intent's effect can reach the step function. An intent that only
+//! writes fields nothing steps on could be shown early and stay true. One
+//! whose effect the step function reads ACCUMULATES — the world keeps
+//! deriving from it every tick — and showing that early means simulating
+//! it, which means a second world, which cannot be kept honest: the
+//! accumulation is a function of when the action started, and the
+//! authority starts it later than the client does.
+//!
+//!   move_to    sets a target, the dog walks, position accumulates.
+//!   boost_set  writes a flag. The flag doubles speed, so position
+//!              accumulates: it reads as a pure edit and is not one.
+//!   check_in   energy and a day stamp, which nothing steps on.
+//!   join       a spawn cell drawn from the tick it is applied at, and a
+//!              dependency everything else waits on.
+//!
+//! Three separate things have made a kind unshowable, and they are worth
+//! keeping distinct because a new kind can fail any one alone: an outcome
+//! drawn from the tick it is applied at, a dependency that has to exist
+//! first, and an effect the step function reads.
+//!
+//! The ruling, 2026-08-14, and the reason this file simulates one world:
+//! the client predicts nothing. "Instant" means no overhead over the
+//! round trip, not less than it — latency is answered by putting the
+//! authority near the player, not by a second simulation. Tap feedback
+//! that is presentation (a marker, a turn, dust) is instant and lives in
+//! the host; motion waits for the journal. Do not reintroduce prediction
+//! without a new product requirement.
 //!
 //! Wire protocol v4 (little-endian scalars; the QUIC varint length prefix
 //! is big-endian per RFC 9000 §16) is in [`wire`].
+//!
+//! A verdict is evidence about the history the replica held when it asked,
+//! and both of its negative answers mean two different things. "Unknown" is
+//! either a tick that fell out of the authority's ring or one it has not
+//! stamped yet, and only the first is staleness — the second is this replica
+//! racing the authority's present, which it does by design after a restore
+//! and would do more often at a shorter lag. "Mismatch" is either history
+//! that was wrong or history this replica has since rewritten underneath the
+//! check: a late event repairs the very tick a check named, so the hash the
+//! authority disagrees with is one that no longer exists here. Both are
+//! classified at the strike, because either one costs a resync — a
+//! correction the viewer sees — for a replica that is already right. The
+//! second costs a check its tick, kept until the verdict lands and marked by
+//! any repair that rewrites it.
 #![cfg_attr(not(test), no_std)]
 
-use mythra_sim_clock::{Clock, F_SNAPSHOT, State};
+use core::mem;
+use mythra_sim_clock::{Clock, F_SNAPSHOT, STEP_COST_US, State};
 
 pub mod wire;
-
-/// Park verb slots.
-pub const SLOT_JOURNAL: u32 = 0;
-pub const SLOT_PRESENTED: u32 = 1;
 
 /// Host requests: the core names what it needs, the host fetches it.
 pub const REQ_NEED_TERRAIN: u32 = 1;
@@ -59,6 +99,12 @@ pub const T_CLOCK_STATE: u32 = 13;
 pub const T_INTENT_SENT: u32 = 14;
 pub const T_AUTO_REJOIN: u32 = 15;
 pub const T_RESTORE_FAILED: u32 = 16;
+/// presence(source, tick): 1 the journal placed our dog, 2 the authority
+/// refused a join as already present. Which one a session gets decides
+/// when its held intents go out.
+pub const T_PRESENCE: u32 = 17;
+pub const PRESENCE_JOURNAL: u64 = 1;
+pub const PRESENCE_ALREADY_THERE: u64 = 2;
 
 /// Why the replica asked for a snapshot. Rides both `REQ_RESYNC_WANTED`
 /// and `T_RESYNC_REQUESTED`.
@@ -81,6 +127,37 @@ pub const S_RESYNCING: u32 = 1 << 1;
 pub const S_STEPPED: u32 = 1 << 2;
 pub const S_WANT_TERRAIN: u32 = 1 << 3;
 pub const S_WANT_MODULE: u32 = 1 << 4;
+/// The world was corrected during this pump, so dogs may have moved
+/// without time passing. The host reads this on the same frame and
+/// carries the difference as a decaying per-dog offset; a frame later is
+/// a frame too late, because by then it has already been drawn.
+///
+/// Four paths correct the world. Each one raises this bit, and a fifth
+/// would have to:
+///
+///   1. A snapshot restore, in `land` — wherever it lands, including
+///      between two pumps, which is why the flag is latched here rather
+///      than derived at the end of one.
+///   2. A repair, in `rollback_to`: both the rewind and its replay.
+///   3. A `terrain_set` event, which puts every dog the new blob cannot
+///      stand on back onto ground that exists. It is the only apply that
+///      moves a dog already in the park.
+///   4. A module swap, which drops the world outright. The replica holds
+///      no state until a snapshot lands, so the swap is announced by the
+///      restore in (1) that completes it.
+///
+/// The step function is the only other way the world changes and the only
+/// one that is not a correction: it is time passing, and it reports
+/// itself as S_STEPPED. `clock_skip` moves the park's tick without a step,
+/// which is why the tick is read back from the park after every apply
+/// instead of assumed.
+///
+/// The enumeration is mechanical rather than remembered: `sim_step` is the
+/// only thing in the park that moves a dog, `sim_restore` and `sim_apply`
+/// commit nothing on the paths that fail, and the park's own test pins
+/// that no event kind but `terrain_set` (and a `join`, which has no prior
+/// position to keep) relocates one.
+pub const S_CORRECTED: u32 = 1 << 5;
 /// Clock state (0 acquiring, 1 locked, 2 fast-forward, 3 snapshot) at bit 8.
 pub const S_CLOCK_SHIFT: u32 = 8;
 
@@ -102,6 +179,9 @@ const EV_JOIN: u16 = 1;
 const EV_CHECK_IN: u16 = 3;
 const EV_MOVE_TO: u16 = 4;
 const EV_EPOCH_ADVANCE: u16 = 6;
+/// The one journal kind whose application moves dogs: every dog the new
+/// blob cannot stand on is put back on the nearest ground it can.
+const EV_TERRAIN_SET: u16 = 7;
 const EV_BOOST_SET: u16 = 8;
 const ERR_PRESENT: u32 = 2;
 const ERR_ABSENT: u32 = 3;
@@ -111,6 +191,12 @@ const RESTORE_WRONG_TERRAIN: u32 = 4;
 
 /// One snapshot per second of rollback depth.
 const RING_DEPTH: usize = 10;
+/// Floors recorded while walking back to the present after a rollback.
+/// Steady state costs nothing — these are written only during a repair —
+/// but without them each repair leaves the newest floor aging where it
+/// was, so the next one rewinds further than the last: measured climbing
+/// 4, 5, 7, 9 ... 23 ticks for events that were each one tick late.
+const REPAIR_DEPTH: usize = 16;
 /// A full park's canonical snapshot plus headroom (the park's io buffer).
 const SNAP_CAP: usize = 64 * 1024;
 /// Frame reassembly. The buffer must hold a whole frame that is still
@@ -124,10 +210,18 @@ const HASH_RING: usize = 1024;
 const MAX_QUEUED: usize = 256;
 const MAX_RECENT: usize = 512;
 const MAX_INTENTS: usize = 32;
+/// Checks whose verdict has not come back yet. The cadence is seconds and
+/// a verdict rides one round trip, so this is depth for a pathological
+/// cadence rather than a normal one.
+const MAX_CHECKS: usize = 8;
 const EV_PAYLOAD_CAP: usize = 64;
 const HELLO_MS: u64 = 1500;
 const RETRY_MS: u64 = 3000;
 const AUTO_JOIN_MS: u64 = 5000;
+/// How long an unanswered resync waits before being asked again. The same
+/// two seconds the clock re-requests on, for the same reason: the first
+/// ask can race a dying transport.
+const RESYNC_REASK_MS: u64 = 2000;
 const STRIKES_TO_RESYNC: u32 = 2;
 
 #[derive(Clone, Copy)]
@@ -162,10 +256,14 @@ struct Intent {
     /// matches a pending entry. Never infer ownership any other way, and
     /// never match on the counter half: `(nonce << 32) | counter` is what
     /// keeps two senders (and two page loads of one sender) from claiming
-    /// each other's events and corrupting the overlay.
+    /// each other's events.
     id: u64,
     kind: u16,
     plen: u16,
+    /// The connection this intent last went out on, or 0 for one never
+    /// sent — minted before the dog's presence was confirmed, or left over
+    /// from a connection that died first.
+    sent_conn: u32,
     p: [u8; EV_PAYLOAD_CAP],
 }
 
@@ -174,6 +272,7 @@ impl Intent {
         id: 0,
         kind: 0,
         plen: 0,
+        sent_conn: 0,
         p: [0; EV_PAYLOAD_CAP],
     };
 
@@ -214,16 +313,31 @@ impl HashEntry {
     };
 }
 
-/// Everything the core asks of its embedder. Slot-addressed park verbs
-/// operate on the host's two park instances; the host copies bytes between
-/// the two wasm memories.
+/// A check on the wire, and whether the history it described is still the
+/// one this replica holds.
+#[derive(Clone, Copy)]
+struct Check {
+    tick: u64,
+    replaced: bool,
+}
+
+impl Check {
+    const EMPTY: Check = Check {
+        tick: 0,
+        replaced: false,
+    };
+}
+
+/// Everything the core asks of its embedder. There is one park — the
+/// journal replica — and the host copies bytes between its memory and
+/// this one on the park verbs.
 pub trait Host {
-    fn park_apply(&mut self, slot: u32, ev: &[u8]) -> u32;
-    fn park_step(&mut self, slot: u32);
-    fn park_snapshot(&mut self, slot: u32, dst: &mut [u8]) -> u32;
-    fn park_restore(&mut self, slot: u32, state: &[u8]) -> u32;
-    fn park_hash(&mut self, slot: u32) -> u64;
-    fn park_tick(&mut self, slot: u32) -> u64;
+    fn park_apply(&mut self, ev: &[u8]) -> u32;
+    fn park_step(&mut self);
+    fn park_snapshot(&mut self, dst: &mut [u8]) -> u32;
+    fn park_restore(&mut self, state: &[u8]) -> u32;
+    fn park_hash(&mut self) -> u64;
+    fn park_tick(&mut self) -> u64;
     fn send_stream(&mut self, frame: &[u8]);
     fn send_datagram(&mut self, datagram: &[u8]);
     /// Raw deflate; returns the inflated length, 0 on error.
@@ -246,11 +360,33 @@ pub struct Session {
     terrain_id: u64,
 
     connected: bool,
+    /// Bumped per dial, so an intent can tell "already sent on this
+    /// connection" from "sent on the one that just died".
+    conn: u32,
+    /// The authority has confirmed our dog is in the park — by journaling
+    /// our join, or by refusing it as already present. Intents that need a
+    /// dog wait for this rather than racing it.
+    presence: bool,
     have_state: bool,
     visible: bool,
-    dirty: bool,
+    /// The world was corrected and no pump has reported it yet. Not every
+    /// correction happens inside a pump — a snapshot arriving mid-frame
+    /// restores where it lands — and the host has to hear about all of
+    /// them, so this is latched here and cleared when a pump carries it.
+    corrected: bool,
     replaying: bool,
     resyncing: bool,
+    /// When the outstanding resync went out. A resync asked for on the
+    /// event path has nothing else watching it: the clock re-asks when it
+    /// is starved, but a repair that refused and asked for a snapshot
+    /// instead would wait forever, and the session goes quiet rather than
+    /// degraded — no event applies again, because the seq gap never closes.
+    resync_at_ms: u64,
+    /// Why the outstanding resync was asked for. A retry repeats it rather
+    /// than naming itself: it is the same request, and a reason that
+    /// changed on retry would show a dashboard two causes where there was
+    /// one.
+    resync_reason: u32,
     resync_on_landed: bool,
     module_latch: bool,
     wrong_terrain: bool,
@@ -268,7 +404,12 @@ pub struct Session {
     retry_at_ms: u64,
     deferred_resync: u32,
 
+    /// The frame budget the host last pumped with, so a snapshot landing
+    /// between pumps can price its catch-up the same way.
+    last_budget_us: u32,
     next_check_ms: u64,
+    checks: [Check; MAX_CHECKS],
+    checks_len: usize,
     auto_joined: bool,
     last_auto_join_ms: u64,
     clock_state: u32,
@@ -277,6 +418,9 @@ pub struct Session {
     in_len: usize,
     ring_head: usize,
     ring_len: usize,
+    repair_head: usize,
+    repair_len: usize,
+    repairing: bool,
     queued_len: usize,
     recent_head: usize,
     recent_len: usize,
@@ -292,6 +436,7 @@ struct Bufs {
     state: [u8; SNAP_CAP],
     hold: [u8; SNAP_CAP],
     ring: [Snap; RING_DEPTH],
+    repair: [Snap; REPAIR_DEPTH],
     hashes: [HashEntry; HASH_RING],
     queued: [Ev; MAX_QUEUED],
     recent: [Ev; MAX_RECENT],
@@ -304,6 +449,7 @@ static mut BUFS: Bufs = Bufs {
     state: [0; SNAP_CAP],
     hold: [0; SNAP_CAP],
     ring: [Snap::EMPTY; RING_DEPTH],
+    repair: [Snap::EMPTY; REPAIR_DEPTH],
     hashes: [HashEntry::EMPTY; HASH_RING],
     queued: [Ev::EMPTY; MAX_QUEUED],
     recent: [Ev::EMPTY; MAX_RECENT],
@@ -329,11 +475,15 @@ impl Session {
         terrain_id: 0,
 
         connected: false,
+        conn: 0,
+        presence: false,
         have_state: false,
         visible: true,
-        dirty: false,
+        corrected: false,
         replaying: false,
         resyncing: false,
+        resync_at_ms: 0,
+        resync_reason: 0,
         resync_on_landed: false,
         module_latch: false,
         wrong_terrain: false,
@@ -351,7 +501,10 @@ impl Session {
         retry_at_ms: 0,
         deferred_resync: 0,
 
+        last_budget_us: 8_000,
         next_check_ms: 0,
+        checks: [Check::EMPTY; MAX_CHECKS],
+        checks_len: 0,
         auto_joined: false,
         last_auto_join_ms: 0,
         clock_state: 0,
@@ -360,6 +513,9 @@ impl Session {
         in_len: 0,
         ring_head: 0,
         ring_len: 0,
+        repair_head: 0,
+        repair_len: 0,
+        repairing: false,
         queued_len: 0,
         recent_head: 0,
         recent_len: 0,
@@ -392,11 +548,15 @@ impl Session {
         self.hz = mythra_sim_clock::GENESIS_HZ;
         self.terrain_id = 0;
         self.connected = false;
+        self.conn = 0;
+        self.presence = false;
         self.have_state = false;
         self.visible = true;
-        self.dirty = false;
+        self.corrected = false;
         self.replaying = false;
         self.resyncing = false;
+        self.resync_at_ms = 0;
+        self.resync_reason = 0;
         self.resync_on_landed = false;
         self.module_latch = false;
         self.wrong_terrain = false;
@@ -407,7 +567,9 @@ impl Session {
         self.retry_pending = false;
         self.retry_at_ms = 0;
         self.deferred_resync = 0;
+        self.last_budget_us = 8_000;
         self.next_check_ms = 0;
+        self.checks_len = 0;
         self.auto_joined = false;
         self.last_auto_join_ms = 0;
         self.clock_state = 0;
@@ -415,6 +577,9 @@ impl Session {
         self.in_len = 0;
         self.ring_head = 0;
         self.ring_len = 0;
+        self.repair_head = 0;
+        self.repair_len = 0;
+        self.repairing = false;
         self.queued_len = 0;
         self.recent_head = 0;
         self.recent_len = 0;
@@ -433,9 +598,9 @@ impl Session {
         self.nonce = nonce;
         self.counter = 0;
         self.intents_len = 0;
+        self.presence = false;
         self.auto_joined = false;
         self.last_auto_join_ms = 0;
-        self.dirty = true;
     }
 
     pub fn set_visible(&mut self, visible: bool) {
@@ -480,14 +645,27 @@ impl Session {
             return 1;
         }
         self.connected = true;
+        self.conn = self.conn.wrapping_add(1).max(1);
         self.in_len = 0;
         self.resyncing = false;
+        // The dog's presence belongs to the park, but our evidence for it
+        // does not outlive the connection that carried it.
+        self.presence = false;
         self.next_check_ms = now_ms + HELLO_MS;
         let n = wire::encode_hello(&mut bufs().out, self.seq, self.tick, ticket);
         h.send_stream(&bufs().out[..n]);
         h.emit(T_CONNECTED, ticket.len() as u64, 0);
+        // A join still waiting for its answer is this connection's join
+        // too. Minting a second asks the park to admit a dog it is already
+        // being asked to admit, under an id it has never seen — two joins
+        // on the wire, and the second one refused.
         if self.role == ROLE_PLAYER {
-            self.send_intent(h, EV_JOIN, &self.my_dog.to_le_bytes(), now_ms);
+            match self.pending_kind(EV_JOIN) {
+                Some(i) => self.resend(h, i),
+                None => {
+                    self.send_intent(h, EV_JOIN, &self.my_dog.to_le_bytes(), now_ms);
+                }
+            }
         }
         0
     }
@@ -608,17 +786,22 @@ impl Session {
         };
         self.stats[STAT_REJECTS as usize - 1] += 1;
         let it = self.intent_take(intent);
-        if it.is_some() {
-            // The overlay is predicting something the authority refused.
-            self.dirty = true;
-        }
         let kind = it.map(|i| i.kind).unwrap_or(0);
+        // "Already present" describes the state we asked for, so it is
+        // not news — and only a join can earn it, so it needs no pending
+        // entry to be read that way. Copies arriving after the first has
+        // consumed ours are just as unremarkable. It does confirm the dog
+        // is in the park, which is the one fact the journal cannot always
+        // deliver: a reconnecting player whose dog is already present is
+        // answered with a snapshot, not with the join event that placed it.
+        if reason == ERR_PRESENT {
+            self.confirm_presence(h, PRESENCE_ALREADY_THERE);
+            return;
+        }
         // Two rejects describe a world that already matches the intent:
         // a join for a dog the park still holds, and a boost transition
         // that already landed. Both ARE the requested state.
-        if (reason == ERR_PRESENT && kind == EV_JOIN)
-            || (reason == ERR_NOOP && kind == EV_BOOST_SET)
-        {
+        if reason == ERR_NOOP && kind == EV_BOOST_SET {
             return;
         }
         h.emit(T_REJECT, reason as u64, kind as u64);
@@ -671,15 +854,16 @@ impl Session {
             h.request(REQ_NEED_TERRAIN, terrain);
             return;
         }
-        self.land(h, now_ms);
+        self.land(h, now_ms, self.last_budget_us);
     }
 
-    fn land<H: Host>(&mut self, h: &mut H, now_ms: u64) {
+    fn land<H: Host>(&mut self, h: &mut H, now_ms: u64, budget_us: u32) {
         if !self.held_valid {
             return;
         }
         self.held_valid = false;
-        let code = h.park_restore(SLOT_JOURNAL, &bufs().hold[..self.held_len]);
+        let was = self.tick;
+        let code = h.park_restore(&bufs().hold[..self.held_len]);
         if code != 0 {
             h.emit(T_RESTORE_FAILED, code as u64, self.held_seq as u64);
             self.resyncing = false;
@@ -694,29 +878,78 @@ impl Session {
             return;
         }
         self.seq = self.held_seq;
+        // Safe because the authority queues a resync snapshot in-stream:
+        // everything already waiting here arrived ahead of it and is
+        // therefore folded into it. A snapshot delivered out of band would
+        // strand every event newer than itself.
         self.queued_len = 0;
         self.recent_head = 0;
         self.recent_len = 0;
         self.ring_head = 0;
         self.ring_len = 0;
+        // Every floor described a world that has just been replaced.
+        self.repair_head = 0;
+        self.repair_len = 0;
         self.hash_clear();
-        self.tick = h.park_tick(SLOT_JOURNAL);
-        let local = h.park_hash(SLOT_JOURNAL);
+        self.tick = h.park_tick();
+        let local = h.park_hash();
         self.hash_set(self.tick, local);
+        // The ring must never be empty while a world is live. Cadence
+        // entries only appear on the second, so without this a late event
+        // arriving in the first second after a restore has no floor to
+        // roll back to — and the only repair left is another snapshot,
+        // which lands here and empties the ring again. That is a loop, and
+        // it renders as a teleport every time round.
+        let len = h.park_snapshot(&mut bufs().state) as usize;
+        if len > 0 && len <= SNAP_CAP {
+            self.ring_push(len);
+        }
         self.resyncing = false;
         self.have_state = true;
         self.wrong_terrain = false;
-        self.dirty = true;
+        // Every outstanding check described the world this snapshot just
+        // replaced.
+        self.checks_len = 0;
+        // Reconciled here rather than at the next pump: a snapshot lands
+        // mid-frame, and a renderer reading the world between the restore
+        // and the next pump would show the one it had before.
+        self.corrected = true;
         self.clock.reset(self.held_tick, now_ms);
+        // A snapshot is stamped where the authority stood when it took it,
+        // which can be behind where this replica has already run to — and
+        // presenting that would rewind a tick the viewer has passed. The
+        // restored state is authoritative at its own tick, so walking it
+        // forward is the same work the next few frames would have done
+        // anyway. Bounded, because a restore from much further back is a
+        // real correction and showing it beats grinding through it.
+        let ceiling = was.min(self.tick + 2 * self.hz);
+        if self.tick < ceiling {
+            // Applying as we go rather than stepping past: events already
+            // queued for these ticks would otherwise be late the moment we
+            // arrived, and each would buy a rollback we caused ourselves.
+            self.repairing = true;
+            while self.tick < ceiling {
+                self.step_once(h);
+                self.apply_ready(h, now_ms, budget_us);
+            }
+            self.repairing = false;
+        }
         h.emit(T_SNAPSHOT_RESTORED, self.seq as u64, self.tick);
         if local != self.held_wh {
             self.stats[STAT_MISMATCHES as usize - 1] += 1;
             h.emit(T_MISMATCH, self.tick, 0);
         }
+        // Resend only what this connection has not already carried, and
+        // nothing that is still waiting on the dog's presence.
         for i in 0..self.intents_len {
             let it = bufs().intents[i];
-            let n = wire::encode_intent(&mut bufs().out, it.id, it.kind, it.payload());
-            h.send_stream(&bufs().out[..n]);
+            if it.sent_conn == self.conn {
+                continue;
+            }
+            if Self::needs_presence(it.kind) && self.role == ROLE_PLAYER && !self.presence {
+                continue;
+            }
+            self.resend(h, i);
         }
         if self.resync_on_landed {
             self.resync_on_landed = false;
@@ -729,6 +962,7 @@ impl Session {
             return;
         };
         self.clock.sample(v.ct_ms, now_ms, v.now);
+        let replaced = self.check_take(v.tick);
         let rtt = now_ms.saturating_sub(v.ct_ms);
         let ok = v.flags & wire::VERDICT_KNOWN != 0 && v.flags & wire::VERDICT_OK != 0;
         h.emit(T_VERDICT, ok as u64, rtt);
@@ -739,6 +973,19 @@ impl Session {
             self.want_module(h, pw, now_ms);
         }
         if v.flags & wire::VERDICT_KNOWN == 0 {
+            // "Unknown" answers two different questions: a tick that fell
+            // out of the authority's ring, and one it has not stamped yet.
+            // Only the first is staleness. A replica that has just
+            // restored sits at the snapshot's tick — ahead of its own lag
+            // target, holding — so its checks name ticks the server has
+            // not reached, and counting those as strikes turns an honest
+            // answer into a resync whose snapshot lands behind what is on
+            // screen. This classification is a prerequisite for shrinking
+            // LAG_TICKS: running hotter races the authority's present more
+            // often, not less.
+            if v.tick > v.now {
+                return;
+            }
             self.strike(h, R_CHECK_AGED_OUT, now_ms);
             return;
         }
@@ -746,13 +993,20 @@ impl Session {
             self.strikes = 0;
             return;
         }
+        // A verdict answers the history the replica held when it asked. A
+        // repair since then makes the answer true and useless: the hash it
+        // disagrees with is one this replica has already replaced, and
+        // striking on it resyncs a world that repaired itself correctly.
+        if replaced {
+            return;
+        }
         self.stats[STAT_MISMATCHES as usize - 1] += 1;
         h.emit(T_MISMATCH, v.tick, 0);
         self.strike(h, R_HASH_MISMATCH, now_ms);
     }
 
-    /// The terrain the host was asked for is (or is not) loaded into both
-    /// slots. A held snapshot lands on the next pump, which carries time.
+    /// The terrain the host was asked for is (or is not) loaded. A held
+    /// snapshot lands on the next pump, which carries time.
     pub fn terrain_ready<H: Host>(&mut self, _h: &mut H, id: u64, ok: bool) {
         if ok {
             self.terrain_id = id;
@@ -774,8 +1028,8 @@ impl Session {
         self.retry_pending = true;
     }
 
-    /// The host has replaced both slots' park instances. The new instances
-    /// hold no world, so the swap completes as a snapshot restore.
+    /// The host has replaced the park instance. The new one holds no
+    /// world, so the swap completes as a snapshot restore.
     pub fn module_swapped<H: Host>(&mut self, h: &mut H, pw: u32) {
         self.park_pw = pw;
         self.module_latch = false;
@@ -790,6 +1044,9 @@ impl Session {
         self.recent_len = 0;
         self.ring_head = 0;
         self.ring_len = 0;
+        // Every floor described a world that has just been replaced.
+        self.repair_head = 0;
+        self.repair_len = 0;
         self.hash_clear();
         self.resyncing = false;
         self.deferred_resync = R_MODULE_SWAPPED;
@@ -830,14 +1087,21 @@ impl Session {
             id,
             kind,
             plen: payload.len() as u16,
+            sent_conn: 0,
             p: [0; EV_PAYLOAD_CAP],
         };
         it.p[..payload.len()].copy_from_slice(payload);
         bufs().intents[self.intents_len] = it;
         self.intents_len += 1;
-        self.dirty = true;
+        // An intent that needs a dog in the park waits until the park says
+        // there is one. Racing the join earns an ABSENT refusal, which
+        // triggers a re-join and a retry — a spiral out of one tap.
+        if self.role == ROLE_PLAYER && !self.presence && Self::needs_presence(kind) {
+            return id;
+        }
         let n = wire::encode_intent(&mut bufs().out, id, kind, payload);
         h.send_stream(&bufs().out[..n]);
+        bufs().intents[self.intents_len - 1].sent_conn = self.conn;
         h.emit(T_INTENT_SENT, kind as u64, id);
         id
     }
@@ -845,20 +1109,31 @@ impl Session {
     // ---- the local tick loop ----
 
     /// One frame: obey the clock's directive, apply what the journal has
-    /// delivered, keep the check cadence, and re-derive the presented
-    /// world. The host executes nothing else.
+    /// delivered, and keep the check cadence. The host executes nothing
+    /// else.
     ///
     /// `budget_us` of 0 means observe rather than step: the clock still
     /// takes its frame, so it escalates and can still demand a snapshot,
     /// ready events still apply, and checks still go out — but neither
-    /// slot advances a tick. That is what a starved replica looks like,
-    /// which is exactly what makes it a usable freeze for dev loops.
-    /// Rollback replay is driven by arriving events rather than by the
-    /// clock, so a late event still repairs itself under a zero budget.
+    /// the world advances a tick. That is what a starved replica looks
+    /// like,
+    /// which is exactly what makes it a usable freeze for dev loops. A
+    /// zero budget also buys no rollback, so a late event resyncs instead
+    /// of rewinding — academic in practice, since a starved replica runs
+    /// behind the authority and every event it receives is a future one.
     pub fn pump<H: Host>(&mut self, h: &mut H, now_ms: u64, budget_us: u32) -> u32 {
+        self.last_budget_us = budget_us.max(1);
         if self.retry_pending {
             self.retry_pending = false;
             self.retry_at_ms = now_ms + RETRY_MS;
+        }
+        // A resync nobody answered is a session that has gone quiet: the
+        // seq gap never closes, so no event applies again. Ask once more,
+        // on the clock's own re-request cadence.
+        if self.resyncing && now_ms.saturating_sub(self.resync_at_ms) >= RESYNC_REASK_MS {
+            let again = self.resync_reason;
+            self.resyncing = false;
+            self.request_resync(h, again, now_ms);
         }
         if self.retry_at_ms != 0 && now_ms >= self.retry_at_ms {
             self.retry_at_ms = 0;
@@ -871,7 +1146,7 @@ impl Session {
         }
         if self.land_pending {
             self.land_pending = false;
-            self.land(h, now_ms);
+            self.land(h, now_ms, budget_us);
         }
         let mut stepped = false;
         if self.have_state {
@@ -888,16 +1163,13 @@ impl Session {
             stepped = steps > 0;
             while steps > 0 {
                 self.step_once(h);
-                self.apply_ready(h, now_ms);
+                self.apply_ready(h, now_ms, budget_us);
                 steps -= 1;
             }
-            self.apply_ready(h, now_ms);
+            self.apply_ready(h, now_ms, budget_us);
             if self.visible && self.connected && now_ms >= self.next_check_ms {
                 self.send_check(h, now_ms);
                 self.next_check_ms = now_ms + self.check_ms;
-            }
-            if self.dirty {
-                self.rebuild_overlay(h);
             }
         }
         let st = clock_state_code(self.clock.state());
@@ -912,86 +1184,187 @@ impl Session {
             | bit(stepped, S_STEPPED)
             | bit(self.held_valid, S_WANT_TERRAIN)
             | bit(self.module_latch, S_WANT_MODULE)
+            | bit(mem::take(&mut self.corrected), S_CORRECTED)
             | (st << S_CLOCK_SHIFT)
     }
 
     fn step_once<H: Host>(&mut self, h: &mut H) {
-        h.park_step(SLOT_JOURNAL);
-        if !self.dirty {
-            h.park_step(SLOT_PRESENTED);
-        }
-        self.tick = h.park_tick(SLOT_JOURNAL);
-        let hash = h.park_hash(SLOT_JOURNAL);
+        h.park_step();
+        self.tick = h.park_tick();
+        let hash = h.park_hash();
         // The ring entry is the state at *entry* to this tick: the events
         // stamped for it have not been applied yet, and re-hashing after
         // they are would poison exactly the entry a same-tick check
         // samples.
         self.hash_set(self.tick, hash);
-        if self.tick % self.hz == 0 {
-            let len = h.park_snapshot(SLOT_JOURNAL, &mut bufs().state) as usize;
+        let cadence = self.tick % self.hz == 0;
+        if cadence || self.repairing {
+            let len = h.park_snapshot(&mut bufs().state) as usize;
             if len > 0 && len <= SNAP_CAP {
-                self.ring_push(len);
+                if self.repairing {
+                    self.repair_push(len);
+                }
+                if cadence {
+                    self.ring_push(len);
+                }
             }
-            if !self.replaying {
-                self.prune_recent();
-            }
+        }
+        if cadence && !self.replaying {
+            self.prune_recent();
         }
     }
 
     /// Applies queued events at their exact tick, in dense seq order. A
     /// gap waits; a late event rolls back through the snapshot ring and
-    /// replays; deeper than the ring is a resync.
-    fn apply_ready<H: Host>(&mut self, h: &mut H, now_ms: u64) {
-        while self.queued_len > 0 && bufs().queued[0].seq <= self.seq {
-            self.queued_drop_front();
-        }
-        while self.queued_len > 0 && bufs().queued[0].seq == self.seq + 1 {
-            let e = bufs().queued[0];
-            if e.tick > self.tick {
+    /// replays; deeper than the ring — or than this frame's budget — is a
+    /// resync. A rollback always ends where it started: the rewind and the
+    /// replay both happen inside this call, so no frame ever renders the
+    /// past.
+    fn apply_ready<H: Host>(&mut self, h: &mut H, now_ms: u64, budget_us: u32) {
+        self.apply_and_resume(h, now_ms, budget_us);
+        // The repair is over however this ended: the floors exist for the
+        // walk back, and a resync that gave up on it is still an end.
+        self.repairing = false;
+    }
+
+    fn apply_and_resume<H: Host>(&mut self, h: &mut H, now_ms: u64, budget_us: u32) {
+        // Where the replica stood before any rewind: the tick this call
+        // owes the renderer by the time it returns.
+        let mut resume = 0;
+        loop {
+            while self.queued_len > 0 && bufs().queued[0].seq <= self.seq {
+                self.queued_drop_front();
+            }
+            while self.queued_len > 0 && bufs().queued[0].seq == self.seq + 1 {
+                let e = bufs().queued[0];
+                if e.tick > self.tick {
+                    break;
+                }
+                if e.tick < self.tick {
+                    let was = self.tick;
+                    if !self.rollback_to(h, e.tick, budget_us) {
+                        self.request_resync(h, R_LATE_EVENT, now_ms);
+                        return;
+                    }
+                    resume = resume.max(was);
+                }
+                self.queued_drop_front();
+                let code = self.apply(h, e.kind, e.payload());
+                if code != 0 {
+                    self.request_resync(h, R_EVENT_REJECTED, now_ms);
+                    return;
+                }
+                self.seq = e.seq;
+                // An event is not always a pure edit on top of the tick it
+                // lands in. `terrain_set` relocates dogs, which is rendered
+                // motion no step paid for and the only apply that produces
+                // any; everything else edits fields the renderer reads without
+                // moving anything.
+                if e.kind == EV_TERRAIN_SET {
+                    self.corrected = true;
+                }
+                // `clock_skip` moves the park's clock rather than its state, so
+                // the tick is read back rather than assumed — and the model of
+                // the authority moves with it. The authority journaled this
+                // skip from its own tick, so both worlds are at the
+                // destination; without the reset the clock sees a replica
+                // hours ahead of where it believes the authority stands and
+                // demands a snapshot to repair a world that is already right.
+                let park_tick = h.park_tick();
+                if park_tick != self.tick {
+                    self.tick = park_tick;
+                    self.clock.reset(park_tick, now_ms);
+                }
+                self.stats[STAT_EVENTS as usize - 1] += 1;
+                self.intent_take(e.intent);
+                self.recent_push(e);
+                // Presence is the journal's to state: our dog is in the park
+                // when the journal says a join placed it, whoever's intent id
+                // that event happens to carry.
+                if e.kind == EV_JOIN && e.plen == 8 && !self.presence {
+                    let mut id = [0u8; 8];
+                    id.copy_from_slice(&e.p[..8]);
+                    if u64::from_le_bytes(id) == self.my_dog {
+                        self.confirm_presence(h, PRESENCE_JOURNAL);
+                    }
+                }
+                h.emit(T_EVENT_APPLIED, e.seq as u64, e.tick);
+                if e.kind == EV_EPOCH_ADVANCE && e.plen == 12 {
+                    let mut b = [0u8; 8];
+                    b.copy_from_slice(&e.p[4..12]);
+                    self.want_module(h, u64::from_le_bytes(b) as u32, now_ms);
+                }
+            }
+            if self.tick >= resume {
                 return;
             }
-            if e.tick < self.tick && !self.rollback_to(h, e.tick) {
-                self.request_resync(h, R_LATE_EVENT, now_ms);
-                return;
-            }
-            self.queued_drop_front();
-            let code = self.apply(h, SLOT_JOURNAL, e.kind, e.payload());
-            if code != 0 {
-                self.request_resync(h, R_EVENT_REJECTED, now_ms);
-                return;
-            }
-            self.seq = e.seq;
-            self.stats[STAT_EVENTS as usize - 1] += 1;
-            self.dirty = true;
-            self.recent_push(e);
-            if self.intent_take(e.intent).is_some() {
-                self.dirty = true;
-            }
-            h.emit(T_EVENT_APPLIED, e.seq as u64, e.tick);
-            if e.kind == EV_EPOCH_ADVANCE && e.plen == 12 {
-                let mut b = [0u8; 8];
-                b.copy_from_slice(&e.p[4..12]);
-                self.want_module(h, u64::from_le_bytes(b) as u32, now_ms);
-            }
+            // The walk back to the present applies as it goes. Stepping past a
+            // queued event stamped inside the walk makes it late the moment we
+            // arrive, and it buys a rollback we caused ourselves — which walks
+            // again, and strands the next one. One late event becomes a train
+            // of them, all of them ours.
+            self.step_once(h);
         }
     }
 
     /// Rewinds to the newest ring entry at or before `tick`, replays the
     /// events since it, and stops exactly at `tick` so the late event can
-    /// apply where it belongs. The deficit that opens up is the clock's
-    /// problem, and stepping is what it is for. False means the repair is
-    /// out of reach and only a snapshot will do.
-    fn rollback_to<H: Host>(&mut self, h: &mut H, tick: u64) -> bool {
-        let mut i = self.ring_len;
-        while i > 0 {
-            i -= 1;
-            let idx = self.ring_idx(i);
-            if bufs().ring[idx].tick > tick {
-                continue;
+    /// apply where it belongs. The caller walks the replica back to the
+    /// present before it returns, so the rewind is never rendered.
+    ///
+    /// False means the repair is out of reach — no ring entry that deep,
+    /// or more steps than this frame's budget can pay for — and only a
+    /// snapshot will do. Refusing beats a half-finished rewind: the screen
+    /// would show the past and then jump.
+    ///
+    /// Load-bearing assumption: dogs do not interact. A dog's step reads
+    /// only its own state, the terrain, and `det_rand(seed, tick, id)`, so
+    /// replaying an event that moves one dog reproduces every other dog's
+    /// trajectory bit-identically and nothing on screen twitches but the
+    /// actor. The day dog-dog interaction ships, that stops being true and
+    /// this becomes a visible correction for bystanders.
+    fn rollback_to<H: Host>(&mut self, h: &mut H, tick: u64, budget_us: u32) -> bool {
+        // The newest floor at or before the target. Rewind distance is
+        // repair cost, not something anyone sees: the pump budget bounds
+        // it and the resync hatch catches the rest, so the ring stays one
+        // entry per second rather than paying a per-tick copy forever.
+        // By index — a Snap is most of a 64 KiB buffer, never moved.
+        let mut best: Option<(bool, usize)> = None;
+        let mut best_tick = 0;
+        for i in 0..self.repair_len {
+            let idx = self.repair_idx(i);
+            let t = bufs().repair[idx].tick;
+            if t <= tick && (best.is_none() || t > best_tick) {
+                best = Some((true, idx));
+                best_tick = t;
             }
+        }
+        for i in 0..self.ring_len {
+            let idx = self.ring_idx(i);
+            let t = bufs().ring[idx].tick;
+            if t <= tick && (best.is_none() || t > best_tick) {
+                best = Some((false, idx));
+                best_tick = t;
+            }
+        }
+        {
+            let Some((from_repair, idx)) = best else {
+                return false;
+            };
             let was = self.tick;
-            let entry = bufs().ring[idx];
+            let entry = if from_repair {
+                bufs().repair[idx]
+            } else {
+                bufs().ring[idx]
+            };
             let (stick, sseq, slen) = (entry.tick, entry.seq, entry.len);
+            // Every tick between the entry and the present gets stepped
+            // exactly once on the way back out. If this frame cannot pay
+            // for all of them, refuse the whole repair — a rewind the
+            // budget cannot finish is a rewind the user watches.
+            if was.saturating_sub(stick) > (budget_us / STEP_COST_US) as u64 {
+                return false;
+            }
             // The authority stamps ticks monotonically with seq, so every
             // event to replay belongs at or before `tick`. One that does
             // not would be silently dropped by this replay: refuse.
@@ -1001,15 +1374,36 @@ impl Session {
                     return false;
                 }
             }
-            if h.park_restore(SLOT_JOURNAL, &bufs().ring[idx].state[..slen]) != 0 {
+            let restored = if from_repair {
+                h.park_restore(&bufs().repair[idx].state[..slen])
+            } else {
+                h.park_restore(&bufs().ring[idx].state[..slen])
+            };
+            if restored != 0 {
                 return false;
             }
             self.seq = sseq;
-            self.tick = h.park_tick(SLOT_JOURNAL);
-            self.dirty = true;
+            self.tick = h.park_tick();
+            // A repair moves the world under whatever has been drawn, so
+            // the host is told to absorb it the same way it absorbs a
+            // restore.
+            self.corrected = true;
+            // Every tick from the late event onward is about to be
+            // re-derived, so any check still waiting on one of them
+            // described a history this replica is replacing right now.
+            for i in 0..self.checks_len {
+                if self.checks[i].tick >= tick {
+                    self.checks[i].replaced = true;
+                }
+            }
             self.stats[STAT_ROLLBACKS as usize - 1] += 1;
-            h.emit(T_ROLLBACK, was.saturating_sub(stick), stick);
+            h.emit(
+                T_ROLLBACK,
+                was.saturating_sub(tick),
+                was.saturating_sub(stick),
+            );
             self.replaying = true;
+            self.repairing = true;
             for k in 0..self.recent_len {
                 let e = self.recent_get(k);
                 if e.seq <= sseq {
@@ -1018,42 +1412,28 @@ impl Session {
                 while self.tick < e.tick {
                     self.step_once(h);
                 }
-                if self.apply(h, SLOT_JOURNAL, e.kind, e.payload()) == 0 {
+                if self.apply(h, e.kind, e.payload()) == 0 {
                     self.seq = e.seq;
+                    // Replayed history moves the tick exactly where it
+                    // moved it the first time: stepping from an assumed
+                    // tick past a replayed `clock_skip` would land this
+                    // replica somewhere the authority never stood.
+                    self.tick = h.park_tick();
                 }
             }
             while self.tick < tick {
                 self.step_once(h);
             }
             self.replaying = false;
-            return true;
+            true
         }
-        false
     }
 
-    /// Slot 1 is slot 0 plus this client's unanswered intents. Rebuilt
-    /// whenever slot 0 moved outside lockstep stepping or the pending set
-    /// changed; overlay rejects are expected and ignored.
-    fn rebuild_overlay<H: Host>(&mut self, h: &mut H) {
-        let len = h.park_snapshot(SLOT_JOURNAL, &mut bufs().state) as usize;
-        if len == 0 || len > SNAP_CAP {
-            return;
-        }
-        if h.park_restore(SLOT_PRESENTED, &bufs().state[..len]) != 0 {
-            return;
-        }
-        for i in 0..self.intents_len {
-            let it = bufs().intents[i];
-            self.apply(h, SLOT_PRESENTED, it.kind, it.payload());
-        }
-        self.dirty = false;
-    }
-
-    fn apply<H: Host>(&mut self, h: &mut H, slot: u32, kind: u16, payload: &[u8]) -> u32 {
+    fn apply<H: Host>(&mut self, h: &mut H, kind: u16, payload: &[u8]) -> u32 {
         let mut buf = [0u8; 2 + EV_PAYLOAD_CAP];
         buf[..2].copy_from_slice(&kind.to_le_bytes());
         buf[2..2 + payload.len()].copy_from_slice(payload);
-        h.park_apply(slot, &buf[..2 + payload.len()])
+        h.park_apply(&buf[..2 + payload.len()])
     }
 
     // ---- checks, strikes, resync ----
@@ -1064,6 +1444,15 @@ impl Session {
         };
         let n = wire::encode_check(&mut bufs().out, self.tick, wh, now_ms);
         h.send_datagram(&bufs().out[..n]);
+        if self.checks_len == MAX_CHECKS {
+            self.checks.copy_within(1..MAX_CHECKS, 0);
+            self.checks_len -= 1;
+        }
+        self.checks[self.checks_len] = Check {
+            tick: self.tick,
+            replaced: false,
+        };
+        self.checks_len += 1;
         self.stats[STAT_CHECKS as usize - 1] += 1;
         h.emit(T_CHECK_SENT, self.tick, 0);
     }
@@ -1087,6 +1476,8 @@ impl Session {
             return;
         }
         self.resyncing = true;
+        self.resync_at_ms = _now_ms;
+        self.resync_reason = reason;
         self.resync_on_landed = true;
         self.stats[STAT_RESYNCS as usize - 1] += 1;
         h.emit(T_RESYNC_REQUESTED, reason as u64, self.seq as u64);
@@ -1129,6 +1520,26 @@ impl Session {
 
     fn ring_idx(&self, i: usize) -> usize {
         (self.ring_head + i) % RING_DEPTH
+    }
+
+    fn repair_idx(&self, i: usize) -> usize {
+        (self.repair_head + i) % REPAIR_DEPTH
+    }
+
+    fn repair_push(&mut self, len: usize) {
+        if self.repair_len == REPAIR_DEPTH {
+            self.repair_head = (self.repair_head + 1) % REPAIR_DEPTH;
+            self.repair_len -= 1;
+        }
+        let idx = self.repair_idx(self.repair_len);
+        let (tick, seq) = (self.tick, self.seq);
+        let b = bufs();
+        b.repair[idx].tick = tick;
+        b.repair[idx].seq = seq;
+        b.repair[idx].len = len;
+        let (dst, src) = (&mut b.repair[idx].state[..len], &b.state[..len]);
+        dst.copy_from_slice(src);
+        self.repair_len += 1;
     }
 
     fn ring_push(&mut self, len: usize) {
@@ -1176,6 +1587,55 @@ impl Session {
     fn queued_drop_front(&mut self) {
         bufs().queued.copy_within(1..self.queued_len, 0);
         self.queued_len -= 1;
+    }
+
+    /// Does an intent of this kind still await an answer?
+    fn pending_kind(&self, kind: u16) -> Option<usize> {
+        (0..self.intents_len).find(|&i| bufs().intents[i].kind == kind)
+    }
+
+    /// Puts a pending intent back on the wire under its original id — the
+    /// authority dedupes by that id, so a resend can never double-apply.
+    fn resend<H: Host>(&mut self, h: &mut H, i: usize) {
+        let it = bufs().intents[i];
+        let n = wire::encode_intent(&mut bufs().out, it.id, it.kind, it.payload());
+        h.send_stream(&bufs().out[..n]);
+        bufs().intents[i].sent_conn = self.conn;
+    }
+
+    /// Intents the park refuses unless our dog is already standing in it.
+    fn needs_presence(kind: u16) -> bool {
+        matches!(kind, EV_CHECK_IN | EV_MOVE_TO | EV_BOOST_SET)
+    }
+
+    /// The park has our dog: whatever was waiting on that can go now.
+    fn confirm_presence<H: Host>(&mut self, h: &mut H, source: u64) {
+        if self.presence {
+            return;
+        }
+        self.presence = true;
+        h.emit(T_PRESENCE, source, self.tick);
+        for i in 0..self.intents_len {
+            if bufs().intents[i].sent_conn != self.conn {
+                self.resend(h, i);
+            }
+        }
+    }
+
+    /// Retires the outstanding check for `tick`, answering whether a
+    /// repair rewrote that tick while the verdict was in flight.
+    fn check_take(&mut self, tick: u64) -> bool {
+        let mut i = 0;
+        while i < self.checks_len {
+            if self.checks[i].tick == tick {
+                let replaced = self.checks[i].replaced;
+                self.checks.copy_within(i + 1..self.checks_len, i);
+                self.checks_len -= 1;
+                return replaced;
+            }
+            i += 1;
+        }
+        false
     }
 
     fn intent_take(&mut self, id: u64) -> Option<Intent> {
