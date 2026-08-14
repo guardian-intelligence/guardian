@@ -46,7 +46,7 @@ async function measureSettled(rttMs: number): Promise<Settled> {
     await r.harness.settle();
     if (t >= ACQUIRE_MS) {
       trail.push(Number(r.authority.tick - r.core.state.tick));
-      believed.push(r.core.clockErrorTicks());
+      believed.push(r.core.diag()?.errorTicks ?? 0);
     }
   }
   return { trail, believed };

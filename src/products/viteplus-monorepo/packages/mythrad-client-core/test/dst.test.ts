@@ -10,7 +10,7 @@
 // well-behaved integration test.
 
 import { describe, expect, it } from "vitest";
-import { Emit, HostEmit, ResyncReason, Stat } from "../src/ports.ts";
+import { Emit, HostEmit, ResyncReason } from "../src/ports.ts";
 import { PumpFlag, clockStateOf } from "../src/abi.ts";
 import { Role, decodeCheck, encodeEvent, type ClientFrame } from "../src/wire.ts";
 import {
@@ -1152,16 +1152,25 @@ describe("pump status and the read surface", () => {
     expect(new Set(seen).size).toBe(seen.length);
   });
 
-  it("counts every stat the session exposes", async () => {
+  it("serves one live diagnostics record and state agrees with it", async () => {
     const r = await rig();
     await r.establish();
     r.deliver([r.emit(Ev.join, dogPayload(0x61n))]);
     await r.until(() => r.core.state.seq === r.authority.seq);
-    expect(r.core.state.events).toBe(1);
-    for (const kind of Object.values(Stat)) {
-      expect(Number(r.core.state.tick)).toBeGreaterThanOrEqual(0);
-      expect(kind).toBeGreaterThan(0);
-    }
+    const d = r.core.diag();
+    expect(d).not.toBeNull();
+    // the record is the source ClientState refreshes from, and it names
+    // its own invariant: the trail target rides the bytes, not a mirror
+    expect(d!.events).toBe(1);
+    expect(d!.tick).toBe(r.core.state.tick);
+    expect(d!.seq).toBe(r.core.state.seq);
+    expect(d!.clockState).toBe(r.core.state.clockState);
+    expect(d!.trailTargetTicks).toBeGreaterThan(0);
+    expect(d!.cushionTicks).toBeGreaterThanOrEqual(d!.trailTargetTicks);
+    // trail measures from the authority's present, error from the
+    // cushioned schedule: they must differ by exactly the cushion, which
+    // pins every one of the three fields to its right offset
+    expect(d!.trailTicks - d!.errorTicks).toBeCloseTo(d!.cushionTicks, 3);
     expect(r.core.state.bytesDown).toBeGreaterThan(0);
   });
 

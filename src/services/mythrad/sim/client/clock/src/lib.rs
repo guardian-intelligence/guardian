@@ -39,6 +39,13 @@ pub const GENESIS_HZ: u64 = 24;
 /// The replica deliberately trails server-now (events in flight arrive
 /// before their tick is stepped).
 pub const LAG_TICKS: i64 = 6;
+/// The product invariant the netcode is tracked against: the replica
+/// should trail the authority's present by no more than one tick.
+/// `LAG_TICKS` is the cushion actually in force — oversized today because
+/// the authority's stamp-to-wire pipeline consumes the margin (measured
+/// via the session's arrival telemetry) — and every reduction toward this
+/// target shows up in `trail_q16`, the figure a host surfaces against it.
+pub const TRAIL_TARGET_TICKS: i64 = 1;
 
 const ENTER_FF_Q16: i64 = 12 * ONE;
 const EXIT_FF_Q16: i64 = 2 * ONE;
@@ -241,6 +248,19 @@ impl Clock {
         }
         self.target_q16(now_ms) - (replica_tick as i64) * ONE
     }
+
+    /// How far the replica trails the authority's present, in Q16 ticks:
+    /// the modeled server tick now, minus the replica's. This is the
+    /// figure `TRAIL_TARGET_TICKS` bounds. Distinct from `error_q16`,
+    /// which measures distance from the *cushioned* target and reads ~0
+    /// while the replica sits a full `LAG_TICKS` behind the authority.
+    pub fn trail_q16(&self, now_ms: u64, replica_tick: u64) -> i64 {
+        if self.state == State::Acquiring {
+            return 0;
+        }
+        self.ref_tick_q16 + self.ticks_q16(now_ms.saturating_sub(self.ref_ms))
+            - (replica_tick as i64) * ONE
+    }
 }
 
 #[cfg(test)]
@@ -331,6 +351,23 @@ mod tests {
         assert_eq!(h.clock.state(), State::Locked);
         assert!(h.err_ticks().abs() <= 1, "err={} ticks", h.err_ticks());
         assert_eq!(h.snapshots, 0);
+    }
+
+    #[test]
+    fn trail_reads_the_full_distance_to_the_authority() {
+        let mut h = Harness::new(0, 100);
+        h.run_ms(30_000);
+        let trail = h.clock.trail_q16(h.now_ms, h.replica_tick);
+        let err = h.clock.error_q16(h.now_ms, h.replica_tick);
+        // trail is measured from the authority's present, error from the
+        // cushioned target: at steady state they differ by exactly the
+        // cushion, and the trail sits within a tick of it.
+        assert_eq!(trail, err + LAG_TICKS * ONE);
+        let ticks = trail / ONE;
+        assert!(
+            ((LAG_TICKS - 1)..=(LAG_TICKS + 1)).contains(&ticks),
+            "trail={ticks} ticks"
+        );
     }
 
     #[test]

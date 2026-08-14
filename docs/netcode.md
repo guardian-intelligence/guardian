@@ -121,15 +121,30 @@ only handle that marks an event as yours. Rejects go only to the sender.
 2. **Journaled deterministic simulation.** Every surface runs the identical
    sim; the server streams an ordered event journal, never state, and the
    journal is also the durable truth (Postgres) — replay, restore, rejoin,
-   and spectating are the same operation. Clients predict only their own
-   intents and reconcile smoothly; divergence is detected by client-pulled
+   and spectating are the same operation. Clients run no prediction: one
+   world per client, built from the journal, with instant cosmetic tap
+   feedback only; divergence is detected by client-pulled
    world-hash checks and repaired by snapshot resync. The full contract —
    wire protocol, batching, epochs, catch-up, corrections — is the rest of
    this document. Steady-state downlink for an idle session is a few
    bytes of hash checks; the cellular-usage promise is a headline product
    metric.
 
-3. **One deterministic core, unchanged, on every surface.** Game logic
+3. **Freshness target: within one tick of the authority.** The replica
+   aims to trail the authority's present by no more than one tick
+   (`TRAIL_TARGET_TICKS`, clock crate) — latency is solved by server
+   placement, not client complexity. The operating cushion (`LAG_TICKS`)
+   is currently wider, sized to absorb delivery jitter; every reduction
+   toward the target must show up in the measured trail, which rides the
+   session diagnostics record (`session_diag`) and is visible live in
+   prod via the in-game Stats for Nerds pane (`?stats=1` or backquote).
+   Player intents apply at the first authority tick after receipt and are
+   idempotent by `(actor, intent id)` across reconnects; the client
+   measures each action's first-wire-write→applied latency in the session
+   core and reports it as a finished fact (`answered`), so every host on
+   every platform grades feel with the same number.
+
+4. **One deterministic core, unchanged, on every surface.** Game logic
    compiles from the shared Rust structural core (`//src/services/mythrad/sim`)
    to wasm. The module bytes are the portability contract. Three rules keep
    the determinism absolute:
@@ -154,7 +169,7 @@ only handle that marks an event as yours. Rejects go only to the sender.
    app), WebView or JNI runtime (Android app). If a surface cannot run the
    identical bytes, the design is wrong, not the surface.
 
-4. **Seamless updates: the ladder.** Every layer updates live, in order of
+5. **Seamless updates: the ladder.** Every layer updates live, in order of
    blast radius, and the running session survives all of them:
    - assets: content-addressed, streamed on first reference;
    - server behavior: dark launch (shadow slot evaluated every tick on live
@@ -168,7 +183,7 @@ only handle that marks an event as yours. Rejects go only to the sender.
    - server binary: image roll (sessions rejoin by journal catch-up);
    - network/routing: no coordination — see invariant 5.
 
-5. **Clients auto-reconnect seamlessly.** Severed connections are
+6. **Clients auto-reconnect seamlessly.** Severed connections are
    unavoidable, so any change to the network or routing layer may sever them
    without ceremony: every client redials with backoff and rejoins by
    journal catch-up (`since_seq`), and the server sends whichever of
@@ -176,7 +191,7 @@ only handle that marks an event as yours. Rejects go only to the sender.
    to game semantics — pack membership and park presence live in the
    journal, not in the connection.
 
-6. **Feature flags are presentation and product gating — never sim inputs.**
+7. **Feature flags are presentation and product gating — never sim inputs.**
    Client-side flagging uses the OpenFeature SDK evaluating over OFREP
    against the same-origin /features mount, with a read-only SSE
    subscription to the flag-set epoch so flips propagate live without

@@ -90,7 +90,7 @@ export interface Ports {
 }
 
 /**
- * Telemetry codes the session core emits, 1..19. The numbers are the
+ * Telemetry codes the session core emits, 1..22. The numbers are the
  * contract and are shared with the Rust crate; host-minted codes live in
  * `HostEmit` and start at 1000 so the two can never be confused in a
  * dashboard or a span attribute.
@@ -141,11 +141,57 @@ export const Emit = {
    * minus margin.
    */
   eventArrived: 19,
+  /**
+   * answered((resends << 16) | kind, latency_ms): the journal applied an
+   * event carrying one of OUR intent ids — the player's action became
+   * world state. The latency is a finished fact the core measured, from
+   * the action's first wire write to this apply, so the host does zero
+   * bookkeeping: name the kind, forward, done. Every host on every
+   * platform reports the same figure the same way.
+   */
+  intentAnswered: 20,
+  /**
+   * resent(kind, resends): a pending action went back on the wire under
+   * its original id (the authority dedupes, so a resend can never
+   * double-apply). The answered fact carries the final count; this marks
+   * the retry itself.
+   */
+  intentResent: 21,
+  /**
+   * dropped((reason << 16) | kind, held_ms): a pending action was
+   * discarded and will never be answered — the player acted and the
+   * world will not reflect it. Reasons in `IntentDrop`; held_ms is how
+   * long it had waited (0 for one that never reached the wire). Nothing
+   * else says so: no reject arrives and no event applies.
+   */
+  intentDropped: 22,
+} as const;
+
+/** The high half of `intentDropped`'s `a` slot. */
+export const IntentDrop = {
+  /** A 33rd in-flight intent evicted the oldest. */
+  overflow: 1,
+  /** `reidentify`: the old identity's intents die with it. */
+  reidentify: 2,
 } as const;
 
 /**
+ * The intent kinds a host can send, named for dashboards and panes. The
+ * numbers are the park's event kinds — an action's kind rides its spans
+ * as this number, so a NEW action needs no telemetry change, only a row
+ * here; the conformance suite fails when the core sends a kind this
+ * table cannot name.
+ */
+export const ActionKind: Record<number, string> = {
+  1: "join",
+  3: "check_in",
+  4: "move_to",
+  8: "boost",
+};
+
+/**
  * Codes the HOST mints, for facts the session core cannot know. They
- * start at 1000 so a consumer can tell them apart from the core's 1..18
+ * start at 1000 so a consumer can tell them apart from the core's 1..22
  * by magnitude alone, and so neither range can ever grow into the other.
  */
 export const HostEmit = {
@@ -239,14 +285,4 @@ export const Request = {
    * byte on that stream is unparseable. The redial is the repair.
    */
   teardown: 4,
-} as const;
-
-/** `session_stat(kind)` counters. 7 (bytes_down) is host-side and lives on the core. */
-export const Stat = {
-  events: 1,
-  rollbacks: 2,
-  resyncs: 3,
-  checks: 4,
-  mismatches: 5,
-  rejects: 6,
 } as const;

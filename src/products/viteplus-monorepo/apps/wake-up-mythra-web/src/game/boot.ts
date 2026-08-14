@@ -20,6 +20,7 @@ import { createDebugPanel, type DebugPanel } from "./debug";
 import { createHud, type Hud } from "./hud";
 import { createJank } from "./jank";
 import { createRenderer } from "./renderer";
+import { createStatsPane, type StatsPane } from "./stats";
 import {
   createTelemetry,
   jank as jankSpan,
@@ -58,6 +59,7 @@ export function startGame(): void {
 
 async function run(hud: Hud): Promise<void> {
   let debug: DebugPanel | null = null;
+  let stats: StatsPane | null = null;
   try {
     // Read after completeSignIn restores the pre-sign-in query, so ?park=
     // and ?spectate survive a redirect-flow round trip.
@@ -136,6 +138,7 @@ async function run(hud: Hud): Promise<void> {
       telemetry: (code, a, b) => {
         telemetry.emit(code, a, b);
         debug?.onEmit(code, a, b);
+        stats?.onEmit(code, a, b);
       },
       random32: browserRandom32,
       log: hud.log,
@@ -158,6 +161,10 @@ async function run(hud: Hud): Promise<void> {
     hud.setStatus("connecting");
     telemetry.bind(core);
     debug = import.meta.env.DEV ? createDebugPanel(core) : null;
+    // Stats for Nerds ships to prod: `?stats=1` or backquote. It reads
+    // the module's diagnostics record; dev values are tiny by nature —
+    // production is where the trail number earns its keep.
+    stats = createStatsPane(core);
     // The raw per-frame ring is opt-in because only a harness reads it; the
     // counters behind the once-a-minute span always run.
     const probe = query.has("probe");

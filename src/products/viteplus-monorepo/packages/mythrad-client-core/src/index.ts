@@ -9,12 +9,13 @@ export {
 } from "./core.ts";
 export { browserRandom32 } from "./adapters.ts";
 export {
+  ActionKind,
   Caps,
   Emit,
   HostEmit,
+  IntentDrop,
   Request,
   ResyncReason,
-  Stat,
   type BehaviorModule,
   type Connection,
   type ConnectionSink,
@@ -25,11 +26,14 @@ export {
 export {
   CLOCK_STATE_SHIFT,
   clockStateOf,
+  decodeDiag,
   decodeHud,
   decodeWelcomeEmit,
+  DIAG_BYTES,
   HUD_BYTES,
   PumpFlag,
   type ClientExports,
+  type Diag,
   type HostImports,
   type Hud,
   type ParkExports,

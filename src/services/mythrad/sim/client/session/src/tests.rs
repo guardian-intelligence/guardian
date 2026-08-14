@@ -1517,6 +1517,131 @@ fn only_an_exact_intent_id_acknowledges_a_pending_intent() {
 }
 
 #[test]
+fn an_answered_intent_reports_its_kind_and_its_latency() {
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    r.confirm_join();
+    let id = r.s.intent_move_to(&mut r.m, 9, r.now);
+    let sent_at = r.now;
+    r.advance(160);
+    let next = r.s.seq() + 1;
+    r.event(next, r.s.tick(), EV_MOVE_TO, id, &move_payload(9));
+    r.pump_until_seq(next);
+    // the moment the action became world state, as a finished fact: kind
+    // (with a zero resend count in the high half) and first-wire-write to
+    // apply latency, measured in the core so every host reports the same
+    // figure. The join's own answer is announced the same way.
+    let answered = r.m.emits_of(T_INTENT_ANSWERED);
+    assert_eq!(answered.len(), 2, "join, then the move: {answered:?}");
+    assert_eq!(answered[0].0, EV_JOIN as u64);
+    assert_eq!(answered[1].0, EV_MOVE_TO as u64, "kind, zero resends");
+    assert_eq!(answered[1].1, r.now - sent_at, "latency in wall ms");
+}
+
+#[test]
+fn a_tap_before_presence_is_sent_once_at_its_first_wire_write() {
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    // the dog is not confirmed yet: the tap is held, and a held intent
+    // has not been sent
+    let id = r.s.intent_check_in(&mut r.m, r.now);
+    assert!(
+        !r.m.intents().iter().any(|(i, _)| *i == id),
+        "a presence-gated intent went out early"
+    );
+    assert!(!r.m.emits_of(T_INTENT_SENT).iter().any(|e| e.1 == id));
+
+    r.confirm_join();
+    // the flush IS the send: on the wire once, announced once, and it is
+    // a first send, not a resend
+    assert_eq!(r.m.intents().iter().filter(|(i, _)| *i == id).count(), 1);
+    assert_eq!(
+        r.m.emits_of(T_INTENT_SENT)
+            .iter()
+            .filter(|e| e.1 == id)
+            .count(),
+        1
+    );
+    assert_eq!(r.m.emits_of(T_INTENT_RESENT), vec![]);
+}
+
+#[test]
+fn a_reconnect_flush_is_a_resend_under_the_original_id() {
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    r.confirm_join();
+    let id = r.s.intent_move_to(&mut r.m, 9, r.now);
+    r.s.disconnected();
+    r.m.clear();
+    r.s.connected(&mut r.m, b"ticket-bytes", r.now);
+    // the park still holds the dog: presence is re-confirmed by refusal,
+    // and the flush puts the pending move back on the wire
+    let join = r.s.pending_kind(EV_JOIN).map(|i| bufs().intents[i].id);
+    r.reject(join.expect("the reconnect re-sends its join"), ERR_PRESENT);
+    // announced as a retry — kind and how many times it has gone out again
+    let resent = r.m.emits_of(T_INTENT_RESENT);
+    assert!(
+        resent.contains(&(EV_MOVE_TO as u64, 1)),
+        "the flush must announce the retry: got {resent:?}"
+    );
+    assert_eq!(r.m.intents().iter().filter(|(i, _)| *i == id).count(), 1);
+}
+
+#[test]
+fn the_intent_ring_overflow_names_the_action_it_discards() {
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    r.confirm_join();
+    r.s.intent_move_to(&mut r.m, 1, r.now);
+    r.advance(32);
+    for n in 2..=MAX_INTENTS as u32 + 1 {
+        r.s.intent_move_to(&mut r.m, n, r.now);
+    }
+    // the player acted 33 times; the 33rd evicted the first, and the
+    // discard says which kind of action will never be answered and how
+    // long it had been waiting
+    assert_eq!(
+        r.m.emits_of(T_INTENT_DROPPED),
+        vec![((DROP_OVERFLOW << 16) | EV_MOVE_TO as u64, 32)]
+    );
+}
+
+#[test]
+fn the_diagnostics_record_is_one_versioned_dump_of_live_state() {
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    r.confirm_join();
+    r.run_to_tick(1030);
+    let mut buf = [0u8; 128];
+    assert_eq!(r.s.diag(r.now, &mut buf), DIAG_BYTES);
+    assert_eq!(u16::from_le_bytes([buf[0], buf[1]]), DIAG_VERSION);
+    assert_eq!(buf[2], 1, "clock state: locked");
+    assert_eq!(
+        i64::from_le_bytes(buf[8..16].try_into().unwrap()),
+        r.s.trail_q16(r.now)
+    );
+    assert_eq!(
+        u64::from_le_bytes(buf[24..32].try_into().unwrap()),
+        r.s.tick()
+    );
+    assert_eq!(
+        i64::from_le_bytes(buf[32..40].try_into().unwrap()),
+        r.s.seq()
+    );
+    // the record states the invariant and the cushion itself, from the
+    // clock crate's constants — no host mirrors them
+    assert_eq!(
+        u32::from_le_bytes(buf[40..44].try_into().unwrap()),
+        mythra_sim_clock::TRAIL_TARGET_TICKS as u32
+    );
+    assert_eq!(
+        u32::from_le_bytes(buf[44..48].try_into().unwrap()),
+        mythra_sim_clock::LAG_TICKS as u32
+    );
+    assert_eq!(
+        u64::from_le_bytes(buf[48..56].try_into().unwrap()),
+        r.s.stat(STAT_EVENTS)
+    );
+    // a buffer too small is refused whole, never truncated
+    assert_eq!(r.s.diag(r.now, &mut buf[..DIAG_BYTES - 1]), 0);
+}
+
+#[test]
 fn signing_in_swaps_identity_without_reloading_the_world() {
     const NEW_DOG: u64 = 0x5151_5151_5151_5151;
     const NEW_NONCE: u32 = 0x0BAD_F00D;
@@ -1526,10 +1651,17 @@ fn signing_in_swaps_identity_without_reloading_the_world() {
     r.s.intent_check_in(&mut r.m, r.now);
     assert_eq!(r.s.intents_len, 1);
 
-    r.s.reidentify(NEW_DOG, ROLE_PLAYER, NEW_NONCE, r.now);
+    r.s.reidentify(&mut r.m, NEW_DOG, ROLE_PLAYER, NEW_NONCE, r.now);
     assert_eq!(
         r.s.intents_len, 0,
         "pending intents belonged to the old dog"
+    );
+    // the discard is a fact in the trace: this action will never land,
+    // and nothing else — no reject, no event — would ever say so. Sent
+    // and dropped at the same instant, so it had waited zero ms.
+    assert_eq!(
+        r.m.emits_of(T_INTENT_DROPPED),
+        vec![((DROP_REIDENTIFY << 16) | EV_CHECK_IN as u64, 0)]
     );
     assert_eq!((r.s.seq(), r.s.tick()), (seq, tick), "the replica survives");
 

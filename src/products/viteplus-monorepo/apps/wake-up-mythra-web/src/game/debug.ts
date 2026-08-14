@@ -64,15 +64,15 @@ export function createDebugPanel(core: Core): DebugPanel {
     },
     update: () => {
       const state = core.state;
+      const d = core.diag();
+      if (!d) return;
       line("dbg-clock").textContent =
-        `clock ${CLOCK_STATES[core.clockState()] ?? "?"}${frozen() ? " (frozen)" : ""}` +
-        ` · rtt ${core.clockRttMs()}ms`;
-      const err = core.clockErrorTicks();
-      const seconds = state.hz > 0 ? ` (${(err / state.hz).toFixed(2)}s)` : "";
-      line("dbg-desync").textContent = `desync ${err.toFixed(1)} ticks${seconds}`;
+        `clock ${CLOCK_STATES[d.clockState] ?? "?"}${frozen() ? " (frozen)" : ""}` +
+        ` · rtt ${d.rttMs}ms`;
+      const seconds = state.hz > 0 ? ` (${(d.errorTicks / state.hz).toFixed(2)}s)` : "";
+      line("dbg-desync").textContent = `desync ${d.errorTicks.toFixed(1)} ticks${seconds}`;
       line("dbg-replica").textContent =
-        `replica tick ${state.tick} seq ${state.seq}` +
-        ` · ${state.rollbacks} rollbacks, ${state.resyncs} resyncs`;
+        `replica tick ${d.tick} seq ${d.seq}` + ` · ${d.rollbacks} rollbacks, ${d.resyncs} resyncs`;
       line("dbg-verdict").textContent = `verdict ${verdict}`;
     },
   };
