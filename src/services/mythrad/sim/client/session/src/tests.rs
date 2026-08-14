@@ -203,6 +203,11 @@ impl Host for Mock {
     }
 
     fn inflate(&mut self, src: &[u8], dst: &mut [u8]) -> u32 {
+        // The host's contract: 0 for a failure, and for a result that
+        // would not fit the destination.
+        if src.len() > dst.len() {
+            return 0;
+        }
         dst[..src.len()].copy_from_slice(src);
         src.len() as u32
     }
@@ -662,6 +667,31 @@ mod codec {
             (g.seq, g.tick, g.epoch, g.wh, g.terrain, g.z),
             (s.seq, s.tick, s.epoch, s.wh, s.terrain, s.z)
         );
+    }
+
+    #[test]
+    fn a_park_name_longer_than_the_wire_allows_is_clamped() {
+        // The length rides in a u8: wrapping it would write a frame whose
+        // declared name length disagrees with the bytes after it.
+        let long = [b'x'; 300];
+        let mut b = [0u8; 512];
+        let n = encode_welcome(
+            &mut b,
+            &Welcome {
+                epoch: 1,
+                seq: 1,
+                tick: 1,
+                hz: 24,
+                role: 0,
+                terrain: 0,
+                park: &long,
+            },
+        );
+        let (k, off, len, total) = frame_bounds(&b[..n]).unwrap().unwrap();
+        assert_eq!((k, total), (K_WELCOME, n));
+        let w = parse_welcome(&b[off..off + len]).unwrap();
+        assert_eq!(w.park.len(), 255);
+        assert_eq!(w.park, &long[..255]);
     }
 
     #[test]
@@ -1392,6 +1422,147 @@ fn a_rejected_intent_leaves_the_overlay_immediately() {
             "reason {reason}: the refused intent is still predicted"
         );
     }
+}
+
+// A snapshot frame at the largest size the park can produce: the park's
+// io buffer is the ceiling on the state, so it is the ceiling on the
+// deflate payload too.
+fn big_snapshot_frame(seq: i64, tick: u64, zlen: usize) -> Vec<u8> {
+    let z = vec![0x5A; zlen];
+    let mut buf = vec![0u8; zlen + 64];
+    let n = wire::encode_snapshot(
+        &mut buf,
+        &wire::Snapshot {
+            seq,
+            tick,
+            epoch: 3,
+            wh: 0,
+            terrain: TERRAIN,
+            z: &z,
+        },
+    );
+    buf.truncate(n);
+    buf
+}
+
+#[test]
+fn a_frame_larger_than_a_host_chunk_survives_the_chunk_boundary() {
+    // The host stages 64 KiB at a time, so a full-size snapshot frame is
+    // always split — and while its tail is still pending, another whole
+    // chunk can land on top. If reassembly cannot hold both, the decoder
+    // realigns mid-frame on garbage and the session is finished.
+    let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
+    r.m.clear();
+    let mut stream = Vec::new();
+    stream.extend_from_slice(&big_snapshot_frame(200, 5000, 64 * 1024));
+    stream.extend_from_slice(&big_snapshot_frame(201, 5001, 64 * 1024));
+    let mut tail = [0u8; 128];
+    let n = wire::encode_snapshot(
+        &mut tail,
+        &wire::Snapshot {
+            seq: 300,
+            tick: 4000,
+            epoch: 3,
+            wh: toy_hash(4000, 9),
+            terrain: TERRAIN,
+            z: &toy_state(4000, 9),
+        },
+    );
+    stream.extend_from_slice(&tail[..n]);
+
+    for chunk in stream.chunks(64 * 1024) {
+        r.s.on_stream(&mut r.m, chunk, r.now);
+    }
+    r.pump();
+    assert!(
+        r.m.reqs_of(REQ_TEARDOWN).is_empty(),
+        "reassembly gave up inside a legal frame"
+    );
+    // the frame behind the big ones is the proof the decoder stayed aligned
+    assert!(r.s.have_state);
+    assert_eq!((r.s.seq(), r.s.tick()), (300, 4000));
+}
+
+#[test]
+fn a_stream_too_big_to_reassemble_is_torn_down_not_resynced() {
+    let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
+    r.m.clear();
+    // a frame that promises far more than reassembly can ever hold
+    let mut chunk = Vec::new();
+    let mut v = [0u8; 8];
+    let n = wire::put_varint(&mut v, 400_000);
+    chunk.extend_from_slice(&v[..n]);
+    chunk.push(wire::K_SNAPSHOT);
+    chunk.resize(64 * 1024, 0);
+    for _ in 0..3 {
+        r.s.on_stream(&mut r.m, &chunk, r.now);
+    }
+    assert_eq!(r.m.reqs_of(REQ_TEARDOWN), vec![R_STREAM_OVERFLOW as u64]);
+    assert!(
+        r.m.emits_of(T_RESYNC_REQUESTED).is_empty(),
+        "a resync travels the same broken stream and can never repair it"
+    );
+    assert_eq!(r.s.stat(STAT_RESYNCS), 0);
+    assert_eq!(r.s.in_len, 0);
+}
+
+#[test]
+fn an_unreadable_length_prefix_is_torn_down_not_resynced() {
+    let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
+    r.m.clear();
+    r.s.on_stream(&mut r.m, &[0x00], r.now); // a body that cannot hold a kind
+    assert_eq!(r.m.reqs_of(REQ_TEARDOWN), vec![R_FRAMING as u64]);
+    assert!(r.m.emits_of(T_RESYNC_REQUESTED).is_empty());
+    assert_eq!(r.s.stat(STAT_RESYNCS), 0);
+}
+
+#[test]
+fn a_failed_fetch_for_another_world_leaves_the_held_snapshot_alone() {
+    const OTHER: u64 = 0xBEEF_0001;
+    let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
+    r.m.clear();
+    r.snapshot(400, 6000, 3, OTHER);
+    assert_eq!(r.m.reqs_of(REQ_NEED_TERRAIN), vec![OTHER]);
+    assert!(r.s.held_valid);
+    // a fetch we stopped caring about fails
+    r.s.terrain_ready(&mut r.m, 0x1234_5678, false);
+    assert!(
+        r.s.held_valid,
+        "a superseded fetch discarded the snapshot we are holding"
+    );
+    // and the world we are actually waiting on still lands
+    r.s.terrain_ready(&mut r.m, OTHER, true);
+    r.pump();
+    assert!(r.s.have_state);
+    assert_eq!((r.s.seq(), r.s.tick()), (400, 6000));
+}
+
+#[test]
+fn a_refused_world_stops_the_strike_loop_until_the_terrain_changes() {
+    let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
+    r.advance(1000);
+    r.m.restore_code = RESTORE_WRONG_TERRAIN;
+    r.m.clear();
+    r.snapshot(300, 3000, 5, TERRAIN);
+    r.pump();
+    assert_eq!(r.m.emits_of(T_RESTORE_FAILED).len(), 1);
+    // divergence keeps being reported, but another snapshot would be
+    // refused exactly the same way — asking again at the check cadence is
+    // a loop, not a repair
+    for _ in 0..10 {
+        r.verdict(r.s.tick(), true, false, 0);
+    }
+    assert!(
+        r.m.emits_of(T_RESYNC_REQUESTED).is_empty(),
+        "resync loop against a world the park refuses"
+    );
+    assert_eq!(r.s.stat(STAT_RESYNCS), 0);
+    // a different world is worth asking about again
+    r.m.restore_code = 0;
+    r.s.terrain_ready(&mut r.m, 0x9999, true);
+    r.verdict(r.s.tick(), true, false, 0);
+    r.verdict(r.s.tick(), true, false, 0);
+    assert_eq!(r.m.emits_of(T_RESYNC_REQUESTED).len(), 1);
 }
 
 #[test]

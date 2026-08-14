@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { Emit, HostEmit, ResyncReason, Stat } from "../src/ports.ts";
 import { PumpFlag, clockStateOf } from "../src/abi.ts";
 import { Role, decodeCheck, encodeEvent } from "../src/wire.ts";
-import { Ev, Reject, dogPayload, epochAdvancePayload, rig } from "./wasm.ts";
+import { Ev, Reject, dogPayload, epochAdvancePayload, modules, rig } from "./wasm.ts";
 
 /** One tick at the fixture park's 24Hz, in milliseconds. */
 const TICK_MS = 1000 / 24;
@@ -395,6 +395,45 @@ describe("invariant 7: module epoch", () => {
     expect(await r.until(() => r.core.state.seq === r.authority.seq, 2000)).toBe(true);
   });
 
+  it("a swap that cannot load its terrain leaves the old world running", async () => {
+    // A new module refusing the terrain we hold is a real shape — the
+    // schema tightening is exactly the sort of change that ships with a
+    // module. Publishing the fresh instances before their terrain loaded
+    // would leave two worldless slots live, `session_module_swapped`
+    // never called, and every retry failing identically: a frozen park.
+    const r = await rig();
+    await r.establish();
+    await r.run(400);
+    const tickBefore = r.core.state.tick;
+    const dogsBefore = r.core.state.dogCount;
+
+    // Serve a "new module" that instantiates but cannot take our world.
+    // server.wasm is a real committed artifact with no park surface, so
+    // the swap gets past instantiation and dies in the terrain load —
+    // which is the ordering under test. It dies at the FIRST terrain call
+    // (`terrain_cap` is missing) rather than at a `sim_set_terrain`
+    // refusal, so what is covered here is "the terrain step threw", not
+    // specifically "the new module rejected this world". Reaching the
+    // later point faithfully would need a park build with a different
+    // terrain schema; both land in the same catch.
+    r.harness.setModule("park", modules().server.slice().buffer);
+    r.deliver([r.emit(Ev.epochAdvance, epochAdvancePayload(2, 0xdeadbeefn))]);
+    expect(await r.until(() => r.harness.logs.some((l) => l.includes("swap failed")), 2000)).toBe(
+      true,
+    );
+
+    // The retired module is still running the world: the replica keeps
+    // stepping and the roster is intact.
+    await r.run(600);
+    expect(r.core.state.tick).toBeGreaterThan(tickBefore);
+    expect(r.core.state.dogCount).toBe(dogsBefore);
+    expect(r.core.pump() & PumpFlag.haveState).toBe(PumpFlag.haveState);
+
+    // And the retry lane recovers once the module serves a loadable world.
+    r.harness.setModule("park", modules().park.slice().buffer);
+    expect(await r.until(() => r.count(Emit.moduleSwapped) > 1, 8000)).toBe(true);
+  });
+
   it("a verdict naming a different park module asks for the swap", async () => {
     const r = await rig({ checkMs: 150 });
     await r.establish();
@@ -569,6 +608,86 @@ describe("network abuse", () => {
     }
     await r.run(300);
     expect(Number(r.core.state.resyncs)).toBe(0);
+  });
+
+  it("reassembles the largest snapshot a park can emit", async () => {
+    // The biggest thing on the wire. A park's whole state lives in its
+    // 64 KiB io buffer, so a full 2048-dog roster is ~61.5 KB; sent as
+    // stored blocks the frame is about that size, which is larger than
+    // the host's staging buffer and forces #onStreamBytes to split it.
+    const r = await rig();
+    await r.establish();
+    expect(r.authority.fillRoster()).toBe(2048);
+    const frame = r.authority.snapshotUncompressed();
+    expect(frame.length).toBeGreaterThan(60_000);
+
+    const restores = r.count(Emit.snapshotRestored);
+    // One read, larger than session_cap, cut nowhere convenient.
+    r.harness.transport.deliverStream(frame);
+    expect(await r.until(() => r.count(Emit.snapshotRestored) > restores, 4000)).toBe(true);
+    // The restore lands inside the stream call; the presented slot is
+    // rebuilt on the next pump, which is where the roster becomes visible.
+    expect(await r.until(() => r.core.state.dogCount === 2048, 2000)).toBe(true);
+    expect(r.core.state.seq).toBe(r.authority.seq);
+    expect(Number(r.core.state.mismatches)).toBe(0);
+  });
+
+  it("reassembles that snapshot however the reads are cut", async () => {
+    const r = await rig();
+    await r.establish();
+    r.authority.fillRoster();
+    const frame = r.authority.snapshotUncompressed();
+    const restores = r.count(Emit.snapshotRestored);
+    // A ragged delivery: a byte, the rest of the prefix, then odd sizes
+    // that land mid-payload and straddle the host's staging boundary.
+    r.harness.transport.deliverStream(frame, [1, 2, 3, 60_000, 999]);
+    expect(await r.until(() => r.count(Emit.snapshotRestored) > restores, 4000)).toBe(true);
+    expect(await r.until(() => r.core.state.dogCount === 2048, 2000)).toBe(true);
+  });
+
+  it("tears the transport down when reassembly overflows, and redials", async () => {
+    // Overflow needs a partial frame already buffered plus a large read
+    // behind it — no single frame can do it. The core drops the buffer
+    // and asks the host to close, because byte alignment is gone and a
+    // resync written onto this stream would be answered into garbage.
+    const r = await rig();
+    await r.establish();
+    const dials = r.harness.transport.dials;
+
+    // Claim a frame far larger than anything real, then feed it. The
+    // core buffers it happily until pending + incoming passes the cap.
+    const header = new Uint8Array(4);
+    new DataView(header.buffer).setUint32(0, 0x8000_0000 | 400_000, false);
+    r.harness.transport.deliverStream(header);
+    const filler = new Uint8Array(64 * 1024);
+    for (let i = 0; i < 4 && r.harness.transport.dials === dials; i++) {
+      r.harness.transport.deliverStream(filler);
+      await r.harness.settle();
+    }
+
+    expect(r.harness.logs.some((l) => l.includes("framing lost"))).toBe(true);
+    expect(r.harness.transport.closed).toBeGreaterThan(0);
+    expect(await r.until(() => r.harness.transport.dials > dials, 8000, 25)).toBe(true);
+
+    // And the replacement connection is a working session: the replica
+    // survived, and a fresh snapshot lands on the new stream.
+    const restores = r.count(Emit.snapshotRestored);
+    r.deliver([r.authority.snapshot()]);
+    expect(await r.until(() => r.count(Emit.snapshotRestored) > restores, 3000)).toBe(true);
+    expect(r.core.pump() & PumpFlag.haveState).toBe(PumpFlag.haveState);
+  });
+
+  it("tears down on a length prefix it cannot read", async () => {
+    const r = await rig();
+    await r.establish();
+    const dials = r.harness.transport.dials;
+    // A frame declaring zero length: there is no kind byte and no way to
+    // step past it, so the decoder can never make progress. Reason 12,
+    // distinct from the overflow's 11.
+    r.harness.transport.deliverStream(Uint8Array.of(0x00));
+    await r.harness.settle();
+    expect(r.harness.logs.some((l) => l.includes("framing lost"))).toBe(true);
+    expect(await r.until(() => r.harness.transport.dials > dials, 8000, 25)).toBe(true);
   });
 
   it("ignores a datagram that is not a verdict", async () => {

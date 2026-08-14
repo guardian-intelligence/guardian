@@ -130,8 +130,11 @@ export const HostEmit = {
 } as const;
 
 /**
- * Why the core asked for a snapshot. Rides `emit(5, reason, seq)` and
- * `request(3, reason)`; the host only reports these.
+ * Why the core gave up on the state it had. One numbering across both
+ * recovery verbs, and after the teardown split no code appears on both:
+ * 1..10 only ever arrive as `request(3)` resync_wanted, 11..12 only ever
+ * as `request(4)` teardown. A consumer can therefore key severity off the
+ * verb rather than off the code. The host only reports these.
  */
 export const ResyncReason = {
   clock: 1,
@@ -144,7 +147,10 @@ export const ResyncReason = {
   restoreFailed: 8,
   queueOverflow: 9,
   moduleSwapped: 10,
+  /** Reassembly ran out of room. Arrives as a teardown, never a resync. */
   streamOverflow: 11,
+  /** A length prefix that cannot be read. Also a teardown. */
+  framing: 12,
 } as const;
 
 /**
@@ -161,8 +167,20 @@ export const Caps = {
   recentEvents: 512,
   /** Largest sim event payload the core will carry. */
   eventPayload: 64,
-  /** Stream reassembly buffer; a longer pending frame forces a resync. */
-  reassembly: 96 * 1024,
+  /**
+   * Stream reassembly. The trigger is what is ALREADY buffered plus the
+   * incoming read, not the size of any one frame — and it cannot be one
+   * frame, because a park's whole state fits in its 64 KiB io buffer, so
+   * the largest snapshot frame it can emit is around 61.5 KB. Overflow
+   * takes a partial frame sitting in the buffer with a further large read
+   * arriving behind it.
+   *
+   * When it trips, the core drops the whole buffer and raises
+   * `Request.teardown`: byte alignment is lost, there is no way to find
+   * the next frame boundary in what remains, and a resync frame written
+   * onto that stream would be answered into the same garbage.
+   */
+  reassembly: 160 * 1024,
   /** Outbound frame buffer, which bounds the ticket. */
   outbound: 4 * 1024,
 } as const;
@@ -172,6 +190,13 @@ export const Request = {
   needTerrain: 1,
   needModule: 2,
   resyncWanted: 3,
+  /**
+   * The stream's byte alignment is gone and nothing sent on it can get
+   * that back. The host MUST close the transport: logging and carrying on
+   * reproduces the wedge with a nicer log line, because every subsequent
+   * byte on that stream is unparseable. The redial is the repair.
+   */
+  teardown: 4,
 } as const;
 
 /** `session_stat(kind)` counters. 7 (bytes_down) is host-side and lives on the core. */

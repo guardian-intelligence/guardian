@@ -252,6 +252,11 @@ export class Harness {
     };
   }
 
+  /** Swaps what `fetchBehavior` serves, so a test can change what a re-fetch returns. */
+  setModule(kind: BehaviorModule, bytes: ArrayBuffer): void {
+    this.#modules = { ...this.#modules, [kind]: bytes };
+  }
+
   /** Codes emitted so far, for asserting a choreography without pinning arguments. */
   codes(): number[] {
     return this.emitted.map((e) => e.code);

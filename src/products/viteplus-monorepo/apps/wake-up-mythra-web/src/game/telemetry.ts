@@ -14,8 +14,9 @@ import {
 import { emitSpan, reportError } from "@guardian/telemetry";
 import { rejectText } from "./hud";
 
-// Why the replica asked for a snapshot. The dashboard groups `wum.why`, so
-// these stay the sentences proto 3 emitted.
+// Why the replica asked for a snapshot, or — for the last two — tore the
+// stream down instead. The dashboard groups `wum.why`, so these stay the
+// sentences proto 3 emitted.
 const RESYNC_WHY: Record<number, string> = {
   [ResyncReason.clock]: "clock: beyond the recovery window",
   [ResyncReason.lateEvent]: "late event beyond rollback ring",
@@ -28,6 +29,7 @@ const RESYNC_WHY: Record<number, string> = {
   [ResyncReason.queueOverflow]: "event queue overflow",
   [ResyncReason.moduleSwapped]: "module swapped",
   [ResyncReason.streamOverflow]: "stream overflow",
+  [ResyncReason.framing]: "unreadable frame length",
 };
 
 export type SignInFlow = "popup" | "redirect";

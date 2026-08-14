@@ -138,9 +138,13 @@ export class Core {
   // waiting on a load that already reported.
   #terrainQueue: Promise<void> = Promise.resolve();
   #fetchingModule = false;
+  /** Cancels the module-swap retry, so a disposed Core stops instantiating modules. */
+  #cancelModuleRetry: (() => void) | null = null;
 
   #boostHeld = false;
   #bytesDown = 0;
+  /** A teardown raised from inside a session call, run once that call returns. */
+  #pendingTeardown: number | null = null;
   /** The last pump's status word; the clock state only exists in there. */
   #lastPumpFlags = 0;
   #state: ClientState;
@@ -232,6 +236,10 @@ export class Core {
     this.#dialEpoch++;
     this.#cancelRedial?.();
     this.#cancelRedial = null;
+    // Without this a disposed Core still instantiates two wasm modules
+    // three seconds later, on a session nothing is watching.
+    this.#cancelModuleRetry?.();
+    this.#cancelModuleRetry = null;
     this.#closeConnection();
   }
 
@@ -326,7 +334,30 @@ export class Core {
       // can grow its memory and detach any view taken before it.
       new Uint8Array(client.memory.buffer).set(bytes.subarray(off, off + n), client.session_buf());
       client.session_on_stream(n, now);
+      // Once framing is lost, the rest of this read is unparseable too;
+      // feeding it in would be handing garbage to a core that already
+      // said so.
+      if (this.#pendingTeardown !== null) break;
     }
+    this.#drainTeardown();
+  }
+
+  /**
+   * Runs a teardown the core raised from inside a call we were making.
+   * Closing the transport takes the ordinary death path — the connection
+   * closes, the core is told, and the backoff redials — because a stream
+   * whose framing is gone is not repairable in place.
+   */
+  #drainTeardown(): void {
+    const reason = this.#pendingTeardown;
+    if (reason === null) return;
+    this.#pendingTeardown = null;
+    this.#log(`stream framing lost (reason ${reason}); tearing down`);
+    // Orphan the dead connection's callbacks first: its own `closed` may
+    // still be in flight, and without this it would schedule a second
+    // redial on top of the one below.
+    this.#dialEpoch++;
+    this.#onDead();
   }
 
   #onDatagram(bytes: Uint8Array): void {
@@ -402,6 +433,13 @@ export class Core {
             return;
           case Request.resyncWanted:
             this.#log(`resync requested (reason ${a})`);
+            return;
+          case Request.teardown:
+            // Deferred, not done here: this runs INSIDE a session call, and
+            // tearing down re-enters the module through
+            // `session_disconnected`. The core hands out one `&mut Session`
+            // from a static, so a nested call would alias it.
+            this.#pendingTeardown = Number(BigInt.asUintN(32, a));
             return;
           default:
             this.#log(`unknown host request ${kind} (${a})`);
@@ -519,24 +557,35 @@ export class Core {
           `park module fetch is ${moduleWordHex(word)}, not the announced ${moduleWordHex(pw)}`,
         );
       }
+      // Everything is prepared on locals and published only once it has
+      // all succeeded. A new module can legitimately refuse the terrain we
+      // hold — tightening the terrain schema is exactly the kind of change
+      // that ships with a module — and publishing first would leave two
+      // live instances with no world, `session_module_swapped` never
+      // called, and the core's latch stuck: a frozen park that every
+      // retry then fails to repair in the same way.
       const [journal, presented] = await Promise.all([
         instantiatePark(bytes),
         instantiatePark(bytes),
       ]);
-      this.#slots[SLOT_JOURNAL] = journal;
-      this.#slots[SLOT_PRESENTED] = presented;
       const blob = this.#terrain?.blob;
       if (blob) {
         const hex = hex64(this.#terrainId);
         loadTerrainInto(journal, blob, hex);
         loadTerrainInto(presented, blob, hex);
       }
+      this.#slots[SLOT_JOURNAL] = journal;
+      this.#slots[SLOT_PRESENTED] = presented;
       this.#fetchingModule = false;
       this.#log(`park module ${moduleWordHex(word)} staged`);
       this.#client?.session_module_swapped(word);
     } catch (e) {
+      // The old slots are untouched, so the world keeps running on the
+      // retired module until a retry succeeds.
       this.#log(`module swap failed: ${messageOf(e)}`);
-      this.#schedule(() => {
+      this.#cancelModuleRetry?.();
+      this.#cancelModuleRetry = this.#schedule(() => {
+        this.#cancelModuleRetry = null;
         this.#fetchingModule = false;
         void this.#swapModule(pw);
       }, MODULE_RETRY_MS);
@@ -647,6 +696,7 @@ export class Core {
     const flags = client.session_pump(BigInt(this.#ports.now()), budgetUs);
     this.#lastPumpFlags = flags;
     this.#refresh(flags);
+    this.#drainTeardown();
     return flags;
   }
 

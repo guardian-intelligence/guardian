@@ -54,9 +54,12 @@
 //! park_tick(slot) -> u64, send_stream(ptr, len), send_datagram(ptr, len),
 //! inflate(src, slen, dst, cap) -> u32, request(kind, a),
 //! emit(kind, a, b). Host requests: 1 need_terrain(id),
-//! 2 need_module(pw), 3 resync_wanted(reason). A module word (`pw`) is
-//! always the little-endian load of the sha256 prefix's four wire bytes,
-//! never a re-formatting of them.
+//! 2 need_module(pw), 3 resync_wanted(reason), 4 teardown(reason) — the
+//! stream lost its framing, so the host must close the transport and
+//! redial (a resync would ride the same broken stream, and QUIC keeps it
+//! alive indefinitely). A module word (`pw`) is always the little-endian
+//! load of the sha256 prefix's four wire bytes, never a re-formatting of
+//! them.
 //!
 //! Presentation: the page writes one Q16.16 quad per dog into the frame
 //! buffer, calls smooth_frame with its frame phase, and reads the presented

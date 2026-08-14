@@ -156,15 +156,18 @@ pub fn encode_resync(dst: &mut [u8], have_seq: i64) -> usize {
 }
 
 pub fn encode_welcome(dst: &mut [u8], w: &Welcome) -> usize {
-    let (at, total) = frame(dst, K_WELCOME, WELCOME_HEADER + w.park.len());
+    // The name's length rides in a u8, so it clamps rather than wrapping:
+    // a truncated name is a readable frame, a wrapped one is not.
+    let park = &w.park[..w.park.len().min(u8::MAX as usize)];
+    let (at, total) = frame(dst, K_WELCOME, WELCOME_HEADER + park.len());
     dst[at..at + 4].copy_from_slice(&w.epoch.to_le_bytes());
     dst[at + 4..at + 12].copy_from_slice(&w.seq.to_le_bytes());
     dst[at + 12..at + 20].copy_from_slice(&w.tick.to_le_bytes());
     dst[at + 20..at + 24].copy_from_slice(&w.hz.to_le_bytes());
     dst[at + 24] = w.role;
     dst[at + 25..at + 33].copy_from_slice(&w.terrain.to_le_bytes());
-    dst[at + 33] = w.park.len() as u8;
-    dst[at + 34..at + 34 + w.park.len()].copy_from_slice(w.park);
+    dst[at + 33] = park.len() as u8;
+    dst[at + 34..at + 34 + park.len()].copy_from_slice(park);
     total
 }
 

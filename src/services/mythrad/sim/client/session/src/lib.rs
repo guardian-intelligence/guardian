@@ -37,6 +37,10 @@ pub const SLOT_PRESENTED: u32 = 1;
 pub const REQ_NEED_TERRAIN: u32 = 1;
 pub const REQ_NEED_MODULE: u32 = 2;
 pub const REQ_RESYNC_WANTED: u32 = 3;
+/// The stream can no longer be read: the host must close the transport and
+/// redial. A resync cannot repair lost framing — it travels on the same
+/// broken stream, and QUIC will happily keep that stream alive forever.
+pub const REQ_TEARDOWN: u32 = 4;
 
 /// Telemetry vocabulary — numeric only, mapped to spans by the host.
 pub const T_CONNECTED: u32 = 1;
@@ -69,6 +73,7 @@ pub const R_RESTORE_FAILED: u32 = 8;
 pub const R_QUEUE_OVERFLOW: u32 = 9;
 pub const R_MODULE_SWAPPED: u32 = 10;
 pub const R_STREAM_OVERFLOW: u32 = 11;
+pub const R_FRAMING: u32 = 12;
 
 /// `session_pump` status bits.
 pub const S_HAVE_STATE: u32 = 1;
@@ -108,8 +113,12 @@ const RESTORE_WRONG_TERRAIN: u32 = 4;
 const RING_DEPTH: usize = 10;
 /// A full park's canonical snapshot plus headroom (the park's io buffer).
 const SNAP_CAP: usize = 64 * 1024;
-/// Frame reassembly: one snapshot frame is the largest thing on the wire.
-const IN_CAP: usize = 96 * 1024;
+/// Frame reassembly. The buffer must hold a whole frame that is still
+/// being delivered PLUS a full host chunk landing on top of it, or a
+/// chunk boundary inside the largest frame would overflow and lose byte
+/// alignment: 64 KiB of host staging + a snapshot frame carrying the
+/// park's 64 KiB io buffer and its 41-byte framing, rounded up.
+const IN_CAP: usize = 160 * 1024;
 const OUT_CAP: usize = 4 * 1024;
 const HASH_RING: usize = 1024;
 const MAX_QUEUED: usize = 256;
@@ -244,6 +253,7 @@ pub struct Session {
     resyncing: bool,
     resync_on_landed: bool,
     module_latch: bool,
+    wrong_terrain: bool,
     park_pw: u32,
     strikes: u32,
 
@@ -326,6 +336,7 @@ impl Session {
         resyncing: false,
         resync_on_landed: false,
         module_latch: false,
+        wrong_terrain: false,
         park_pw: 0,
         strikes: 0,
 
@@ -388,6 +399,7 @@ impl Session {
         self.resyncing = false;
         self.resync_on_landed = false;
         self.module_latch = false;
+        self.wrong_terrain = false;
         self.park_pw = 0;
         self.strikes = 0;
         self.held_valid = false;
@@ -490,8 +502,7 @@ impl Session {
 
     pub fn on_stream<H: Host>(&mut self, h: &mut H, bytes: &[u8], now_ms: u64) {
         if self.in_len + bytes.len() > IN_CAP {
-            self.in_len = 0;
-            self.request_resync(h, R_STREAM_OVERFLOW, now_ms);
+            self.teardown(h, R_STREAM_OVERFLOW);
             return;
         }
         bufs().inbuf[self.in_len..self.in_len + bytes.len()].copy_from_slice(bytes);
@@ -500,8 +511,7 @@ impl Session {
             let bounds = wire::frame_bounds(&bufs().inbuf[..self.in_len]);
             let Ok(Some((kind, off, len, total))) = bounds else {
                 if bounds.is_err() {
-                    self.in_len = 0;
-                    self.request_resync(h, R_STREAM_OVERFLOW, now_ms);
+                    self.teardown(h, R_FRAMING);
                 }
                 return;
             };
@@ -509,6 +519,13 @@ impl Session {
             bufs().inbuf.copy_within(total..self.in_len, 0);
             self.in_len -= total;
         }
+    }
+
+    /// Byte alignment is gone, and nothing sent on this stream can get it
+    /// back. The host closes the transport; the redial is the repair.
+    fn teardown<H: Host>(&mut self, h: &mut H, reason: u32) {
+        self.in_len = 0;
+        h.request(REQ_TEARDOWN, reason as u64);
     }
 
     fn dispatch<H: Host>(&mut self, h: &mut H, kind: u8, off: usize, len: usize, now_ms: u64) {
@@ -666,9 +683,12 @@ impl Session {
         if code != 0 {
             h.emit(T_RESTORE_FAILED, code as u64, self.held_seq as u64);
             self.resyncing = false;
-            // Wrong terrain is a contract violation, not a hiccup: surface
-            // it once instead of looping the resync that cannot fix it.
-            if code != RESTORE_WRONG_TERRAIN {
+            // Wrong terrain is a contract violation, not a hiccup: latch it
+            // and stop asking, because every snapshot the authority sends
+            // will fail the same way until the terrain itself changes.
+            if code == RESTORE_WRONG_TERRAIN {
+                self.wrong_terrain = true;
+            } else {
                 self.retry_pending = true;
             }
             return;
@@ -685,6 +705,7 @@ impl Session {
         self.hash_set(self.tick, local);
         self.resyncing = false;
         self.have_state = true;
+        self.wrong_terrain = false;
         self.dirty = true;
         self.clock.reset(self.held_tick, now_ms);
         h.emit(T_SNAPSHOT_RESTORED, self.seq as u64, self.tick);
@@ -735,9 +756,17 @@ impl Session {
     pub fn terrain_ready<H: Host>(&mut self, _h: &mut H, id: u64, ok: bool) {
         if ok {
             self.terrain_id = id;
+            // A different world is loaded: a snapshot can be worth asking
+            // for again.
+            self.wrong_terrain = false;
             if self.held_valid && self.held_terrain == id {
                 self.land_pending = true;
             }
+            return;
+        }
+        // A fetch that failed for terrain we are no longer waiting on says
+        // nothing about the snapshot we are holding.
+        if self.held_valid && self.held_terrain != id {
             return;
         }
         self.held_valid = false;
@@ -1043,6 +1072,12 @@ impl Session {
         self.strikes += 1;
         if self.strikes >= STRIKES_TO_RESYNC {
             self.strikes = 0;
+            // Divergence is real, but while the last snapshot was refused
+            // for its terrain another one repairs nothing — it would just
+            // fail again at the check cadence, forever.
+            if self.wrong_terrain {
+                return;
+            }
             self.request_resync(h, reason, now_ms);
         }
     }

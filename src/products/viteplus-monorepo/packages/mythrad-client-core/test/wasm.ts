@@ -36,13 +36,27 @@ function repoFile(rel: string): Uint8Array {
 
 const BEHAVIORS = "services/mythrad/behaviors/";
 
-let cached: { client: Uint8Array; park: Uint8Array; terrain: Uint8Array } | null = null;
+type Modules = {
+  client: Uint8Array;
+  park: Uint8Array;
+  terrain: Uint8Array;
+  /**
+   * The behavior-slot module. It instantiates cleanly and exports almost
+   * nothing, which makes it the honest stand-in for "a park module this
+   * host cannot put a world into": the failure lands AFTER instantiation,
+   * which is the ordering a module swap has to get right.
+   */
+  server: Uint8Array;
+};
+
+let cached: Modules | null = null;
 
 /** Reads the committed modules once per process; they are a few hundred KB. */
-export function modules(): { client: Uint8Array; park: Uint8Array; terrain: Uint8Array } {
+export function modules(): Modules {
   cached ??= {
     client: repoFile(`${BEHAVIORS}client.wasm`),
     park: repoFile(`${BEHAVIORS}park.wasm`),
+    server: repoFile(`${BEHAVIORS}server.wasm`),
     terrain: repoFile("services/mythrad/terrain/fixture_park.bin"),
   };
   return cached;
@@ -165,6 +179,37 @@ export class Authority {
       wh: this.hash(),
       terrain: this.terrainId,
       z: deflateSync(state),
+    });
+  }
+
+  /** Fills the roster to MAX_DOGS so the snapshot is the largest a park can emit. */
+  fillRoster(): number {
+    let joined = 0;
+    for (let i = 1; i <= 2048; i++) {
+      if (applyTo(this.park, Ev.join, dogPayload(BigInt(i))) === 0) joined++;
+    }
+    this.seq += BigInt(joined);
+    return joined;
+  }
+
+  /**
+   * A snapshot whose payload is stored-block DEFLATE: still a valid raw
+   * stream that inflates to a real state and lands, but roughly the size
+   * of the state itself. Compression would otherwise take a full 2048-dog
+   * park from 61.5 KB down to about 12 KB, and the point of this frame is
+   * to be large on the wire.
+   */
+  snapshotUncompressed(): Uint8Array {
+    const len = this.park.sim_snapshot();
+    const at = this.park.io_buf();
+    const state = new Uint8Array(this.park.memory.buffer.slice(at, at + len));
+    return encodeSnapshot({
+      seq: this.seq,
+      tick: this.tick,
+      epoch: this.epoch,
+      wh: this.hash(),
+      terrain: this.terrainId,
+      z: deflateSync(state, { level: 0 }),
     });
   }
 
