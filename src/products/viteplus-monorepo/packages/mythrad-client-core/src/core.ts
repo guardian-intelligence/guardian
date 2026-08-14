@@ -353,6 +353,7 @@ export class Core {
     if (reason === null) return;
     this.#pendingTeardown = null;
     this.#log(`stream framing lost (reason ${reason}); tearing down`);
+    this.#ports.telemetry(HostEmit.teardown, BigInt(reason), 0n);
     // Orphan the dead connection's callbacks first: its own `closed` may
     // still be in flight, and without this it would schedule a second
     // redial on top of the one below.

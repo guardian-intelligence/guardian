@@ -667,6 +667,11 @@ describe("network abuse", () => {
 
     expect(r.harness.logs.some((l) => l.includes("framing lost"))).toBe(true);
     expect(r.harness.transport.closed).toBeGreaterThan(0);
+    expect(
+      r.harness.emitted.some(
+        (e) => e.code === HostEmit.teardown && e.a === BigInt(ResyncReason.streamOverflow),
+      ),
+    ).toBe(true);
     expect(await r.until(() => r.harness.transport.dials > dials, 8000, 25)).toBe(true);
 
     // And the replacement connection is a working session: the replica
@@ -687,6 +692,11 @@ describe("network abuse", () => {
     r.harness.transport.deliverStream(Uint8Array.of(0x00));
     await r.harness.settle();
     expect(r.harness.logs.some((l) => l.includes("framing lost"))).toBe(true);
+    expect(
+      r.harness.emitted.some(
+        (e) => e.code === HostEmit.teardown && e.a === BigInt(ResyncReason.framing),
+      ),
+    ).toBe(true);
     expect(await r.until(() => r.harness.transport.dials > dials, 8000, 25)).toBe(true);
   });
 

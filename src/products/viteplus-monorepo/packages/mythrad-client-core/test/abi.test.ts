@@ -101,7 +101,6 @@ describe("client.wasm", () => {
     expect(imports.map((i) => i.name).sort()).toEqual([...HOST_IMPORTS].sort());
     expect(imports.every((i) => i.kind === "function")).toBe(true);
   });
-
 });
 
 describe("park.wasm", () => {
