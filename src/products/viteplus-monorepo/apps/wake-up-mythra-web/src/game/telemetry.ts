@@ -5,8 +5,10 @@
 // may not.
 
 import {
+  ActionKind,
   Emit,
   HostEmit,
+  IntentDrop,
   ResyncReason,
   moduleWordHex,
   type Core,
@@ -136,6 +138,40 @@ export function createTelemetry(ctx: {
         case Emit.mismatch:
           span("wum.netcode_mismatch", { "wum.tick": String(a), "wum.park": park });
           return;
+        case Emit.intentAnswered: {
+          // The action lifecycle, as finished facts the core measured:
+          // this is the per-action latency dashboards rank kinds by.
+          const kind = Number(a & 0xffffn);
+          span("wum.action", {
+            "wum.kind": ActionKind[kind] ?? `kind ${kind}`,
+            "wum.ms": String(b),
+            "wum.resends": String(a >> 16n),
+            "wum.park": park,
+          });
+          return;
+        }
+        case Emit.intentDropped: {
+          const kind = Number(a & 0xffffn);
+          const why = Number(a >> 16n);
+          span("wum.action_dropped", {
+            "wum.kind": ActionKind[kind] ?? `kind ${kind}`,
+            "wum.why": why === IntentDrop.overflow ? "overflow" : "reidentify",
+            "wum.held_ms": String(b),
+            "wum.park": park,
+          });
+          return;
+        }
+        case Emit.eventArrived:
+          // Per accepted event, so this is the highest-volume span the
+          // probe carries. It is what makes the authority's stamp-to-wire
+          // delay measurable: margin is the event's tick minus where the
+          // replica stood, and the delay is the trail minus that margin.
+          span("wum.netcode_arrived", {
+            "wum.tick": String(a),
+            "wum.replica_tick": String(b),
+            "wum.park": park,
+          });
+          return;
         case Emit.reject:
           ctx.log(rejectText(Number(a)));
           span("wum.netcode_reject", {
@@ -163,13 +199,15 @@ export function createTelemetry(ctx: {
           });
           return;
         case Emit.rollback:
-          // Two different quantities that a single "depth" used to blur:
-          // how late the event was, and how far back the ring's cadence
-          // forced the repair to reach to apply it. The second is usually
-          // the larger, and it is the one a player watches.
+          // rollback(returned_to, late << 32 | rewound). Three facts a
+          // single "depth" used to blur: the absolute tick the repair
+          // returned to, how late the event was (the defect signal), and
+          // how far back the ring's cadence forced the reach (the repair
+          // cost — usually larger, and the one a player watches).
           span("wum.netcode_rollback", {
-            "wum.late_ticks": String(a),
-            "wum.rewound_ticks": String(b),
+            "wum.returned_to": String(a),
+            "wum.late_ticks": String(b >> 32n),
+            "wum.rewound_ticks": String(b & 0xffffffffn),
             "wum.park": park,
           });
           return;

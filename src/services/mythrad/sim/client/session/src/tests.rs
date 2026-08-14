@@ -16,6 +16,7 @@ const PARK_B: u32 = 0x2222_2222;
 /// stand in for the two events that move the world sideways.
 const EV_CLOCK_SKIP: u16 = 9;
 const ERR_TICK: u32 = 11;
+const ERR_NOOP: u32 = 10;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Verb {
@@ -36,7 +37,7 @@ struct Toy {
     /// a repeat — a second move_to names the same target, a second boost
     /// or check-in is refused — so a replayed event lands on the same
     /// state twice without moving it twice.
-    seen: [u64; 8],
+    seen: [u64; 64],
     seen_len: usize,
 }
 
@@ -85,7 +86,16 @@ struct Mock {
     reqs: Vec<(u32, u64)>,
     emits: Vec<(u32, u64, u64)>,
     restore_code: u32,
+    /// The tick each restore landed on, in order: rewind depth is a fact
+    /// about the world, not something to read out of a span.
+    restored_at: Vec<u64>,
     reject: Option<(u16, u32)>,
+    /// The park REFUSES an event that is already standing — a second
+    /// check-in is ERR_CHECKED_IN, a boost that already matches is
+    /// ERR_NOOP — rather than absorbing it. A mock that absorbs one is
+    /// more forgiving than the thing it stands in for, and hides every
+    /// path that applies an event twice.
+    strict_repeat: bool,
 }
 
 impl Mock {
@@ -94,7 +104,7 @@ impl Mock {
             park: Toy {
                 tick: 0,
                 acc: 0,
-                seen: [0; 8],
+                seen: [0; 64],
                 seen_len: 0,
             },
             verbs: Vec::new(),
@@ -103,11 +113,14 @@ impl Mock {
             reqs: Vec::new(),
             emits: Vec::new(),
             restore_code: 0,
+            restored_at: Vec::new(),
             reject: None,
+            strict_repeat: false,
         }
     }
 
     fn clear(&mut self) {
+        self.restored_at.clear();
         self.verbs.clear();
         self.sent.clear();
         self.dgs.clear();
@@ -196,9 +209,12 @@ impl Host for Mock {
             return 0;
         }
         let edit = edit_of(ev);
+        let strict = self.strict_repeat;
         let p = &mut self.park;
         if p.seen[..p.seen_len].contains(&edit) {
-            return 0; // already standing; nothing to change
+            // already standing: the park refuses, and only a forgiving
+            // mock pretends otherwise
+            return if strict { ERR_NOOP } else { 0 };
         }
         if p.seen_len < p.seen.len() {
             p.seen[p.seen_len] = edit;
@@ -236,10 +252,11 @@ impl Host for Mock {
         let mut a = [0u8; 8];
         t.copy_from_slice(&state[2..10]);
         a.copy_from_slice(&state[10..18]);
+        self.restored_at.push(u64::from_le_bytes(t));
         self.park = Toy {
             tick: u64::from_le_bytes(t),
             acc: u64::from_le_bytes(a),
-            seen: [0; 8],
+            seen: [0; 64],
             seen_len: 0,
         };
         0
@@ -959,6 +976,38 @@ fn a_seq_gap_waits_for_the_missing_event() {
 }
 
 #[test]
+fn an_arriving_event_reports_the_margin_it_arrived_with() {
+    // The lead is sized against the network, and nothing measures the
+    // delay events actually travel through — the authority's own batching,
+    // journal commit and broadcast. Recording where the replica stood when
+    // each event landed turns that delay from an inference off how late
+    // repairs are into a subtraction: margin here, trail measured
+    // separately, pipeline is the difference.
+    let mut r = Rig::boot(ROLE_SPECTATOR, 9000);
+    r.advance(400);
+    r.m.clear();
+
+    // an event that beat the replica to its own tick: positive margin
+    let ahead = r.s.tick() + 5;
+    r.event(r.s.seq() + 1, ahead, EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    assert_eq!(
+        r.m.emits_of(T_EVENT_ARRIVED),
+        vec![(ahead, r.s.tick())],
+        "an arriving event must say where the replica stood"
+    );
+
+    // and one that did not: the replica is already past it, so the margin
+    // is negative and a repair is owed
+    r.advance(400);
+    r.m.clear();
+    let behind = r.s.tick() - 2;
+    r.event(r.s.seq() + 2, behind, EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    let (evt, here) = r.m.emits_of(T_EVENT_ARRIVED)[0];
+    assert!(evt < here, "a late arrival must be visible as one");
+    assert_eq!(here - evt, 2, "and by how much");
+}
+
+#[test]
 fn a_future_event_waits_for_its_tick() {
     let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
     r.run_to_tick(1020);
@@ -988,14 +1037,25 @@ fn a_late_event_rolls_back_through_the_ring_and_replays() {
     r.event(102, late, 3, 0, &DOG.to_le_bytes());
     r.pump();
     assert_eq!(r.m.count(Verb::Restore), 1, "one rollback");
-    // (late_ticks, rewound_ticks): how late the event was, and how far
-    // back the repair reached to place it. This one is later than the
-    // dense window, so the rewind falls back to the cadence entry.
-    assert_eq!(r.m.emits_of(T_ROLLBACK), vec![(was - late, was - 1032)]);
+    // The span names where it returned to, how late the event was, and how
+    // far it had to reach — so the rewritten range and the causing event
+    // are both facts. Late and rewound are different questions: this event
+    // is late by two, and the reach fell back to the cadence entry.
+    let (returned, packed) = r.m.emits_of(T_ROLLBACK)[0];
+    assert_eq!(returned, was);
+    assert_eq!(packed >> 32, was - late, "lateness");
+    assert_eq!(
+        packed & 0xFFFF_FFFF,
+        was - 1032,
+        "rewound to the cadence entry"
+    );
     assert_eq!(r.s.stat(STAT_ROLLBACKS), 1);
     assert_eq!(r.s.seq(), 102);
     // the event since the ring entry was replayed, then the late one landed
     assert_eq!(r.m.applies(), vec![1, 3]);
+    // and the replay says which event it rebuilt, so a repair can be paired
+    // with what it touched instead of inferred from what was in the window
+    assert_eq!(r.m.emits_of(T_REPLAYED), vec![(101, early)]);
     // ...and the pump ends where it began: the rewind never reaches a frame
     assert_eq!(
         r.s.tick(),
@@ -1457,6 +1517,131 @@ fn only_an_exact_intent_id_acknowledges_a_pending_intent() {
 }
 
 #[test]
+fn an_answered_intent_reports_its_kind_and_its_latency() {
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    r.confirm_join();
+    let id = r.s.intent_move_to(&mut r.m, 9, r.now);
+    let sent_at = r.now;
+    r.advance(160);
+    let next = r.s.seq() + 1;
+    r.event(next, r.s.tick(), EV_MOVE_TO, id, &move_payload(9));
+    r.pump_until_seq(next);
+    // the moment the action became world state, as a finished fact: kind
+    // (with a zero resend count in the high half) and first-wire-write to
+    // apply latency, measured in the core so every host reports the same
+    // figure. The join's own answer is announced the same way.
+    let answered = r.m.emits_of(T_INTENT_ANSWERED);
+    assert_eq!(answered.len(), 2, "join, then the move: {answered:?}");
+    assert_eq!(answered[0].0, EV_JOIN as u64);
+    assert_eq!(answered[1].0, EV_MOVE_TO as u64, "kind, zero resends");
+    assert_eq!(answered[1].1, r.now - sent_at, "latency in wall ms");
+}
+
+#[test]
+fn a_tap_before_presence_is_sent_once_at_its_first_wire_write() {
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    // the dog is not confirmed yet: the tap is held, and a held intent
+    // has not been sent
+    let id = r.s.intent_check_in(&mut r.m, r.now);
+    assert!(
+        !r.m.intents().iter().any(|(i, _)| *i == id),
+        "a presence-gated intent went out early"
+    );
+    assert!(!r.m.emits_of(T_INTENT_SENT).iter().any(|e| e.1 == id));
+
+    r.confirm_join();
+    // the flush IS the send: on the wire once, announced once, and it is
+    // a first send, not a resend
+    assert_eq!(r.m.intents().iter().filter(|(i, _)| *i == id).count(), 1);
+    assert_eq!(
+        r.m.emits_of(T_INTENT_SENT)
+            .iter()
+            .filter(|e| e.1 == id)
+            .count(),
+        1
+    );
+    assert_eq!(r.m.emits_of(T_INTENT_RESENT), vec![]);
+}
+
+#[test]
+fn a_reconnect_flush_is_a_resend_under_the_original_id() {
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    r.confirm_join();
+    let id = r.s.intent_move_to(&mut r.m, 9, r.now);
+    r.s.disconnected();
+    r.m.clear();
+    r.s.connected(&mut r.m, b"ticket-bytes", r.now);
+    // the park still holds the dog: presence is re-confirmed by refusal,
+    // and the flush puts the pending move back on the wire
+    let join = r.s.pending_kind(EV_JOIN).map(|i| bufs().intents[i].id);
+    r.reject(join.expect("the reconnect re-sends its join"), ERR_PRESENT);
+    // announced as a retry — kind and how many times it has gone out again
+    let resent = r.m.emits_of(T_INTENT_RESENT);
+    assert!(
+        resent.contains(&(EV_MOVE_TO as u64, 1)),
+        "the flush must announce the retry: got {resent:?}"
+    );
+    assert_eq!(r.m.intents().iter().filter(|(i, _)| *i == id).count(), 1);
+}
+
+#[test]
+fn the_intent_ring_overflow_names_the_action_it_discards() {
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    r.confirm_join();
+    r.s.intent_move_to(&mut r.m, 1, r.now);
+    r.advance(32);
+    for n in 2..=MAX_INTENTS as u32 + 1 {
+        r.s.intent_move_to(&mut r.m, n, r.now);
+    }
+    // the player acted 33 times; the 33rd evicted the first, and the
+    // discard says which kind of action will never be answered and how
+    // long it had been waiting
+    assert_eq!(
+        r.m.emits_of(T_INTENT_DROPPED),
+        vec![((DROP_OVERFLOW << 16) | EV_MOVE_TO as u64, 32)]
+    );
+}
+
+#[test]
+fn the_diagnostics_record_is_one_versioned_dump_of_live_state() {
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    r.confirm_join();
+    r.run_to_tick(1030);
+    let mut buf = [0u8; 128];
+    assert_eq!(r.s.diag(r.now, &mut buf), DIAG_BYTES);
+    assert_eq!(u16::from_le_bytes([buf[0], buf[1]]), DIAG_VERSION);
+    assert_eq!(buf[2], 1, "clock state: locked");
+    assert_eq!(
+        i64::from_le_bytes(buf[8..16].try_into().unwrap()),
+        r.s.trail_q16(r.now)
+    );
+    assert_eq!(
+        u64::from_le_bytes(buf[24..32].try_into().unwrap()),
+        r.s.tick()
+    );
+    assert_eq!(
+        i64::from_le_bytes(buf[32..40].try_into().unwrap()),
+        r.s.seq()
+    );
+    // the record states the invariant and the cushion itself, from the
+    // clock crate's constants — no host mirrors them
+    assert_eq!(
+        u32::from_le_bytes(buf[40..44].try_into().unwrap()),
+        mythra_sim_clock::TRAIL_TARGET_TICKS as u32
+    );
+    assert_eq!(
+        u32::from_le_bytes(buf[44..48].try_into().unwrap()),
+        mythra_sim_clock::LAG_TICKS as u32
+    );
+    assert_eq!(
+        u64::from_le_bytes(buf[48..56].try_into().unwrap()),
+        r.s.stat(STAT_EVENTS)
+    );
+    // a buffer too small is refused whole, never truncated
+    assert_eq!(r.s.diag(r.now, &mut buf[..DIAG_BYTES - 1]), 0);
+}
+
+#[test]
 fn signing_in_swaps_identity_without_reloading_the_world() {
     const NEW_DOG: u64 = 0x5151_5151_5151_5151;
     const NEW_NONCE: u32 = 0x0BAD_F00D;
@@ -1466,10 +1651,17 @@ fn signing_in_swaps_identity_without_reloading_the_world() {
     r.s.intent_check_in(&mut r.m, r.now);
     assert_eq!(r.s.intents_len, 1);
 
-    r.s.reidentify(NEW_DOG, ROLE_PLAYER, NEW_NONCE, r.now);
+    r.s.reidentify(&mut r.m, NEW_DOG, ROLE_PLAYER, NEW_NONCE, r.now);
     assert_eq!(
         r.s.intents_len, 0,
         "pending intents belonged to the old dog"
+    );
+    // the discard is a fact in the trace: this action will never land,
+    // and nothing else — no reject, no event — would ever say so. Sent
+    // and dropped at the same instant, so it had waited zero ms.
+    assert_eq!(
+        r.m.emits_of(T_INTENT_DROPPED),
+        vec![((DROP_REIDENTIFY << 16) | EV_CHECK_IN as u64, 0)]
     );
     assert_eq!((r.s.seq(), r.s.tick()), (seq, tick), "the replica survives");
 
@@ -2153,9 +2345,17 @@ fn a_repair_leaves_floors_behind_for_the_next_one() {
     let seq = r.s.seq() + 1;
     r.event(seq, was - 1, 3, 0, &DOG.to_le_bytes());
     r.pump();
-    let first = r.m.emits_of(T_ROLLBACK)[0];
-    assert_eq!(first.0, 1, "late by one tick");
-    assert!(first.1 > 2, "this test needs a stale floor to start from");
+    let (returned, packed) = r.m.emits_of(T_ROLLBACK)[0];
+    assert_eq!(packed >> 32, 1, "late by one tick");
+    assert!(
+        packed & 0xFFFF_FFFF > 2,
+        "this test needs a stale floor to start from"
+    );
+    assert_eq!(
+        returned - (packed & 0xFFFF_FFFF),
+        r.m.restored_at[0],
+        "the span's range must name the tick the restore actually landed on"
+    );
 
     // the next ones, over ticks that repair just walked, pay for their own
     // lateness instead of inheriting the first repair's distance
@@ -2165,8 +2365,10 @@ fn a_repair_leaves_floors_behind_for_the_next_one() {
         let seq = r.s.seq() + 1;
         r.event(seq, was - 1, 3, 0, &DOG.to_le_bytes());
         r.pump();
-        let (late, rewound) = r.m.emits_of(T_ROLLBACK)[0];
-        assert_eq!(late, 1);
+        let (returned, packed) = r.m.emits_of(T_ROLLBACK)[0];
+        assert_eq!(returned, was);
+        assert_eq!(packed >> 32, 1, "late by one tick");
+        let rewound = packed & 0xFFFF_FFFF;
         assert!(
             rewound <= 2,
             "round {round}: rewound {rewound} for a 1-tick-late event"
@@ -2251,6 +2453,46 @@ fn assert_history_matches(r: &Rig, base_acc: u64, journal: &[(u64, u16, Vec<u8>)
         checked += 1;
     }
     assert!(checked > 0, "{when}: no history to compare");
+}
+
+#[test]
+fn a_replay_that_cannot_reproduce_its_history_asks_for_the_truth() {
+    // The one path that can leave this replica quietly wrong: a repair
+    // rewinds, replays its recorded events, and the park refuses one. The
+    // world is then missing an event nothing will deliver again — no seq
+    // gap, no late event, no repair — and only a snapshot can fix it. So
+    // the refusal has to become a resync, and it carries its own reason:
+    // if R_REPLAY_REFUSED ever appears in a trace, this path is the
+    // divergence and no one has to infer it.
+    let mut r = Rig::boot(ROLE_SPECTATOR, 8000);
+    // everything stays inside the first cadence second, so the only floor
+    // to rewind to is the restore itself and the replay has to rebuild the
+    // check-in rather than inherit it from a newer floor
+    r.advance(300);
+    let at = r.s.tick();
+    r.event(r.s.seq() + 1, at, EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    r.pump();
+    r.advance(300);
+
+    // the park starts refusing what the replay is about to re-apply
+    r.m.reject = Some((EV_CHECK_IN, 5));
+    r.m.clear();
+    let was = r.s.tick();
+    assert!(was > at + 1, "the late event must land behind the present");
+    r.event(r.s.seq() + 1, at + 1, EV_MOVE_TO, 0, &move_payload(9));
+    r.pump();
+    assert_eq!(r.s.stat(STAT_ROLLBACKS), 1, "the repair never ran");
+    assert_eq!(
+        r.m.emits_of(T_REPLAYED),
+        vec![(101, at)],
+        "the event the replay could not rebuild must be named, not inferred"
+    );
+    r.pump();
+    assert_eq!(
+        r.m.emits_of(T_RESYNC_REQUESTED),
+        vec![(R_REPLAY_REFUSED as u64, r.s.seq() as u64)],
+        "a replay that lost an event carried on as if it had not"
+    );
 }
 
 #[test]

@@ -49,9 +49,13 @@
 //!   intent_check_in(now_ms u64) -> u64
 //!   intent_move_to(node u32, now_ms u64) -> u64
 //!   intent_boost(on u32, now_ms u64) -> u64
-//!   session_tick() -> u64, session_seq() -> i64
-//!   session_stat(kind u32) -> u64  1 events, 2 rollbacks, 3 resyncs,
-//!                                  4 checks, 5 mismatches, 6 rejects
+//!   session_diag(now_ms u64) -> u32
+//!                                  writes the versioned diagnostics record
+//!                                  (session crate: DIAG_VERSION/DIAG_BYTES)
+//!                                  into the staging buffer and returns its
+//!                                  length: tick, seq, clock, trail vs the
+//!                                  1-tick target, counters — the ONE state
+//!                                  read; a host parses, forwards, discards
 //!
 //! Imports (module `host`): park_apply(ptr, len) -> u32, park_step(),
 //! park_snapshot(dst, cap) -> u32, park_restore(ptr, len) -> u32,
@@ -77,14 +81,10 @@
 //!                                  rewrites slots 0,1 of each quad in place
 //!
 //! Clock discipline belongs to the session — `session_pump` samples,
-//! resets, and steps it — so the only clock surface here is read-only and
-//! reads the clock that is actually being disciplined:
+//! resets, and steps it. The render loop's only per-frame clock read:
 //!   session_phase_q16() -> u32     Q16 frame phase (render alpha)
-//!   session_rtt_ms() -> u32        smoothed round trip
-//!   session_error_q16(now_ms u64) -> i64
-//!                                  phase error in Q16 ticks, positive when
-//!                                  the replica trails (diagnostics)
-//! The clock's state rides `session_pump`'s return at bit 8.
+//! Everything else the clock knows rides the diagnostics record, and the
+//! clock's state rides `session_pump`'s return at bit 8.
 #![no_std]
 
 use mythra_sim_session::{Host, Session};
@@ -225,7 +225,7 @@ pub extern "C" fn session_pump(now_ms: u64, budget_us: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn session_reidentify(my_dog: u64, role: u32, nonce: u32, now_ms: u64) {
-    session().reidentify(my_dog, role, nonce, now_ms);
+    session().reidentify(&mut Wasm, my_dog, role, nonce, now_ms);
 }
 
 #[unsafe(no_mangle)]
@@ -264,33 +264,14 @@ pub extern "C" fn intent_boost(on: u32, now_ms: u64) -> u64 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn session_tick() -> u64 {
-    session().tick()
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn session_seq() -> i64 {
-    session().seq()
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn session_stat(kind: u32) -> u64 {
-    session().stat(kind)
-}
-
-#[unsafe(no_mangle)]
 pub extern "C" fn session_phase_q16() -> u32 {
     session().phase_q16()
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn session_rtt_ms() -> u32 {
-    session().rtt_ms()
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn session_error_q16(now_ms: u64) -> i64 {
-    session().error_q16(now_ms)
+pub extern "C" fn session_diag(now_ms: u64) -> u32 {
+    let stage = unsafe { core::slice::from_raw_parts_mut(&raw mut STAGE as *mut u8, STAGE_CAP) };
+    session().diag(now_ms, stage) as u32
 }
 
 #[unsafe(no_mangle)]

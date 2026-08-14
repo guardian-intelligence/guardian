@@ -14,17 +14,20 @@
 // is what a snapshot frame carries.
 import { inflateSync } from "fflate";
 import {
+  decodeDiag,
   decodeHud,
   clockStateOf,
   decodeWelcomeEmit,
+  DIAG_BYTES,
   HUD_BYTES,
   PumpFlag,
   type ClientExports,
+  type Diag,
   type HostImports,
   type Hud,
   type ParkExports,
 } from "./abi.ts";
-import { Emit, HostEmit, Request, Stat, type Connection, type Ports } from "./ports.ts";
+import { Emit, HostEmit, Request, type Connection, type Ports } from "./ports.ts";
 import { decodeTerrain, type TerrainPlanes } from "./terrain.ts";
 import { Role, moduleWordHex, hex64, type RoleName } from "./wire.ts";
 
@@ -215,14 +218,13 @@ export class Core {
   #bytesDown = 0;
   /** A teardown raised from inside a session call, run once that call returns. */
   #pendingTeardown: number | null = null;
-  /** The last pump's status word; the clock state only exists in there. */
-  #lastPumpFlags = 0;
   #state: ClientState;
   readonly #subscribers = new Set<Subscriber>();
 
   /** Reused so a 60Hz render loop does not allocate a view copy per frame. */
   #viewScratch = new Uint8Array(0);
   readonly #hudScratch = new Uint8Array(HUD_BYTES);
+  readonly #diagScratch = new Uint8Array(DIAG_BYTES);
 
   /** Where each dog was last shown, in Q16 view units, and when. */
   readonly #shown = new Map<bigint, { x: number; y: number; frame: number }>();
@@ -762,7 +764,6 @@ export class Core {
     const client = this.#client;
     if (!client) return 0;
     const flags = client.session_pump(BigInt(this.#ports.now()), budgetUs);
-    this.#lastPumpFlags = flags;
     // Latched rather than read straight from the flags: several pumps can
     // pass between two frames, and the glide is owed from the last
     // position a viewer actually saw, not from the last pump.
@@ -776,37 +777,22 @@ export class Core {
     return this.#state;
   }
 
-  // ---- clock diagnostics ----
-  // Live reads for a dev panel. Normal UI should take `clockState` and
-  // `rttMs` off `ClientState`, which refreshes once per pump; these exist
-  // because a debug panel wants the number at the instant it paints.
+  // ---- diagnostics ----
 
   /**
-   * How far the replica is from where the authority says it should be, in
-   * Q16 ticks. Positive means the replica trails. The session knows its
-   * own tick, so unlike the retired `clock_error_q16` there is no way to
-   * ask about a tick that isn't the one being disciplined.
+   * The session's diagnostics record, read live at the instant of the
+   * call: trail vs its target, clock, counters. One raw dump the module
+   * writes and this host decodes — a pane polls it a few times a second,
+   * `ClientState` is refreshed from the same record once per pump, and
+   * the bytes are never retained. Null before a session module is live.
    */
-  clockErrorQ16(): bigint {
-    return this.#client?.session_error_q16(BigInt(this.#ports.now())) ?? 0n;
-  }
-
-  /** The same figure as whole ticks, fraction included, for a readout. */
-  clockErrorTicks(): number {
-    return Number(this.clockErrorQ16()) / 65536;
-  }
-
-  /**
-   * 0 acquiring, 1 locked, 2 fast-forward, 3 snapshot-required. Comes
-   * from the last pump: the module has no live export for it, because the
-   * state is a property of the frame the clock just decided.
-   */
-  clockState(): number {
-    return clockStateOf(this.#lastPumpFlags);
-  }
-
-  clockRttMs(): number {
-    return this.#client?.session_rtt_ms() ?? 0;
+  diag(): Diag | null {
+    const client = this.#client;
+    if (!client) return null;
+    const len = client.session_diag(BigInt(this.#ports.now()));
+    if (len < DIAG_BYTES) return null;
+    this.#diagScratch.set(new Uint8Array(client.memory.buffer, client.session_buf(), DIAG_BYTES));
+    return decodeDiag(this.#diagScratch);
   }
 
   /**
@@ -992,18 +978,20 @@ export class Core {
         hud = decodeHud(this.#hudScratch);
       }
     }
+    const diag = this.diag();
+    if (!diag) return;
     this.#patch({
-      tick: client.session_tick(),
-      seq: client.session_seq(),
-      events: Number(client.session_stat(Stat.events)),
-      rollbacks: Number(client.session_stat(Stat.rollbacks)),
-      resyncs: Number(client.session_stat(Stat.resyncs)),
-      checks: Number(client.session_stat(Stat.checks)),
-      mismatches: Number(client.session_stat(Stat.mismatches)),
-      rejects: Number(client.session_stat(Stat.rejects)),
+      tick: diag.tick,
+      seq: diag.seq,
+      events: diag.events,
+      rollbacks: diag.rollbacks,
+      resyncs: diag.resyncs,
+      checks: diag.checks,
+      mismatches: diag.mismatches,
+      rejects: diag.rejects,
       bytesDown: this.#bytesDown,
       clockState: clockStateOf(pumpFlags),
-      rttMs: client.session_rtt_ms(),
+      rttMs: diag.rttMs,
       ...(hud
         ? {
             present: hud.present,

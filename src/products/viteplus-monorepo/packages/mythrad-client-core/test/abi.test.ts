@@ -10,7 +10,8 @@
 // failing test at the moment it lands, in either repo.
 
 import { describe, expect, it } from "vitest";
-import { modules } from "./wasm.ts";
+import { ActionKind, Emit, HostEmit } from "../src/ports.ts";
+import { bringTheDogIn, dogPayload, Ev, modules, rig } from "./wasm.ts";
 
 /** Exactly the members of `ClientExports`, minus `memory`. */
 const CLIENT_EXPORTS = [
@@ -26,12 +27,8 @@ const CLIENT_EXPORTS = [
   "session_set_visible",
   "session_terrain_ready",
   "session_module_swapped",
-  "session_tick",
-  "session_seq",
-  "session_stat",
   "session_phase_q16",
-  "session_rtt_ms",
-  "session_error_q16",
+  "session_diag",
   "intent_join",
   "intent_check_in",
   "intent_move_to",
@@ -117,5 +114,58 @@ describe("park.wasm", () => {
 
   it("declares no park export the module does not have", () => {
     expect([...exports].sort()).toEqual([...PARK_EXPORTS, ...PARK_UNUSED, "memory"].sort());
+  });
+});
+
+describe("the telemetry vocabulary", () => {
+  it("names every code the core emits", async () => {
+    // The emit codes are a contract the Rust crate owns and this file
+    // mirrors. Nothing in the module's import or export tables carries
+    // them, so a code added on the other side arrives here as a bare
+    // integer: no name in a dashboard, no case in a switch, and no
+    // failure anywhere. This is the only thing that notices.
+    const named = new Set<number>([...Object.values(Emit), ...Object.values(HostEmit)]);
+    const r = await rig({ role: "player", myDog: 0x9801n });
+    await r.establish();
+    await bringTheDogIn(r, 0x9801n);
+
+    // Exercise enough paths that the common vocabulary shows up: an
+    // intent, its answer, a repair, a check and its verdict.
+    r.core.checkIn();
+    r.core.setBoost(true);
+    await r.run(300);
+    r.answerChecks();
+    const arrival = r.authority.apply(Ev.join, dogPayload(0x9802n));
+    await r.run(100);
+    r.deliver([arrival]);
+    await r.run(600);
+    r.answerChecks();
+    await r.run(600);
+
+    const seen = new Set(r.harness.emitted.map((e) => e.code));
+    const unnamed = [...seen].filter((code) => !named.has(code)).sort((a, b) => a - b);
+    expect(seen.size, "codes observed").toBeGreaterThan(5);
+    expect(unnamed, "telemetry codes this host cannot name").toEqual([]);
+  });
+
+  it("names every action kind a host can send", async () => {
+    // The action verbs are the host's whole write surface, and the kind
+    // rides every action span as a bare number. A verb whose kind has no
+    // row in ActionKind reaches dashboards as "kind N" — this is the only
+    // thing that notices the table going stale.
+    const r = await rig({ role: "player", myDog: 0x9803n });
+    await r.establish();
+    await bringTheDogIn(r, 0x9803n);
+    r.core.checkIn();
+    r.core.moveTo(1);
+    r.core.setBoost(true);
+    await r.run(300);
+
+    const sent = r.harness.emitted
+      .filter((e) => e.code === Emit.intentSent)
+      .map((e) => Number(e.a));
+    expect(new Set(sent).size, "distinct kinds exercised").toBeGreaterThanOrEqual(4);
+    const unnamed = [...new Set(sent)].filter((kind) => !(kind in ActionKind));
+    expect(unnamed, "action kinds without a name").toEqual([]);
   });
 });

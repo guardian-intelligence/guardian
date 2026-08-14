@@ -335,11 +335,11 @@ describe("a player attaching to a running park", () => {
       await r.harness.settle();
     }
 
-    // rollback(late_ticks, rewound_ticks)
+    // rollback(returned_to, late << 32 | rewound)
     const rolls = r.harness.emitted
       .slice(mark)
       .filter((e) => e.code === Emit.rollback)
-      .map((e) => ({ late: Number(e.a), rewound: Number(e.b) }));
+      .map((e) => ({ late: Number(e.b >> 32n), rewound: Number(e.b & 0xffffffffn) }));
 
     expect(moves).toBeGreaterThan(8);
     expect(r.core.state.present).toBe(true);

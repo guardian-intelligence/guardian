@@ -356,6 +356,12 @@ enum Axis {
 /// every tick and the dog jiggles at the obstacle face forever. The lane
 /// choice is a pure function of position, so every replica rounds the
 /// barrel the same way.
+///
+/// TODO: this pathfinding is demonstration-only, not final (user ruling
+/// 2026-08-14). Known feel defect kept deliberately: arrival is tested
+/// before moving, so a dog pauses one tick at every waypoint corner. A
+/// real pathfinder replaces this wholesale; fixing the pause alone would
+/// change trajectories and force a module epoch for a throwaway.
 pub fn step_toward(
     t: &Terrain,
     x: &mut i32,

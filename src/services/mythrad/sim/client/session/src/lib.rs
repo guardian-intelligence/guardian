@@ -86,6 +86,15 @@ pub const REQ_TEARDOWN: u32 = 4;
 pub const T_CONNECTED: u32 = 1;
 pub const T_WELCOME: u32 = 2;
 pub const T_EVENT_APPLIED: u32 = 3;
+/// rollback(returned_to, late << 32 | rewound). The first is the absolute
+/// tick the repair returned to, so the range it rewrote — `[returned_to -
+/// rewound, returned_to]` — and the event that caused it — `returned_to -
+/// late` — are facts in the trace rather than arithmetic over frame
+/// timestamps. The two distances ride one slot because they answer
+/// different questions and reading one for the other inverts the meaning:
+/// LATE is how far behind the replica an event arrived, which is the
+/// defect signal, and REWOUND is how far back the ring's cadence forced
+/// the reach, which is repair cost and gates nothing.
 pub const T_ROLLBACK: u32 = 4;
 pub const T_RESYNC_REQUESTED: u32 = 5;
 pub const T_SNAPSHOT_RESTORED: u32 = 6;
@@ -105,6 +114,66 @@ pub const T_RESTORE_FAILED: u32 = 16;
 pub const T_PRESENCE: u32 = 17;
 pub const PRESENCE_JOURNAL: u64 = 1;
 pub const PRESENCE_ALREADY_THERE: u64 = 2;
+/// replayed(seq, tick): an event a repair re-applied while rebuilding
+/// history, emitted before the attempt so a refused one is visible too.
+/// These fall between the `T_ROLLBACK` span that opened the repair and
+/// whatever ends it, which is what lets a reader pair a repair with the
+/// events it actually touched — the one thing a trace could not show, and
+/// the reason a replay defect can only be narrowed from outside rather
+/// than confirmed.
+pub const T_REPLAYED: u32 = 18;
+/// arrived(event tick, replica tick): where the replica stood when an
+/// event reached it, before anything is done with it. The difference is
+/// the margin the event arrived with — positive means it beat the replica
+/// to its own tick, negative means it was already late and a repair is
+/// owed. Paired with the replica's measured trail, this is the authority's
+/// stamp-to-wire delay: the lead is sized against the network, and nothing
+/// measures the pipeline the events actually travel through, so without
+/// this the delay can only be inferred from how late repairs are.
+pub const T_EVENT_ARRIVED: u32 = 19;
+/// answered((resends << 16) | kind, latency_ms): the journal applied an
+/// event carrying one of OUR pending intent ids — the moment the
+/// player's action became world state. The latency is measured HERE,
+/// from the intent's first wire write to this apply, so every host
+/// reports the same figure with zero bookkeeping: the number game feel
+/// is judged by, as a finished fact. The kind rides as its wire number,
+/// so a new action reaches dashboards without a telemetry change — only
+/// the host's name table grows.
+pub const T_INTENT_ANSWERED: u32 = 20;
+/// resent(kind, resends): a pending intent went back on the wire under
+/// its original id (the authority dedupes by id, so this can never
+/// double-apply) — a reconnect or presence-confirmation flush. The
+/// answered fact carries the final count; this marks the retry itself.
+pub const T_INTENT_RESENT: u32 = 21;
+/// dropped((reason << 16) | kind, held_ms): a pending intent was
+/// discarded and will never be answered — the player acted and the world
+/// will not reflect it. Reasons below; held_ms is how long it waited
+/// (0 for one that never reached the wire). Without this the loss is
+/// invisible: no reject arrives, no event applies, the action just
+/// vanishes.
+pub const T_INTENT_DROPPED: u32 = 22;
+/// A 33rd in-flight intent evicted the oldest.
+pub const DROP_OVERFLOW: u64 = 1;
+/// `reidentify`: the old identity's intents die with it.
+pub const DROP_REIDENTIFY: u64 = 2;
+
+/// The diagnostics record (`Session::diag`) layout version and size.
+/// Little-endian throughout:
+///   0  u16 version
+///   2  u8  clock state (0 acquiring, 1 locked, 2 fast-forward,
+///          3 snapshot-required)
+///   3  u8  reserved
+///   4  u32 rtt_ms
+///   8  i64 trail_q16   (behind the authority's present)
+///   16 i64 error_q16   (behind the cushioned target)
+///   24 u64 tick
+///   32 i64 seq
+///   40 u32 trail target, ticks (the invariant, stated by the module)
+///   44 u32 operating cushion, ticks
+///   48 u64 ×6 counters: events, rollbacks, resyncs, checks, mismatches,
+///          rejects
+pub const DIAG_VERSION: u16 = 1;
+pub const DIAG_BYTES: usize = 96;
 
 /// Why the replica asked for a snapshot. Rides both `REQ_RESYNC_WANTED`
 /// and `T_RESYNC_REQUESTED`.
@@ -120,6 +189,10 @@ pub const R_QUEUE_OVERFLOW: u32 = 9;
 pub const R_MODULE_SWAPPED: u32 = 10;
 pub const R_STREAM_OVERFLOW: u32 = 11;
 pub const R_FRAMING: u32 = 12;
+/// A replayed event the park refused. The replica cannot rebuild the
+/// history it is holding, and nothing will re-deliver it: only a snapshot
+/// repairs this, and carrying on would leave the world quietly wrong.
+pub const R_REPLAY_REFUSED: u32 = 13;
 
 /// `session_pump` status bits.
 pub const S_HAVE_STATE: u32 = 1;
@@ -264,6 +337,12 @@ struct Intent {
     /// sent — minted before the dog's presence was confirmed, or left over
     /// from a connection that died first.
     sent_conn: u32,
+    /// Wall clock at the FIRST wire write (0 while held for presence).
+    /// The per-action latency is measured from here, in the core, so
+    /// every host inherits the same figure instead of pairing spans.
+    sent_ms: u64,
+    /// Wire writes past the first, under the same id.
+    resends: u16,
     p: [u8; EV_PAYLOAD_CAP],
 }
 
@@ -273,6 +352,8 @@ impl Intent {
         kind: 0,
         plen: 0,
         sent_conn: 0,
+        sent_ms: 0,
+        resends: 0,
         p: [0; EV_PAYLOAD_CAP],
     };
 
@@ -592,7 +673,22 @@ impl Session {
     /// right after this, and that hello carries the seq we already hold,
     /// so the upgrade costs a reconnect rather than a fresh world. Pending
     /// intents do not survive: they were the old dog's.
-    pub fn reidentify(&mut self, my_dog: u64, role: u32, nonce: u32, _now_ms: u64) {
+    pub fn reidentify<H: Host>(
+        &mut self,
+        h: &mut H,
+        my_dog: u64,
+        role: u32,
+        nonce: u32,
+        now_ms: u64,
+    ) {
+        for i in 0..self.intents_len {
+            let it = bufs().intents[i];
+            h.emit(
+                T_INTENT_DROPPED,
+                (DROP_REIDENTIFY << 16) | it.kind as u64,
+                held_ms(&it, now_ms),
+            );
+        }
         self.my_dog = my_dog;
         self.role = role;
         self.nonce = nonce;
@@ -631,11 +727,44 @@ impl Session {
         self.clock.error_q16(now_ms, self.tick)
     }
 
+    /// How far the replica trails the authority's present, Q16 ticks —
+    /// the figure `clock::TRAIL_TARGET_TICKS` bounds. Diagnostics only.
+    pub fn trail_q16(&self, now_ms: u64) -> i64 {
+        self.clock.trail_q16(now_ms, self.tick)
+    }
+
     pub fn stat(&self, kind: u32) -> u64 {
         match kind {
             1..=6 => self.stats[kind as usize - 1],
             _ => 0,
         }
+    }
+
+    /// The diagnostics record: one raw dump of the session's live state,
+    /// versioned and little-endian, for a host to parse, forward, and
+    /// discard. This is the ONLY state read a pane or a harness needs —
+    /// a new diagnostic is a new field here and a line in the host's
+    /// decoder, never a new ABI export. The record states its own trail
+    /// target so no host carries a mirrored constant to drift.
+    pub fn diag(&self, now_ms: u64, dst: &mut [u8]) -> usize {
+        if dst.len() < DIAG_BYTES {
+            return 0;
+        }
+        dst[0..2].copy_from_slice(&DIAG_VERSION.to_le_bytes());
+        dst[2] = clock_state_code(self.clock.state()) as u8;
+        dst[3] = 0;
+        dst[4..8].copy_from_slice(&self.rtt_ms().to_le_bytes());
+        dst[8..16].copy_from_slice(&self.trail_q16(now_ms).to_le_bytes());
+        dst[16..24].copy_from_slice(&self.error_q16(now_ms).to_le_bytes());
+        dst[24..32].copy_from_slice(&self.tick.to_le_bytes());
+        dst[32..40].copy_from_slice(&self.seq.to_le_bytes());
+        dst[40..44].copy_from_slice(&(mythra_sim_clock::TRAIL_TARGET_TICKS as u32).to_le_bytes());
+        dst[44..48].copy_from_slice(&(mythra_sim_clock::LAG_TICKS as u32).to_le_bytes());
+        for (i, s) in self.stats.iter().enumerate() {
+            let at = 48 + i * 8;
+            dst[at..at + 8].copy_from_slice(&s.to_le_bytes());
+        }
+        DIAG_BYTES
     }
 
     /// The transport is up: greet the authority with what we already hold,
@@ -661,7 +790,7 @@ impl Session {
         // on the wire, and the second one refused.
         if self.role == ROLE_PLAYER {
             match self.pending_kind(EV_JOIN) {
-                Some(i) => self.resend(h, i),
+                Some(i) => self.resend(h, i, now_ms),
                 None => {
                     self.send_intent(h, EV_JOIN, &self.my_dog.to_le_bytes(), now_ms);
                 }
@@ -776,6 +905,7 @@ impl Session {
         bufs().queued.copy_within(at..self.queued_len, at + 1);
         bufs().queued[at] = ev;
         self.queued_len += 1;
+        h.emit(T_EVENT_ARRIVED, ev.tick, self.tick);
     }
 
     fn on_reject<H: Host>(&mut self, h: &mut H, off: usize, len: usize, now_ms: u64) {
@@ -795,7 +925,7 @@ impl Session {
         // deliver: a reconnecting player whose dog is already present is
         // answered with a snapshot, not with the join event that placed it.
         if reason == ERR_PRESENT {
-            self.confirm_presence(h, PRESENCE_ALREADY_THERE);
+            self.confirm_presence(h, PRESENCE_ALREADY_THERE, now_ms);
             return;
         }
         // Two rejects describe a world that already matches the intent:
@@ -949,7 +1079,7 @@ impl Session {
             if Self::needs_presence(it.kind) && self.role == ROLE_PLAYER && !self.presence {
                 continue;
             }
-            self.resend(h, i);
+            self.resend(h, i, now_ms);
         }
         if self.resync_on_landed {
             self.resync_on_landed = false;
@@ -1076,10 +1206,16 @@ impl Session {
         self.send_intent(h, EV_BOOST_SET, &p, now_ms)
     }
 
-    fn send_intent<H: Host>(&mut self, h: &mut H, kind: u16, payload: &[u8], _now_ms: u64) -> u64 {
+    fn send_intent<H: Host>(&mut self, h: &mut H, kind: u16, payload: &[u8], now_ms: u64) -> u64 {
         self.counter = self.counter.wrapping_add(1);
         let id = ((self.nonce as u64) << 32) | self.counter as u64;
         if self.intents_len == MAX_INTENTS {
+            let evicted = bufs().intents[0];
+            h.emit(
+                T_INTENT_DROPPED,
+                (DROP_OVERFLOW << 16) | evicted.kind as u64,
+                held_ms(&evicted, now_ms),
+            );
             bufs().intents.copy_within(1..MAX_INTENTS, 0);
             self.intents_len -= 1;
         }
@@ -1088,6 +1224,8 @@ impl Session {
             kind,
             plen: payload.len() as u16,
             sent_conn: 0,
+            sent_ms: 0,
+            resends: 0,
             p: [0; EV_PAYLOAD_CAP],
         };
         it.p[..payload.len()].copy_from_slice(payload);
@@ -1102,6 +1240,7 @@ impl Session {
         let n = wire::encode_intent(&mut bufs().out, id, kind, payload);
         h.send_stream(&bufs().out[..n]);
         bufs().intents[self.intents_len - 1].sent_conn = self.conn;
+        bufs().intents[self.intents_len - 1].sent_ms = now_ms;
         h.emit(T_INTENT_SENT, kind as u64, id);
         id
     }
@@ -1276,7 +1415,13 @@ impl Session {
                     self.clock.reset(park_tick, now_ms);
                 }
                 self.stats[STAT_EVENTS as usize - 1] += 1;
-                self.intent_take(e.intent);
+                if let Some(it) = self.intent_take(e.intent) {
+                    h.emit(
+                        T_INTENT_ANSWERED,
+                        ((it.resends as u64) << 16) | it.kind as u64,
+                        now_ms.saturating_sub(it.sent_ms),
+                    );
+                }
                 self.recent_push(e);
                 // Presence is the journal's to state: our dog is in the park
                 // when the journal says a join placed it, whoever's intent id
@@ -1285,7 +1430,7 @@ impl Session {
                     let mut id = [0u8; 8];
                     id.copy_from_slice(&e.p[..8]);
                     if u64::from_le_bytes(id) == self.my_dog {
-                        self.confirm_presence(h, PRESENCE_JOURNAL);
+                        self.confirm_presence(h, PRESENCE_JOURNAL, now_ms);
                     }
                 }
                 h.emit(T_EVENT_APPLIED, e.seq as u64, e.tick);
@@ -1399,8 +1544,8 @@ impl Session {
             self.stats[STAT_ROLLBACKS as usize - 1] += 1;
             h.emit(
                 T_ROLLBACK,
-                was.saturating_sub(tick),
-                was.saturating_sub(stick),
+                was,
+                (was.saturating_sub(tick) << 32) | was.saturating_sub(stick),
             );
             self.replaying = true;
             self.repairing = true;
@@ -1412,6 +1557,7 @@ impl Session {
                 while self.tick < e.tick {
                     self.step_once(h);
                 }
+                h.emit(T_REPLAYED, e.seq as u64, e.tick);
                 if self.apply(h, e.kind, e.payload()) == 0 {
                     self.seq = e.seq;
                     // Replayed history moves the tick exactly where it
@@ -1419,6 +1565,13 @@ impl Session {
                     // tick past a replayed `clock_skip` would land this
                     // replica somewhere the authority never stood.
                     self.tick = h.park_tick();
+                } else {
+                    // The replay could not rebuild what this replica had
+                    // already applied. Finish the walk so time keeps
+                    // moving, then ask for a world that is true — silence
+                    // here is a divergence nothing else in the protocol
+                    // can find.
+                    self.deferred_resync = R_REPLAY_REFUSED;
                 }
             }
             while self.tick < tick {
@@ -1596,11 +1749,27 @@ impl Session {
 
     /// Puts a pending intent back on the wire under its original id — the
     /// authority dedupes by that id, so a resend can never double-apply.
-    fn resend<H: Host>(&mut self, h: &mut H, i: usize) {
+    fn resend<H: Host>(&mut self, h: &mut H, i: usize, now_ms: u64) {
         let it = bufs().intents[i];
         let n = wire::encode_intent(&mut bufs().out, it.id, it.kind, it.payload());
         h.send_stream(&bufs().out[..n]);
+        // A first wire write — an intent held until presence confirmed —
+        // IS the send, and the action's latency clock starts here; a
+        // repeat under the same id is a resend and only counts. Sent-ness
+        // is `sent_conn`, never `sent_ms == 0`: a host clock can read 0.
+        let first = it.sent_conn == 0;
         bufs().intents[i].sent_conn = self.conn;
+        if first {
+            bufs().intents[i].sent_ms = now_ms;
+            h.emit(T_INTENT_SENT, it.kind as u64, it.id);
+        } else {
+            bufs().intents[i].resends = it.resends.saturating_add(1);
+            h.emit(
+                T_INTENT_RESENT,
+                it.kind as u64,
+                bufs().intents[i].resends as u64,
+            );
+        }
     }
 
     /// Intents the park refuses unless our dog is already standing in it.
@@ -1609,7 +1778,7 @@ impl Session {
     }
 
     /// The park has our dog: whatever was waiting on that can go now.
-    fn confirm_presence<H: Host>(&mut self, h: &mut H, source: u64) {
+    fn confirm_presence<H: Host>(&mut self, h: &mut H, source: u64, now_ms: u64) {
         if self.presence {
             return;
         }
@@ -1617,7 +1786,7 @@ impl Session {
         h.emit(T_PRESENCE, source, self.tick);
         for i in 0..self.intents_len {
             if bufs().intents[i].sent_conn != self.conn {
-                self.resend(h, i);
+                self.resend(h, i, now_ms);
             }
         }
     }
@@ -1654,6 +1823,18 @@ impl Session {
         }
         None
     }
+}
+
+/// How long a discarded intent had been waiting: 0 for one that never
+/// reached the wire (there is no send to measure from). `sent_conn` is
+/// the was-it-sent discriminator, never `sent_ms` — a host whose clock
+/// reads 0 at the first send would otherwise be misclassified, and the
+/// deterministic rigs boot at exactly that clock.
+fn held_ms(it: &Intent, now_ms: u64) -> u64 {
+    if it.sent_conn == 0 {
+        return 0;
+    }
+    now_ms.saturating_sub(it.sent_ms)
 }
 
 fn clock_state_code(s: State) -> u32 {

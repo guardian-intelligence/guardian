@@ -326,9 +326,18 @@ function mismatchCorrelation(records, spans) {
   const rollbacks = spans
     .filter((s) => s.name === "wum.netcode_rollback")
     .map((s) => {
+      // Absolute ticks if the span carries them, which makes the range a
+      // fact; otherwise reconstructed from the frame being drawn, which
+      // makes it an inference. Never silently one pretending to be the
+      // other — the verdict says which it had.
+      const from = s.attrs["wum.from_tick"];
+      const to = s.attrs["wum.to_tick"];
+      if (from !== undefined && to !== undefined) {
+        return { t: s.t, from: Number(from), to: Number(to), measured: true };
+      }
       const at = tickAt(s.t);
       const rewound = Number(s.attrs["wum.rewound_ticks"] ?? 0);
-      return { t: s.t, at, from: at === null ? null : at - rewound, to: at };
+      return { t: s.t, from: at === null ? null : at - rewound, to: at, measured: false };
     });
   return spans
     .filter((s) => s.name === "wum.netcode_mismatch")
@@ -341,6 +350,23 @@ function mismatchCorrelation(records, spans) {
       );
       return { tick, covering, nearest, gapMs: nearest === null ? null : s.t - nearest.t };
     });
+}
+
+/**
+ * The margin every journalled event arrived with, in ticks: how far the
+ * replica still had to step before reaching the tick the event was stamped
+ * for. Positive means the event beat the replica there; negative means it
+ * was already late and a repair was owed.
+ *
+ * This is the measurement that makes the authority's stamp-to-wire delay a
+ * number rather than an estimate — the delay is the replica's trail minus
+ * this margin — and the clean leg is where it is readable, because there
+ * is no network delay folded in on top of it.
+ */
+function arrivalMargins(spans) {
+  return spans
+    .filter((s) => s.name === "wum.netcode_arrived")
+    .map((s) => Number(s.attrs["wum.tick"]) - Number(s.attrs["wum.replica_tick"]));
 }
 
 /** Resyncs by the reason they gave, so two different causes never read as one number. */
@@ -382,11 +408,31 @@ function worstJumps(records, count) {
 // a rewind happened; these say which repair asked for it and how far back
 // it reached, which is the difference between a rollback that overshot and
 // a snapshot landing behind the replica.
-/** How late each repair's event was, in ticks, for the depth gate. */
+/**
+ * How late each repair's event was, in ticks, for the depth gate.
+ *
+ * Throws rather than defaulting when the attribute is missing. A gate that
+ * reads an absent field gets NaN, every comparison against NaN is false,
+ * and it passes forever without ever mentioning that it stopped measuring
+ * anything — which is worse than the defect it was watching for. The
+ * session core owns these names; if one changes, this stops the run and
+ * says so instead of going quietly green.
+ */
 function repairLateness(spans) {
   return spans
     .filter((s) => s.name === "wum.netcode_rollback")
-    .map((s) => Number(s.attrs["wum.late_ticks"] ?? 0));
+    .map((s) => {
+      const raw = s.attrs["wum.late_ticks"];
+      if (raw === undefined) {
+        throw new Error(
+          "rollback span carries no wum.late_ticks — the lateness gate cannot run. " +
+            `Attributes present: ${Object.keys(s.attrs).join(", ")}. ` +
+            "If the core's rollback telemetry changed shape, this gate and the " +
+            "mismatch correlation both need updating before any verdict is believed.",
+        );
+      }
+      return Number(raw);
+    });
 }
 
 function repairs(spans) {
@@ -617,13 +663,21 @@ for (let run = 1; run <= RUNS; run++) {
 
     await playInputs(page, box, CYCLES, leg.hiccupMs, seeded(SEED));
 
-    const { records, spans, dropped, after, diagAfter } = await page.evaluate(() => ({
-      records: globalThis.__mythraProbe.drain(),
-      spans: globalThis.__mythraProbe.drainSpans(),
-      dropped: globalThis.__mythraProbe.dropped,
-      after: globalThis.__mythraProbe.counters(),
-      diagAfter: { ...globalThis.__mythraDiag },
-    }));
+    // Both loss counters are read BEFORE the drains that reset them.
+    // Read after, they are always zero — which is what they were, so a
+    // full ring has never once been reported in this harness.
+    const { records, spans, dropped, droppedSpans, after, diagAfter } = await page.evaluate(() => {
+      const dropped = globalThis.__mythraProbe.dropped;
+      const droppedSpans = globalThis.__mythraProbe.droppedSpans;
+      return {
+        dropped,
+        droppedSpans,
+        records: globalThis.__mythraProbe.drain(),
+        spans: globalThis.__mythraProbe.drainSpans(),
+        after: globalThis.__mythraProbe.counters(),
+        diagAfter: { ...globalThis.__mythraDiag },
+      };
+    });
     const session = {
       events: diagAfter.events - diagBefore.events,
       rollbacks: diagAfter.rollbacks - diagBefore.rollbacks,
@@ -648,6 +702,19 @@ for (let run = 1; run <= RUNS; run++) {
       `    session: events=${session.events} rollbacks=${session.rollbacks}` +
         ` resyncs=${session.resyncs} mismatches=${session.mismatches} rejects=${session.rejects}`,
     );
+    // What the journal's events cost to deliver, which is the number the
+    // pipeline question turns on. Reported on every leg; the clean one is
+    // the one to read, since nothing else is folded into it there.
+    const margins = arrivalMargins(spans);
+    if (margins.length > 0) {
+      const sorted = [...margins].sort((a, b) => a - b);
+      const late = margins.filter((m) => m < 0).length;
+      console.log(
+        `    arrival margin: median ${quantile(sorted, 0.5)} ticks ` +
+          `(p10 ${quantile(sorted, 0.1)}, p90 ${quantile(sorted, 0.9)}) over ${margins.length} events; ` +
+          `${late} arrived already late`,
+      );
+    }
     // A surviving mismatch is the one thing that must never be read past,
     // so its correlation prints whenever one happens — not only on a fail.
     if (session.mismatches > 0) {
@@ -659,7 +726,8 @@ for (let run = 1; run <= RUNS; run++) {
         const near =
           m.nearest === null
             ? "no repair in the leg"
-            : `nearest repair ${m.gapMs.toFixed(0)}ms away covering ${m.nearest.from}..${m.nearest.to}`;
+            : `nearest repair ${m.gapMs.toFixed(0)}ms away covering ${m.nearest.from}..${m.nearest.to}` +
+              ` (${m.nearest.measured ? "measured" : "reconstructed"})`;
         console.log(`    mismatch at tick ${m.tick}: ${verdict}; ${near}`);
       }
     }
@@ -685,7 +753,8 @@ for (let run = 1; run <= RUNS; run++) {
         ` backward=${after.backwardTicks - before.backwardTicks}` +
         ` jumps=${after.ownDogJumps - before.ownDogJumps}` +
         ` freezes=${after.freezeRuns - before.freezeRuns}` +
-        (dropped ? ` (ring dropped ${dropped})` : ""),
+        (dropped ? ` (ring dropped ${dropped})` : "") +
+        (droppedSpans ? ` (SPANS DROPPED ${droppedSpans} — oldest evidence is gone)` : ""),
     );
     if (leg.gates.length > 0) {
       console.log(`    gate: ${fails.length === 0 ? "PASS" : `FAIL — ${fails.join("; ")}`}`);
