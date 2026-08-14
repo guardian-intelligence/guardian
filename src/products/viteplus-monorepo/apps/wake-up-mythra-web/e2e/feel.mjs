@@ -217,15 +217,12 @@ function score(records) {
         stallRuns++;
       }
     }
-    for (let d = 0; d + 2 < r.dogs.length; d += 3) {
-      const id = r.dogs[d];
-      const x = r.dogs[d + 1];
-      const y = r.dogs[d + 2];
-      const was = lastSeen.get(id);
+    for (const dog of r.dogs) {
+      const was = lastSeen.get(dog.id);
       if (was && was.frame === i - 1) {
-        otherDisp.push(Math.hypot(x - was.x, y - was.y) / Q16);
+        otherDisp.push(Math.hypot(dog.xq - was.x, dog.yq - was.y) / Q16);
       }
-      lastSeen.set(id, { x, y, frame: i });
+      lastSeen.set(dog.id, { x: dog.xq, y: dog.yq, frame: i });
     }
   }
 

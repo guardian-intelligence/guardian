@@ -1,6 +1,7 @@
 export {
   Core,
   DEFAULT_STEP_BUDGET_US,
+  Q16,
   UNREACHABLE_AFTER_DIALS,
   type ClientState,
   type ConnectionStatus,
@@ -24,6 +25,7 @@ export {
   type TransportPort,
 } from "./ports.ts";
 export {
+  CLOCK_STATE_NAMES,
   CLOCK_STATE_SHIFT,
   clockStateOf,
   decodeDiag,

@@ -255,3 +255,14 @@ export const CLOCK_STATE_SHIFT = 8;
 export function clockStateOf(pumpFlags: number): number {
   return (pumpFlags >> CLOCK_STATE_SHIFT) & 3;
 }
+
+/**
+ * Clock states by the sim/clock crate's numbering. Spans and panes carry
+ * the name, so nothing downstream depends on the numeric order.
+ */
+export const CLOCK_STATE_NAMES = [
+  "acquiring",
+  "locked",
+  "fast-forward",
+  "snapshot-required",
+] as const;

@@ -3,12 +3,11 @@
 // buffer, camera) — it reads what the core presents and never touches the
 // protocol. The camera is presentation-only; the sim has no concept of one.
 
-import type { Core, TerrainPlanes } from "@guardian/mythrad-client-core";
+import { Q16, type Core, type TerrainPlanes } from "@guardian/mythrad-client-core";
 import * as v from "valibot";
 import type { Hud } from "./hud";
 import type { Jank } from "./jank";
 
-const Q16 = 65536;
 const TILE_W = 16;
 const TILE_H = 8;
 const ELEV_PX = 5;
@@ -77,7 +76,7 @@ export function createRenderer(opts: {
   let dragLast: [number, number] | null = null;
   const dragSamples: { t: number; dx: number; dy: number }[] = [];
 
-  const prevPos = new Map<string, [number, number]>();
+  const prevPos = new Map<bigint, [number, number]>();
   let quads = new Int32Array(0);
 
   function setCamFree(free: boolean): void {
@@ -366,9 +365,9 @@ export function createRenderer(opts: {
       const id = view.getBigUint64(at, true);
       const x = view.getInt32(at + 8, true); // Q16.16 cells
       const y = view.getInt32(at + 12, true);
-      const [px, py] = prevPos.get(id.toString(16)) ?? [x, y];
-      quads[i * 4] = px;
-      quads[i * 4 + 1] = py;
+      const prev = prevPos.get(id);
+      quads[i * 4] = prev ? prev[0] : x;
+      quads[i * 4 + 1] = prev ? prev[1] : y;
       quads[i * 4 + 2] = x;
       quads[i * 4 + 3] = y;
       dogs.push({
@@ -384,11 +383,17 @@ export function createRenderer(opts: {
       const dg = dogs[i]!;
       dg.xq = quads[i * 4]!;
       dg.yq = quads[i * 4 + 1]!;
-      prevPos.set(dg.id.toString(16), [dg.xq, dg.yq]);
+      const p = prevPos.get(dg.id);
+      if (p) {
+        p[0] = dg.xq;
+        p[1] = dg.yq;
+      } else {
+        prevPos.set(dg.id, [dg.xq, dg.yq]);
+      }
     }
     // drop smoothing state for dogs that left, so churn never accumulates
     if (prevPos.size > n * 2 + 16) {
-      const seen = new Set(dogs.map((d) => d.id.toString(16)));
+      const seen = new Set(dogs.map((d) => d.id));
       for (const k of prevPos.keys()) if (!seen.has(k)) prevPos.delete(k);
     }
     return dogs;
