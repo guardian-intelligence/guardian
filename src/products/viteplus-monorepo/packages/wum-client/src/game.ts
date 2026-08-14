@@ -114,6 +114,11 @@ export class WumGame {
     return this.#state;
   }
 
+  /** The dog this session speaks for; follows `reidentify`. */
+  get myDog(): bigint {
+    return this.#myDog;
+  }
+
   /**
    * Watches the whole game state. Fires immediately with the current
    * value, then after any change. Returns the unsubscribe.

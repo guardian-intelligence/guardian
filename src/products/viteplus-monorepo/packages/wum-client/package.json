@@ -2,7 +2,7 @@
   "name": "@guardian/wum-client",
   "version": "0.1.0",
   "private": true,
-  "description": "Wake Up Mythra's game layer over the @guardian/chunkies replica host: intent verbs, HUD/view/terrain decodes, and the glide presenter. Everything that makes the replica a dog park lives here, not in the host.",
+  "description": "Wake Up Mythra's game layer over the @guardian/chunkies replica host: intent verbs, HUD/view/terrain decodes, the glide presenter, and the isometric renderer. Everything that makes the replica a dog park lives here, not in the host.",
   "files": [
     "src"
   ],

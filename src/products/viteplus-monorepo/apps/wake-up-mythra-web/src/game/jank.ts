@@ -13,7 +13,7 @@
 // what a play-test harness needs to compute distributions a counter cannot
 // carry.
 
-import { Q16 } from "@guardian/wum-client";
+import { Q16, type DogPos } from "@guardian/wum-client";
 
 /**
  * A frame is long past this gap: three missed 60Hz frames, which is where a
@@ -54,13 +54,6 @@ const PROBE_CAP = 4096;
 const SPAN_CAP = 1024;
 /** How often the aggregate leaves the page. */
 const BEACON_MS = 60_000;
-
-/** Enough of a dog to place it. The renderer's view records satisfy this. */
-export type DogPos = {
-  readonly id: bigint;
-  readonly xq: number;
-  readonly yq: number;
-};
 
 export type JankCounters = {
   readonly frames: number;

@@ -44,8 +44,8 @@ event stream as everything else).
 | `mythrad/session.go` | transport | WebTransport sessions, OIDC-ticket admission, intent→actor binding, fan-out |
 | `mythrad/journal` | durability | Postgres `park_events` / `park_snapshots` / `park_terrain`; per-park seq is dense and single-writer; `journaltest.Run` is the conformance suite |
 | `packages/chunkies` | the game-agnostic replica host | moves opaque bytes between wire, wasm, and screen: the session module, the replica slot, the transport, and the guarded extension/projection doors a game layer reaches its own exports through. Knows no game vocabulary; the name is a deliberate find-and-replaceable placeholder |
-| `packages/wum-client` | the game layer | WUM over the host: intent verbs, the HUD/view/terrain decodes, and the glide presenter. If TypeScript (or Go) can read a game rule, the rule is in the wrong place |
-| `apps/wake-up-mythra-web/src/game` | the surface | platform adapters (WebTransport, fetch, auth), the isometric renderer, the HUD, and the telemetry mapping. No protocol |
+| `packages/wum-client` | the game layer | WUM over the host: intent verbs, the HUD/view/terrain decodes, the glide presenter, and the isometric renderer. If TypeScript (or Go) can read a game rule, the rule is in the wrong place |
+| `apps/wake-up-mythra-web/src/game` | the surface | platform adapters (WebTransport, fetch, auth), the HUD/stats/debug DOM, and the telemetry mapping. No protocol |
 
 ## Interfaces
 

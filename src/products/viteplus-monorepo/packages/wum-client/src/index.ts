@@ -12,5 +12,11 @@ export {
   type ViewDog,
 } from "./projections/view.ts";
 export { HUD_BYTES, HUD_VERSION, decodeHud, type Hud } from "./projections/hud.ts";
+export {
+  WumRenderer,
+  type DogPos,
+  type RendererDiag,
+  type RendererSurface,
+} from "./renderer/renderer.ts";
 export { TerrainError, decodeTerrain, terrainBytes, type TerrainPlanes } from "./terrain.ts";
 export { browserRandom32 } from "./random.ts";
