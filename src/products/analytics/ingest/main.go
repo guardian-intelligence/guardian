@@ -37,7 +37,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
 	addr := envOr("INGEST_LISTEN", ":8080")
-	chAddr := envOr("CLICKHOUSE_ADDR", "clickhouse-analytics.guardian-analytics.svc.cozy.local:9000")
+	chAddr := envOr("CLICKHOUSE_ADDR", "chendpoint-clickhouse-analytics.tenant-root.svc.cozy.local:9000")
 	chUser := envOr("CLICKHOUSE_USER", "ingest")
 	chPassword := os.Getenv("CLICKHOUSE_PASSWORD")
 	// OTLP gRPC endpoint of the in-namespace collector; unset ⇒ no-op tracer.

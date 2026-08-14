@@ -26,7 +26,7 @@ ISSUER="http://127.0.0.1:${ISSUER_PORT}/realms/dev"
 
 command -v docker >/dev/null || { echo "wum-dev: docker is required for the journal db" >&2; exit 1; }
 command -v bazelisk >/dev/null || { echo "wum-dev: bazelisk is required (see scripts/bootstrap.sh)" >&2; exit 1; }
-command -v pnpm >/dev/null || { echo "wum-dev: pnpm is required for the web app" >&2; exit 1; }
+command -v vp >/dev/null || { echo "wum-dev: vp (vite-plus) is required for the web app" >&2; exit 1; }
 
 DSN="$(scripts/wum-dev-db.sh start)"
 
@@ -46,6 +46,10 @@ trap cleanup EXIT INT TERM
 PORT="$ISSUER_PORT" "$ROOT/$DEVISSUER" &
 PIDS+=($!)
 
+# Prod serves skins from the mythra-assets ConfigMap; locally, drop .svg
+# files into this dir and mythrad's 2s poll picks them up live.
+mkdir -p "$ROOT/src/services/mythrad/assets"
+
 DATABASE_URL="$DSN" \
   OIDC_ISSUER="$ISSUER" \
   BEHAVIOR_DIR="$ROOT/src/services/mythrad/behaviors" \
@@ -57,4 +61,4 @@ PIDS+=($!)
 echo >&2
 echo "wum-dev: open http://127.0.0.1:4254  (sign in as any name; Ctrl-C stops everything)" >&2
 echo >&2
-cd "$APP" && VITE_OIDC_ISSUER="$ISSUER" pnpm dev
+cd "$APP" && VITE_OIDC_ISSUER="$ISSUER" vp dev

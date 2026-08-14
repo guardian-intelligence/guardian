@@ -292,6 +292,9 @@ type assetCatalog struct {
 
 func newAssetCatalog(dir string) *assetCatalog {
 	c := &assetCatalog{byRef: map[string]*asset{}, dir: dir}
+	if _, err := os.ReadDir(dir); err != nil {
+		log.Printf("asset catalog: %v (no skins will load until it appears)", err)
+	}
 	c.reload()
 	go func() {
 		for range time.Tick(2 * time.Second) {
