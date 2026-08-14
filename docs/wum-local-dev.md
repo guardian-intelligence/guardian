@@ -12,7 +12,7 @@ the background; drive it with:
 ```sh
 aspect mythra dev status              # per-leg health, non-zero if unhealthy
 aspect mythra dev logs                # recent lines from every leg
-aspect mythra dev logs --leg=mythrad  # follow one leg: pg|devissuer|mythrad|web
+aspect mythra dev logs --leg=mythrad  # follow one leg: pg|ch|otelcol|flagd|ingest|devissuer|mythrad|web
 aspect mythra dev down                # stop everything
 ```
 
@@ -21,9 +21,18 @@ The legs:
 | piece | where | notes |
 | --- | --- | --- |
 | journal db | repo-pinned PostgreSQL, 127.0.0.1:55432 | empty is complete: parks genesis themselves on first open |
+| analytics db | repo-pinned ClickHouse, 127.0.0.1:59000 (native), :58123 (HTTP) | local `guardian_analytics` sink with the prod `events` + `otel_traces` schemas, on the exact server version the prod chart hard-pins |
+| otel collector | 127.0.0.1:4317 (gRPC), :4318 (HTTP) | prod-shaped pipeline (redaction included) writing traces to the analytics db |
+| flagd | 127.0.0.1:8016 (OFREP), :8013/:8014 | serves the committed prod flag set; hot-reloads on file edit |
+| analytics ingest | 127.0.0.1:9636 | the real event Publish service, batching into the analytics db |
 | dev OIDC issuer | 127.0.0.1:9635/realms/dev | Keycloak-shaped; signs any subject; mythrad validates it through the same `oidcGate` path as prod |
 | mythrad | 127.0.0.1:9634 (HTTP), :4433 (WebTransport) | self-signed cert pinned via `certHashB64`; wasm modules hot-load from `src/services/mythrad/behaviors/` |
-| web app | http://127.0.0.1:4254 | vite dev server, proxying `/session` `/wt-info` `/terrain` `/behavior` `/assets` to mythrad exactly as the prod Ingress does |
+| web app | http://127.0.0.1:4254 | vite dev server, proxying `/session` `/wt-info` `/terrain` `/behavior` `/assets` to mythrad and `/api/events` to the ingest exactly as the prod Ingress does |
+
+Every telemetry lane a change emits is queryable locally: the `up` card
+prints a copy-pasteable ClickHouse query (`guardian_analytics.events` for
+product events, `guardian_analytics.otel_traces` for spans) and the
+committed flags.json path for flag flips.
 
 Nothing here bypasses production code paths: admission, module
 distribution, terrain serving, and the netcode all run the same code they

@@ -1,0 +1,59 @@
+# Local `aspect mythra dev` collector config — the single-node mirror of
+# src/infrastructure/deployments/analytics/system/otel-collector.yaml
+# (localhost binds, no auth, same processors; redaction is kept verbatim so
+# dev sees prod-shaped masking). The DDL is applied by scripts/wum-dev.sh,
+# not the exporter — same create_schema:false ownership as prod.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:${env:WUM_DEV_OTLP_GRPC_PORT}
+      http:
+        endpoint: 127.0.0.1:${env:WUM_DEV_OTLP_HTTP_PORT}
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+  redaction:
+    allow_all_keys: true
+    blocked_values:
+      # GitHub tokens (classic, fine-grained, app installation/user)
+      - "gh[pousr]_[A-Za-z0-9]{20,255}"
+      - "github_pat_[A-Za-z0-9_]{20,255}"
+      # Bearer/JWT material
+      - "[Bb]earer\\s+[A-Za-z0-9._~+/=-]{16,}"
+      - "eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9._-]{10,}"
+      # Credential assignments in freeform strings
+      - "(?i)(password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|totp[_-]?(seed|secret))\\s*[=:]\\s*[^\\s&\"']{6,}"
+      # OAuth authorization codes / state in query strings
+      - "(?i)[?&](code|state|access_token|id_token)=[^\\s&\"']{6,}"
+    summary: info
+  batch:
+    timeout: 5s
+    send_batch_size: 10000
+exporters:
+  clickhouse:
+    endpoint: tcp://127.0.0.1:${env:WUM_DEV_CH_PORT}?dial_timeout=10s&compress=lz4
+    username: default
+    database: guardian_analytics
+    traces_table_name: otel_traces
+    create_schema: false
+    async_insert: true
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+    sending_queue:
+      enabled: true
+      queue_size: 1000
+service:
+  telemetry:
+    metrics:
+      level: none
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, redaction, batch]
+      exporters: [clickhouse]
