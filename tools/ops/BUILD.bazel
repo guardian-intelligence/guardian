@@ -31,3 +31,10 @@ py_test(
     data = ["cluster-watch"],
     python_version = "3.12",
 )
+
+py_test(
+    name = "workspace_watch_test",
+    srcs = ["workspace_watch_test.py"],
+    data = ["workspace-watch"],
+    python_version = "3.12",
+)

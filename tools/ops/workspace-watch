@@ -1,0 +1,795 @@
+#!/usr/bin/env python3
+"""workspace-watch — keep the operator workstation ready to work.
+
+One idempotent pass does three chores that otherwise rot between sessions:
+
+  1. Primary workspace freshness. Fetches origin and fast-forwards the
+     checkout to origin/main when — and only when — that is a no-op for
+     local work: on main, clean tree, no local commits. Anything else is
+     reported and left alone.
+
+  2. Merged worktree cleanup. Removes worktrees whose branch is already in
+     origin/main (ancestor, merged PR, or empty contribution) and that are
+     clean, unlocked, and idle. `git worktree lock` is the opt-out, and a
+     worktree touched in the last --idle-minutes is never removed, so a
+     parallel agent cannot have the floor pulled out from under it.
+
+  3. Standing cluster read access. Checks the kubeconfig exec credential
+     still points at a binary that exists, keeps the mgmt tunnel up, and
+     probes the apiserver. Every successful probe refreshes the
+     `platform-agent` offline token, which is what keeps its 30-day idle
+     window from ever closing. When the probe fails it re-mints the read
+     persona unattended, and only pages a human when that fails too — a
+     device login is the one step no daemon can do.
+
+Usage:
+  workspace-watch run [--repo PATH] [--dry-run] [--json]
+  workspace-watch install [--repo PATH] [--interval SECONDS]
+  workspace-watch uninstall
+  workspace-watch status
+
+Env:
+  KUBECTL     kubectl binary (default: repo tool shim, then PATH)
+  KUBECONFIG  kubeconfig to keep healthy (default ~/.kube/config)
+"""
+
+import argparse
+import contextlib
+import datetime
+import json
+import os
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+LABEL = "org.guardianintelligence.workspace-watch"
+BASE = "origin/main"
+DEFAULT_INTERVAL = 1200
+DEFAULT_IDLE_MINUTES = 120
+TOKEN_WARN_DAYS = 21  # the read persona's offline token idles out at 30
+NOTIFY_COOLDOWN_SECONDS = 6 * 3600
+TUNNEL_ADDR = ("127.0.0.1", 16443)
+TUNNEL_LABEL = "org.guardianintelligence.mgmt-tunnel"
+
+HOME = Path.home()
+INSTALL_PATH = HOME / ".guardian" / "bin" / "workspace-watch"
+PLIST = HOME / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+LOG = HOME / "Library" / "Logs" / f"{LABEL}.log"
+# launchd runs the agent under a fixed interpreter: macOS privacy grants
+# attach to the executed binary, so it must not drift with PATH.
+AGENT_PYTHON = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else sys.executable
+STATE = HOME / ".guardian" / "state" / "workspace-watch.json"
+
+
+# --- process helpers -------------------------------------------------------
+
+
+# Nothing here may ever wait on a human: launchd has no terminal to prompt at,
+# and a credential helper that pops a dialog would wedge the pass until its
+# timeout instead of reporting a failure.
+NONINTERACTIVE = {
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_ASKPASS": "/usr/bin/false",
+    "SSH_ASKPASS": "/usr/bin/false",
+    "GH_PROMPT_DISABLED": "1",
+    "GH_NO_UPDATE_NOTIFIER": "1",
+}
+
+
+def run(args, cwd=None, timeout=120, env=None):
+    """Run a command with no tty, returning (rc, stdout, stderr).
+
+    The child gets its own process group so a timeout kills the whole tree:
+    killing only the direct child leaves grandchildren holding the pipe, and
+    the wait for output never returns.
+    """
+    child_env = dict(env or os.environ)
+    child_env.update(NONINTERACTIVE)
+    try:
+        proc = subprocess.Popen(
+            args,
+            cwd=cwd,
+            env=child_env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+    except OSError as err:
+        return 127, "", str(err)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            proc.kill()
+        try:
+            out, err = proc.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            out, err = "", ""
+        return 124, out.strip(), (err.strip() + f" (timed out after {timeout}s)").strip()
+    return proc.returncode, out.strip(), err.strip()
+
+
+def git(repo, *args, timeout=120):
+    return run(["git", "-C", str(repo), *args], timeout=timeout)
+
+
+def ok(result):
+    return result[0] == 0
+
+
+# --- primary workspace -----------------------------------------------------
+
+
+def plan_primary_sync(branch, dirty, ahead, behind):
+    """Decide what to do with the primary checkout. Pure."""
+    if branch != "main":
+        return "skipped", f"on branch {branch}, not main"
+    if ahead:
+        return "skipped", f"{ahead} local commit(s) not on {BASE}"
+    if dirty:
+        return "skipped", f"{dirty} uncommitted change(s)"
+    if not behind:
+        return "current", f"already at {BASE}"
+    return "fast-forward", f"{behind} commit(s) behind {BASE}"
+
+
+def sync_primary(repo, dry_run):
+    fetch = git(repo, "fetch", "--prune", "--quiet", "origin", timeout=120)
+    report = {"repo": str(repo)}
+    if not ok(fetch):
+        report.update(action="error", reason=f"fetch failed: {fetch[2][:200]}")
+        return report
+
+    branch = git(repo, "rev-parse", "--abbrev-ref", "HEAD")[1]
+    dirty = len([line for line in git(repo, "status", "--porcelain")[1].splitlines() if line.strip()])
+    counts = git(repo, "rev-list", "--left-right", "--count", f"HEAD...{BASE}")[1].split()
+    ahead, behind = (int(counts[0]), int(counts[1])) if len(counts) == 2 else (0, 0)
+
+    action, reason = plan_primary_sync(branch, dirty, ahead, behind)
+    report.update(action=action, reason=reason, branch=branch, ahead=ahead, behind=behind, dirty=dirty)
+    if action != "fast-forward":
+        return report
+    if dry_run:
+        report["action"] = "would fast-forward"
+        return report
+    merge = git(repo, "merge", "--ff-only", BASE)
+    if ok(merge):
+        report.update(action="fast-forwarded", head=git(repo, "rev-parse", "--short", "HEAD")[1])
+    else:
+        report.update(action="error", reason=f"ff-only merge failed: {merge[2][:200]}")
+    return report
+
+
+# --- worktrees -------------------------------------------------------------
+
+
+def parse_worktrees(porcelain):
+    """Parse `git worktree list --porcelain` into dicts. Pure."""
+    worktrees = []
+    current = {}
+    for line in porcelain.splitlines():
+        if not line.strip():
+            if current:
+                worktrees.append(current)
+                current = {}
+            continue
+        key, _, value = line.partition(" ")
+        if key == "worktree":
+            if current:
+                worktrees.append(current)
+            current = {"worktree": value}
+        elif key == "branch":
+            current["branch"] = value.replace("refs/heads/", "")
+        elif key in ("HEAD", "prunable"):
+            current[key] = value
+        elif key in ("bare", "detached", "locked"):
+            current[key] = value or True
+    if current:
+        worktrees.append(current)
+    return worktrees
+
+
+def classify_worktree(wt, *, primary, merged_by, unmerged_reason, dirty, idle_seconds, idle_minimum):
+    """Decide whether a worktree can be removed. Pure.
+
+    merged_by is the evidence string (e.g. "ancestor of origin/main") or None.
+    """
+    path = wt.get("worktree", "")
+    if path == primary:
+        return "keep", "primary workspace"
+    if wt.get("bare"):
+        return "keep", "bare"
+    if "locked" in wt:
+        note = wt.get("locked")
+        return "keep", "locked" + (f": {note}" if isinstance(note, str) and note else "")
+    if not merged_by:
+        return "keep", unmerged_reason or ("not merged into " + BASE)
+    if dirty:
+        return "keep", f"{dirty} uncommitted change(s)"
+    if idle_seconds < idle_minimum:
+        return "keep", f"active {int(idle_seconds // 60)}m ago"
+    return "remove", merged_by
+
+
+def merge_evidence(repo, wt):
+    """Why this worktree's HEAD is already in origin/main.
+
+    Returns (evidence, blocked_reason): at most one is set. A merged PR only
+    counts while the local branch has not moved since the merge — otherwise
+    the worktree carries commits nobody upstream has ever seen.
+    """
+    head = wt.get("HEAD", "")
+    branch = wt.get("branch")
+    if head and ok(git(repo, "merge-base", "--is-ancestor", head, BASE)):
+        return f"ancestor of {BASE}", None
+    if head and ok(git(repo, "diff", "--quiet", f"{BASE}...{head}")):
+        return f"contributes nothing over {BASE}", None
+    if branch and shutil.which("gh"):
+        rc, out, _ = run(
+            [
+                "gh", "pr", "list",
+                "--head", branch,
+                "--state", "merged",
+                "--limit", "1",
+                "--json", "number,mergedAt",
+            ],
+            cwd=str(repo),
+            timeout=60,
+        )
+        if rc == 0:
+            try:
+                merged = json.loads(out or "[]")
+            except json.JSONDecodeError:
+                merged = []
+            if merged:
+                pr = merged[0]
+                head_committed = git(repo, "show", "-s", "--format=%cI", head)[1]
+                if commits_after_merge(head_committed, pr.get("mergedAt")):
+                    return None, f"commits after PR #{pr['number']} merged"
+                return f"PR #{pr['number']} merged", None
+    return None, None
+
+
+def commits_after_merge(head_committed, merged_at):
+    """Pure: did the branch move after its PR was merged? Unknown counts as yes."""
+    if not head_committed or not merged_at:
+        return True
+    try:
+        head_time = datetime.datetime.fromisoformat(head_committed)
+        merge_time = datetime.datetime.fromisoformat(merged_at.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return head_time > merge_time
+
+
+def idle_seconds_for(path, now):
+    """Seconds since git last moved this worktree (checkout, commit, index write).
+
+    Only files are consulted: the admin *directory* mtime changes whenever
+    git takes a lock in it, including from this tool's own read-only calls.
+    """
+    root = Path(path)
+    admin = root / ".git"
+    if admin.is_file():
+        try:
+            admin = Path(admin.read_text().split("gitdir:", 1)[1].strip())
+        except (OSError, IndexError):
+            return float("inf")
+    candidates = [root, admin / "index", admin / "HEAD", admin / "ORIG_HEAD"]
+    newest = 0.0
+    for candidate in candidates:
+        try:
+            newest = max(newest, candidate.stat().st_mtime)
+        except OSError:
+            continue
+    return max(0.0, now - newest) if newest else float("inf")
+
+
+def path_in_use(path):
+    """True when some process is sitting in the worktree (an agent at work)."""
+    rc, out, _ = run(["lsof", "-a", "-d", "cwd", "-Fn", "+D", str(path)], timeout=30)
+    if rc not in (0, 1):
+        return False
+    prefix = str(Path(path).resolve())
+    return any(line.startswith("n" + prefix) for line in out.splitlines())
+
+
+def cleanup_worktrees(repo, dry_run, idle_minutes, now):
+    git(repo, "worktree", "prune")
+    worktrees = parse_worktrees(git(repo, "worktree", "list", "--porcelain")[1])
+    primary = git(repo, "rev-parse", "--show-toplevel")[1]
+    idle_minimum = idle_minutes * 60
+    removed, kept = [], []
+    for wt in worktrees:
+        path = wt.get("worktree", "")
+        merged_by, unmerged_reason = (None, None)
+        if path != primary and "locked" not in wt:
+            merged_by, unmerged_reason = merge_evidence(repo, wt)
+        # Read idleness before anything else: a plain `git status` refreshes
+        # the index and would make every worktree look freshly touched.
+        idle = idle_seconds_for(path, now) if merged_by else 0.0
+        dirty = 0
+        if merged_by:
+            status = run(["git", "--no-optional-locks", "-C", path, "status", "--porcelain"])[1]
+            dirty = len([line for line in status.splitlines() if line.strip()])
+        action, reason = classify_worktree(
+            wt,
+            primary=primary,
+            merged_by=merged_by,
+            unmerged_reason=unmerged_reason,
+            dirty=dirty,
+            idle_seconds=idle,
+            idle_minimum=idle_minimum,
+        )
+        entry = {"path": path, "branch": wt.get("branch"), "reason": reason}
+        if action == "keep":
+            kept.append(entry)
+            continue
+        if path_in_use(path):
+            entry["reason"] = "a process is working in it"
+            kept.append(entry)
+            continue
+        if dry_run:
+            entry["removed"] = False
+            removed.append(entry)
+            continue
+        result = git(repo, "worktree", "remove", path)
+        if not ok(result):
+            # Only build junk (gitignored) can remain: the tree is clean.
+            result = git(repo, "worktree", "remove", "--force", path)
+        if not ok(result):
+            entry.update(removed=False, error=result[2][:200])
+            kept.append(entry)
+            continue
+        entry["removed"] = True
+        branch = wt.get("branch")
+        if branch:
+            entry["branch_deleted"] = ok(git(repo, "branch", "-D", branch))
+        removed.append(entry)
+    return {"removed": removed, "kept": kept}
+
+
+# --- cluster read access ---------------------------------------------------
+
+
+def resolve_kubectl(repo):
+    for candidate in (
+        os.environ.get("KUBECTL"),
+        str(Path(repo) / ".guardian" / "tools" / "bin" / "kubectl"),
+    ):
+        if candidate and os.access(candidate, os.X_OK):
+            return candidate
+    return shutil.which("kubectl")
+
+
+def exec_credential(kubectl, kubeconfig):
+    """The exec plugin the current context authenticates with, or None."""
+    rc, out, _ = run([kubectl, "config", "view", "--raw", "-o", "json"], env=kube_env(kubeconfig), timeout=30)
+    if rc != 0:
+        return None
+    try:
+        config = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    context_name = config.get("current-context")
+    user_name = None
+    for context in config.get("contexts") or []:
+        if context.get("name") == context_name:
+            user_name = (context.get("context") or {}).get("user")
+    for user in config.get("users") or []:
+        if user.get("name") == user_name:
+            return ((user.get("user") or {}).get("exec") or {}) or None
+    return None
+
+
+def kube_env(kubeconfig):
+    env = dict(os.environ)
+    env["KUBECONFIG"] = str(kubeconfig)
+    return env
+
+
+def exec_binary_healthy(exec_spec):
+    """Pure: does the kubeconfig still name a runnable credential plugin?"""
+    if not exec_spec:
+        return False, "no exec credential in the current context"
+    command = exec_spec.get("command", "")
+    if not command:
+        return False, "exec credential has no command"
+    if not os.access(command, os.X_OK):
+        return False, f"credential plugin missing: {command}"
+    resolved = Path(command)
+    if resolved.is_symlink():
+        target = Path(os.path.realpath(command))
+        if not target.exists():
+            return False, f"credential plugin dangling: {command} -> {target}"
+    return True, command
+
+
+def tunnel_up(addr=TUNNEL_ADDR):
+    try:
+        with socket.create_connection(addr, timeout=3):
+            return True
+    except OSError:
+        return False
+
+
+def kickstart_tunnel():
+    uid = os.getuid()
+    return ok(run(["launchctl", "kickstart", "-k", f"gui/{uid}/{TUNNEL_LABEL}"], timeout=30))
+
+
+def token_age_days(cache_dir, now):
+    """Days since the persona's refresh token was last exercised. Pure-ish."""
+    newest = 0.0
+    try:
+        for entry in Path(cache_dir).iterdir():
+            if entry.suffix == ".lock":
+                continue
+            newest = max(newest, entry.stat().st_mtime)
+    except OSError:
+        return None
+    return round((now - newest) / 86400, 2) if newest else None
+
+
+def probe_cluster(kubectl, kubeconfig):
+    rc, out, err = run(
+        [kubectl, "--request-timeout=25s", "get", "--raw", "/version"],
+        env=kube_env(kubeconfig),
+        timeout=60,
+    )
+    return rc == 0, (out or err)[:200]
+
+
+def remint_read_persona(repo):
+    aspect = shutil.which("aspect") or str(HOME / ".local" / "bin" / "aspect")
+    if not os.access(aspect, os.X_OK):
+        return False, "aspect CLI not found"
+    rc, _, err = run([aspect, "infra", "auth", "--persona=read"], cwd=str(repo), timeout=600)
+    return rc == 0, err[-300:]
+
+
+def auth_verdict(exec_ok, probe_ok, repaired, age_days):
+    """Pure: fold the access checks into a status and whether a human is needed."""
+    if probe_ok and exec_ok:
+        stale = age_days is not None and age_days > TOKEN_WARN_DAYS
+        return ("stale" if stale else "healthy"), False
+    if repaired:
+        return "repaired", False
+    return "needs-device-login", True
+
+
+def check_access(repo, dry_run):
+    kubeconfig = os.environ.get("KUBECONFIG") or str(HOME / ".kube" / "config")
+    kubectl = resolve_kubectl(repo)
+    report = {"kubeconfig": kubeconfig}
+    if not kubectl:
+        report.update(status="error", reason="no kubectl on PATH or in the repo tool shims")
+        return report, True
+
+    report["tunnel"] = "up" if tunnel_up() else "down"
+    if report["tunnel"] == "down" and not dry_run:
+        report["tunnel"] = "restarted" if kickstart_tunnel() else "down"
+
+    exec_spec = exec_credential(kubectl, kubeconfig)
+    exec_ok, exec_detail = exec_binary_healthy(exec_spec)
+    report["credential_plugin"] = exec_detail
+    probe_ok, detail = probe_cluster(kubectl, kubeconfig)
+    if not probe_ok:
+        # A single slow apiserver round trip is not a credential problem.
+        probe_ok, detail = probe_cluster(kubectl, kubeconfig)
+    report["probe"] = "ok" if probe_ok else detail
+
+    repaired = False
+    # The probe is ground truth: it runs the credential plugin end to end, so
+    # a re-mint is only ever worth its minutes when the probe itself failed.
+    if not probe_ok and not dry_run:
+        repaired, err = remint_read_persona(repo)
+        report["remint"] = "ok" if repaired else f"failed: {err}"
+        if repaired:
+            probe_ok, detail = probe_cluster(kubectl, kubeconfig)
+            report["probe"] = "ok" if probe_ok else detail
+            repaired = probe_ok
+
+    cache_dir = HOME / ".kube" / "cache" / "oidc-login-platform-agent"
+    age = token_age_days(cache_dir, time.time())
+    report["token_age_days"] = age
+    status, needs_human = auth_verdict(exec_ok, probe_ok, repaired, age)
+    report["status"] = status
+    return report, needs_human
+
+
+# --- reporting -------------------------------------------------------------
+
+
+def load_state():
+    try:
+        return json.loads(STATE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_state(state):
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    STATE.write_text(json.dumps(state, indent=2, sort_keys=True))
+
+
+PAGEABLE = ("needs-device-login", "blocked")
+
+
+def should_notify(state, status, now, cooldown=NOTIFY_COOLDOWN_SECONDS):
+    """Pure: page on entering a state only a human can clear, then at most once per cooldown."""
+    if status not in PAGEABLE:
+        return False
+    if state.get("access_status") != status:
+        return True
+    return now - float(state.get("notified_at") or 0) >= cooldown
+
+
+def notify(message):
+    script = f'display notification {json.dumps(message)} with title "Guardian workspace-watch"'
+    run(["osascript", "-e", script], timeout=15)
+
+
+def append_log(report):
+    try:
+        LOG.parent.mkdir(parents=True, exist_ok=True)
+        with LOG.open("a") as handle:
+            handle.write(json.dumps(report, sort_keys=True) + "\n")
+    except OSError:
+        pass
+
+
+def summarize(report):
+    primary = report["primary"]
+    worktrees = report["worktrees"]
+    access = report["access"]
+    lines = [
+        f"workspace  {primary['action']} — {primary['reason']}",
+        f"worktrees  removed {len(worktrees['removed'])}, kept {len(worktrees['kept'])}",
+    ]
+    for entry in worktrees["removed"]:
+        lines.append(f"           - {entry['path']} ({entry['reason']})")
+    age = access.get("token_age_days")
+    lines[0] = lines[0].rstrip() + f"   [{sum(report['seconds'].values()):.0f}s]"
+    lines.append(
+        f"access     {access['status']} — probe {access.get('probe')}, tunnel {access.get('tunnel')}"
+        + (f", token last used {age}d ago" if age is not None else "")
+    )
+    return "\n".join(lines)
+
+
+@contextlib.contextmanager
+def phase(report, name):
+    """Record how long a chore took: a slow pass is the first sign of a wedge."""
+    started = time.time()
+    try:
+        yield
+    finally:
+        report["seconds"][name] = round(time.time() - started, 1)
+
+
+def repo_readable(repo):
+    """macOS withholds ~/Documents from launchd agents until the operator grants it."""
+    try:
+        (Path(repo) / ".git" / "HEAD").read_bytes()
+    except PermissionError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+PRIVACY_REMEDY = (
+    "macOS is withholding {repo} from the launchd agent.\n"
+    "Grant it once: System Settings > Privacy & Security > Full Disk Access,\n"
+    "add " + AGENT_PYTHON + " (Cmd+Shift+G to type the path), then run\n"
+    "  tools/ops/workspace-watch install"
+)
+
+
+def command_run(args):
+    repo = Path(args.repo).resolve()
+    if not repo_readable(repo):
+        message = PRIVACY_REMEDY.format(repo=repo)
+        report = {"at": int(time.time()), "blocked": "macos-privacy", "repo": str(repo)}
+        append_log(report)
+        state = load_state()
+        now = time.time()
+        if should_notify(state, "blocked", now):
+            notify("workspace-watch needs Full Disk Access for " + AGENT_PYTHON)
+            state["notified_at"] = now
+        state["access_status"] = "blocked"
+        state["last_run"] = time.time()
+        save_state(state)
+        print(message, file=sys.stderr)
+        return 2
+    report = {"at": int(time.time()), "dry_run": args.dry_run, "seconds": {}}
+    with phase(report, "primary"):
+        report["primary"] = sync_primary(repo, args.dry_run)
+    if not args.dry_run:
+        self_update(repo)
+    with phase(report, "worktrees"):
+        report["worktrees"] = cleanup_worktrees(repo, args.dry_run, args.idle_minutes, time.time())
+    with phase(report, "access"):
+        report["access"], needs_human = check_access(repo, args.dry_run)
+
+    state = load_state()
+    now = time.time()
+    if should_notify(state, report["access"]["status"], now):
+        notify("cluster read access needs a device login: aspect infra auth --persona=read")
+        state["notified_at"] = now
+    state["access_status"] = report["access"]["status"]
+    state["last_run"] = now
+    if not args.dry_run:
+        save_state(state)
+        append_log(report)
+
+    print(json.dumps(report, indent=2, sort_keys=True) if args.json else summarize(report))
+    return 1 if needs_human else 0
+
+
+def self_update(repo):
+    """Track the merged tool: refresh the installed copy from origin/main."""
+    if Path(sys.argv[0]).resolve() != INSTALL_PATH.resolve():
+        return
+    rc, out, _ = run(["git", "-C", str(repo), "show", f"{BASE}:tools/ops/workspace-watch"], timeout=60)
+    if rc != 0 or not out.strip():
+        return
+    current = INSTALL_PATH.read_text() if INSTALL_PATH.exists() else ""
+    if out.strip() != current.strip():
+        INSTALL_PATH.write_text(out + "\n")
+        INSTALL_PATH.chmod(0o755)
+
+
+# --- launchd ---------------------------------------------------------------
+
+
+def plist_body(repo, interval):
+    tools_bin = Path(repo) / ".guardian" / "tools" / "bin"
+    path = f"{HOME}/.local/bin:{tools_bin}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{AGENT_PYTHON}</string>
+    <string>{INSTALL_PATH}</string>
+    <string>run</string>
+    <string>--repo</string><string>{repo}</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>{path}</string>
+    <key>HOME</key><string>{HOME}</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>{interval}</integer>
+  <key>ProcessType</key>
+  <string>Standard</string>
+  <key>StandardOutPath</key>
+  <string>{LOG}</string>
+  <key>StandardErrorPath</key>
+  <string>{LOG}</string>
+</dict>
+</plist>
+"""
+
+
+def command_install(args):
+    require_darwin()
+    repo = Path(args.repo).resolve()
+    source = Path(__file__).resolve()
+    INSTALL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, INSTALL_PATH)
+    INSTALL_PATH.chmod(0o755)
+    PLIST.parent.mkdir(parents=True, exist_ok=True)
+    PLIST.write_text(plist_body(repo, args.interval))
+    uid = os.getuid()
+    run(["launchctl", "bootout", f"gui/{uid}/{LABEL}"], timeout=30)
+    rc, _, err = run(["launchctl", "bootstrap", f"gui/{uid}", str(PLIST)], timeout=30)
+    if rc != 0:
+        print(f"ERROR: launchctl bootstrap failed: {err}", file=sys.stderr)
+        return 1
+    print(f"installed {LABEL}: every {args.interval}s over {repo}")
+    print(f"  tool  {INSTALL_PATH}\n  agent {AGENT_PYTHON}\n  plist {PLIST}\n  log   {LOG}")
+    report = first_pass_report()
+    if report is None:
+        print("\nagent bootstrapped; its first pass is still running — check `workspace-watch status`")
+        return 0
+    if report.get("blocked") == "macos-privacy":
+        print("\nWARNING: " + PRIVACY_REMEDY.format(repo=repo), file=sys.stderr)
+        return 2
+    print("\nfirst pass:\n" + summarize(report))
+    return 0
+
+
+def first_pass_report(deadline=120):
+    """Wait for the freshly bootstrapped agent's own report."""
+    started = time.time()
+    while time.time() - started < deadline:
+        try:
+            lines = [line for line in LOG.read_text().splitlines() if line.startswith("{")]
+        except OSError:
+            lines = []
+        if lines:
+            try:
+                report = json.loads(lines[-1])
+            except json.JSONDecodeError:
+                report = {}
+            if report.get("at", 0) >= int(started):
+                return report
+        time.sleep(3)
+    return None
+
+
+def command_uninstall(_args):
+    require_darwin()
+    uid = os.getuid()
+    run(["launchctl", "bootout", f"gui/{uid}/{LABEL}"], timeout=30)
+    PLIST.unlink(missing_ok=True)
+    INSTALL_PATH.unlink(missing_ok=True)
+    print(f"removed {LABEL}")
+    return 0
+
+
+def command_status(_args):
+    uid = os.getuid()
+    rc, out, _ = run(["launchctl", "print", f"gui/{uid}/{LABEL}"], timeout=30)
+    print(f"launchd agent: {'loaded' if rc == 0 else 'not loaded'}")
+    if rc == 0:
+        for line in out.splitlines():
+            if line.strip().startswith(("state =", "last exit code =", "runs =")):
+                print("  " + line.strip())
+    state = load_state()
+    if state.get("last_run"):
+        ago = int((time.time() - state["last_run"]) / 60)
+        print(f"last pass: {ago}m ago, access {state.get('access_status')}")
+    print(f"log: {LOG}")
+    return 0
+
+
+def require_darwin():
+    if sys.platform != "darwin":
+        sys.exit("ERROR: launchd management is macOS-only")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="workspace-watch", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    default_repo = os.environ.get("GUARDIAN_REPO") or str(Path(__file__).resolve().parents[2])
+
+    runner = sub.add_parser("run", help="run one pass")
+    runner.add_argument("--repo", default=default_repo)
+    runner.add_argument("--dry-run", action="store_true")
+    runner.add_argument("--json", action="store_true")
+    runner.add_argument("--idle-minutes", type=int, default=DEFAULT_IDLE_MINUTES)
+    runner.set_defaults(func=command_run)
+
+    installer = sub.add_parser("install", help="install the launchd agent")
+    installer.add_argument("--repo", default=default_repo)
+    installer.add_argument("--interval", type=int, default=DEFAULT_INTERVAL)
+    installer.set_defaults(func=command_install)
+
+    sub.add_parser("uninstall", help="remove the launchd agent").set_defaults(func=command_uninstall)
+    sub.add_parser("status", help="show agent and last-pass status").set_defaults(func=command_status)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

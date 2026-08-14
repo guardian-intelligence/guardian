@@ -34,6 +34,12 @@ User must pay $10/mo to enable CloudFlare LB with 3 endpoints (1 for each ingres
   `aspect infra auth --persona=root --reason "<why>"` and dies with its short
   cert lifetime. The ladder lives in
   `src/infrastructure/base/cozystack-identities/platform-admins.yaml`.
+- Workstation hygiene is a launchd agent, not a habit: `tools/ops/workspace-watch
+  install` fast-forwards the primary checkout whenever that is a no-op for local
+  work, removes worktrees whose branch is already in `origin/main`, and keeps the
+  `read` persona's offline token from idling out of its 30-day window. Locked,
+  dirty, in-use, and recently touched worktrees are never removed —
+  `git worktree lock` is the opt-out other agents get for free.
 - Machine config applies are per-node, base plus overlay:
   `talm apply -f nodes/<node>.yaml -f nodes/<node>-overlay.yaml`.
 

@@ -1932,13 +1932,16 @@ def _auth_impl(ctx):
     return _auth_oidc_persona(ctx, guardian_auth, persona, command_args)
 
 def _auth_oidc_persona(ctx, guardian_auth, persona, command_args):
-    bin_dir = install_bazel_tool_shims(ctx, [("kubectl-oidc_login", KUBELOGIN_TARGET)], ".guardian/tools/bin")
-    if bin_dir == "":
-        return 1
-
     home = ctx.std.env.var("HOME") or ""
     if home == "":
         ctx.std.io.stderr.write("ERROR: HOME is not set\n")
+        return 1
+
+    # The kubeconfig stores this path and outlives the workspace that minted
+    # it, so the shim lives under HOME: a workspace-relative shim dies with
+    # its worktree and takes standing cluster access with it.
+    bin_dir = install_bazel_tool_shims(ctx, [("kubectl-oidc_login", KUBELOGIN_TARGET)], home + "/.guardian/tools/bin")
+    if bin_dir == "":
         return 1
 
     persona_user = PERSONA_USERS[persona]
