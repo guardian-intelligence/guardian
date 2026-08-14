@@ -10,7 +10,7 @@
 //
 // Interpose it by advertising its port to clients:
 //
-//	WUM_DEV_PUBLIC_ADDR=127.0.0.1:14433 scripts/wum-dev.sh
+//	WUM_DEV_PUBLIC_ADDR=127.0.0.1:14433 aspect mythra dev up
 //
 // Control (loopback only):
 //

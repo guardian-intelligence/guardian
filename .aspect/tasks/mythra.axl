@@ -300,6 +300,30 @@ def _restart_impl(ctx):
         label = "wait for Mythra game-server recovery",
     )
 
+def _dev_verb(ctx, verb, extra = []):
+    return checked_spawn(
+        ctx,
+        ws_path(ctx, "scripts/wum-dev.sh"),
+        [verb] + extra,
+        cwd = ws_path(ctx),
+        label = "wum-dev " + verb,
+    )
+
+def _dev_up_impl(ctx):
+    return _dev_verb(ctx, "up")
+
+def _dev_down_impl(ctx):
+    return _dev_verb(ctx, "down")
+
+def _dev_status_impl(ctx):
+    return _dev_verb(ctx, "status")
+
+def _dev_logs_impl(ctx):
+    extra = []
+    if ctx.args.leg != "":
+        extra = [ctx.args.leg]
+    return _dev_verb(ctx, "logs", extra)
+
 def _common_args(extra = {}):
     out = {
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
@@ -352,6 +376,37 @@ dump = task(
         "schema_only": args.boolean(default = False, description = "Dump schema only."),
         "wait_timeout": args.string(default = "1m", description = "Timeout waiting for the journal console to become Ready."),
     }),
+)
+
+dev_up = task(
+    implementation = _dev_up_impl,
+    name = "up",
+    group = ["mythra", "dev"],
+    summary = "Start the container-free local Wake Up Mythra stack in the background: pinned-PostgreSQL journal, dev OIDC issuer, mythrad, and the vite dev server.",
+)
+
+dev_down = task(
+    implementation = _dev_down_impl,
+    name = "down",
+    group = ["mythra", "dev"],
+    summary = "Stop every local Wake Up Mythra dev leg and its child processes.",
+)
+
+dev_status = task(
+    implementation = _dev_status_impl,
+    name = "status",
+    group = ["mythra", "dev"],
+    summary = "Show per-leg health of the local Wake Up Mythra dev stack; non-zero exit if any leg is unhealthy.",
+)
+
+dev_logs = task(
+    implementation = _dev_logs_impl,
+    name = "logs",
+    group = ["mythra", "dev"],
+    summary = "Tail local Wake Up Mythra dev logs: recent lines from every leg, or follow one leg with --leg.",
+    args = {
+        "leg": args.string(default = "", description = "Leg to follow (pg|devissuer|mythrad|web); empty shows recent lines from every leg."),
+    },
 )
 
 restart = task(
