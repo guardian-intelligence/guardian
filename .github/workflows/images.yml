@@ -17,6 +17,7 @@ on:
     paths:
       - "src/services/alerting/**"
       - "src/services/authorization/**"
+      - "src/services/cloud_agent_federation/**"
       - "src/services/payments/**"
       - "src/services/postflight/**"
       - "src/services/feature-flags-notify/**"
@@ -59,7 +60,7 @@ jobs:
       - name: Classify the diff
         id: classify
         run: |
-          names=(alert-relay analytics-ingest authorization canary-journeys
+          names=(alert-relay analytics-ingest authorization canary-journeys cloud-agent-federation
             feature-flags-notify mythrad payments payments-canary
             postflight-controlplane tofu-runner company-site privatecut-web
             visual-harness wake-up-mythra-web)
@@ -67,6 +68,7 @@ jobs:
             [alert-relay]='^src/services/alerting/'
             [analytics-ingest]='^src/products/analytics/|^src/proto/'
             [authorization]='^src/services/authorization/|^src/proto/guardian/authorization/|^src/proto/gen/go/guardian/authorization/'
+            [cloud-agent-federation]='^src/services/cloud_agent_federation/'
             [canary-journeys]='^src/products/viteplus-monorepo/packages/canary-journeys/|^src/products/viteplus-monorepo/pnpm-(lock|workspace)\.yaml$'
             [payments]='^src/services/payments/'
             [payments-canary]='^src/services/payments/'
@@ -83,6 +85,7 @@ jobs:
             [alert-relay]='//src/services/alerting/relay:push'
             [analytics-ingest]='//src/products/analytics/ingest:push'
             [authorization]='//src/services/authorization:push'
+            [cloud-agent-federation]='//src/services/cloud_agent_federation:push'
             [canary-journeys]='//src/products/viteplus-monorepo/packages/canary-journeys:push'
             [payments]='//src/services/payments:push'
             [payments-canary]='//src/services/payments/canary:push'
@@ -95,7 +98,7 @@ jobs:
             [wake-up-mythra-web]='//src/products/viteplus-monorepo/apps/wake-up-mythra-web/site:push'
             [visual-harness]='//src/products/viteplus-monorepo/packages/visual-harness:push'
           )
-          go_images=' alert-relay analytics-ingest authorization feature-flags-notify mythrad payments payments-canary postflight-controlplane tofu-runner '
+          go_images=' alert-relay analytics-ingest authorization cloud-agent-federation feature-flags-notify mythrad payments payments-canary postflight-controlplane tofu-runner '
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'
 
           all=false changed=""
