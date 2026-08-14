@@ -1,7 +1,5 @@
 This is a Bazel polyglot monorepo and a free open-source repository housing all code including infrastructure and applications for Guardian Intelligence, a company founded by the user.
 
-Read `docs/TRIBAL_KNOWLEDGE.md` before making changes to this repository.
-
 The management cluster runs Cozystack, variant `isp-full` with opt-in Gateway API.
 
 <operations_guidelines>
@@ -54,12 +52,9 @@ House rules:
 - If relevant to your task, clean up any hanging resources in the cluster post-merge.
 </development_loop>
 
-<coding_guidelines>
-* Do not use GitHub Actions workflow YAMLs as a second control plane. Prefer to move tasks including but not limited to: generating Preview Deployments, generating/signing images, scheduled jobs, and so on, into the source code, rather than hairpinning cluster administration through GitHub.
-</coding_guidelines>
-
 Product Surfaces:
 
 - Postflight - GitHub App, Blacksmith.sh but using QEMU warm pool, CRIU, on SEV-SNP hardware, ZFS for caching build artifacts and memory snapshots to create a "golden image" per repo. (In Progress)
-- PrivateCut - rumi.engineering, browser-native video clipper: up to a minute of any video at the best quality that fits under a hard user-selected size cap — 4 MB by default, up to 100 MB (mediabunny in a worker, measured-size acceptance gate, no upload). (In Progress)
-- "Wake Up, Mythra!" (WUM) - Web game (native mobile apps planned) online cooperative city simulation tied to real-world dog parks. Rust -> `wazero` core + client crate for camera, device bindings, interpolation, reconnect logic. Go service.
+- "Wake Up, Mythra!" (WUM) - Web game (native mobile apps planned) online cooperative city simulation tied to real-world dog parks.
+
+Small note: `docs/TRIBAL_KNOWLEDGE.md` is useful to read for tricky issues.
