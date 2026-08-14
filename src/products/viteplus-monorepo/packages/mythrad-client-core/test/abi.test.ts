@@ -5,72 +5,15 @@
 // instantiation failure at boot. Neither announces itself until the code
 // runs.
 //
-// These lists mirror the interfaces in src/abi.ts. Set equality against
-// the committed modules turns ABI drift in either direction into a
-// failing test at the moment it lands, in either repo.
+// The name tables live in src/abi.ts, where `Core.boot` verifies them
+// against the fetched modules before any cast. Set equality against the
+// committed modules turns ABI drift in either direction into a failing
+// test at the moment it lands, in either repo.
 
 import { describe, expect, it } from "vitest";
+import { CLIENT_EXPORTS, HOST_IMPORTS, PARK_EXPORTS } from "../src/abi.ts";
 import { ActionKind, Emit, HostEmit } from "../src/ports.ts";
 import { bringTheDogIn, dogPayload, Ev, modules, rig } from "@guardian/chunkies-testkit";
-
-/** Exactly the members of `ClientExports`, minus `memory`. */
-const CLIENT_EXPORTS = [
-  "session_buf",
-  "session_cap",
-  "session_init",
-  "session_reidentify",
-  "session_connected",
-  "session_disconnected",
-  "session_on_stream",
-  "session_on_datagram",
-  "session_pump",
-  "session_set_visible",
-  "session_terrain_ready",
-  "session_module_swapped",
-  "session_phase_q16",
-  "session_diag",
-  "intent_join",
-  "intent_check_in",
-  "intent_move_to",
-  "intent_boost",
-  "frame_buf",
-  "frame_cap",
-  "smooth_frame",
-];
-
-/** Exactly the members of `HostImports`. */
-const HOST_IMPORTS = [
-  "park_apply",
-  "park_step",
-  "park_snapshot",
-  "park_restore",
-  "park_hash",
-  "park_tick",
-  "send_stream",
-  "send_datagram",
-  "inflate",
-  "request",
-  "emit",
-];
-
-/** Exactly the members of `ParkExports`, minus `memory`. */
-const PARK_EXPORTS = [
-  "io_buf",
-  "io_cap",
-  "terrain_buf",
-  "terrain_cap",
-  "sim_set_terrain",
-  "sim_init",
-  "sim_terrain_id",
-  "sim_apply",
-  "sim_step",
-  "sim_snapshot",
-  "sim_restore",
-  "sim_hash",
-  "sim_tick",
-  "sim_view",
-  "sim_hud",
-];
 
 /** Park exports the host has no use for, but the module legitimately has. */
 const PARK_UNUSED = ["sim_epoch", "sim_rate", "sim_anchor_tick", "sim_anchor_ns"];

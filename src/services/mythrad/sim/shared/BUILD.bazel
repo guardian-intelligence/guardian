@@ -90,6 +90,7 @@ rust_library(
     srcs = ["park/src/lib.rs"],
     crate_name = "mythra_sim_park",
     edition = "2024",
+    visibility = TIER_PKGS,
     deps = [
         ":core",
         ":nav",

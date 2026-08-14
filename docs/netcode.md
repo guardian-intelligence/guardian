@@ -48,7 +48,9 @@ event stream as everything else).
 
 ## Interfaces
 
-Sim ABI (identical on every host): `sim_set_terrain`, `sim_init`,
+Sim ABI (identical on every host): `abi_version` (both wasm modules
+export it; the TS host refuses to boot a version it does not know —
+additions never bump it, removals and re-typings must), `sim_set_terrain`, `sim_init`,
 `sim_restore` (refuses wrong terrain), `sim_snapshot`, `sim_step`,
 `sim_apply` (validation and application in one — no separate `validate()` to
 drift), `sim_hash`, `sim_tick`, `sim_epoch`, `sim_rate` /

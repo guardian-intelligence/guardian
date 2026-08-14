@@ -96,6 +96,11 @@ export function reportBootFailure(e: unknown): string {
   return reportError(e, { "error.op": "wum.boot" });
 }
 
+/** Reports the throw that stopped the frame loop. Once per session, by construction. */
+export function reportFrameFailure(e: unknown): string {
+  return reportError(e, { "error.op": "wum.frame" });
+}
+
 export function createTelemetry(ctx: {
   readonly park: string;
   readonly log: (line: string) => void;

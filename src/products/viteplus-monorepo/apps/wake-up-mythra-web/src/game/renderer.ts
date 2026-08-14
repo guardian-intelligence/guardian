@@ -3,7 +3,7 @@
 // buffer, camera) — it reads what the core presents and never touches the
 // protocol. The camera is presentation-only; the sim has no concept of one.
 
-import { Q16, type Core, type TerrainPlanes } from "@guardian/mythrad-client-core";
+import { decodeViewDog, Q16, type Core, type TerrainPlanes } from "@guardian/mythrad-client-core";
 import * as v from "valibot";
 import type { Hud } from "./hud";
 import type { Jank } from "./jank";
@@ -12,8 +12,6 @@ const TILE_W = 16;
 const TILE_H = 8;
 const ELEV_PX = 5;
 const ISO_PAD = TILE_H * 4; // top margin so raised tiles stay in-layer
-/** The sim_view stride: id u64, x i32, y i32 (Q16.16 cells), flags u8, facing u8, anim u8, pad. */
-const VIEW_STRIDE = 20;
 /** How far a dog may drift from its presented position before the smoother snaps it. */
 const SNAP_Q16 = 8 * Q16;
 
@@ -356,27 +354,17 @@ export function createRenderer(opts: {
 
   /** Reads the presented world, running every dog through the smoother in one batch. */
   function readDogs(bytes: Uint8Array, phaseQ16: number): DogView[] {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const n = view.getUint32(0, true);
+    const n = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true);
     if (quads.length < n * 4) quads = new Int32Array(n * 8);
     const dogs: DogView[] = [];
     for (let i = 0; i < n; i++) {
-      const at = 4 + i * VIEW_STRIDE;
-      const id = view.getBigUint64(at, true);
-      const x = view.getInt32(at + 8, true); // Q16.16 cells
-      const y = view.getInt32(at + 12, true);
-      const prev = prevPos.get(id);
-      quads[i * 4] = prev ? prev[0] : x;
-      quads[i * 4 + 1] = prev ? prev[1] : y;
-      quads[i * 4 + 2] = x;
-      quads[i * 4 + 3] = y;
-      dogs.push({
-        id,
-        xq: x,
-        yq: y,
-        flags: view.getUint8(at + 16),
-        anim: view.getUint8(at + 18),
-      });
+      const dg = decodeViewDog(bytes, i);
+      const prev = prevPos.get(dg.id);
+      quads[i * 4] = prev ? prev[0] : dg.x;
+      quads[i * 4 + 1] = prev ? prev[1] : dg.y;
+      quads[i * 4 + 2] = dg.x;
+      quads[i * 4 + 3] = dg.y;
+      dogs.push({ id: dg.id, xq: dg.x, yq: dg.y, flags: dg.flags, anim: dg.anim });
     }
     core.smooth(quads.subarray(0, n * 4), phaseQ16, SNAP_Q16);
     for (let i = 0; i < n; i++) {

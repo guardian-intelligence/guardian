@@ -11,9 +11,18 @@
 // bigint and every u32/i32 a number. Getting that wrong is a silent
 // truncation, not a type error, at the wasm boundary.
 
+/**
+ * The ABI generation both modules stamp and this host expects. Additive
+ * changes — a new export, a new emit code — never bump it; a removal or
+ * re-typing must, so a mismatched pair refuses to boot instead of
+ * throwing mid-frame.
+ */
+export const ABI_VERSION = 1;
+
 /** `park.wasm`'s exports, as the host uses them. */
 export interface ParkExports {
   readonly memory: WebAssembly.Memory;
+  abi_version(): number;
   io_buf(): number;
   io_cap(): number;
   terrain_buf(): number;
@@ -46,6 +55,8 @@ export interface ParkExports {
 /** `client.wasm`'s exports: the session core, plus the clock and smoother it links. */
 export interface ClientExports {
   readonly memory: WebAssembly.Memory;
+
+  abi_version(): number;
 
   /** Host staging area for inbound bytes and the outbound ticket. */
   session_buf(): number;
@@ -125,6 +136,96 @@ export interface HostImports {
   emit(kind: number, a: bigint, b: bigint): void;
 }
 
+// The canonical ABI name tables. Interfaces do not survive to runtime, so
+// these are what the boot check and the module-shape tests both verify
+// against — one list per contract, mirrored nowhere else.
+
+/** Exactly the members of `ClientExports`, minus `memory`. */
+export const CLIENT_EXPORTS = [
+  "abi_version",
+  "session_buf",
+  "session_cap",
+  "session_init",
+  "session_reidentify",
+  "session_connected",
+  "session_disconnected",
+  "session_on_stream",
+  "session_on_datagram",
+  "session_pump",
+  "session_set_visible",
+  "session_terrain_ready",
+  "session_module_swapped",
+  "session_phase_q16",
+  "session_diag",
+  "intent_join",
+  "intent_check_in",
+  "intent_move_to",
+  "intent_boost",
+  "frame_buf",
+  "frame_cap",
+  "smooth_frame",
+] as const;
+
+/** Exactly the members of `HostImports`, all under import module `host`. */
+export const HOST_IMPORTS = [
+  "park_apply",
+  "park_step",
+  "park_snapshot",
+  "park_restore",
+  "park_hash",
+  "park_tick",
+  "send_stream",
+  "send_datagram",
+  "inflate",
+  "request",
+  "emit",
+] as const;
+
+/** Exactly the members of `ParkExports`, minus `memory`. */
+export const PARK_EXPORTS = [
+  "abi_version",
+  "io_buf",
+  "io_cap",
+  "terrain_buf",
+  "terrain_cap",
+  "sim_set_terrain",
+  "sim_init",
+  "sim_terrain_id",
+  "sim_apply",
+  "sim_step",
+  "sim_snapshot",
+  "sim_restore",
+  "sim_hash",
+  "sim_tick",
+  "sim_view",
+  "sim_hud",
+] as const;
+
+/**
+ * How a compiled module fails the ABI, e.g. `["missing export sim_hud",
+ * "unsatisfiable import env.now"]` — required exports the module lacks,
+ * and imports it wants that the host does not supply. A module may import
+ * less than the host offers (that is additive-safe); it may never export
+ * less. Checked before any cast to a typed export surface: a missing
+ * export found here is a refused boot, found later it is a TypeError on
+ * every frame.
+ */
+export function abiViolations(
+  module: WebAssembly.Module,
+  required: { readonly exports: readonly string[]; readonly imports: readonly string[] },
+): string[] {
+  const exports = new Set(WebAssembly.Module.exports(module).map((e) => e.name));
+  const supplied = new Set(required.imports);
+  return [
+    ...required.exports
+      .filter((name) => !exports.has(name))
+      .map((name) => `missing export ${name}`),
+    ...WebAssembly.Module.imports(module)
+      .filter((i) => i.module !== "host" || !supplied.has(i.name))
+      .map((i) => `unsatisfiable import ${i.module}.${i.name}`),
+  ];
+}
+
 /** Bytes in the `sim_hud` record. */
 export const HUD_BYTES = 28;
 
@@ -153,6 +254,35 @@ export function decodeHud(bytes: Uint8Array): Hud | null {
     parkEnergy: dv.getBigUint64(12, true),
     selfEnergy: dv.getUint32(20, true),
     boosting: (dv.getUint8(24) & 2) !== 0,
+  };
+}
+
+/** Bytes per dog in the `sim_view` projection (after the leading u32 count). */
+export const VIEW_RECORD_BYTES = 20;
+
+export type ViewDog = {
+  readonly id: bigint;
+  /** Q16.16 park cells. */
+  readonly x: number;
+  readonly y: number;
+  /** bit0 deck, bit1 swimming, bit2 moving, bit3 boosting. */
+  readonly flags: number;
+  /** Octant, 0=E clockwise; 2 (south) when idle. */
+  readonly facing: number;
+  readonly anim: number;
+};
+
+/** Reads dog record `index` of a `sim_view` projection. */
+export function decodeViewDog(bytes: Uint8Array, index: number): ViewDog {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const at = 4 + index * VIEW_RECORD_BYTES;
+  return {
+    id: dv.getBigUint64(at, true),
+    x: dv.getInt32(at + 8, true),
+    y: dv.getInt32(at + 12, true),
+    flags: dv.getUint8(at + 16),
+    facing: dv.getUint8(at + 17),
+    anim: dv.getUint8(at + 18),
   };
 }
 

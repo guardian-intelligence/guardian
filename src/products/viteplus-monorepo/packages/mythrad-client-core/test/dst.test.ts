@@ -587,15 +587,10 @@ describe("invariant 7: module epoch", () => {
     const tickBefore = r.core.state.tick;
     const dogsBefore = r.core.state.dogCount;
 
-    // Serve a "new module" that instantiates but cannot take our world.
-    // server.wasm is a real committed artifact with no park surface, so
-    // the swap gets past instantiation and dies in the terrain load —
-    // which is the ordering under test. It dies at the FIRST terrain call
-    // (`terrain_cap` is missing) rather than at a `sim_set_terrain`
-    // refusal, so what is covered here is "the terrain step threw", not
-    // specifically "the new module rejected this world". Reaching the
-    // later point faithfully would need a park build with a different
-    // terrain schema; both land in the same catch.
+    // Serve a "new module" that cannot take our world. server.wasm is a
+    // real committed artifact with no park surface, so the swap dies at
+    // the ABI check — before a worldless instance can be published —
+    // which lands in the same catch as a terrain refusal would.
     r.harness.setModule("park", modules().server.slice().buffer);
     r.deliver([r.emit(Ev.epochAdvance, epochAdvancePayload(2, 0xdeadbeefn))]);
     expect(await r.until(() => r.harness.logs.some((l) => l.includes("swap failed")), 2000)).toBe(

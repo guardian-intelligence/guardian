@@ -32,6 +32,9 @@
 //!
 //! ABI (all integers; payloads move through the io buffer, terrain blobs
 //! through the larger terrain buffer):
+//!   abi_version() -> u32              hosts refuse an unknown version at
+//!                                     boot; additions never bump it,
+//!                                     removals and re-typings must
 //!   io_buf() -> *mut u8, io_cap() -> u32
 //!   terrain_buf() -> *mut u8, terrain_cap() -> u32
 //!   sim_set_terrain(len: u32) -> u32  parse+adopt blob, 0 ok
@@ -223,6 +226,11 @@ fn terrain() -> Option<Terrain<'static>> {
 
 fn scratch() -> &'static mut nav::Scratch {
     unsafe { &mut *(&raw mut SCRATCH) }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn abi_version() -> u32 {
+    1
 }
 
 #[unsafe(no_mangle)]
