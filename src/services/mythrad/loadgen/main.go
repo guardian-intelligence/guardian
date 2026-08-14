@@ -15,12 +15,12 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
@@ -38,6 +38,8 @@ import (
 
 	"github.com/quic-go/quic-go/http3"
 	webtransport "github.com/quic-go/webtransport-go"
+
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
 )
 
 func envInt(k string, d int) int {
@@ -213,29 +215,39 @@ type bot struct {
 	sub       string
 }
 
-// terrainDims caches w<<16|h per terrain hex process-wide, so the fleet
+// terrainDims caches w<<16|h per terrain id process-wide, so the fleet
 // decodes each artifact's header once instead of per bot.
 var terrainDims sync.Map
 
-func (b *bot) loadDims(hex string) {
-	if hex == "" {
+func (b *bot) loadDims(id uint64) {
+	if id == 0 {
 		return
 	}
-	if v, ok := terrainDims.Load(hex); ok {
+	if v, ok := terrainDims.Load(id); ok {
 		b.dims.Store(v.(uint32))
 		return
 	}
-	blob, err := b.fetchTerrain(hex)
+	blob, err := b.fetchTerrain(id)
 	if err != nil || len(blob) < 12 {
 		return
 	}
 	d := uint32(binary.LittleEndian.Uint16(blob[8:10]))<<16 | uint32(binary.LittleEndian.Uint16(blob[10:12]))
-	terrainDims.Store(hex, d)
+	terrainDims.Store(id, d)
 	b.dims.Store(d)
 }
 
-func (b *bot) fetchTerrain(hex string) ([]byte, error) {
-	return fetchBytes(b.terrainBase + hex)
+// The blob id travels as a u64 and is only ever spelled in hex to address
+// the artifact over HTTP.
+func (b *bot) fetchTerrain(id uint64) ([]byte, error) {
+	return fetchBytes(fmt.Sprintf("%s%016x", b.terrainBase, id))
+}
+
+// nextIntentID keeps every bot's ids distinct across the fleet. Event
+// frames carry no actor, so a bot recognises its own events by intent id
+// alone; a shared counter space would have bots crediting each other's
+// events and corrupting the visible-latency sample.
+func (b *bot) nextIntentID() uint64 {
+	return uint64(b.idx+1)<<32 | uint64(uint32(b.intentID.Add(1)))
 }
 
 func fetchBytes(url string) ([]byte, error) {
@@ -326,11 +338,11 @@ func (b *bot) runOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	hello, _ := json.Marshal(map[string]any{
-		"type": "hello", "proto": 3, "ticket": sess.Ticket,
-		"since_seq": b.seq, "since_tick": b.sinceTick,
+	hello := wire.EncodeHello(wire.Hello{
+		Proto: wire.Proto, Ticket: sess.Ticket,
+		SinceSeq: b.seq, SinceTick: b.sinceTick,
 	})
-	if _, err := stream.Write(append(hello, '\n')); err != nil {
+	if _, err := stream.Write(hello); err != nil {
 		return err
 	}
 	breakerReport(true)
@@ -338,15 +350,13 @@ func (b *bot) runOnce(ctx context.Context) error {
 	lgSessions.Add(1)
 	defer lgSessions.Add(-1)
 
-	send := func(o map[string]any) {
-		msg, _ := json.Marshal(o)
-		stream.Write(append(msg, '\n'))
-	}
+	// One frame per Write: quic-go serialises whole Write calls, so the
+	// act goroutine and the join below never interleave a frame's bytes.
 	sendIntent := func(kind uint16, payload []byte) {
-		id := b.intentID.Add(1)
+		id := b.nextIntentID()
 		b.pending.Store(id, time.Now())
 		lgIntents.Add(1)
-		send(map[string]any{"type": "intent", "id": id, "kind": kind, "p": payload})
+		stream.Write(wire.EncodeIntent(wire.Intent{ID: id, Kind: kind, Payload: payload}))
 	}
 	myDogPayload := func() []byte {
 		var p [8]byte
@@ -359,7 +369,7 @@ func (b *bot) runOnce(ctx context.Context) error {
 	var present atomic.Bool
 	boosting := false // owned by the act goroutine
 
-	// act at human rate; checks pull from the shared replica
+	// act at human rate
 	go func() {
 		act := time.NewTicker(time.Duration(b.actSec)*time.Second + time.Duration(rand.Intn(1000*b.actSec))*time.Millisecond)
 		defer act.Stop()
@@ -400,50 +410,60 @@ func (b *bot) runOnce(ctx context.Context) error {
 			}
 		}
 	}()
-	sc := bufio.NewScanner(stream)
-	sc.Buffer(make([]byte, 512*1024), 512*1024)
+	frames := wire.NewReader(stream)
 	joined := false
-	for sc.Scan() {
-		lgBytes.Add(int64(len(sc.Bytes()) + 1))
-		var m struct {
-			Type    string `json:"type"`
-			Seq     int64  `json:"seq"`
-			Tick    uint64 `json:"tick"`
-			Actor   string `json:"actor"`
-			Intent  uint64 `json:"intent"`
-			Terrain string `json:"terrain"`
+	for {
+		kind, payload, err := frames.Next()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
 		}
-		if json.Unmarshal(sc.Bytes(), &m) != nil {
-			continue
-		}
-		switch m.Type {
-		case "welcome":
-			b.loadDims(m.Terrain)
+		lgBytes.Add(int64(wire.FrameSize(len(payload))))
+		switch kind {
+		case wire.KindWelcome:
+			w, err := wire.DecodeWelcome(payload)
+			if err != nil {
+				continue
+			}
+			b.loadDims(w.Terrain)
 			if !joined {
 				joined = true
 				present.Store(true)
 				sendIntent(1, myDogPayload())
 			}
-		case "snapshot":
-			b.seq = m.Seq
-			b.sinceTick = m.Tick
-		case "event":
-			lgEvents.Add(1)
-			b.seq = m.Seq
-			b.sinceTick = m.Tick
-			if m.Actor == b.sub {
-				if v, ok := b.pending.LoadAndDelete(m.Intent); ok {
-					latMu.Lock()
-					latSamples = append(latSamples, time.Since(v.(time.Time)).Seconds())
-					latMu.Unlock()
-				}
+		case wire.KindSnapshot:
+			snap, err := wire.DecodeSnapshot(payload)
+			if err != nil {
+				continue
 			}
-		case "reject":
+			b.seq = snap.Seq
+			b.sinceTick = snap.Tick
+		case wire.KindEvent:
+			ev, err := wire.DecodeEvent(payload)
+			if err != nil {
+				continue
+			}
+			lgEvents.Add(1)
+			b.seq = ev.Seq
+			b.sinceTick = ev.Tick
+			// Ids are unique per bot, so a hit is this bot's own intent
+			// coming back as the journal's acknowledgment.
+			if v, ok := b.pending.LoadAndDelete(ev.Intent); ok {
+				latMu.Lock()
+				latSamples = append(latSamples, time.Since(v.(time.Time)).Seconds())
+				latMu.Unlock()
+			}
+		case wire.KindReject:
+			rj, err := wire.DecodeReject(payload)
+			if err != nil {
+				continue
+			}
 			lgRejects.Add(1)
-			b.pending.Delete(m.Intent)
+			b.pending.Delete(rj.Intent)
 		}
 	}
-	return sc.Err()
 }
 
 func main() {

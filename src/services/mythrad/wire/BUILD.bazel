@@ -1,0 +1,14 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "wire",
+    srcs = ["wire.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/mythrad/wire",
+    visibility = ["//src/services/mythrad:__subpackages__"],
+)
+
+go_test(
+    name = "wire_test",
+    srcs = ["wire_test.go"],
+    embed = [":wire"],
+)

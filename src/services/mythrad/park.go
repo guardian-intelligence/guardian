@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -20,6 +19,7 @@ import (
 	"github.com/tetratelabs/wazero/api"
 
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/journal"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
 )
 
 const (
@@ -294,21 +294,21 @@ type attachReq struct {
 // attachResult carries the raw catch-up material out of the tick
 // goroutine: the attach position and an uncompressed snapshot capture. The
 // journal read and the deflate pass happen on the session's own goroutine
-// (catchupLines), so the tick loop never blocks on a client's history.
+// (catchupFrames), so the tick loop never blocks on a client's history.
 type attachResult struct {
 	welcome []byte
 	seq     int64
 	tick    uint64
 	epoch   uint32
 	wh      uint64
-	terrain string
+	terrain uint64
 	state   []byte
 	err     error
 }
 
 type snapCacheEntry struct {
-	tick uint64
-	line []byte
+	tick  uint64
+	frame []byte
 }
 
 type ringEntry struct {
@@ -346,11 +346,11 @@ type authority struct {
 	anchor     time.Time
 	anchorTick uint64
 
-	// The active terrain artifact, cached for welcome/snapshot lines so
+	// The active terrain artifact, cached for welcome/snapshot frames so
 	// clients know which blob to fetch before restoring, and as raw bytes
 	// for candidate modules under soak. Written only by the boot path and
 	// the tick goroutine's replay.
-	terrainHex  string
+	terrain     uint64
 	terrainBlob []byte
 
 	// The module-update lane (docs/netcode.md, module epochs): when the
@@ -507,7 +507,7 @@ func parkIDFor(name string) int64 {
 }
 
 // setTerrain loads a blob into the host and caches its identity for the
-// welcome/snapshot lines (and the bytes for soak candidates).
+// welcome/snapshot frames (and the bytes for soak candidates).
 func (a *authority) setTerrain(blob []byte) error {
 	if _, _, _, err := terrainHeaderFields(blob); err != nil {
 		return err
@@ -515,7 +515,7 @@ func (a *authority) setTerrain(blob []byte) error {
 	if err := a.host.SetTerrain(blob); err != nil {
 		return err
 	}
-	a.terrainHex = fmt.Sprintf("%016x", terrainID(blob))
+	a.terrain = terrainID(blob)
 	a.terrainBlob = blob
 	return nil
 }
@@ -606,7 +606,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 					return fail(err)
 				}
 			}
-			if code := host.Apply(encodeEvent(ev.Kind, ev.Payload)); code != 0 {
+			if code := host.Apply(simEvent(ev.Kind, ev.Payload)); code != 0 {
 				return fail(fmt.Errorf("replay: event seq %d rejected with code %d", ev.Seq, code))
 			}
 			a.lastSeq = ev.Seq
@@ -674,7 +674,7 @@ func (a *authority) rateChange(ctx context.Context, hz int) error {
 	tick, epoch := a.host.Tick(), a.host.Epoch()
 	var p [4]byte
 	binary.LittleEndian.PutUint32(p[:], uint32(hz))
-	if code := a.host.Apply(encodeEvent(evRateSet, p[:])); code != 0 {
+	if code := a.host.Apply(simEvent(evRateSet, p[:])); code != 0 {
 		// A module from before rates existed (mount skew during a
 		// deploy): hold the world's rate; the desired rate lands on the
 		// first reopen under a rate-capable module.
@@ -714,7 +714,7 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	tick, epoch := a.host.Tick(), a.host.Epoch()
 	var p [8]byte
 	binary.LittleEndian.PutUint64(p[:], target)
-	if code := a.host.Apply(encodeEvent(evClockSkip, p[:])); code != 0 {
+	if code := a.host.Apply(simEvent(evClockSkip, p[:])); code != 0 {
 		// A module from before clock_skip existed (mount skew during a
 		// deploy): anchor to this process so the schedule holds drift-free
 		// for the instance's life; the real repayment lands on the first
@@ -752,7 +752,9 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	return nil
 }
 
-func encodeEvent(kind uint16, payload []byte) []byte {
+// simEvent encodes an event for sim_apply: the module's own ABI (kind u16
+// then payload), which is not the wire's event frame.
+func simEvent(kind uint16, payload []byte) []byte {
 	out := make([]byte, 2+len(payload))
 	binary.LittleEndian.PutUint16(out, kind)
 	copy(out[2:], payload)
@@ -909,7 +911,7 @@ func (a *authority) tickOnce() {
 	tick := a.host.Tick()
 	epoch := a.host.Epoch()
 	for _, in := range staged {
-		code := a.host.Apply(encodeEvent(in.kind, in.payload))
+		code := a.host.Apply(simEvent(in.kind, in.payload))
 		if code != 0 {
 			if in.sess != nil {
 				in.sess.sendReject(in.intentID, code)
@@ -930,7 +932,7 @@ func (a *authority) tickOnce() {
 		// Feed the accepted event to the soaking candidate: a module that
 		// cannot replay the live journal must never be promoted.
 		if a.cand != nil {
-			ccode, cerr := a.cand.ApplyE(encodeEvent(in.kind, in.payload))
+			ccode, cerr := a.cand.ApplyE(simEvent(in.kind, in.payload))
 			if cerr != nil {
 				a.failSoak(a.candHash, fmt.Errorf("apply trap: %w", cerr))
 			} else if ccode != 0 {
@@ -964,9 +966,9 @@ func (a *authority) tickOnce() {
 		a.mu.Lock()
 		for i := range accepted {
 			accepted[i].Seq = firstSeq + int64(i)
-			line := eventLine(&accepted[i])
+			f := eventFrameFor(&accepted[i])
 			for s := range a.subs {
-				s.send(line)
+				s.send(f)
 			}
 		}
 		a.lastSeq = accepted[len(accepted)-1].Seq
@@ -1021,26 +1023,23 @@ func (a *authority) tickOnce() {
 func (a *authority) handleAttach(req attachReq) attachResult {
 	s := req.sess
 	if req.resync {
-		s.send(a.snapshotLine())
+		s.send(a.cachedSnapshotFrame())
 		mCatchup.WithLabelValues("resync").Inc()
 		return attachResult{}
 	}
-	// The terrain hex is the only terrain fact on the wire: dimensions and
+	// The terrain id is the only terrain fact on the wire: dimensions and
 	// schema live in the content-addressed blob every consumer fetches.
-	// hz is a read-out of the world's journaled rate — a connection sees
-	// exactly one rate, since rate changes only happen while dark.
-	welcome, _ := json.Marshal(map[string]any{
-		"type": "welcome", "park": a.name, "role": s.role, "epoch": a.host.Epoch(),
-		"seq": a.lastSeq, "tick": a.host.Tick(), "terrain": a.terrainHex,
-		"hz": a.hz,
-	})
 	res := attachResult{
-		welcome: append(welcome, '\n'),
+		welcome: wire.EncodeWelcome(wire.Welcome{
+			Epoch: a.host.Epoch(), Seq: a.lastSeq, Tick: a.host.Tick(),
+			Hz: uint32(a.hz), Role: wire.RoleCode(s.role), Terrain: a.terrain,
+			Park: a.name,
+		}),
 		seq:     a.lastSeq,
 		tick:    a.host.Tick(),
 		epoch:   a.host.Epoch(),
 		wh:      a.host.Hash(),
-		terrain: a.terrainHex,
+		terrain: a.terrain,
 		state:   a.host.Snapshot(),
 	}
 
@@ -1056,13 +1055,13 @@ func (a *authority) handleAttach(req attachReq) attachResult {
 
 var errPastAttach = errors.New("past attach position")
 
-// catchupLines builds the catch-up material on the caller's goroutine.
+// catchupFrames builds the catch-up material on the caller's goroutine.
 // Divergence resyncs and fresh joins get the snapshot; rejoins get
 // min-cost with the ring-depth compute bound. Live events queued after the
 // attach position follow on the session channel, so the journal read stops
 // at the attach seq — anything newer is already on its way.
-func (a *authority) catchupLines(sinceSeq int64, sinceTick uint64, res attachResult) [][]byte {
-	snapLine := snapshotLineFrom(res.seq, res.tick, res.epoch, res.wh, res.terrain, res.state)
+func (a *authority) catchupFrames(sinceSeq int64, sinceTick uint64, res attachResult) [][]byte {
+	snap := snapshotFrameFor(res.seq, res.tick, res.epoch, res.wh, res.terrain, res.state)
 	if sinceSeq > 0 && sinceSeq <= res.seq && sinceTick+uint64(len(a.ring)) >= res.tick {
 		var events [][]byte
 		eventBytes := 0
@@ -1071,61 +1070,56 @@ func (a *authority) catchupLines(sinceSeq int64, sinceTick uint64, res attachRes
 			if ev.Seq > res.seq {
 				return errPastAttach
 			}
-			line := eventLine(&ev)
-			events = append(events, line)
-			eventBytes += len(line)
+			f := eventFrameFor(&ev)
+			events = append(events, f)
+			eventBytes += len(f)
 			return nil
 		})
 		cancel()
 		if errors.Is(err, errPastAttach) {
 			err = nil
 		}
-		if err == nil && eventBytes < len(snapLine) {
+		if err == nil && eventBytes < len(snap) {
 			mCatchup.WithLabelValues("events").Inc()
 			return events
 		}
 	}
 	mCatchup.WithLabelValues("snapshot").Inc()
-	return [][]byte{snapLine}
+	return [][]byte{snap}
 }
 
-// snapshotLine serves the resync path from the tick goroutine, cached per
-// tick so concurrent resyncs share one deflate pass.
-func (a *authority) snapshotLine() []byte {
+// cachedSnapshotFrame serves the resync path from the tick goroutine,
+// cached per tick so concurrent resyncs share one deflate pass.
+func (a *authority) cachedSnapshotFrame() []byte {
 	t := a.host.Tick()
 	a.mu.Lock()
 	cached := a.snapCache
 	a.mu.Unlock()
-	if cached.tick == t && cached.line != nil {
-		return cached.line
+	if cached.tick == t && cached.frame != nil {
+		return cached.frame
 	}
-	line := snapshotLineFrom(a.lastSeq, t, a.host.Epoch(), a.host.Hash(), a.terrainHex, a.host.Snapshot())
+	f := snapshotFrameFor(a.lastSeq, t, a.host.Epoch(), a.host.Hash(), a.terrain, a.host.Snapshot())
 	a.mu.Lock()
-	a.snapCache = snapCacheEntry{tick: t, line: line}
+	a.snapCache = snapCacheEntry{tick: t, frame: f}
 	a.mu.Unlock()
-	return line
+	return f
 }
 
-func snapshotLineFrom(seq int64, tick uint64, epoch uint32, wh uint64, terrain string, state []byte) []byte {
+func snapshotFrameFor(seq int64, tick uint64, epoch uint32, wh, terrain uint64, state []byte) []byte {
 	var z bytes.Buffer
 	w, _ := flate.NewWriter(&z, flate.BestCompression)
 	w.Write(state)
 	w.Close()
-	msg, _ := json.Marshal(map[string]any{
-		"type": "snapshot", "seq": seq, "tick": tick,
-		"epoch": epoch, "wh": fmt.Sprintf("%016x", wh),
-		"terrain": terrain,
-		"z":       z.Bytes(), // json encodes []byte as base64
+	return wire.EncodeSnapshot(wire.Snapshot{
+		Seq: seq, Tick: tick, Epoch: epoch, WH: wh, Terrain: terrain, Z: z.Bytes(),
 	})
-	return append(msg, '\n')
 }
 
-func eventLine(ev *journal.Event) []byte {
-	msg, _ := json.Marshal(map[string]any{
-		"type": "event", "seq": ev.Seq, "tick": ev.Tick, "kind": ev.Kind,
-		"actor": ev.Actor, "intent": ev.IntentID, "p": ev.Payload,
+func eventFrameFor(ev *journal.Event) []byte {
+	return wire.EncodeEvent(wire.Event{
+		Seq: ev.Seq, Tick: ev.Tick, Kind: ev.Kind,
+		Intent: ev.IntentID, Payload: ev.Payload,
 	})
-	return append(msg, '\n')
 }
 
 func (a *authority) close() {

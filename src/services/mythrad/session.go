@@ -1,10 +1,9 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/binary"
-	"encoding/json"
+	"errors"
 	"hash/fnv"
 	"log"
 	"strconv"
@@ -13,6 +12,8 @@ import (
 	"time"
 
 	webtransport "github.com/quic-go/webtransport-go"
+
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
 )
 
 // Protocol event kinds the doorman needs by number (payload contents stay
@@ -76,8 +77,7 @@ func (s *session) send(msg []byte) {
 }
 
 func (s *session) sendReject(intentID uint64, reason uint32) {
-	msg, _ := json.Marshal(map[string]any{"type": "reject", "intent": intentID, "reason": reason})
-	s.send(append(msg, '\n'))
+	s.send(wire.EncodeReject(wire.Reject{Intent: intentID, Reason: reason}))
 }
 
 func (s *session) closeSession(why string) {
@@ -104,20 +104,19 @@ func (h *gameHandlers) handleSession(sess *webtransport.Session) {
 		return
 	}
 	stream.SetReadDeadline(time.Now().Add(10 * time.Second))
-	sc := bufio.NewScanner(stream)
-	sc.Buffer(make([]byte, 64*1024), 64*1024)
-	if !sc.Scan() {
+	frames := wire.NewReader(stream)
+	kind, payload, err := frames.Next()
+	if err != nil {
 		mHandshakes.WithLabelValues("no_hello").Inc()
 		return
 	}
-	var hello struct {
-		Type      string `json:"type"`
-		Proto     int    `json:"proto"`
-		Ticket    string `json:"ticket"`
-		SinceSeq  int64  `json:"since_seq"`
-		SinceTick uint64 `json:"since_tick"`
+	if kind != wire.KindHello {
+		mHandshakes.WithLabelValues("bad_hello").Inc()
+		sess.CloseWithError(4400, "bad hello")
+		return
 	}
-	if json.Unmarshal(sc.Bytes(), &hello) != nil || hello.Type != "hello" || hello.Proto != 3 {
+	hello, err := wire.DecodeHello(payload)
+	if err != nil || hello.Proto != wire.Proto {
 		mHandshakes.WithLabelValues("bad_hello").Inc()
 		sess.CloseWithError(4400, "bad hello")
 		return
@@ -177,7 +176,7 @@ func (h *gameHandlers) handleSession(sess *webtransport.Session) {
 		if !write(res.welcome) {
 			return
 		}
-		for _, m := range park.catchupLines(hello.SinceSeq, hello.SinceTick, res) {
+		for _, m := range park.catchupFrames(hello.SinceSeq, hello.SinceTick, res) {
 			if !write(m) {
 				return
 			}
@@ -200,7 +199,15 @@ func (h *gameHandlers) handleSession(sess *webtransport.Session) {
 	// write intents die here — same protocol, no write authority.
 	tokens := 40.0
 	lastRefill := time.Now()
-	for sc.Scan() {
+	for {
+		kind, payload, err := frames.Next()
+		if err != nil {
+			if errors.Is(err, wire.ErrFrameTooLarge) || errors.Is(err, wire.ErrShortFrame) {
+				log.Printf("wt session framing lost: sub=%s park=%s err=%v", s.sub, park.name, err)
+				s.closeSession("bad framing")
+			}
+			break
+		}
 		now := time.Now()
 		tokens = min(40, tokens+20*now.Sub(lastRefill).Seconds())
 		lastRefill = now
@@ -209,32 +216,29 @@ func (h *gameHandlers) handleSession(sess *webtransport.Session) {
 			return
 		}
 		tokens--
-		var m struct {
-			Type string `json:"type"`
-			ID   uint64 `json:"id"`
-			Kind uint16 `json:"kind"`
-			P    []byte `json:"p"`
-			Have int64  `json:"have"`
-		}
-		if json.Unmarshal(sc.Bytes(), &m) != nil {
-			continue
-		}
-		switch m.Type {
-		case "intent":
+		switch kind {
+		case wire.KindIntent:
+			in, err := wire.DecodeIntent(payload)
+			if err != nil {
+				continue
+			}
 			if s.role != "player" {
-				s.sendReject(m.ID, rejectReadOnly)
-				log.Printf("intent rejected: actor=%s kind=%d intent=%d reason=read_only", s.sub, m.Kind, m.ID)
+				s.sendReject(in.ID, rejectReadOnly)
+				log.Printf("intent rejected: actor=%s kind=%d intent=%d reason=read_only", s.sub, in.Kind, in.ID)
 				mIntentsRejected.WithLabelValues("read_only").Inc()
 				continue
 			}
-			if !intentBoundToActor(m.Kind, m.P, s.dogID) {
-				s.sendReject(m.ID, rejectNotYours)
-				log.Printf("intent rejected: actor=%s kind=%d intent=%d reason=not_yours", s.sub, m.Kind, m.ID)
+			if !intentBoundToActor(in.Kind, in.Payload, s.dogID) {
+				s.sendReject(in.ID, rejectNotYours)
+				log.Printf("intent rejected: actor=%s kind=%d intent=%d reason=not_yours", s.sub, in.Kind, in.ID)
 				mIntentsRejected.WithLabelValues("not_yours").Inc()
 				continue
 			}
-			park.stageIntent(s, m.ID, m.Kind, m.P)
-		case "resync":
+			park.stageIntent(s, in.ID, in.Kind, in.Payload)
+		case wire.KindResync:
+			if _, err := wire.DecodeResync(payload); err != nil {
+				continue
+			}
 			mResyncs.Inc()
 			select {
 			case park.attach <- attachReq{sess: s, resync: true, done: make(chan attachResult, 1)}:
@@ -298,36 +302,27 @@ func (s *session) datagramLoop(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		var m struct {
-			Type string `json:"type"`
-			Tick uint64 `json:"tick"`
-			WH   string `json:"wh"`
-			CT   int64  `json:"ct"`
-		}
-		if json.Unmarshal(data, &m) != nil || m.Type != "check" {
-			continue
-		}
-		wh, err := strconv.ParseUint(m.WH, 16, 64)
+		chk, err := wire.DecodeCheck(data)
 		if err != nil {
 			continue
 		}
-		ok, now := s.park.verdictFor(m.Tick, wh)
+		ok, now := s.park.verdictFor(chk.Tick, chk.WH)
 		_, cw := s.park.mods.client.get()
 		_, pw := s.park.mods.park.get()
 		result := "unknown"
-		v := map[string]any{"type": "verdict", "tick": m.Tick, "now": now, "ct": m.CT,
-			"cw": cw, "pw": pw}
+		v := wire.Verdict{Tick: chk.Tick, Now: now, CTMS: chk.CTMS,
+			CW: wire.ModuleWord(cw), PW: wire.ModuleWord(pw)}
 		if ok != nil {
-			v["ok"] = *ok
+			v.Flags = wire.VerdictKnown
 			if *ok {
+				v.Flags |= wire.VerdictOK
 				result = "ok"
 			} else {
 				result = "mismatch"
 			}
 		}
 		mChecks.WithLabelValues(result).Inc()
-		msg, _ := json.Marshal(v)
-		if s.sess.SendDatagram(msg) == nil {
+		if s.sess.SendDatagram(wire.EncodeVerdict(v)) == nil {
 			mDgSent.Inc()
 		} else {
 			mDgErrors.Inc()

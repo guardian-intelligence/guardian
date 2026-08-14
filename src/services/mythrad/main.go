@@ -13,23 +13,20 @@
 //     the park module at open; an epoch_advance journal event is how a swap
 //     becomes effective for a running park.
 //   - tier 3 (terrain): each park's world is a content-addressed terrain
-//     artifact served at /terrain/<16-hex>. The welcome and snapshot lines
+//     artifact served at /terrain/<16-hex>. The welcome and snapshot frames
 //     carry the active identity; clients fetch the blob and load it into
 //     their replica before restoring — the same choreography the authority
 //     itself follows on boot and replay.
 //
-// Wire protocol (JSON lines on one bidi stream + JSON datagrams):
+// Wire protocol v4 (binary frames on one bidi stream + binary datagrams;
+// little-endian, layouts in wire.go):
 //
-//	POST /session (OIDC bearer)          -> { ticket, endpoint, certHashB64? }
-//	client -> server stream:   {"type":"hello","proto":3,"ticket","since_seq","since_tick"}
-//	                           {"type":"intent","id","kind","p":base64}
-//	                           {"type":"resync","have"}
-//	server -> client stream:   {"type":"welcome","park","role","epoch","seq","tick","terrain","terrain_schema","w","h"}
-//	                           {"type":"event","seq","tick","kind","actor","intent","p"}
-//	                           {"type":"reject","intent","reason"}
-//	                           {"type":"snapshot","seq","tick","epoch","wh","terrain","z":deflate}
-//	client -> server datagram: {"type":"check","tick","wh","ct"}
-//	server -> client datagram: {"type":"verdict","tick","now","ok?","ct","cw","pw"}
+//	POST /session (OIDC bearer)  -> { ticket, endpoint, certHashB64? }
+//	stream frame:   qlen (QUIC varint of kind+payload) | kind u8 | payload
+//	client -> server:  1 hello, 2 intent, 3 resync
+//	server -> client:  16 welcome, 17 event, 18 reject, 19 snapshot
+//	client -> server datagram: check{tick, wh, ct_ms}
+//	server -> client datagram: verdict{tick, now, ct_ms, flags, cw, pw}
 package main
 
 import (

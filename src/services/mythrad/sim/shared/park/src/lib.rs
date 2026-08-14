@@ -36,6 +36,7 @@
 //!   sim_tick() -> u64, sim_epoch() -> u32, sim_terrain_id() -> u64
 //!   sim_rate() -> u32, sim_anchor_tick() -> u64, sim_anchor_ns() -> u64
 //!   sim_view() -> u32                 render data written to io, len
+//!   sim_hud(self_id: u64) -> u32      HUD numbers written to io, len
 //!
 //! Event encoding (little-endian): kind u16, then payload —
 //!   1 join          { id u64 }            spawn cell derived from
@@ -979,6 +980,28 @@ pub extern "C" fn sim_view() -> u32 {
     at as u32
 }
 
+/// The HUD projection, never hashed: the handful of numbers a face plate
+/// shows, resolved for one dog so no host has to walk the snapshot to find
+/// them. 28 bytes to io — version u16 (=1), present u8, checked_in_today
+/// u8, day u32, dog_count u32, park_energy u64, self_energy u32, self_flags
+/// u8 (bit 1 = boosting), pad [3]u8.
+#[unsafe(no_mangle)]
+pub extern "C" fn sim_hud(self_id: u64) -> u32 {
+    let p = park();
+    let me = find(p, self_id).map(|i| p.dogs[i]);
+    let buf = io();
+    buf[0..2].copy_from_slice(&1u16.to_le_bytes());
+    buf[2] = me.is_some() as u8;
+    buf[3] = me.is_some_and(|d| d.checked_in_day == p.day) as u8;
+    buf[4..8].copy_from_slice(&p.day.to_le_bytes());
+    buf[8..12].copy_from_slice(&(p.n as u32).to_le_bytes());
+    buf[12..20].copy_from_slice(&p.energy.to_le_bytes());
+    buf[20..24].copy_from_slice(&me.map_or(0, |d| d.energy).to_le_bytes());
+    buf[24] = me.map_or(0, |d| d.flags & FLAG_BOOST);
+    buf[25..28].copy_from_slice(&[0, 0, 0]);
+    28
+}
+
 /// Octant of a direction vector: 0=E, 1=SE, 2=S, ... counterclockwise in
 /// screen coordinates (y grows south). Dominant-axis with a 2:1 threshold.
 fn octant(dx: i32, dy: i32) -> u8 {
@@ -1563,6 +1586,49 @@ mod tests {
         for i in 1..p.n {
             assert!(p.dogs[i - 1].id < p.dogs[i].id);
         }
+    }
+
+    #[test]
+    fn hud_reports_the_park_and_the_dog_asking() {
+        let _g = setup(3);
+        let hud = |id: u64| -> Vec<u8> {
+            let len = sim_hud(id) as usize;
+            assert_eq!(len, 28);
+            io()[..len].to_vec()
+        };
+        let u32at = |b: &[u8], at: usize| u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        let u64at = |b: &[u8], at: usize| u64::from_le_bytes(b[at..at + 8].try_into().unwrap());
+
+        assert_eq!(ev_id(EV_JOIN, 8), OK);
+        assert_eq!(ev_id(EV_JOIN, 9), OK);
+        let h = hud(8);
+        assert_eq!(u16::from_le_bytes([h[0], h[1]]), 1);
+        assert_eq!((h[2], h[3]), (1, 0));
+        assert_eq!(u32at(&h, 8), 2);
+        assert_eq!(u64at(&h, 12), 0);
+        assert_eq!((u32at(&h, 20), h[24]), (0, 0));
+
+        assert_eq!(ev_id(EV_CHECK_IN, 8), OK);
+        assert_eq!(ev_boost(8, 1), OK);
+        let h = hud(8);
+        assert_eq!((h[2], h[3]), (1, 1));
+        assert_eq!(u64at(&h, 12), CHECK_IN_ENERGY as u64);
+        assert_eq!(u32at(&h, 20), CHECK_IN_ENERGY);
+        assert_eq!(h[24], FLAG_BOOST);
+
+        // a new day re-arms the check-in without touching the energy
+        assert_eq!(ev(EV_DAY_RESET, &4u32.to_le_bytes()), OK);
+        let h = hud(8);
+        assert_eq!((h[2], h[3]), (1, 0));
+        assert_eq!(u32at(&h, 4), 4);
+
+        // a dog that isn't here still sees the park
+        let h = hud(999);
+        assert_eq!((h[2], h[3]), (0, 0));
+        assert_eq!(u32at(&h, 8), 2);
+        assert_eq!(u64at(&h, 12), CHECK_IN_ENERGY as u64);
+        assert_eq!((u32at(&h, 20), h[24]), (0, 0));
+        assert_eq!(&h[25..28], &[0, 0, 0]);
     }
 
     #[test]
