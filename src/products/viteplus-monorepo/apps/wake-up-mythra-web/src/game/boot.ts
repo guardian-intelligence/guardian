@@ -5,6 +5,7 @@
 // host asks for, and the controls.
 
 import type { Ports } from "@guardian/chunkies";
+import { pageIdHex } from "@guardian/telemetry";
 import { WumGame, WumRenderer, browserRandom32, type RoleName } from "@guardian/wum-client";
 import { OpenFeature } from "@openfeature/web-sdk";
 import * as v from "valibot";
@@ -181,7 +182,11 @@ async function run(hud: Hud): Promise<void> {
     const jank = createJank({ probe, emit: (counters) => jankSpan(park, counters) });
     // Under the probe the harness reads the spans alongside the frames:
     // the frames show a rewind, the spans say which repair asked for it.
-    if (probe) tapSpans(jank.recordSpan);
+    // The page id lets a harness match this page's rows in the events sink.
+    if (probe) {
+      tapSpans(jank.recordSpan);
+      Object.assign(globalThis, { __mythraPageId: pageIdHex });
+    }
     const canvas = v.parse(v.instance(HTMLCanvasElement), document.getElementById("grid"));
     const renderer = new WumRenderer(canvas, game, {
       diag: hud.diag,

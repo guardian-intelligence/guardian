@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Wake Up Mythra local development stack, fronted by `aspect mythra dev`:
 #
-#   scripts/wum-dev.sh [up|down|status|logs [leg]]
+#   scripts/wum-dev.sh [up|down|status|logs [leg]|smoke]
 #
 # Everything mirrors prod: same admission path, same module distribution,
 # same ingress split.
@@ -225,7 +225,7 @@ EOF
     INGEST_LISTEN="127.0.0.1:${INGEST_PORT}" \
       CLICKHOUSE_ADDR="127.0.0.1:${CH_PORT}" \
       CLICKHOUSE_USER=default \
-      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="127.0.0.1:${OTLP_GRPC_PORT}" \
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://127.0.0.1:${OTLP_GRPC_PORT}" \
       IP2ASN_PATH="$IP2ASN" \
       "$ROOT/$INGEST" >>"$(logfile ingest)" 2>&1 &
     echo $! >"$(pidfile ingest)"
@@ -245,7 +245,7 @@ EOF
       BEHAVIOR_DIR="$ROOT/src/services/mythrad/behaviors" \
       ASSET_DIR="$ROOT/src/services/mythrad/assets" \
       PUBLIC_ADDR="${WUM_DEV_PUBLIC_ADDR:-127.0.0.1:4433}" \
-      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="127.0.0.1:${OTLP_GRPC_PORT}" \
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://127.0.0.1:${OTLP_GRPC_PORT}" \
       "$ROOT/$MYTHRAD" >>"$(logfile mythrad)" 2>&1 &
     echo $! >"$(pidfile mythrad)"
     await_ready mythrad 60 || fail_leg mythrad
@@ -345,6 +345,104 @@ status() {
   return "$rc"
 }
 
+# Reads only: the stack was built and started by up, so smoke resolves the
+# already-built client instead of triggering a build.
+resolve_clickhouse() {
+  CLICKHOUSE="$(bazelisk cquery --output=files @multitool//tools/clickhouse-server 2>/dev/null | head -1)"
+  [ -n "$CLICKHOUSE" ] && [ -x "$ROOT/$CLICKHOUSE" ]
+}
+
+ch_query() {
+  "$ROOT/$CLICKHOUSE" client --port "$CH_PORT" --query "$1"
+}
+
+# The dev stack's own canary: a headless player signs in and connects, then
+# both telemetry lanes must land in the local ClickHouse. Never mutates
+# stack state beyond the one journey it drives.
+smoke() {
+  if ! status_output="$(status)"; then
+    printf '%s\n' "$status_output" >&2
+    unhealthy="$(printf '%s\n' "$status_output" | awk '$4 != "healthy" { print $1 }' | paste -sd' ' -)"
+    echo "wum-dev: smoke needs a healthy stack (unhealthy: $unhealthy) — start it with: aspect mythra dev up" >&2
+    return 1
+  fi
+
+  if ! resolve_clickhouse; then
+    echo "wum-dev: cannot resolve the pinned clickhouse client — run: aspect mythra dev up" >&2
+    return 1
+  fi
+
+  pw_browser="$(cd "$APP" && node -e 'console.log(require("playwright").chromium.executablePath())' 2>/dev/null)" || true
+  if [ -z "$pw_browser" ]; then
+    echo "wum-dev: the app's playwright package is missing — run 'vp install' in src/products/viteplus-monorepo" >&2
+    return 1
+  fi
+  if [ ! -x "$pw_browser" ]; then
+    echo "wum-dev: playwright's chromium is not installed — install it with: cd $APP && npx playwright install chromium" >&2
+    return 1
+  fi
+
+  # Run scoping: the trace lane is scoped by this run's unique player name
+  # (it rides the span as wum.sub); the events lane by the page id the
+  # probe page minted (plus the sink's clock) — no other session's rows,
+  # concurrent smoke, or localStorage replay of a stale queue can satisfy
+  # either.
+  player="smoke-$(date +%s)-$$"
+  t0="$(ch_query 'SELECT toUnixTimestamp64Milli(now64(3))')" || {
+    echo "wum-dev: ClickHouse did not answer on port $CH_PORT" >&2
+    return 1
+  }
+
+  smoke_log="$RUN_DIR/smoke.log"
+  : >"$smoke_log"
+  echo "wum-dev: smoke — headless player '$player' joining the park…" >&2
+  if ! (cd "$APP" && WUM_SMOKE_PLAYER="$player" node e2e/smoke.mjs) >>"$smoke_log" 2>&1; then
+    echo "wum-dev: SMOKE FAIL — the journey broke (browser → devissuer sign-in → mythrad connect); journey log tail:" >&2
+    tail -n 20 "$smoke_log" >&2
+    echo "wum-dev: mythrad log tail:" >&2
+    tail -n 10 "$(logfile mythrad)" >&2
+    return 1
+  fi
+  dial_ms="$(sed -n 's/^SMOKE_JOURNEY dial_ms=\([0-9]*\).*/\1/p' "$smoke_log" | tail -1)"
+  page_id="$(sed -n 's/^SMOKE_JOURNEY .*page_id=\([0-9a-f]\{16\}\).*/\1/p' "$smoke_log" | tail -1)"
+  if [ -z "$page_id" ]; then
+    echo "wum-dev: SMOKE FAIL — journey did not report its page id; journey log tail:" >&2
+    tail -n 20 "$smoke_log" >&2
+    return 1
+  fi
+
+  # The page is gone, but the beacon's payload still crosses the ingest's
+  # 10s batcher and the spans ride the collector's own batcher — so both
+  # lanes get one bounded poll instead of one hopeful sleep.
+  events=0
+  spans=0
+  poll_deadline=$((SECONDS + 60))
+  while :; do
+    events="$(ch_query "SELECT count() FROM guardian_analytics.events WHERE event_name = 'wum.connected' AND page_id = unhex('$page_id') AND toUnixTimestamp64Milli(server_ts) >= $t0")" || events=0
+    spans="$(ch_query "SELECT count() FROM guardian_analytics.otel_traces WHERE ServiceName = 'mythrad' AND SpanName = 'POST /session' AND SpanAttributes['wum.sub'] = '$player'")" || spans=0
+    if [ "$events" -ge 1 ] && [ "$spans" -ge 1 ]; then
+      break
+    fi
+    [ "$SECONDS" -lt "$poll_deadline" ] || break
+    sleep 2
+  done
+
+  rc=0
+  if [ "$events" -lt 1 ]; then
+    echo "wum-dev: SMOKE FAIL — events lane: no wum.connected row for page $page_id landed (beacon → web /api/events proxy → ingest → ClickHouse); ingest log tail:" >&2
+    tail -n 20 "$(logfile ingest)" >&2
+    rc=1
+  fi
+  if [ "$spans" -lt 1 ]; then
+    echo "wum-dev: SMOKE FAIL — trace lane: no mythrad 'POST /session' span for $player (mythrad → otel collector → ClickHouse); otelcol log tail:" >&2
+    tail -n 20 "$(logfile otelcol)" >&2
+    rc=1
+  fi
+  [ "$rc" -eq 0 ] || return "$rc"
+
+  echo "wum-dev: SMOKE PASS — dial ${dial_ms}ms; +$events wum.connected event(s), +$spans mythrad 'POST /session' span(s)"
+}
+
 logs() {
   leg="${1:-}"
   if [ -z "$leg" ]; then
@@ -366,8 +464,9 @@ up) up ;;
 down) down ;;
 status) status ;;
 logs) logs "${2:-}" ;;
+smoke) smoke ;;
 *)
-  echo "usage: $0 [up|down|status|logs [leg]]" >&2
+  echo "usage: $0 [up|down|status|logs [leg]|smoke]" >&2
   exit 2
   ;;
 esac
