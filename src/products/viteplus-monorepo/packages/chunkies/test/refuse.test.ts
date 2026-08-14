@@ -60,9 +60,9 @@ describe("a repair that replays a refusable event", () => {
       }
     };
 
-    const mismatchesBefore = r.core.state.mismatches;
-    const eventsBefore = r.core.state.events;
-    const rollbacksBefore = r.core.state.rollbacks;
+    const mismatchesBefore = r.state.mismatches;
+    const eventsBefore = r.state.events;
+    const rollbacksBefore = r.state.rollbacks;
 
     // Check in once — the park refuses a second one for the rest of the
     // day — and toggle boost repeatedly, which the park refuses whenever
@@ -72,16 +72,16 @@ describe("a repair that replays a refusable event", () => {
     let nextBoost = 200;
     for (let ms = 0; ms < 4000; ms += 8) {
       r.harness.clock.advance(8);
-      r.core.pump();
-      while (r.authority.tick < r.core.state.tick) r.authority.step();
+      r.pump();
+      while (r.authority.tick < r.state.tick) r.authority.step();
       r.answerChecks();
       answer();
       if (!checkedIn && ms >= 100) {
-        r.core.checkIn();
+        r.checkIn();
         checkedIn = true;
       }
       if (ms >= nextBoost && boosts < 8) {
-        r.core.setBoost(boosts % 2 === 0);
+        r.setBoost(boosts % 2 === 0);
         boosts++;
         nextBoost = ms + 400;
       }
@@ -91,15 +91,15 @@ describe("a repair that replays a refusable event", () => {
     // Coverage before verdict: the park has to have journalled these and
     // the session has to have repaired around them, or this case is a
     // quiet session proving nothing.
-    expect(r.core.state.events - eventsBefore, "events applied").toBeGreaterThan(4);
-    expect(r.core.state.rollbacks - rollbacksBefore, "repairs performed").toBeGreaterThan(0);
+    expect(r.state.events - eventsBefore, "events applied").toBeGreaterThan(4);
+    expect(r.state.rollbacks - rollbacksBefore, "repairs performed").toBeGreaterThan(0);
     expect(intentsSent(r, Ev.checkIn).length, "a check-in was sent").toBeGreaterThan(0);
     expect(intentId(intentsSent(r, Ev.boostSet)[0]), "a boost was sent").toBeGreaterThan(0n);
 
     // And the worlds still agree. A replay that mishandled a refusal would
     // show up here and nowhere else.
-    expect(r.core.state.mismatches, "hash mismatches").toBe(mismatchesBefore);
-    expect(r.core.state.resyncs, "resyncs").toBe(0);
+    expect(r.state.mismatches, "hash mismatches").toBe(mismatchesBefore);
+    expect(r.state.resyncs, "resyncs").toBe(0);
   });
 
   it("survives the journal repeating what the world already has", async () => {
@@ -113,9 +113,9 @@ describe("a repair that replays a refusable event", () => {
     await bringTheDogIn(r, dog);
     await r.run(200);
 
-    const mismatchesBefore = r.core.state.mismatches;
+    const mismatchesBefore = r.state.mismatches;
     r.deliver([r.emit(Ev.boostSet, boostPayload(dog, true))]);
-    expect(await r.until(() => r.core.state.seq === r.authority.seq, 2000)).toBe(true);
+    expect(await r.until(() => r.state.seq === r.authority.seq, 2000)).toBe(true);
 
     // Late arrivals, so each repair replays the boost above out of the
     // ring. Minted by the authority — its seq is the one the session is
@@ -127,13 +127,13 @@ describe("a repair that replays a refusable event", () => {
       const arrival = r.authority.apply(Ev.join, dogPayload(BigInt(0x96a0 + i)));
       await r.run(100);
       r.deliver([arrival]);
-      expect(await r.until(() => r.core.state.seq === r.authority.seq, 2000)).toBe(true);
+      expect(await r.until(() => r.state.seq === r.authority.seq, 2000)).toBe(true);
     }
     await r.run(600);
     r.answerChecks();
     await r.run(600);
 
-    expect(r.core.state.rollbacks, "repairs performed").toBeGreaterThan(0);
-    expect(r.core.state.mismatches, "hash mismatches").toBe(mismatchesBefore);
+    expect(r.state.rollbacks, "repairs performed").toBeGreaterThan(0);
+    expect(r.state.mismatches, "hash mismatches").toBe(mismatchesBefore);
   });
 });

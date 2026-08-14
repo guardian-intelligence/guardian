@@ -13,8 +13,7 @@ import {
   seededRandom32,
   VirtualClock,
 } from "@guardian/chunkies-testkit";
-import { browserRandom32 } from "../src/adapters.ts";
-import { decodeWelcomeEmit } from "../src/abi.ts";
+import { decodeWelcomeEmit } from "../src/status.ts";
 
 const welcome = encodeWelcome({
   epoch: 1,
@@ -79,25 +78,14 @@ describe("welcome telemetry", () => {
   // welcome(a = epoch, b = hz | role << 32). Packed by the session core,
   // unpacked here; a shift error is silent, so pin the layout.
   it("splits hz from the granted role", () => {
-    expect(decodeWelcomeEmit(24n)).toEqual({ hz: 24, role: 0 });
-    expect(decodeWelcomeEmit(24n | (1n << 32n))).toEqual({ hz: 24, role: 1 });
+    expect(decodeWelcomeEmit(24n)).toEqual({ hz: 24, role: "spectator" });
+    expect(decodeWelcomeEmit(24n | (1n << 32n))).toEqual({ hz: 24, role: "player" });
   });
 
   it("keeps a full-width hz out of the role bits", () => {
     const hz = 0xffff_ffff;
-    expect(decodeWelcomeEmit(BigInt(hz))).toEqual({ hz, role: 0 });
-    expect(decodeWelcomeEmit(BigInt(hz) | (1n << 32n))).toEqual({ hz, role: 1 });
-  });
-});
-
-describe("browserRandom32", () => {
-  it("draws the full 32 bits from the platform CSPRNG", () => {
-    const draws = Array.from({ length: 64 }, () => browserRandom32());
-    expect(draws.every((n) => Number.isInteger(n) && n >= 0 && n <= 0xffff_ffff)).toBe(true);
-    // A truncated or low-entropy draw would collide across 64 samples.
-    expect(new Set(draws).size).toBe(draws.length);
-    // Values must reach above 2^31 — a signed-read bug would cap them.
-    expect(Math.max(...draws)).toBeGreaterThan(0x4000_0000);
+    expect(decodeWelcomeEmit(BigInt(hz))).toEqual({ hz, role: "spectator" });
+    expect(decodeWelcomeEmit(BigInt(hz) | (1n << 32n))).toEqual({ hz, role: "player" });
   });
 });
 
@@ -233,26 +221,26 @@ describe("scripted transport", () => {
 
 describe("harness ports", () => {
   it("records fetches and fails the ones with no fixture", async () => {
-    const park = new ArrayBuffer(8);
-    const h = new Harness({ modules: { park }, terrain: {} });
-    await expect(h.ports.fetchBehavior("park", "abc12345")).resolves.toBe(park);
-    await expect(h.ports.fetchBehavior("client")).rejects.toThrow("no client module");
-    await expect(h.ports.fetchTerrain("00000000deadbeef")).rejects.toThrow("no terrain");
-    expect(h.behaviorFetches).toEqual([{ kind: "park", ref: "abc12345" }, { kind: "client" }]);
-    expect(h.terrainFetches).toEqual(["00000000deadbeef"]);
+    const replica = new ArrayBuffer(8);
+    const h = new Harness({ modules: { replica } });
+    await expect(h.ports.fetchModule("replica", "abc12345")).resolves.toBe(replica);
+    await expect(h.ports.fetchModule("session")).rejects.toThrow("no session module");
+    await expect(h.ports.fetchBlob(1, "00000000deadbeef")).rejects.toThrow("no blob");
+    expect(h.moduleFetches).toEqual([{ slot: "replica", ref: "abc12345" }, { slot: "session" }]);
+    expect(h.blobFetches).toEqual(["00000000deadbeef"]);
   });
 
   it("reads time only from the virtual clock", () => {
     const h = new Harness({ startMs: 5000 });
-    expect(h.ports.now()).toBe(5000);
+    expect(h.hostOptions.now()).toBe(5000);
     h.clock.advance(250);
-    expect(h.ports.now()).toBe(5250);
+    expect(h.hostOptions.now()).toBe(5250);
   });
 
   it("collects the telemetry vocabulary as raw codes", () => {
     const h = new Harness();
-    h.ports.telemetry(2, 7n, 24n);
-    h.ports.telemetry(14, 1n, 2n);
+    h.hostOptions.telemetry(2, 7n, 24n);
+    h.hostOptions.telemetry(14, 1n, 2n);
     expect(h.codes()).toEqual([2, 14]);
     expect(h.emitted[0]).toEqual({ code: 2, a: 7n, b: 24n });
   });

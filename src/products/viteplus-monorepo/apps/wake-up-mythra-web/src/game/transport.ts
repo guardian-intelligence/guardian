@@ -7,12 +7,7 @@
 // Exactly one dial per call, success or throw. Backoff, redial and the
 // decision to give up belong to the core.
 
-import type {
-  Connection,
-  ConnectionSink,
-  Dialed,
-  TransportPort,
-} from "@guardian/mythrad-client-core";
+import type { Connection, ConnectionSink, Dialed, TransportPort } from "@guardian/chunkies";
 import * as v from "valibot";
 
 const DIAL_TIMEOUT_MS = 10_000;
@@ -37,6 +32,8 @@ export type TransportOptions = {
   readonly credentials: () => Promise<Credentials>;
   /** A dial that reached the park, for the connected span. */
   readonly onDialed: (dialMs: number, anon: boolean) => void;
+  /** Stream and datagram bytes as they arrive: the headline downlink cost metric. */
+  readonly onBytesDown: (n: number) => void;
 };
 
 export function createTransport(options: TransportOptions): TransportPort {
@@ -105,8 +102,14 @@ export function createTransport(options: TransportOptions): TransportPort {
       }
 
       options.onDialed(Math.round(performance.now() - dialStart), anon);
-      void deliver(stream.readable, (bytes) => sink.onStreamBytes(bytes));
-      void deliver(transport.datagrams.readable, (bytes) => sink.onDatagram(bytes));
+      void deliver(stream.readable, (bytes) => {
+        options.onBytesDown(bytes.length);
+        sink.onStreamBytes(bytes);
+      });
+      void deliver(transport.datagrams.readable, (bytes) => {
+        options.onBytesDown(bytes.length);
+        sink.onDatagram(bytes);
+      });
       transport.closed.catch(() => {}).finally(() => sink.onClosed());
 
       const connection: Connection = {

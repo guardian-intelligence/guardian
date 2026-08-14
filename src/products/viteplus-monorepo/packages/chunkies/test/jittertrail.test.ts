@@ -66,13 +66,13 @@ async function traceTrail(net: Net, ms: number): Promise<string> {
   let next = 0;
   for (let t = 0; t < ms; t += 8) {
     r.harness.clock.advance(8);
-    r.core.pump();
+    r.pump();
     const should = startedAt + BigInt(Math.floor(t / TICK_MS));
     while (r.authority.tick < should) r.authority.step();
     link.pump(t);
     await r.harness.settle();
     if (t >= next) {
-      out.push(`${(t / 1000).toFixed(0)}s:${Number(r.authority.tick - r.core.state.tick)}`);
+      out.push(`${(t / 1000).toFixed(0)}s:${Number(r.authority.tick - r.state.tick)}`);
       next = t + 5000;
     }
   }
@@ -91,13 +91,13 @@ async function settledTrail(net: Net): Promise<number[]> {
   const startedAt = r.authority.tick;
   for (let t = 0; t < ACQUIRE_MS + SETTLED_MS; t += 8) {
     r.harness.clock.advance(8);
-    r.core.pump();
+    r.pump();
     const should = startedAt + BigInt(Math.floor(t / TICK_MS));
     while (r.authority.tick < should) r.authority.step();
     net_.pump(t);
     if (net.hiccupMs && t === 6000) net_.startBlackout(t);
     await r.harness.settle();
-    if (t >= ACQUIRE_MS) trail.push(Number(r.authority.tick - r.core.state.tick));
+    if (t >= ACQUIRE_MS) trail.push(Number(r.authority.tick - r.state.tick));
   }
   return trail;
 }

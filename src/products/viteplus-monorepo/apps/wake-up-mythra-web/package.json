@@ -13,8 +13,9 @@
     "typecheck": "vp exec tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@guardian/mythrad-client-core": "workspace:*",
+    "@guardian/chunkies": "workspace:*",
     "@guardian/telemetry": "workspace:*",
+    "@guardian/wum-client": "workspace:*",
     "@openfeature/core": "catalog:",
     "@openfeature/ofrep-web-provider": "catalog:",
     "@openfeature/react-sdk": "catalog:",

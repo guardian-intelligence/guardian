@@ -36,7 +36,7 @@ async function measureSettled(rttMs: number): Promise<Settled> {
   const startedAt = r.authority.tick;
   for (let t = 0; t < ACQUIRE_MS + SETTLED_MS; t += 8) {
     r.harness.clock.advance(8);
-    r.core.pump();
+    r.pump();
     r.answerChecks();
     // The authority keeps its own time, stepping on the wall clock at the
     // park's rate rather than following the replica. That is what makes
@@ -45,8 +45,8 @@ async function measureSettled(rttMs: number): Promise<Settled> {
     while (r.authority.tick < should) r.authority.step();
     await r.harness.settle();
     if (t >= ACQUIRE_MS) {
-      trail.push(Number(r.authority.tick - r.core.state.tick));
-      believed.push(r.core.diag()?.errorTicks ?? 0);
+      trail.push(Number(r.authority.tick - r.state.tick));
+      believed.push(r.diag()?.errorTicks ?? 0);
     }
   }
   return { trail, believed };

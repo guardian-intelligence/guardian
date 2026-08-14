@@ -3,7 +3,7 @@
 // buffer, camera) — it reads what the core presents and never touches the
 // protocol. The camera is presentation-only; the sim has no concept of one.
 
-import { decodeViewDog, Q16, type Core, type TerrainPlanes } from "@guardian/mythrad-client-core";
+import { decodeViewDog, Q16, type TerrainPlanes, type WumGame } from "@guardian/wum-client";
 import * as v from "valibot";
 import type { Hud } from "./hud";
 import type { Jank } from "./jank";
@@ -47,14 +47,14 @@ export type Renderer = {
 };
 
 export function createRenderer(opts: {
-  readonly core: Core;
+  readonly game: WumGame;
   readonly hud: Hud;
   /** Measures what was drawn, frame by frame. */
   readonly jank: Jank;
   /** The dog to highlight and follow. Follows a sign-in, so it is read per frame. */
   readonly myDog: () => bigint;
 }): Renderer {
-  const { core, hud, jank } = opts;
+  const { game, hud, jank } = opts;
   const canvas = v.parse(v.instance(HTMLCanvasElement), document.getElementById("grid"));
   const ctx = v.parse(v.instance(CanvasRenderingContext2D), canvas.getContext("2d"));
 
@@ -155,7 +155,7 @@ export function createRenderer(opts: {
   // send a move_to for the tapped cell. A pan is not a tap — the slop
   // discriminator above set dragMoved for this gesture.
   canvas.addEventListener("click", (e) => {
-    if (dragMoved || !terrain || core.state.role !== "player") return;
+    if (dragMoved || !terrain || game.state.connection.role !== "player") return;
     const rect = canvas.getBoundingClientRect();
     const px = ((e.clientX - rect.left) * canvas.width) / rect.width + lastCam[0];
     const py = ((e.clientY - rect.top) * canvas.height) / rect.height + lastCam[1];
@@ -164,7 +164,7 @@ export function createRenderer(opts: {
     const cellX = Math.floor((wx + wy) / 2);
     const cellY = Math.floor((wy - wx) / 2);
     if (cellX < 0 || cellY < 0 || cellX >= terrain.w || cellY >= terrain.h) return;
-    core.moveTo(cellY * terrain.w + cellX);
+    game.moveTo(cellX, cellY);
   });
 
   function shade(hex: string, f: number): string {
@@ -353,7 +353,7 @@ export function createRenderer(opts: {
   }
 
   /** Reads the presented world, running every dog through the smoother in one batch. */
-  function readDogs(bytes: Uint8Array, phaseQ16: number): DogView[] {
+  function readDogs(bytes: Uint8Array, now: number): DogView[] {
     const n = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true);
     if (quads.length < n * 4) quads = new Int32Array(n * 8);
     const dogs: DogView[] = [];
@@ -366,7 +366,7 @@ export function createRenderer(opts: {
       quads[i * 4 + 3] = dg.y;
       dogs.push({ id: dg.id, xq: dg.x, yq: dg.y, flags: dg.flags, anim: dg.anim });
     }
-    core.smooth(quads.subarray(0, n * 4), phaseQ16, SNAP_Q16);
+    game.host.smoothFrame(now).smooth(quads.subarray(0, n * 4), SNAP_Q16);
     for (let i = 0; i < n; i++) {
       const dg = dogs[i]!;
       dg.xq = quads[i * 4]!;
@@ -390,7 +390,7 @@ export function createRenderer(opts: {
   return {
     followCamera: () => setCamFree(false),
     frame: (now) => {
-      const view = core.view();
+      const view = game.frame(now);
       if (!view) return;
       ctx.imageSmoothingEnabled = false;
       ctx.fillStyle = "#161a21";
@@ -402,7 +402,7 @@ export function createRenderer(opts: {
       if (!terrain || !groundLayer || !deckLayer) return;
 
       const myDog = opts.myDog();
-      const dogs = readDogs(view.viewBytes, view.phaseQ16);
+      const dogs = readDogs(view.viewBytes, now);
       const names: string[] = [];
       let mine: DogView | null = null;
       for (const dg of dogs) {

@@ -13,7 +13,7 @@
 // what a play-test harness needs to compute distributions a counter cannot
 // carry.
 
-import { Q16 } from "@guardian/mythrad-client-core";
+import { Q16 } from "@guardian/wum-client";
 
 /**
  * A frame is long past this gap: three missed 60Hz frames, which is where a

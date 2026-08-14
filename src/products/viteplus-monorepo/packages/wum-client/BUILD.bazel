@@ -3,12 +3,7 @@ load("@npm//:defs.bzl", "npm_link_all_packages")
 
 npm_link_all_packages()
 
-exports_files(
-    ["src/telemetry.gen.ts"],
-    visibility = ["//src/services/mythrad/sim:__pkg__"],
-)
-
-MYTHRAD_CLIENT_CORE_SRCS = glob([
+WUM_CLIENT_SRCS = glob([
     "package.json",
     "src/**/*",
     "tsconfig.json",
@@ -22,12 +17,12 @@ filegroup(
 
 filegroup(
     name = "sources",
-    srcs = MYTHRAD_CLIENT_CORE_SRCS,
+    srcs = WUM_CLIENT_SRCS,
     visibility = ["//visibility:public"],
 )
 
 js_library(
     name = "pkg",
-    srcs = MYTHRAD_CLIENT_CORE_SRCS,
+    srcs = WUM_CLIENT_SRCS,
     visibility = ["//visibility:public"],
 )

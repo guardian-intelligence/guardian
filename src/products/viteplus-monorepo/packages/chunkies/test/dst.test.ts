@@ -1,5 +1,5 @@
-// The deterministic simulation suite: a real `Core` driving the real
-// committed modules, with a real park instance playing the authority, and
+// The deterministic simulation suite: a real `ReplicaHost` driving the
+// real committed modules, with a real park instance playing the authority, and
 // only the network and the clock faked. Each case names the design-doc
 // invariant it certifies.
 //
@@ -10,8 +10,7 @@
 // well-behaved integration test.
 
 import { describe, expect, it } from "vitest";
-import { Emit, HostEmit, ResyncReason } from "../src/ports.ts";
-import { PumpFlag, clockStateOf } from "../src/abi.ts";
+import { Emit, HostEmit, ResyncReason, type HostState } from "../src/index.ts";
 import {
   bringTheDogIn,
   decodeCheck,
@@ -73,9 +72,9 @@ describe("boot and handshake", () => {
   it("lands a world: welcome, terrain fetch, snapshot", async () => {
     const r = await rig();
     await r.establish();
-    expect(r.core.state.hz).toBe(24);
-    expect(r.core.state.seq).toBe(r.authority.seq);
-    expect(r.harness.terrainFetches).toEqual([r.authority.terrainHex]);
+    expect(r.state.hz).toBe(24);
+    expect(r.state.seq).toBe(r.authority.seq);
+    expect(r.harness.blobFetches).toEqual([r.authority.terrainHex]);
     expect(r.codes()).toContain(Emit.snapshotRestored);
   });
 
@@ -84,7 +83,7 @@ describe("boot and handshake", () => {
     // module_swapped lands during boot, while no world is live, so it
     // announces the running module without disturbing any state.
     expect(r.count(Emit.moduleSwapped)).toBe(1);
-    expect(r.core.state.parkWord).toMatch(/^[0-9a-f]{8}$/);
+    expect(r.state.replicaModuleWord).toMatch(/^[0-9a-f]{8}$/);
     expect(r.count(Emit.snapshotRestored)).toBe(0);
   });
 
@@ -105,7 +104,7 @@ describe("boot and handshake", () => {
     await r.establish(Role.spectator);
     const sent = r.harness.transport.sentFrames();
     expect(sent.filter((f) => f.kind === "intent")).toHaveLength(0);
-    expect(r.core.state.role).toBe("spectator");
+    expect(r.state.role).toBe("spectator");
   });
 
   it("takes the granted role from the welcome, over the one it asked for", async () => {
@@ -113,7 +112,7 @@ describe("boot and handshake", () => {
     // welcome is authoritative and must overwrite what init was told.
     const r = await rig({ role: "player" });
     await r.establish(Role.spectator);
-    expect(r.core.state.role).toBe("spectator");
+    expect(r.state.role).toBe("spectator");
   });
 });
 
@@ -121,11 +120,11 @@ describe("invariant 2: seq-dense application", () => {
   it("applies events in seq order at their tick", async () => {
     const r = await rig();
     await r.establish();
-    const before = r.core.state.dogCount;
+    const before = r.state.dogCount;
     r.deliver([r.emit(Ev.join, dogPayload(0xa1n)), r.emit(Ev.join, dogPayload(0xa2n))]);
-    expect(await r.until(() => r.core.state.seq === r.authority.seq)).toBe(true);
-    expect(r.core.state.dogCount).toBe(before + 2);
-    expect(Number(r.core.state.resyncs)).toBe(0);
+    expect(await r.until(() => r.state.seq === r.authority.seq)).toBe(true);
+    expect(r.state.dogCount).toBe(before + 2);
+    expect(Number(r.state.resyncs)).toBe(0);
   });
 
   it("holds a later event until the gap ahead of it is filled", async () => {
@@ -133,28 +132,28 @@ describe("invariant 2: seq-dense application", () => {
     await r.establish();
     const first = r.emit(Ev.join, dogPayload(0xb1n), 0n, 40);
     const second = r.emit(Ev.join, dogPayload(0xb2n), 0n, 60);
-    const seqBefore = r.core.state.seq;
+    const seqBefore = r.state.seq;
 
     r.deliver([second]);
     await r.run(300);
     // seq 2 cannot apply over a missing seq 1, however long it waits.
-    expect(r.core.state.seq).toBe(seqBefore);
+    expect(r.state.seq).toBe(seqBefore);
 
     r.deliver([first]);
-    expect(await r.until(() => r.core.state.seq === r.authority.seq)).toBe(true);
-    expect(Number(r.core.state.resyncs)).toBe(0);
+    expect(await r.until(() => r.state.seq === r.authority.seq)).toBe(true);
+    expect(Number(r.state.resyncs)).toBe(0);
   });
 
   it("ignores a duplicated event", async () => {
     const r = await rig();
     await r.establish();
-    const before = r.core.state.dogCount;
+    const before = r.state.dogCount;
     const frame = r.emit(Ev.join, dogPayload(0xc1n));
     r.deliver([frame, frame, frame]);
-    expect(await r.until(() => r.core.state.seq === r.authority.seq)).toBe(true);
+    expect(await r.until(() => r.state.seq === r.authority.seq)).toBe(true);
     await r.run(300);
-    expect(r.core.state.dogCount).toBe(before + 1);
-    expect(r.core.state.events).toBe(1);
+    expect(r.state.dogCount).toBe(before + 1);
+    expect(r.state.events).toBe(1);
   });
 
   it("ignores an event whose seq it has already passed", async () => {
@@ -162,17 +161,12 @@ describe("invariant 2: seq-dense application", () => {
     await r.establish();
     const frame = r.emit(Ev.join, dogPayload(0xd1n));
     r.deliver([frame]);
-    expect(await r.until(() => r.core.state.seq === r.authority.seq)).toBe(true);
-    const stale = r.authority.frame(
-      r.core.state.seq,
-      r.core.state.tick,
-      Ev.join,
-      dogPayload(0xd2n),
-    );
+    expect(await r.until(() => r.state.seq === r.authority.seq)).toBe(true);
+    const stale = r.authority.frame(r.state.seq, r.state.tick, Ev.join, dogPayload(0xd2n));
     r.deliver([stale]);
     await r.run(300);
-    expect(r.core.state.events).toBe(1);
-    expect(Number(r.core.state.resyncs)).toBe(0);
+    expect(r.state.events).toBe(1);
+    expect(Number(r.state.resyncs)).toBe(0);
   });
 
   it("survives a burst delivered in reverse order", async () => {
@@ -180,9 +174,9 @@ describe("invariant 2: seq-dense application", () => {
     await r.establish();
     const frames = [0xe1n, 0xe2n, 0xe3n, 0xe4n].map((id) => r.emit(Ev.join, dogPayload(id)));
     r.deliver([...frames].reverse());
-    expect(await r.until(() => r.core.state.seq === r.authority.seq)).toBe(true);
-    expect(r.core.state.events).toBe(4);
-    expect(Number(r.core.state.resyncs)).toBe(0);
+    expect(await r.until(() => r.state.seq === r.authority.seq)).toBe(true);
+    expect(r.state.events).toBe(4);
+    expect(Number(r.state.resyncs)).toBe(0);
   });
 });
 
@@ -193,15 +187,15 @@ describe("invariant 2/7: rollback", () => {
     const r = await rig();
     await r.establish();
     await r.run(RING_WARMUP_MS);
-    const at = r.core.state.tick - 5n;
+    const at = r.state.tick - 5n;
     expect(at).toBeGreaterThan(24n);
-    const rollbacksBefore = r.core.state.rollbacks;
-    const resyncsBefore = r.core.state.resyncs;
+    const rollbacksBefore = r.state.rollbacks;
+    const resyncsBefore = r.state.resyncs;
 
-    r.deliver([r.authority.frame(r.core.state.seq + 1n, at, Ev.join, dogPayload(0xf1n))]);
-    expect(await r.until(() => r.core.state.rollbacks > rollbacksBefore, 500)).toBe(true);
-    expect(r.core.state.events).toBeGreaterThan(0);
-    expect(r.core.state.resyncs).toBe(resyncsBefore);
+    r.deliver([r.authority.frame(r.state.seq + 1n, at, Ev.join, dogPayload(0xf1n))]);
+    expect(await r.until(() => r.state.rollbacks > rollbacksBefore, 500)).toBe(true);
+    expect(r.state.events).toBeGreaterThan(0);
+    expect(r.state.resyncs).toBe(resyncsBefore);
     expect(r.codes()).toContain(Emit.rollback);
   });
 
@@ -212,10 +206,10 @@ describe("invariant 2/7: rollback", () => {
     const r = await rig();
     await r.establish();
     await r.run(RING_WARMUP_MS);
-    const was = r.core.state.tick;
-    r.deliver([r.authority.frame(r.core.state.seq + 1n, was - 4n, Ev.join, dogPayload(0xf2n))]);
-    expect(await r.until(() => r.core.state.rollbacks > 0, 500)).toBe(true);
-    expect(r.core.state.tick).toBeGreaterThanOrEqual(was);
+    const was = r.state.tick;
+    r.deliver([r.authority.frame(r.state.seq + 1n, was - 4n, Ev.join, dogPayload(0xf2n))]);
+    expect(await r.until(() => r.state.rollbacks > 0, 500)).toBe(true);
+    expect(r.state.tick).toBeGreaterThanOrEqual(was);
   });
 
   it("never shows the world earlier after a restore either", async () => {
@@ -232,8 +226,7 @@ describe("invariant 2/7: rollback", () => {
 
     const seen: bigint[] = [];
     const watch = () => {
-      const view = r.core.view();
-      if (view) seen.push(view.tick);
+      seen.push(r.state.tick);
     };
     watch();
     const high = seen[0]!;
@@ -241,10 +234,11 @@ describe("invariant 2/7: rollback", () => {
     r.deliver([stale]);
     for (let t = 0; t < 600; t += 16) {
       r.harness.clock.advance(16);
-      r.core.pump();
+      r.pump();
       watch();
       await r.harness.settle();
     }
+
     expect(r.count(Emit.snapshotRestored)).toBeGreaterThan(restores);
     for (let i = 1; i < seen.length; i++) {
       expect(seen[i], `frame ${i} went backwards`).toBeGreaterThanOrEqual(seen[i - 1]!);
@@ -258,12 +252,12 @@ describe("invariant 2/7: rollback", () => {
     // every retained state, including the one the last restore left.
     const r = await rig();
     await r.establish();
-    const restoredAt = r.core.state.tick;
+    const restoredAt = r.state.tick;
     // Long enough that cadence pushes have evicted the restored floor.
     await r.run(RING_DEPTH_MS + RING_WARMUP_MS);
-    const resyncsBefore = r.core.state.resyncs;
-    r.deliver([r.authority.frame(r.core.state.seq + 1n, restoredAt, Ev.join, dogPayload(0xf3n))]);
-    expect(await r.until(() => r.core.state.resyncs > resyncsBefore, 500)).toBe(true);
+    const resyncsBefore = r.state.resyncs;
+    r.deliver([r.authority.frame(r.state.seq + 1n, restoredAt, Ev.join, dogPayload(0xf3n))]);
+    expect(await r.until(() => r.state.resyncs > resyncsBefore, 500)).toBe(true);
     const resync = r.harness.emitted.find((e) => e.code === Emit.resyncRequested);
     expect(Number(resync!.a)).toBe(ResyncReason.lateEvent);
   });
@@ -275,15 +269,15 @@ describe("invariant 2/7: rollback", () => {
     const r = await rig();
     await r.establish();
     await r.run(RING_WARMUP_MS);
-    const base = r.core.state.seq;
-    const now = r.core.state.tick;
+    const base = r.state.seq;
+    const now = r.state.tick;
     // seq+1 stamped far in the future, then seq+2 stamped in the past:
     // rolling back for seq+2 would strand seq+1's replay.
     r.deliver([r.authority.frame(base + 1n, now + 2n, Ev.join, dogPayload(0x11n))]);
-    expect(await r.until(() => r.core.state.seq === base + 1n, 500)).toBe(true);
-    const resyncsBefore = r.core.state.resyncs;
+    expect(await r.until(() => r.state.seq === base + 1n, 500)).toBe(true);
+    const resyncsBefore = r.state.resyncs;
     r.deliver([r.authority.frame(base + 2n, 2n, Ev.join, dogPayload(0x12n))]);
-    expect(await r.until(() => r.core.state.resyncs > resyncsBefore, 500)).toBe(true);
+    expect(await r.until(() => r.state.resyncs > resyncsBefore, 500)).toBe(true);
   });
 });
 
@@ -295,7 +289,7 @@ describe("invariant 3: the ring entry is the state at entry to a tick", () => {
     const r = await rig({ checkMs: 200 });
     await r.establish();
     r.deliver([r.emit(Ev.join, dogPayload(0x21n))]);
-    expect(await r.until(() => r.core.state.seq === r.authority.seq)).toBe(true);
+    expect(await r.until(() => r.state.seq === r.authority.seq)).toBe(true);
     await r.run(2000);
     const checks = r.harness.transport.sentDatagrams;
     expect(checks.length).toBeGreaterThan(0);
@@ -303,7 +297,7 @@ describe("invariant 3: the ring entry is the state at entry to a tick", () => {
     // The authority is kept in lockstep, so at the same tick it holds the
     // same hash the client sent.
     expect(check.tick).toBeLessThanOrEqual(r.authority.tick);
-    expect(r.core.state.mismatches).toBe(0);
+    expect(r.state.mismatches).toBe(0);
   });
 });
 
@@ -315,13 +309,13 @@ describe("invariant 4: two strikes, one resync", () => {
     expect(r.answerChecks({ ok: false })).toBe(1);
     await r.run(100);
     // One strike is a hiccup, not a divergence.
-    expect(Number(r.core.state.resyncs)).toBe(0);
+    expect(Number(r.state.resyncs)).toBe(0);
 
     await r.waitForChecks(2);
     expect(r.answerChecks({ ok: false })).toBe(1);
     await r.run(200);
-    expect(Number(r.core.state.resyncs)).toBe(1);
-    expect(r.core.state.mismatches).toBeGreaterThanOrEqual(2);
+    expect(Number(r.state.resyncs)).toBe(1);
+    expect(r.state.mismatches).toBeGreaterThanOrEqual(2);
     const resync = r.harness.emitted.find((e) => e.code === Emit.resyncRequested);
     expect(Number(resync!.a)).toBe(ResyncReason.hashMismatch);
   });
@@ -337,7 +331,7 @@ describe("invariant 4: two strikes, one resync", () => {
     r.answerChecks({ ok: false });
     await r.run(300);
     // Two mismatches separated by an ok are one strike each, never two.
-    expect(Number(r.core.state.resyncs)).toBe(0);
+    expect(Number(r.state.resyncs)).toBe(0);
   });
 
   it("loses nothing to a snapshot that answers a resync", async () => {
@@ -353,15 +347,15 @@ describe("invariant 4: two strikes, one resync", () => {
     const r = await rig({ checkMs: 150, myDog: 0x9401n });
     await r.establish();
     await bringTheDogIn(r, 0x9401n);
-    const before = r.core.state.dogCount;
+    const before = r.state.dogCount;
 
     // Two strikes: the core asks for a snapshot and holds everything.
     await r.waitForChecks(1);
     r.answerChecks({ ok: false });
     await r.waitForChecks(2);
     r.answerChecks({ ok: false });
-    expect(await r.until(() => r.core.state.resyncs > 0, 2000)).toBe(true);
-    expect(r.core.pump() & PumpFlag.resyncing).toBe(PumpFlag.resyncing);
+    expect(await r.until(() => r.state.resyncs > 0, 2000)).toBe(true);
+    expect(r.pump().resyncing).toBe(true);
 
     // Dogs keep arriving while it waits. These reach the client before the
     // answer does, so they are exactly what a queue-clearing restore would
@@ -371,15 +365,15 @@ describe("invariant 4: two strikes, one resync", () => {
 
     // Coverage: they must still be UNAPPLIED when the answer goes out, or
     // this case is watching three ordinary joins land and proving nothing.
-    expect(r.core.state.dogCount, "dogs still held back").toBe(before);
-    expect(r.core.state.seq, "events still queued").toBeLessThan(r.authority.seq);
+    expect(r.state.dogCount, "dogs still held back").toBe(before);
+    expect(r.state.seq, "events still queued").toBeLessThan(r.authority.seq);
     expect(r.answerResyncs(), "resync requests answered").toBe(1);
-    expect(await r.until(() => r.core.state.seq === r.authority.seq, 4000)).toBe(true);
+    expect(await r.until(() => r.state.seq === r.authority.seq, 4000)).toBe(true);
 
     // Nothing lost: the three that arrived mid-resync are in the world the
     // snapshot brought, even though the queue holding them was cleared.
-    expect(r.core.state.dogCount, "dogs after the restore").toBe(before + 3);
-    expect(r.core.state.resyncs, "one resync, not a loop").toBe(1);
+    expect(r.state.dogCount, "dogs after the restore").toBe(before + 3);
+    expect(r.state.resyncs, "one resync, not a loop").toBe(1);
   });
 
   it("asks again when a resync goes unanswered", async () => {
@@ -395,11 +389,11 @@ describe("invariant 4: two strikes, one resync", () => {
     // below is genuinely out of reach — and quiet throughout, so the only
     // resync in this case is the one it triggers on purpose.
     await runAnsweringChecks(r, RING_DEPTH_MS + RING_WARMUP_MS);
-    expect(r.core.state.resyncs, "clean before the trigger").toBe(0);
-    expect(r.core.state.mismatches, "clean before the trigger").toBe(0);
+    expect(r.state.resyncs, "clean before the trigger").toBe(0);
+    expect(r.state.mismatches, "clean before the trigger").toBe(0);
 
-    r.deliver([r.authority.frame(r.core.state.seq + 1n, 1n, Ev.join, dogPayload(0xf7n))]);
-    expect(await r.until(() => r.core.state.resyncs > 0, 1000)).toBe(true);
+    r.deliver([r.authority.frame(r.state.seq + 1n, 1n, Ev.join, dogPayload(0xf7n))]);
+    expect(await r.until(() => r.state.resyncs > 0, 1000)).toBe(true);
     const asked = resyncFrames(r).length;
     expect(asked, "the first request went out").toBeGreaterThan(0);
 
@@ -427,7 +421,7 @@ describe("invariant 4: two strikes, one resync", () => {
     await r.waitForChecks(2);
     r.answerChecks({ known: false });
     await r.run(300);
-    expect(Number(r.core.state.resyncs)).toBeGreaterThan(0);
+    expect(Number(r.state.resyncs)).toBeGreaterThan(0);
     const resync = r.harness.emitted.find((e) => e.code === Emit.resyncRequested);
     expect(Number(resync!.a)).toBe(ResyncReason.checkAgedOut);
   });
@@ -437,28 +431,26 @@ describe("invariant 5: snapshot restore", () => {
   it("waits for terrain before restoring, then lands", async () => {
     const r = await rig();
     r.deliver([r.authority.welcome()]);
-    await r.until(() => r.core.state.hz > 0, 200);
+    await r.until(() => r.state.hz > 0, 200);
     r.deliver([r.authority.snapshot()]);
     // The fetch is in flight: the snapshot is held, not dropped.
-    expect(r.harness.terrainFetches).toEqual([r.authority.terrainHex]);
+    expect(r.harness.blobFetches).toEqual([r.authority.terrainHex]);
     expect(await r.until(() => r.count(Emit.snapshotRestored) > 0, 2000)).toBe(true);
-    expect(r.core.state.tick).toBeGreaterThan(0n);
+    expect(r.state.tick).toBeGreaterThan(0n);
   });
 
   it("clears the event queue so a stale gap cannot wedge the session", async () => {
     const r = await rig();
     await r.establish();
     // Queue an event behind a gap that will never be filled.
-    r.deliver([
-      r.authority.frame(r.core.state.seq + 5n, r.core.state.tick, Ev.join, dogPayload(1n)),
-    ]);
+    r.deliver([r.authority.frame(r.state.seq + 5n, r.state.tick, Ev.join, dogPayload(1n))]);
     await r.run(300);
     r.authority.step(4);
     r.deliver([r.authority.snapshot()]);
-    expect(await r.until(() => r.core.state.seq === r.authority.seq, 1000)).toBe(true);
+    expect(await r.until(() => r.state.seq === r.authority.seq, 1000)).toBe(true);
     // Fresh events apply straight away after the restore.
     r.deliver([r.emit(Ev.join, dogPayload(0x31n))]);
-    expect(await r.until(() => r.core.state.seq === r.authority.seq, 1000)).toBe(true);
+    expect(await r.until(() => r.state.seq === r.authority.seq, 1000)).toBe(true);
   });
 
   it("carries unanswered intents onto the next connection", async () => {
@@ -469,7 +461,7 @@ describe("invariant 5: snapshot restore", () => {
     await r.establish();
     await bringTheDogIn(r, 0x88n);
 
-    r.core.checkIn();
+    r.checkIn();
     await r.run(150);
     expect(intentsSent(r, Ev.checkIn)).toHaveLength(1);
     const id = intentId(intentsSent(r, Ev.checkIn)[0]);
@@ -495,9 +487,9 @@ describe("invariant 5: snapshot restore", () => {
   it("reports a hash disagreement on the restored state", async () => {
     const r = await rig();
     await r.establish();
-    const before = r.core.state.mismatches;
+    const before = r.state.mismatches;
     r.deliver([r.authority.snapshotWithBadHash()]);
-    expect(await r.until(() => r.core.state.mismatches > before, 1000)).toBe(true);
+    expect(await r.until(() => r.state.mismatches > before, 1000)).toBe(true);
     expect(r.codes()).toContain(Emit.mismatch);
   });
 });
@@ -523,8 +515,8 @@ describe("invariant 6: a restore against the wrong world is surfaced, not looped
     await r.run(200);
     r.deliver([r.authority.snapshot()]);
     await r.run(5000);
-    expect(r.harness.terrainFetches.length).toBeGreaterThan(1);
-    expect(r.core.state.seq).toBe(0n);
+    expect(r.harness.blobFetches.length).toBeGreaterThan(1);
+    expect(r.state.seq).toBe(0n);
   });
 });
 
@@ -532,12 +524,12 @@ describe("invariant 7: module epoch", () => {
   it("an epoch_advance event asks for the module exactly once", async () => {
     const r = await rig();
     await r.establish();
-    const fetchesBefore = r.harness.behaviorFetches.length;
+    const fetchesBefore = r.harness.moduleFetches.length;
     r.deliver([r.emit(Ev.epochAdvance, epochAdvancePayload(2, 0xdeadbeefn))]);
     expect(await r.until(() => r.count(Emit.moduleSwapWanted) > 0, 1000)).toBe(true);
     await r.run(1000);
     expect(r.count(Emit.moduleSwapWanted)).toBe(1);
-    expect(r.harness.behaviorFetches.length).toBe(fetchesBefore + 1);
+    expect(r.harness.moduleFetches.length).toBe(fetchesBefore + 1);
   });
 
   it("a repeated epoch_advance does not re-latch while one is in flight", async () => {
@@ -572,7 +564,7 @@ describe("invariant 7: module epoch", () => {
     expect(reasons).toContain(ResyncReason.moduleSwapped);
     r.authority.epoch = 2;
     r.deliver([r.authority.snapshot()]);
-    expect(await r.until(() => r.core.state.seq === r.authority.seq, 2000)).toBe(true);
+    expect(await r.until(() => r.state.seq === r.authority.seq, 2000)).toBe(true);
   });
 
   it("a swap that cannot load its terrain leaves the old world running", async () => {
@@ -584,14 +576,14 @@ describe("invariant 7: module epoch", () => {
     const r = await rig();
     await r.establish();
     await r.run(400);
-    const tickBefore = r.core.state.tick;
-    const dogsBefore = r.core.state.dogCount;
+    const tickBefore = r.state.tick;
+    const dogsBefore = r.state.dogCount;
 
     // Serve a "new module" that cannot take our world. server.wasm is a
     // real committed artifact with no park surface, so the swap dies at
     // the ABI check — before a worldless instance can be published —
     // which lands in the same catch as a terrain refusal would.
-    r.harness.setModule("park", modules().server.slice().buffer);
+    r.harness.setModule("replica", modules().server.slice().buffer);
     r.deliver([r.emit(Ev.epochAdvance, epochAdvancePayload(2, 0xdeadbeefn))]);
     expect(await r.until(() => r.harness.logs.some((l) => l.includes("swap failed")), 2000)).toBe(
       true,
@@ -600,12 +592,12 @@ describe("invariant 7: module epoch", () => {
     // The retired module is still running the world: the replica keeps
     // stepping and the roster is intact.
     await r.run(600);
-    expect(r.core.state.tick).toBeGreaterThan(tickBefore);
-    expect(r.core.state.dogCount).toBe(dogsBefore);
-    expect(r.core.pump() & PumpFlag.haveState).toBe(PumpFlag.haveState);
+    expect(r.state.tick).toBeGreaterThan(tickBefore);
+    expect(r.state.dogCount).toBe(dogsBefore);
+    expect(r.pump().haveState).toBe(true);
 
     // And the retry lane recovers once the module serves a loadable world.
-    r.harness.setModule("park", modules().park.slice().buffer);
+    r.harness.setModule("replica", modules().park.slice().buffer);
     expect(await r.until(() => r.count(Emit.moduleSwapped) > 1, 8000)).toBe(true);
   });
 
@@ -631,9 +623,9 @@ describe("invariant 8: intents and their answers", () => {
     const join = sent.find((f) => f.kind === "intent" && f.value.kind === Ev.join);
     const id = join!.kind === "intent" ? join!.value.id : 0n;
     r.deliver([r.emit(Ev.join, dogPayload(0x777n), id)]);
-    expect(await r.until(() => r.core.state.seq === r.authority.seq)).toBe(true);
-    expect(r.core.state.present).toBe(true);
-    expect(r.core.state.dogCount).toBe(1);
+    expect(await r.until(() => r.state.seq === r.authority.seq)).toBe(true);
+    expect(r.state.present).toBe(true);
+    expect(r.state.dogCount).toBe(1);
   });
 
   it("swallows the two rejects that describe the state we asked for", async () => {
@@ -648,7 +640,7 @@ describe("invariant 8: intents and their answers", () => {
     r.deliver([r.authority.reject(id, Reject.present)]);
     await r.run(200);
     expect(r.codes()).not.toContain(Emit.reject);
-    expect(r.core.state.rejects).toBe(1);
+    expect(r.state.rejects).toBe(1);
   });
 
   it("re-joins once when the park says our dog is absent", async () => {
@@ -661,7 +653,7 @@ describe("invariant 8: intents and their answers", () => {
     await bringTheDogIn(r, 0x77an);
     const joinsBefore = new Set(intentsSent(r, Ev.join).map(intentId)).size;
 
-    r.core.checkIn();
+    r.checkIn();
     await r.run(150);
     const id = intentId(intentsSent(r, Ev.checkIn)[0]);
     r.deliver([r.authority.reject(id, Reject.absent)]);
@@ -679,12 +671,12 @@ describe("invariant 9: an idle session sends only checks", () => {
     await r.establish(Role.spectator);
     await r.run(1600);
     const framesBefore = r.harness.transport.sentStream.length;
-    const bytesBefore = r.core.state.bytesDown;
+    const bytesBefore = r.state.bytesDown;
     await r.run(3000);
     expect(r.harness.transport.sentStream.length).toBe(framesBefore);
     expect(r.harness.transport.sentDatagrams.length).toBeGreaterThan(0);
     // Nothing arrives either: the replica steps locally, at zero cost.
-    expect(r.core.state.bytesDown).toBe(bytesBefore);
+    expect(r.state.bytesDown).toBe(bytesBefore);
   });
 
   it("goes silent while hidden and resumes when visible", async () => {
@@ -692,11 +684,11 @@ describe("invariant 9: an idle session sends only checks", () => {
     await r.establish();
     await r.run(1800);
     expect(r.harness.transport.sentDatagrams.length).toBeGreaterThan(0);
-    r.core.setVisible(false);
+    r.setVisible(false);
     const quiet = r.harness.transport.sentDatagrams.length;
     await r.run(2000);
     expect(r.harness.transport.sentDatagrams.length).toBe(quiet);
-    r.core.setVisible(true);
+    r.setVisible(true);
     await r.run(600);
     expect(r.harness.transport.sentDatagrams.length).toBeGreaterThan(quiet);
   });
@@ -707,9 +699,9 @@ describe("network abuse", () => {
     const r = await rig();
     const ones = Array.from({ length: 4000 }, () => 1);
     r.deliver([r.authority.welcome()], ones);
-    await r.until(() => r.core.state.hz > 0, 500);
+    await r.until(() => r.state.hz > 0, 500);
     r.deliver([r.authority.snapshot()], ones);
-    expect(await r.until(() => r.core.state.seq === r.authority.seq, 3000)).toBe(true);
+    expect(await r.until(() => r.state.seq === r.authority.seq, 3000)).toBe(true);
   });
 
   it("survives a read boundary inside the length prefix of a big frame", async () => {
@@ -732,8 +724,8 @@ describe("network abuse", () => {
     joined.set(b, a.length);
     joined.set(c, a.length + b.length);
     r.harness.transport.deliverStream(joined, [a.length + b.length + 3]);
-    expect(await r.until(() => r.core.state.seq === r.authority.seq, 1000)).toBe(true);
-    expect(r.core.state.events).toBe(3);
+    expect(await r.until(() => r.state.seq === r.authority.seq, 1000)).toBe(true);
+    expect(r.state.events).toBe(3);
   });
 
   it("ignores a lost verdict and keeps checking", async () => {
@@ -744,7 +736,7 @@ describe("network abuse", () => {
     // Answer nothing at all: loss is the datagram contract.
     await r.run(2000);
     expect(r.harness.transport.sentDatagrams.length).toBeGreaterThan(sent);
-    expect(Number(r.core.state.resyncs)).toBe(0);
+    expect(Number(r.state.resyncs)).toBe(0);
   });
 
   it("tolerates a verdict arriving after a newer one", async () => {
@@ -757,7 +749,7 @@ describe("network abuse", () => {
       r.harness.transport.deliverDatagram(r.authority.verdict(check, { ok: true }));
     }
     await r.run(300);
-    expect(Number(r.core.state.resyncs)).toBe(0);
+    expect(Number(r.state.resyncs)).toBe(0);
   });
 
   it("reassembles the largest snapshot a park can emit", async () => {
@@ -777,9 +769,9 @@ describe("network abuse", () => {
     expect(await r.until(() => r.count(Emit.snapshotRestored) > restores, 4000)).toBe(true);
     // The restore lands inside the stream call; the world is
     // rebuilt on the next pump, which is where the roster becomes visible.
-    expect(await r.until(() => r.core.state.dogCount === 2048, 2000)).toBe(true);
-    expect(r.core.state.seq).toBe(r.authority.seq);
-    expect(Number(r.core.state.mismatches)).toBe(0);
+    expect(await r.until(() => r.state.dogCount === 2048, 2000)).toBe(true);
+    expect(r.state.seq).toBe(r.authority.seq);
+    expect(Number(r.state.mismatches)).toBe(0);
   });
 
   it("reassembles that snapshot however the reads are cut", async () => {
@@ -792,7 +784,7 @@ describe("network abuse", () => {
     // that land mid-payload and straddle the host's staging boundary.
     r.harness.transport.deliverStream(frame, [1, 2, 3, 60_000, 999]);
     expect(await r.until(() => r.count(Emit.snapshotRestored) > restores, 4000)).toBe(true);
-    expect(await r.until(() => r.core.state.dogCount === 2048, 2000)).toBe(true);
+    expect(await r.until(() => r.state.dogCount === 2048, 2000)).toBe(true);
   });
 
   it("tears the transport down when reassembly overflows, and redials", async () => {
@@ -829,7 +821,7 @@ describe("network abuse", () => {
     const restores = r.count(Emit.snapshotRestored);
     r.deliver([r.authority.snapshot()]);
     expect(await r.until(() => r.count(Emit.snapshotRestored) > restores, 3000)).toBe(true);
-    expect(r.core.pump() & PumpFlag.haveState).toBe(PumpFlag.haveState);
+    expect(r.pump().haveState).toBe(true);
   });
 
   it("tears down on a length prefix it cannot read", async () => {
@@ -856,22 +848,22 @@ describe("network abuse", () => {
     r.harness.transport.deliverDatagram(new Uint8Array(34));
     r.harness.transport.deliverDatagram(Uint8Array.of(1, 2, 3));
     await r.run(200);
-    expect(r.core.state.seq).toBe(r.authority.seq);
+    expect(r.state.seq).toBe(r.authority.seq);
   });
 
   it("refuses an event payload past the core's cap and resyncs", async () => {
     const r = await rig();
     await r.establish();
-    const resyncsBefore = r.core.state.resyncs;
+    const resyncsBefore = r.state.resyncs;
     const oversize = encodeEvent({
-      seq: r.core.state.seq + 1n,
-      tick: r.core.state.tick,
+      seq: r.state.seq + 1n,
+      tick: r.state.tick,
       kind: Ev.join,
       intent: 0n,
       p: new Uint8Array(65),
     });
     r.deliver([oversize]);
-    expect(await r.until(() => r.core.state.resyncs > resyncsBefore, 500)).toBe(true);
+    expect(await r.until(() => r.state.resyncs > resyncsBefore, 500)).toBe(true);
     const resync = r.harness.emitted.filter((e) => e.code === Emit.resyncRequested).at(-1);
     expect(Number(resync!.a)).toBe(ResyncReason.queueOverflow);
   });
@@ -949,11 +941,11 @@ describe("connection lifecycle", () => {
     await r.run(200);
     expect(resyncFrames(r).length).toBeGreaterThan(0);
     // Still outstanding: no snapshot has been delivered to answer it.
-    expect(r.core.pump() & PumpFlag.resyncing).toBe(PumpFlag.resyncing);
+    expect(r.pump().resyncing).toBe(true);
 
     r.harness.transport.drop();
     expect(await r.until(() => r.harness.transport.dials > 1, 3000, 25)).toBe(true);
-    expect(r.core.pump() & PumpFlag.resyncing).toBe(0);
+    expect(r.pump().resyncing).toBe(false);
 
     // The same two strikes must be able to ask again, ON THE NEW STREAM —
     // which is the only place the answer can be read. Counting requests
@@ -972,12 +964,12 @@ describe("connection lifecycle", () => {
     const r = await rig();
     await r.establish();
     await r.run(1000);
-    const seq = r.core.state.seq;
-    const tick = r.core.state.tick;
+    const seq = r.state.seq;
+    const tick = r.state.tick;
     r.harness.transport.drop();
     await r.until(() => r.harness.transport.dials > 1, 3000, 25);
-    expect(r.core.state.seq).toBe(seq);
-    expect(r.core.state.tick).toBeGreaterThanOrEqual(tick);
+    expect(r.state.seq).toBe(seq);
+    expect(r.state.tick).toBeGreaterThanOrEqual(tick);
     // The hello carries what we already have, so the server can catch us up.
     const hellos = r.harness.transport.sentFrames().filter((f) => f.kind === "hello");
     expect(hellos).toHaveLength(2);
@@ -988,8 +980,8 @@ describe("connection lifecycle", () => {
     const r = await rig({ role: "spectator", myDog: 0x1n });
     await r.establish(Role.spectator);
     const dials = r.harness.transport.dials;
-    r.core.reidentify(0x999n, "player");
-    expect(r.core.state.role).toBe("player");
+    r.reidentify(0x999n, "player");
+    expect(r.state.role).toBe("player");
     await r.until(() => r.harness.transport.dials > dials, 2000, 25);
     // The new connection joins as the new dog.
     r.deliver([r.authority.welcome(Role.player)]);
@@ -1015,7 +1007,7 @@ describe("a zero step budget: observe, do not step", () => {
     await r.establish();
     await r.run(600);
 
-    const frozenAt = r.core.state.tick;
+    const frozenAt = r.state.tick;
     const startMs = r.harness.clock.now();
     const startTick = r.authority.tick;
     // The world keeps running while we are frozen; the authority is the
@@ -1025,23 +1017,23 @@ describe("a zero step budget: observe, do not step", () => {
       while (r.authority.tick < target) r.authority.step();
     };
 
-    let flags = 0;
+    let status = r.pump(0);
     let everStepped = false;
-    for (let t = 0; t < 90_000 && clockStateOf(flags) !== 3; t += 50) {
+    for (let t = 0; t < 90_000 && status.clock !== "snapshotRequired"; t += 50) {
       r.harness.clock.advance(50);
       worldRunsOn();
-      flags = r.core.pump(0);
-      everStepped ||= (flags & PumpFlag.stepped) !== 0;
+      status = r.pump(0);
+      everStepped ||= status.stepped;
       // Answer honestly-ok so the ONLY thing driving a resync here is the
       // clock, not a hash the frozen replica cannot possibly match.
       r.answerChecks({ ok: true });
       await r.harness.settle();
     }
 
-    expect(clockStateOf(flags)).toBe(3);
+    expect(status.clock).toBe("snapshotRequired");
     expect(everStepped).toBe(false);
-    expect(r.core.state.tick).toBe(frozenAt);
-    expect(Number(r.core.state.resyncs)).toBeGreaterThan(0);
+    expect(r.state.tick).toBe(frozenAt);
+    expect(Number(r.state.resyncs)).toBeGreaterThan(0);
     const reasons = r.harness.emitted
       .filter((e) => e.code === Emit.resyncRequested)
       .map((e) => Number(e.a));
@@ -1050,9 +1042,9 @@ describe("a zero step budget: observe, do not step", () => {
     // Resume: the snapshot the core asked for lands and the replica is
     // back with the world, at the authority's tick rather than its own.
     r.deliver([r.authority.snapshot()]);
-    expect(await r.until(() => r.core.state.tick > frozenAt, 3000)).toBe(true);
-    expect(r.core.state.tick).toBeGreaterThan(startTick);
-    expect(clockStateOf(r.core.pump())).toBeLessThan(3);
+    expect(await r.until(() => r.state.tick > frozenAt, 3000)).toBe(true);
+    expect(r.state.tick).toBeGreaterThan(startTick);
+    expect(r.pump().clock).not.toBe("snapshotRequired");
   });
 
   it("still applies journal events while frozen", async () => {
@@ -1061,67 +1053,51 @@ describe("a zero step budget: observe, do not step", () => {
     const r = await rig();
     await r.establish();
     await r.run(400);
-    const at = r.core.state.tick;
-    const before = r.core.state.events;
-    r.deliver([r.authority.frame(r.core.state.seq + 1n, at, Ev.join, dogPayload(0x91n))]);
+    const at = r.state.tick;
+    const before = r.state.events;
+    r.deliver([r.authority.frame(r.state.seq + 1n, at, Ev.join, dogPayload(0x91n))]);
     for (let t = 0; t < 500; t += 50) {
       r.harness.clock.advance(50);
-      r.core.pump(0);
+      r.pump(0);
       await r.harness.settle();
     }
-    expect(r.core.state.events).toBe(before + 1);
-    expect(r.core.state.tick).toBe(at);
+    expect(r.state.events).toBe(before + 1);
+    expect(r.state.tick).toBe(at);
   });
 
   it("restores normal stepping when the budget comes back", async () => {
     const r = await rig();
     await r.establish();
     await r.run(400);
-    const frozenAt = r.core.state.tick;
+    const frozenAt = r.state.tick;
     for (let t = 0; t < 1000; t += 50) {
       r.harness.clock.advance(50);
-      r.core.pump(0);
+      r.pump(0);
       await r.harness.settle();
     }
-    expect(r.core.state.tick).toBe(frozenAt);
+    expect(r.state.tick).toBe(frozenAt);
     await r.run(1000);
-    expect(r.core.state.tick).toBeGreaterThan(frozenAt);
+    expect(r.state.tick).toBeGreaterThan(frozenAt);
   });
 });
 
 describe("pump status and the read surface", () => {
   it("reports have_state only once a world has landed", async () => {
     const r = await rig();
-    expect(r.core.pump() & PumpFlag.haveState).toBe(0);
+    expect(r.pump().haveState).toBe(false);
     await r.establish();
-    expect(r.core.pump() & PumpFlag.haveState).toBe(PumpFlag.haveState);
+    expect(r.pump().haveState).toBe(true);
   });
 
-  it("reports a clock state in the high bits", async () => {
+  it("reports the clock state the session disciplines", async () => {
     const r = await rig();
     await r.establish();
     await r.run(1000);
-    const state = clockStateOf(r.core.pump());
-    expect(state).toBeGreaterThanOrEqual(0);
-    expect(state).toBeLessThanOrEqual(3);
+    const { clock } = r.pump();
     // The read surface must take it from the same place, not from the
     // module's standalone clock export, which tracks a different Clock.
-    expect(r.core.state.clockState).toBe(state);
-    expect(state).toBeGreaterThan(0);
-  });
-
-  it("hands a renderer the world and the terrain planes", async () => {
-    const r = await rig();
-    await r.establish();
-    r.deliver([r.emit(Ev.join, dogPayload(0x51n))]);
-    await r.until(() => r.core.state.seq === r.authority.seq);
-    const view = r.core.view();
-    expect(view).not.toBeNull();
-    expect(view!.terrain).not.toBeNull();
-    expect(
-      new DataView(view!.viewBytes.buffer, view!.viewBytes.byteOffset).getUint32(0, true),
-    ).toBe(r.core.state.dogCount);
-    expect(view!.phaseQ16).toBeGreaterThanOrEqual(0);
+    expect(r.state.clockState).toBe(clock);
+    expect(clock).not.toBe("acquiring");
   });
 
   // The render alpha is only meaningful if the clock producing it is
@@ -1133,51 +1109,54 @@ describe("pump status and the read surface", () => {
     const phases = new Set<number>();
     for (let i = 0; i < 8; i++) {
       await r.run(10, 5);
-      phases.add(r.core.view()!.phaseQ16);
+      phases.add(r.host.smoothFrame(r.harness.clock.now()).phaseQ16);
     }
     expect(phases.size).toBeGreaterThan(1);
     expect(Math.max(...phases)).toBeLessThanOrEqual(65536);
   });
 
-  it("notifies a subscriber only when its field changes", async () => {
+  it("notifies a subscriber only when the state changes", async () => {
     const r = await rig();
-    const seen: bigint[] = [];
-    r.core.subscribe("tick", (t) => seen.push(t));
+    const seen: HostState[] = [];
+    r.host.subscribe((s) => seen.push(s));
     await r.establish();
     await r.run(500);
     expect(seen.length).toBeGreaterThan(1);
-    expect([...seen].sort((a, b) => Number(a - b))).toEqual(seen);
-    expect(new Set(seen).size).toBe(seen.length);
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i], `notification ${i} changed nothing`).not.toEqual(seen[i - 1]);
+    }
+    expect(seen.at(-1)!.phase).toBe("live");
+    expect(seen.at(-1)!.rateHz).toBe(24);
   });
 
   it("serves one live diagnostics record and state agrees with it", async () => {
     const r = await rig();
     await r.establish();
     r.deliver([r.emit(Ev.join, dogPayload(0x61n))]);
-    await r.until(() => r.core.state.seq === r.authority.seq);
-    const d = r.core.diag();
+    await r.until(() => r.state.seq === r.authority.seq);
+    const d = r.diag();
     expect(d).not.toBeNull();
     // the record is the source ClientState refreshes from, and it names
     // its own invariant: the trail target rides the bytes, not a mirror
     expect(d!.events).toBe(1);
-    expect(d!.tick).toBe(r.core.state.tick);
-    expect(d!.seq).toBe(r.core.state.seq);
-    expect(d!.clockState).toBe(r.core.state.clockState);
+    expect(d!.tick).toBe(r.state.tick);
+    expect(d!.seq).toBe(r.state.seq);
+    expect(d!.clockState).toBe(r.state.clockState);
     expect(d!.trailTargetTicks).toBeGreaterThan(0);
     expect(d!.cushionTicks).toBeGreaterThanOrEqual(d!.trailTargetTicks);
     // trail measures from the authority's present, error from the
     // cushioned schedule: they must differ by exactly the cushion, which
     // pins every one of the three fields to its right offset
     expect(d!.trailTicks - d!.errorTicks).toBeCloseTo(d!.cushionTicks, 3);
-    expect(r.core.state.bytesDown).toBeGreaterThan(0);
+    expect(r.state.bytesDown).toBeGreaterThan(0);
   });
 
   it("keeps the tick moving at roughly the park's rate", async () => {
     const r = await rig();
     await r.establish();
-    const from = r.core.state.tick;
+    const from = r.state.tick;
     await r.run(2000);
-    const ticks = Number(r.core.state.tick - from);
+    const ticks = Number(r.state.tick - from);
     // The clock decides the pace; it must track 24Hz, not race or stall.
     expect(ticks).toBeGreaterThan(2000 / TICK_MS / 2);
     expect(ticks).toBeLessThan((2000 / TICK_MS) * 2);

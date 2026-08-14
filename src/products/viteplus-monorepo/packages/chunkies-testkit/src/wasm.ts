@@ -12,22 +12,18 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "fflate";
+import { ReplicaHost, type ClockState, type Diag, type PumpStatus } from "@guardian/chunkies";
 import {
-  Core,
   Role,
-  hex64,
-  type CoreOptions,
-  type ParkExports,
-  type RoleName,
-} from "@guardian/mythrad-client-core";
-import {
   decodeCheck,
   encodeEvent,
   encodeReject,
   encodeSnapshot,
   encodeVerdict,
   encodeWelcome,
+  hex64,
   type ClientFrame,
+  type RoleName,
 } from "./wire.ts";
 import { Harness, type HarnessOptions } from "./fakes.ts";
 
@@ -84,13 +80,32 @@ export const Reject = {
   notYours: 101,
 } as const;
 
+/**
+ * What the authority needs of a park instance. Framework verbs plus
+ * `sim_hud`, which the rig peeks for presence — the quarantine's own
+ * spelling of the layout the wum-client decoders are pinned to.
+ */
+export interface ParkModule {
+  readonly memory: WebAssembly.Memory;
+  io_buf(): number;
+  terrain_buf(): number;
+  sim_set_terrain(len: number): number;
+  sim_init(seed: bigint, parkId: bigint, epoch: number): number;
+  sim_terrain_id(): bigint;
+  sim_apply(len: number): number;
+  sim_step(): void;
+  sim_snapshot(): number;
+  sim_hash(): bigint;
+  sim_tick(): bigint;
+}
+
 export function dogPayload(id: bigint): Uint8Array {
   const p = new Uint8Array(8);
   new DataView(p.buffer).setBigUint64(0, id, true);
   return p;
 }
 
-function applyTo(park: ParkExports, kind: number, payload: Uint8Array): number {
+function applyTo(park: ParkModule, kind: number, payload: Uint8Array): number {
   const buf = new Uint8Array(2 + payload.length);
   new DataView(buf.buffer).setUint16(0, kind, true);
   buf.set(payload, 2);
@@ -103,7 +118,7 @@ function applyTo(park: ParkExports, kind: number, payload: Uint8Array): number {
  * every frame it mints is one a real authority could have sent.
  */
 export class Authority {
-  readonly park: ParkExports;
+  readonly park: ParkModule;
   readonly terrain: Uint8Array;
   readonly terrainId: bigint;
   readonly terrainHex: string;
@@ -120,7 +135,7 @@ export class Authority {
    */
   readonly #hashes = new Map<bigint, bigint>();
 
-  private constructor(park: ParkExports, terrain: Uint8Array, terrainId: bigint) {
+  private constructor(park: ParkModule, terrain: Uint8Array, terrainId: bigint) {
     this.park = park;
     this.terrain = terrain;
     this.terrainId = terrainId;
@@ -130,7 +145,7 @@ export class Authority {
   static async create(seed = 7n, parkId = 42n): Promise<Authority> {
     const m = modules();
     const { instance } = await WebAssembly.instantiate(m.park.slice().buffer);
-    const park = instance.exports as unknown as ParkExports;
+    const park = instance.exports as unknown as ParkModule;
     new Uint8Array(park.memory.buffer).set(m.terrain, park.terrain_buf());
     const code = park.sim_set_terrain(m.terrain.length);
     if (code !== 0) throw new Error(`authority terrain rejected (code ${code})`);
@@ -359,8 +374,20 @@ export type RigOptions = HarnessOptions & {
   readonly withoutTerrain?: boolean;
 };
 
-export type Rig = {
-  readonly core: Core;
+/**
+ * What the drive loop needs of the session under test, however it is
+ * wrapped: the bare host here, a `WumGame` in the wum-client suites.
+ */
+export interface DrivenSession {
+  readonly host: ReplicaHost;
+  pump(budgetUs?: number): PumpStatus;
+  tick(): bigint;
+  seq(): bigint;
+  hz(): number;
+  present(): boolean;
+}
+
+export type Rig = DrivenSession & {
   readonly harness: Harness;
   readonly authority: Authority;
   /** Advance time and pump, letting fetch promises resolve between frames. */
@@ -428,42 +455,47 @@ export function epochAdvancePayload(epoch: number, moduleSum: bigint): Uint8Arra
 }
 
 /**
- * Boots a `Core` against the real modules with every port faked. Nothing
- * has been delivered yet — the caller drives the session frame by frame.
+ * Fixtures a session under test boots against: the committed modules, a
+ * live authority, and every port faked. Shared by this rig and the
+ * wum-client one.
  */
-export async function rig(options: RigOptions = {}): Promise<Rig> {
+export async function rigFixtures(
+  options: RigOptions,
+): Promise<{ harness: Harness; authority: Authority }> {
   const m = modules();
   const authority = await Authority.create();
   const harness = new Harness({
     ...options,
-    modules: { park: m.park.slice().buffer, client: m.client.slice().buffer },
-    terrain: options.withoutTerrain
-      ? {}
-      : { [authority.terrainHex]: authority.terrain.slice().buffer },
+    modules: { replica: m.park.slice().buffer, session: m.client.slice().buffer },
+    blobs: options.withoutTerrain
+      ? new Map()
+      : new Map([[authority.terrainHex, authority.terrain.slice().buffer]]),
   });
-  const coreOptions: CoreOptions = {
-    myDog: options.myDog ?? 0x1122_3344_5566_7788n,
-    role: options.role ?? "player",
-    park: "park-mythra",
-    checkMs: options.checkMs ?? 5000,
-    schedule: harness.schedule,
-  };
-  const core = new Core(harness.ports, coreOptions);
-  await core.boot();
-  await harness.settle();
+  return { harness, authority };
+}
 
+/**
+ * Wraps a booted session in the drive loop every suite runs: virtual time,
+ * an authority kept in lockstep, and the check/resync answering lanes.
+ */
+export function composeRig(
+  harness: Harness,
+  authority: Authority,
+  session: DrivenSession,
+  options: RigOptions = {},
+): Rig {
   // The authority runs the same module on the same events, so it must
   // also run the same ticks: a server that never stepped would make every
   // event look late and every hash look wrong. It keeps pace with the
   // client's replica rather than a wall clock of its own.
   const syncWorld = (): void => {
-    while (authority.tick < core.state.tick) authority.step();
+    while (authority.tick < session.tick()) authority.step();
   };
 
   const run = async (ms: number, stepMs = 8): Promise<void> => {
     for (let t = 0; t < ms; t += stepMs) {
       harness.clock.advance(stepMs);
-      core.pump();
+      session.pump();
       syncWorld();
       await harness.settle();
     }
@@ -473,7 +505,7 @@ export async function rig(options: RigOptions = {}): Promise<Rig> {
     for (let t = 0; t < ms; t += stepMs) {
       if (done()) return true;
       harness.clock.advance(stepMs);
-      core.pump();
+      session.pump();
       syncWorld();
       await harness.settle();
     }
@@ -481,7 +513,7 @@ export async function rig(options: RigOptions = {}): Promise<Rig> {
   };
 
   const emit = (kind: number, payload: Uint8Array, intent = 0n, lead = 3): Uint8Array => {
-    const target = core.state.tick + BigInt(lead);
+    const target = session.tick() + BigInt(lead);
     while (authority.tick < target) authority.step();
     return authority.apply(kind, payload, intent);
   };
@@ -494,12 +526,9 @@ export async function rig(options: RigOptions = {}): Promise<Rig> {
     deliver([authority.welcome(role)]);
     // The welcome asks for terrain; the fetch resolves on the microtask
     // queue and the snapshot cannot land until it has.
-    await until(() => core.state.hz > 0, 200);
+    await until(() => session.hz() > 0, 200);
     deliver([authority.snapshot()]);
-    const landed = await until(
-      () => core.state.seq === authority.seq && core.state.tick > 0n,
-      2000,
-    );
+    const landed = await until(() => session.seq() === authority.seq && session.tick() > 0n, 2000);
     if (!landed) throw new Error("world never landed");
   };
 
@@ -553,7 +582,12 @@ export async function rig(options: RigOptions = {}): Promise<Rig> {
     harness.emitted.reduce((n, e) => n + (e.code === code ? 1 : 0), 0);
 
   return {
-    core,
+    host: session.host,
+    pump: (budgetUs) => session.pump(budgetUs),
+    tick: () => session.tick(),
+    seq: () => session.seq(),
+    hz: () => session.hz(),
+    present: () => session.present(),
     harness,
     authority,
     run,
@@ -570,8 +604,124 @@ export async function rig(options: RigOptions = {}): Promise<Rig> {
   };
 }
 
+/** The session module's intent verbs, as the rig's own typed extension door. */
+interface SessionIntents {
+  intent_join(nowMs: bigint): bigint;
+  intent_check_in(nowMs: bigint): bigint;
+  intent_move_to(node: number, nowMs: bigint): bigint;
+  intent_boost(on: number, nowMs: bigint): bigint;
+}
+
+/** The read surface the bare-host rig assembles per access, mirroring the old one-object state. */
+export type RigState = {
+  readonly tick: bigint;
+  readonly seq: bigint;
+  readonly hz: number;
+  readonly role: "player" | "spectator" | null;
+  readonly replicaModuleWord: string;
+  readonly clockState: ClockState;
+  readonly present: boolean;
+  readonly dogCount: number;
+  readonly events: number;
+  readonly rollbacks: number;
+  readonly resyncs: number;
+  readonly checks: number;
+  readonly mismatches: number;
+  readonly rejects: number;
+  readonly rttMs: number;
+  readonly bytesDown: number;
+};
+
+export type HostRig = Rig & {
+  readonly state: RigState;
+  diag(): Diag | null;
+  join(): bigint;
+  checkIn(): bigint;
+  moveTo(node: number): bigint;
+  setBoost(on: boolean): bigint;
+  reidentify(dog: bigint, role: RoleName): void;
+  setVisible(visible: boolean): void;
+};
+
+/**
+ * Boots a bare `ReplicaHost` against the real modules with every port
+ * faked. Nothing has been delivered yet — the caller drives the session
+ * frame by frame.
+ */
+export async function rig(options: RigOptions = {}): Promise<HostRig> {
+  const { harness, authority } = await rigFixtures(options);
+  const myDog = options.myDog ?? 0x1122_3344_5566_7788n;
+  const host = new ReplicaHost(harness.ports, {
+    ...harness.hostOptions,
+    actorId: myDog,
+    role: options.role ?? "player",
+    checkMs: options.checkMs ?? 5000,
+  });
+  await host.boot();
+  await harness.settle();
+
+  const intents = host.extension<SessionIntents>();
+  const now = (): bigint => BigInt(harness.clock.now());
+
+  const hudPeek = (): { present: boolean; dogCount: number } => {
+    if (host.state.replicaModuleWord === "") return { present: false, dogCount: 0 };
+    const bytes = host.readProjection("sim_hud", myDog);
+    if (bytes.length < 28) return { present: false, dogCount: 0 };
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (dv.getUint16(0, true) !== 1) return { present: false, dogCount: 0 };
+    return { present: dv.getUint8(2) !== 0, dogCount: dv.getUint32(8, true) };
+  };
+
+  const state = (): RigState => {
+    const d = host.diag();
+    const hud = hudPeek();
+    return {
+      tick: d?.tick ?? 0n,
+      seq: d?.seq ?? 0n,
+      hz: host.state.rateHz ?? 0,
+      role: host.state.role,
+      replicaModuleWord: host.state.replicaModuleWord,
+      clockState: d?.clockState ?? "acquiring",
+      present: hud.present,
+      dogCount: hud.dogCount,
+      events: d?.events ?? 0,
+      rollbacks: d?.rollbacks ?? 0,
+      resyncs: d?.resyncs ?? 0,
+      checks: d?.checks ?? 0,
+      mismatches: d?.mismatches ?? 0,
+      rejects: d?.rejects ?? 0,
+      rttMs: d?.rttMs ?? 0,
+      bytesDown: harness.transport.bytesDelivered,
+    };
+  };
+
+  const session: DrivenSession = {
+    host,
+    pump: (budgetUs) => host.pump(undefined, budgetUs),
+    tick: () => host.diag()?.tick ?? 0n,
+    seq: () => host.diag()?.seq ?? 0n,
+    hz: () => host.state.rateHz ?? 0,
+    present: () => hudPeek().present,
+  };
+
+  const driven = composeRig(harness, authority, session, options);
+  return {
+    ...driven,
+    get state() {
+      return state();
+    },
+    diag: () => host.diag(),
+    join: () => intents.intent_join(now()),
+    checkIn: () => intents.intent_check_in(now()),
+    moveTo: (node) => intents.intent_move_to(node, now()),
+    setBoost: (on) => intents.intent_boost(on ? 1 : 0, now()),
+    reidentify: (dog, role) => host.reidentify(dog, role),
+    setVisible: (visible) => host.setVisible(visible),
+  };
+}
+
 /** Intent frames of one kind the client has written, oldest first. */
-export function intentsSent(r: Rig, kind: number): ClientFrame[] {
+export function intentsSent(r: { harness: Harness }, kind: number): ClientFrame[] {
   return r.harness.transport
     .sentFrames()
     .filter((f) => f.kind === "intent" && f.value.kind === kind);
@@ -590,7 +740,7 @@ export async function bringTheDogIn(r: Rig, dog: bigint): Promise<void> {
   await r.run(100);
   const id = intentId(intentsSent(r, Ev.join)[0]);
   r.deliver([r.emit(Ev.join, dogPayload(dog), id)]);
-  const present = await r.until(() => r.core.state.present, 2000);
+  const present = await r.until(() => r.present(), 2000);
   if (!present) throw new Error("the journal never placed the dog");
 }
 
@@ -608,7 +758,7 @@ export async function bringTheDogInViaPresent(r: Rig, dog: bigint): Promise<void
   // and is never coming.
   r.authority.apply(Ev.join, dogPayload(dog));
   r.deliver([r.authority.snapshot()]);
-  const inWorld = await r.until(() => r.core.state.present, 2000);
+  const inWorld = await r.until(() => r.present(), 2000);
   if (!inWorld) throw new Error("the snapshot did not carry the dog");
   const id = intentId(intentsSent(r, Ev.join).at(-1));
   r.deliver([r.authority.reject(id, Reject.present)]);
