@@ -38,6 +38,7 @@ import contextlib
 import datetime
 import json
 import os
+import shlex
 import shutil
 import signal
 import socket
@@ -59,8 +60,12 @@ HOME = Path.home()
 INSTALL_PATH = HOME / ".guardian" / "bin" / "workspace-watch"
 PLIST = HOME / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 LOG = HOME / "Library" / "Logs" / f"{LABEL}.log"
-# launchd runs the agent under a fixed interpreter: macOS privacy grants
-# attach to the executed binary, so it must not drift with PATH.
+# macOS attaches a privacy grant to the binary launchd actually executes, and
+# /usr/bin/python3 execs straight into whichever Python the active developer
+# directory holds — a moving target nobody can grant. launchd therefore starts
+# /bin/zsh, which never moves and never changes, and the interpreter it spawns
+# inherits the shell's grant the same way anything run from Terminal does.
+AGENT_SHELL = "/bin/zsh"
 AGENT_PYTHON = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else sys.executable
 STATE = HOME / ".guardian" / "state" / "workspace-watch.json"
 
@@ -590,8 +595,9 @@ def repo_readable(repo):
 PRIVACY_REMEDY = (
     "macOS is withholding {repo} from the launchd agent.\n"
     "Grant it once: System Settings > Privacy & Security > Full Disk Access,\n"
-    "add " + AGENT_PYTHON + " (Cmd+Shift+G to type the path), then run\n"
-    "  tools/ops/workspace-watch install"
+    "add " + AGENT_SHELL + " (Cmd+Shift+G to type the path), then run\n"
+    "  tools/ops/workspace-watch install\n"
+    "A checkout outside ~/Documents, ~/Desktop, and ~/Downloads needs no grant."
 )
 
 
@@ -654,6 +660,12 @@ def self_update(repo):
 
 def plist_body(repo, interval):
     tools_bin = Path(repo) / ".guardian" / "tools" / "bin"
+    # Two statements, so zsh runs the pass as a child instead of replacing
+    # itself with it: the grant lives on the shell, and only a child inherits.
+    command = (
+        f"{shlex.quote(AGENT_PYTHON)} {shlex.quote(str(INSTALL_PATH))}"
+        f" run --repo {shlex.quote(str(repo))}\nexit $?"
+    )
     path = f"{HOME}/.local/bin:{tools_bin}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -663,10 +675,9 @@ def plist_body(repo, interval):
   <string>{LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>{AGENT_PYTHON}</string>
-    <string>{INSTALL_PATH}</string>
-    <string>run</string>
-    <string>--repo</string><string>{repo}</string>
+    <string>{AGENT_SHELL}</string>
+    <string>-c</string>
+    <string>{command}</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -704,7 +715,7 @@ def command_install(args):
         print(f"ERROR: launchctl bootstrap failed: {err}", file=sys.stderr)
         return 1
     print(f"installed {LABEL}: every {args.interval}s over {repo}")
-    print(f"  tool  {INSTALL_PATH}\n  agent {AGENT_PYTHON}\n  plist {PLIST}\n  log   {LOG}")
+    print(f"  tool  {INSTALL_PATH}\n  agent {AGENT_SHELL} -> {AGENT_PYTHON}\n  plist {PLIST}\n  log   {LOG}")
     report = first_pass_report()
     if report is None:
         print("\nagent bootstrapped; its first pass is still running — check `workspace-watch status`")
