@@ -44,6 +44,10 @@ load(
 )
 load(
     ".aspect/tasks/mythra.axl",
+    mythra_dev_down = "dev_down",
+    mythra_dev_logs = "dev_logs",
+    mythra_dev_status = "dev_status",
+    mythra_dev_up = "dev_up",
     mythra_dump = "dump",
     mythra_logs = "logs",
     mythra_psql = "psql",
@@ -92,6 +96,10 @@ def config(ctx):
     ctx.tasks.add(mythra_psql)
     ctx.tasks.add(mythra_dump)
     ctx.tasks.add(mythra_restart)
+    ctx.tasks.add(mythra_dev_up)
+    ctx.tasks.add(mythra_dev_down)
+    ctx.tasks.add(mythra_dev_status)
+    ctx.tasks.add(mythra_dev_logs)
 
     # aspect tidy
     ctx.tasks.add(tidy)

@@ -718,6 +718,13 @@ func main() {
 	obsMux := http.NewServeMux()
 	obsMux.Handle("/metrics", promhttp.Handler())
 	obsMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
+	obsMux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if !journalReady.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(200)
+	})
 
 	log.Printf("mythrad: wt=:%d http=:%d metrics=:%d public=%s issuer=%s", wtPort, httpPort, metricsPort, publicAddr, issuer)
 	go func() { log.Fatal(wt.ListenAndServe()) }()
