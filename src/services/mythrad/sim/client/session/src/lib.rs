@@ -86,6 +86,15 @@ pub const REQ_TEARDOWN: u32 = 4;
 pub const T_CONNECTED: u32 = 1;
 pub const T_WELCOME: u32 = 2;
 pub const T_EVENT_APPLIED: u32 = 3;
+/// rollback(returned_to, late << 32 | rewound). The first is the absolute
+/// tick the repair returned to, so the range it rewrote — `[returned_to -
+/// rewound, returned_to]` — and the event that caused it — `returned_to -
+/// late` — are facts in the trace rather than arithmetic over frame
+/// timestamps. The two distances ride one slot because they answer
+/// different questions and reading one for the other inverts the meaning:
+/// LATE is how far behind the replica an event arrived, which is the
+/// defect signal, and REWOUND is how far back the ring's cadence forced
+/// the reach, which is repair cost and gates nothing.
 pub const T_ROLLBACK: u32 = 4;
 pub const T_RESYNC_REQUESTED: u32 = 5;
 pub const T_SNAPSHOT_RESTORED: u32 = 6;
@@ -105,6 +114,23 @@ pub const T_RESTORE_FAILED: u32 = 16;
 pub const T_PRESENCE: u32 = 17;
 pub const PRESENCE_JOURNAL: u64 = 1;
 pub const PRESENCE_ALREADY_THERE: u64 = 2;
+/// replayed(seq, tick): an event a repair re-applied while rebuilding
+/// history, emitted before the attempt so a refused one is visible too.
+/// These fall between the `T_ROLLBACK` span that opened the repair and
+/// whatever ends it, which is what lets a reader pair a repair with the
+/// events it actually touched — the one thing a trace could not show, and
+/// the reason a replay defect can only be narrowed from outside rather
+/// than confirmed.
+pub const T_REPLAYED: u32 = 18;
+/// arrived(event tick, replica tick): where the replica stood when an
+/// event reached it, before anything is done with it. The difference is
+/// the margin the event arrived with — positive means it beat the replica
+/// to its own tick, negative means it was already late and a repair is
+/// owed. Paired with the replica's measured trail, this is the authority's
+/// stamp-to-wire delay: the lead is sized against the network, and nothing
+/// measures the pipeline the events actually travel through, so without
+/// this the delay can only be inferred from how late repairs are.
+pub const T_EVENT_ARRIVED: u32 = 19;
 
 /// Why the replica asked for a snapshot. Rides both `REQ_RESYNC_WANTED`
 /// and `T_RESYNC_REQUESTED`.
@@ -120,6 +146,10 @@ pub const R_QUEUE_OVERFLOW: u32 = 9;
 pub const R_MODULE_SWAPPED: u32 = 10;
 pub const R_STREAM_OVERFLOW: u32 = 11;
 pub const R_FRAMING: u32 = 12;
+/// A replayed event the park refused. The replica cannot rebuild the
+/// history it is holding, and nothing will re-deliver it: only a snapshot
+/// repairs this, and carrying on would leave the world quietly wrong.
+pub const R_REPLAY_REFUSED: u32 = 13;
 
 /// `session_pump` status bits.
 pub const S_HAVE_STATE: u32 = 1;
@@ -776,6 +806,7 @@ impl Session {
         bufs().queued.copy_within(at..self.queued_len, at + 1);
         bufs().queued[at] = ev;
         self.queued_len += 1;
+        h.emit(T_EVENT_ARRIVED, ev.tick, self.tick);
     }
 
     fn on_reject<H: Host>(&mut self, h: &mut H, off: usize, len: usize, now_ms: u64) {
@@ -1399,8 +1430,8 @@ impl Session {
             self.stats[STAT_ROLLBACKS as usize - 1] += 1;
             h.emit(
                 T_ROLLBACK,
-                was.saturating_sub(tick),
-                was.saturating_sub(stick),
+                was,
+                (was.saturating_sub(tick) << 32) | was.saturating_sub(stick),
             );
             self.replaying = true;
             self.repairing = true;
@@ -1412,6 +1443,7 @@ impl Session {
                 while self.tick < e.tick {
                     self.step_once(h);
                 }
+                h.emit(T_REPLAYED, e.seq as u64, e.tick);
                 if self.apply(h, e.kind, e.payload()) == 0 {
                     self.seq = e.seq;
                     // Replayed history moves the tick exactly where it
@@ -1419,6 +1451,13 @@ impl Session {
                     // tick past a replayed `clock_skip` would land this
                     // replica somewhere the authority never stood.
                     self.tick = h.park_tick();
+                } else {
+                    // The replay could not rebuild what this replica had
+                    // already applied. Finish the walk so time keeps
+                    // moving, then ask for a world that is true — silence
+                    // here is a divergence nothing else in the protocol
+                    // can find.
+                    self.deferred_resync = R_REPLAY_REFUSED;
                 }
             }
             while self.tick < tick {

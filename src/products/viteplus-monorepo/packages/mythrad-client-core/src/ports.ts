@@ -90,10 +90,15 @@ export interface Ports {
 }
 
 /**
- * Telemetry codes the session core emits, 1..16. The numbers are the
+ * Telemetry codes the session core emits, 1..18. The numbers are the
  * contract and are shared with the Rust crate; host-minted codes live in
  * `HostEmit` and start at 1000 so the two can never be confused in a
  * dashboard or a span attribute.
+ *
+ * Every code the core can emit has to be named here. A number the host
+ * cannot name reaches a dashboard as a bare integer and a reader as
+ * nothing at all, and the suite has a case that fails when one arrives —
+ * this list going stale is otherwise completely silent.
  */
 export const Emit = {
   connectedHelloSent: 1,
@@ -113,11 +118,20 @@ export const Emit = {
   autoRejoin: 15,
   /** restore_failed(park code, seq). Code 4 is wrong terrain and is not retried. */
   restoreFailed: 16,
+  /** presence(source, tick): the journal placed our dog, or the park said it already had it. */
+  presence: 17,
+  /**
+   * replayed(seq, tick): one per event a repair re-applies, emitted BEFORE
+   * the attempt so an event the park then refuses is still named. Without
+   * it a repair can only be paired with the events that happened to be
+   * near it in time rather than the ones it actually touched.
+   */
+  replayed: 18,
 } as const;
 
 /**
  * Codes the HOST mints, for facts the session core cannot know. They
- * start at 1000 so a consumer can tell them apart from the core's 1..16
+ * start at 1000 so a consumer can tell them apart from the core's 1..18
  * by magnitude alone, and so neither range can ever grow into the other.
  */
 export const HostEmit = {
@@ -139,10 +153,10 @@ export const HostEmit = {
 
 /**
  * Why the core gave up on the state it had. One numbering across both
- * recovery verbs, and after the teardown split no code appears on both:
- * 1..10 only ever arrive as `request(3)` resync_wanted, 11..12 only ever
- * as `request(4)` teardown. A consumer can therefore key severity off the
- * verb rather than off the code. The host only reports these.
+ * recovery verbs: 1..10 and 13 only ever arrive as `request(3)`
+ * resync_wanted, 11..12 only ever as `request(4)` teardown. A consumer can
+ * therefore key severity off the verb rather than off the code. The host
+ * only reports these.
  */
 export const ResyncReason = {
   clock: 1,
@@ -159,6 +173,12 @@ export const ResyncReason = {
   streamOverflow: 11,
   /** A length prefix that cannot be read. Also a teardown. */
   framing: 12,
+  /**
+   * A repair replayed an event the park refused. The world is then quietly
+   * missing it — no seq gap, no late event, nothing else to find it by —
+   * so the only honest recovery is a snapshot.
+   */
+  replayRefused: 13,
 } as const;
 
 /**
