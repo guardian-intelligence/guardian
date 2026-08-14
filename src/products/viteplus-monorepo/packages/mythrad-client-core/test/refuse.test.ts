@@ -21,7 +21,7 @@ import {
   intentId,
   intentsSent,
   rig,
-} from "./wasm.ts";
+} from "@guardian/chunkies-testkit";
 
 const ONE_WAY_MS = DEFAULT_RTT_MS / 2;
 

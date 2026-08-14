@@ -12,21 +12,24 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "fflate";
-import { Core, type CoreOptions } from "../src/core.ts";
-import type { ParkExports } from "../src/abi.ts";
-import type { RoleName } from "../src/wire.ts";
 import {
+  Core,
   Role,
+  hex64,
+  type CoreOptions,
+  type ParkExports,
+  type RoleName,
+} from "@guardian/mythrad-client-core";
+import {
+  decodeCheck,
   encodeEvent,
   encodeReject,
   encodeSnapshot,
   encodeVerdict,
   encodeWelcome,
-  decodeCheck,
-  hex64,
-} from "../src/wire.ts";
+  type ClientFrame,
+} from "./wire.ts";
 import { Harness, type HarnessOptions } from "./fakes.ts";
-import type { ClientFrame } from "../src/wire.ts";
 
 /** Repo-relative, because these artifacts are committed and the suite must use those bytes. */
 function repoFile(rel: string): Uint8Array {

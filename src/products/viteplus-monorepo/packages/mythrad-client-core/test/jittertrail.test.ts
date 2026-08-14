@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeCheck } from "../src/wire.ts";
-import { seededRandom32 } from "./fakes.ts";
-import { bringTheDogIn, rig } from "./wasm.ts";
+import { bringTheDogIn, decodeCheck, rig, seededRandom32 } from "@guardian/chunkies-testkit";
 
 const TICK_MS = 1000 / 24;
 /** Past the end of the clock's walk to its lead; anything earlier reads the acquisition. */

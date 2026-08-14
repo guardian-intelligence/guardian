@@ -3,10 +3,18 @@
 // drives a real `Core` against the real modules lives in dst.test.ts.
 
 import { describe, expect, it } from "vitest";
-import { Harness, ScriptedTransport, VirtualClock, chop, seededRandom32 } from "./fakes.ts";
+import {
+  chop,
+  encodeVerdict,
+  encodeWelcome,
+  Harness,
+  Role,
+  ScriptedTransport,
+  seededRandom32,
+  VirtualClock,
+} from "@guardian/chunkies-testkit";
 import { browserRandom32 } from "../src/adapters.ts";
 import { decodeWelcomeEmit } from "../src/abi.ts";
-import { Role, encodeVerdict, encodeWelcome } from "../src/wire.ts";
 
 const welcome = encodeWelcome({
   epoch: 1,

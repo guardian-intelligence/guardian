@@ -29,13 +29,13 @@ import {
 } from "./abi.ts";
 import { Emit, HostEmit, Request, type Connection, type Ports } from "./ports.ts";
 import { decodeTerrain, type TerrainPlanes } from "./terrain.ts";
-import { Role, moduleWordHex, hex64, type RoleName } from "./wire.ts";
+import { Role, moduleWordHex, hex64, type RoleName } from "./ids.ts";
 
 const BACKOFF_MIN_MS = 300;
 const BACKOFF_MAX_MS = 5000;
 const BACKOFF_JITTER_MS = 250;
 /** Frame CPU the clock may spend stepping per pump. */
-export const DEFAULT_STEP_BUDGET_US = 8000;
+const DEFAULT_STEP_BUDGET_US = 8000;
 /** How long a failed module fetch waits before trying again. */
 const MODULE_RETRY_MS = 3000;
 /** Straight dial failures before the surface should tell the user the park is unreachable. */
@@ -49,7 +49,7 @@ export const UNREACHABLE_AFTER_DIALS = 3;
  * interpolate through. So the host keeps showing them where they were and
  * closes the gap over this window.
  */
-export const GLIDE_MS = 150;
+const GLIDE_MS = 150;
 
 /**
  * The fastest the presenter will move a dog to close that gap, in cells

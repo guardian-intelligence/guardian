@@ -7,6 +7,8 @@ src/products/viteplus-monorepo/apps/privatecut-web/node_modules
 src/products/viteplus-monorepo/apps/wake-up-mythra-web/node_modules
 src/products/viteplus-monorepo/packages/brand/node_modules
 src/products/viteplus-monorepo/packages/canary-journeys/node_modules
+src/products/viteplus-monorepo/packages/chunkies-testkit/node_modules
+src/products/viteplus-monorepo/packages/mythrad-client-core/node_modules
 src/products/viteplus-monorepo/packages/postflight-checkout/node_modules
 src/products/viteplus-monorepo/packages/telemetry/node_modules
 src/products/viteplus-monorepo/packages/visual-harness/node_modules

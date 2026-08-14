@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 import { ActionKind, Emit, HostEmit } from "../src/ports.ts";
-import { bringTheDogIn, dogPayload, Ev, modules, rig } from "./wasm.ts";
+import { bringTheDogIn, dogPayload, Ev, modules, rig } from "@guardian/chunkies-testkit";
 
 /** Exactly the members of `ClientExports`, minus `memory`. */
 const CLIENT_EXPORTS = [

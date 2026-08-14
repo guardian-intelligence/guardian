@@ -6,9 +6,19 @@
 //
 // This module is pure bytes in, values out. It holds no session state and
 // never talks to a transport — the session core (Rust, in client.wasm)
-// owns protocol behavior. The host uses this codec for its own framing
-// concerns (test harnesses, netsim, diagnostics) and to keep one
-// executable definition of the layouts that the Go server mirrors.
+// owns protocol behavior, and no production host code depends on this
+// copy. It exists so harnesses standing in for the server can mint and
+// read frames, and to keep one executable TS definition of the layouts
+// the Go server and the Rust session codec are pinned to.
+
+export {
+  Role,
+  hex64,
+  moduleHex,
+  moduleWord,
+  moduleWordHex,
+  type RoleName,
+} from "@guardian/mythrad-client-core";
 
 export const PROTO_VERSION = 4;
 
@@ -32,14 +42,6 @@ export const DatagramKind = {
   check: 1,
   verdict: 2,
 } as const;
-
-/** Roles as they ride the welcome frame. */
-export const Role = {
-  spectator: 0,
-  player: 1,
-} as const;
-
-export type RoleName = keyof typeof Role;
 
 // ---------------------------------------------------------------------------
 // QUIC variable-length integers (RFC 9000 §16)
@@ -577,34 +579,4 @@ export class FrameDecoder {
   reset(): void {
     this.#buf = new Uint8Array(0);
   }
-}
-
-/** Renders a u64 blob/hash id the way `/terrain/<hex>` and the HUD spell it. */
-export function hex64(v: bigint): string {
-  return BigInt.asUintN(64, v).toString(16).padStart(16, "0");
-}
-
-/**
- * The `/wt-info` display string for a module: the wire bytes hexed
- * left-to-right. `cw`/`pw` are opaque bytes, so this is a straight
- * transcription — no endianness is involved.
- */
-export function moduleHex(bytes: Uint8Array): string {
-  return [...bytes].map((n) => n.toString(16).padStart(2, "0")).join("");
-}
-
-/**
- * The u32 the session ABI wants for a module word (`session_module_swapped`,
- * `request(2, pw)`): the little-endian load of those same four bytes.
- */
-export function moduleWord(bytes: Uint8Array): number {
-  need(bytes, 4, "module word");
-  return view(bytes).getUint32(0, true);
-}
-
-/** Formats a module word that came back from the ABI, by re-storing it little-endian. */
-export function moduleWordHex(word: number): string {
-  const out = new Uint8Array(4);
-  new DataView(out.buffer).setUint32(0, word >>> 0, true);
-  return moduleHex(out);
 }

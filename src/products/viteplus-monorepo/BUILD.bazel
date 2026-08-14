@@ -56,6 +56,7 @@ filegroup(
         "//src/products/viteplus-monorepo/apps/wake-up-mythra-web:package_manifest",
         "//src/products/viteplus-monorepo/packages/brand:package_manifest",
         "//src/products/viteplus-monorepo/packages/canary-journeys:package_manifest",
+        "//src/products/viteplus-monorepo/packages/chunkies-testkit:package_manifest",
         "//src/products/viteplus-monorepo/packages/mythrad-client-core:package_manifest",
         "//src/products/viteplus-monorepo/packages/postflight-checkout:package_manifest",
         "//src/products/viteplus-monorepo/packages/telemetry:package_manifest",
@@ -86,6 +87,7 @@ filegroup(
         "//src/products/viteplus-monorepo/apps/wake-up-mythra-web:sources",
         "//src/products/viteplus-monorepo/packages/brand:sources",
         "//src/products/viteplus-monorepo/packages/canary-journeys:sources",
+        "//src/products/viteplus-monorepo/packages/chunkies-testkit:sources",
         "//src/products/viteplus-monorepo/packages/mythrad-client-core:sources",
         "//src/products/viteplus-monorepo/packages/postflight-checkout:sources",
         "//src/products/viteplus-monorepo/packages/telemetry:sources",
@@ -155,6 +157,7 @@ genrule(
         "//src/products/viteplus-monorepo/apps/wake-up-mythra-web:node_modules",
         "//src/products/viteplus-monorepo/packages/brand:node_modules",
         "//src/products/viteplus-monorepo/packages/canary-journeys:node_modules",
+        "//src/products/viteplus-monorepo/packages/chunkies-testkit:node_modules",
         "//src/products/viteplus-monorepo/packages/mythrad-client-core:node_modules",
         "//src/products/viteplus-monorepo/packages/postflight-checkout:node_modules",
         "//src/products/viteplus-monorepo/packages/telemetry:node_modules",
@@ -203,6 +206,7 @@ link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/apps/priv
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/apps/wake-up-mythra-web/node_modules" "$$work/apps/wake-up-mythra-web/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/brand/node_modules" "$$work/packages/brand/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/canary-journeys/node_modules" "$$work/packages/canary-journeys/node_modules"
+link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/chunkies-testkit/node_modules" "$$work/packages/chunkies-testkit/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/mythrad-client-core/node_modules" "$$work/packages/mythrad-client-core/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/postflight-checkout/node_modules" "$$work/packages/postflight-checkout/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/telemetry/node_modules" "$$work/packages/telemetry/node_modules"

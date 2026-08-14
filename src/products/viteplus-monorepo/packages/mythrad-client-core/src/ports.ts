@@ -241,38 +241,6 @@ export const ResyncReason = {
   replayRefused: 13,
 } as const;
 
-/**
- * Fixed capacities in the session core. Exceeding one is not an error the
- * host sees — the core drops to a resync — but a host that batches
- * outbound work needs to know they exist.
- */
-export const Caps = {
-  /** Intents in flight before the oldest is dropped. */
-  intents: 32,
-  /** Events held awaiting their turn in seq order. */
-  queuedEvents: 256,
-  /** Events retained for rollback replay. */
-  recentEvents: 512,
-  /** Largest sim event payload the core will carry. */
-  eventPayload: 64,
-  /**
-   * Stream reassembly. The trigger is what is ALREADY buffered plus the
-   * incoming read, not the size of any one frame — and it cannot be one
-   * frame, because a park's whole state fits in its 64 KiB io buffer, so
-   * the largest snapshot frame it can emit is around 61.5 KB. Overflow
-   * takes a partial frame sitting in the buffer with a further large read
-   * arriving behind it.
-   *
-   * When it trips, the core drops the whole buffer and raises
-   * `Request.teardown`: byte alignment is lost, there is no way to find
-   * the next frame boundary in what remains, and a resync frame written
-   * onto that stream would be answered into the same garbage.
-   */
-  reassembly: 160 * 1024,
-  /** Outbound frame buffer, which bounds the ticket. */
-  outbound: 4 * 1024,
-} as const;
-
 /** `request(kind, a)` codes the session core raises to the host. */
 export const Request = {
   needTerrain: 1,

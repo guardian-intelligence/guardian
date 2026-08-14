@@ -7,8 +7,16 @@ import { describe, expect, it } from "vitest";
 import { PumpFlag } from "../src/abi.ts";
 import { GLIDE_MAX_CELLS, GLIDE_MAX_CELLS_PER_SEC } from "../src/core.ts";
 import { Emit, ResyncReason } from "../src/ports.ts";
-import { Role, type ClientFrame } from "../src/wire.ts";
-import { bringTheDogIn, DEFAULT_RTT_MS, Ev, Reject, dogPayload, rig } from "./wasm.ts";
+import {
+  bringTheDogIn,
+  DEFAULT_RTT_MS,
+  dogPayload,
+  Ev,
+  Reject,
+  rig,
+  Role,
+  type ClientFrame,
+} from "@guardian/chunkies-testkit";
 
 /** Ring entries land one per second, so this is the window after a restore with none. */
 const RING_CADENCE_TICKS = 24;
