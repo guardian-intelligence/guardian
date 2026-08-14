@@ -13,6 +13,7 @@ import {
 } from "@guardian/mythrad-client-core";
 import { emitSpan, reportError } from "@guardian/telemetry";
 import { rejectText } from "./hud";
+import type { JankCounters } from "./jank";
 
 // Why the replica asked for a snapshot, or — for the last two — tore the
 // stream down instead. The dashboard groups `wum.why`, so these stay the
@@ -37,6 +38,23 @@ const RESYNC_WHY: Record<number, string> = {
 const CLOCK_STATES = ["acquiring", "locked", "fast-forward", "snapshot-required"] as const;
 
 export type SignInFlow = "popup" | "redirect";
+
+/**
+ * A minute of feel, from every session that drew a frame. The counters and
+ * their thresholds are defined in jank.ts; this is only their name on the
+ * wire, and the play-test harness computes the same figures from the same
+ * frames, so a regression the harness catches locally is the one this
+ * reports from production.
+ */
+export function jank(park: string, c: JankCounters): void {
+  emitSpan("wum.jank", {
+    "wum.long_frames": String(c.longFrames),
+    "wum.backward_ticks": String(c.backwardTicks),
+    "wum.own_dog_jumps": String(c.ownDogJumps),
+    "wum.freeze_runs": String(c.freezeRuns),
+    "wum.park": park,
+  });
+}
 
 export type Telemetry = {
   /** The `telemetry` port: the core's numeric vocabulary, mapped to spans. */
