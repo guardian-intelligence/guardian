@@ -136,6 +136,17 @@ export function createTelemetry(ctx: {
         case Emit.mismatch:
           span("wum.netcode_mismatch", { "wum.tick": String(a), "wum.park": park });
           return;
+        case Emit.eventArrived:
+          // Per accepted event, so this is the highest-volume span the
+          // probe carries. It is what makes the authority's stamp-to-wire
+          // delay measurable: margin is the event's tick minus where the
+          // replica stood, and the delay is the trail minus that margin.
+          span("wum.netcode_arrived", {
+            "wum.tick": String(a),
+            "wum.replica_tick": String(b),
+            "wum.park": park,
+          });
+          return;
         case Emit.reject:
           ctx.log(rejectText(Number(a)));
           span("wum.netcode_reject", {

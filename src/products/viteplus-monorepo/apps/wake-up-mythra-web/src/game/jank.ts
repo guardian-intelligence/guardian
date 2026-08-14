@@ -39,11 +39,15 @@ const PROBE_DOGS = 8;
 /** Frames the probe ring holds: about 68 seconds at 60fps. */
 const PROBE_CAP = 4096;
 /**
- * Spans the probe ring holds. Frames are the what; these are the why, and
- * a leg that produces hundreds of them has a bigger problem than a ring
- * size.
+ * Spans the probe ring holds. Frames are the what; these are the why.
+ *
+ * Sized for a leg that emits one span per journalled event — around 140 —
+ * plus its repairs, with room to spare. Overflow drops the OLDEST, which
+ * is exactly the wrong end: a leg's first repair is usually the one that
+ * explains the rest. So it is counted rather than silent, and a reader
+ * that sees a non-zero count knows its earliest evidence is missing.
  */
-const SPAN_CAP = 256;
+const SPAN_CAP = 1024;
 /** How often the aggregate leaves the page. */
 const BEACON_MS = 60_000;
 
@@ -91,6 +95,8 @@ export type Probe = {
   readonly cap: number;
   /** Frames overwritten before a drain. Nonzero means the harness is behind. */
   readonly dropped: number;
+  /** Spans lost to overflow since the last drain. Non-zero means the oldest are gone. */
+  readonly droppedSpans: number;
   /** Every held frame in order, oldest first, then empties the ring. */
   drain(): FrameRecord[];
   /**
@@ -149,6 +155,7 @@ export function createJank(opts: {
     : [];
   let at = 0;
   let dropped = 0;
+  let droppedSpans = 0;
   let spans: SpanRecord[] = [];
 
   // Counters are cumulative for the life of the page, and the beacon
@@ -183,9 +190,13 @@ export function createJank(opts: {
         dropped = 0;
         return out;
       },
+      get droppedSpans() {
+        return droppedSpans;
+      },
       drainSpans: () => {
         const out = spans;
         spans = [];
+        droppedSpans = 0;
         return out;
       },
       counters,
@@ -214,7 +225,10 @@ export function createJank(opts: {
     recordSpan: (name, attrs) => {
       if (!opts.probe) return;
       spans.push({ t: performance.now(), name, attrs });
-      if (spans.length > SPAN_CAP) spans.splice(0, spans.length - SPAN_CAP);
+      if (spans.length > SPAN_CAP) {
+        droppedSpans += spans.length - SPAN_CAP;
+        spans.splice(0, spans.length - SPAN_CAP);
+      }
     },
     sample: (t, tick, phaseQ16, mine, camX, camY, dogs) => {
       frames++;

@@ -352,6 +352,23 @@ function mismatchCorrelation(records, spans) {
     });
 }
 
+/**
+ * The margin every journalled event arrived with, in ticks: how far the
+ * replica still had to step before reaching the tick the event was stamped
+ * for. Positive means the event beat the replica there; negative means it
+ * was already late and a repair was owed.
+ *
+ * This is the measurement that makes the authority's stamp-to-wire delay a
+ * number rather than an estimate — the delay is the replica's trail minus
+ * this margin — and the clean leg is where it is readable, because there
+ * is no network delay folded in on top of it.
+ */
+function arrivalMargins(spans) {
+  return spans
+    .filter((s) => s.name === "wum.netcode_arrived")
+    .map((s) => Number(s.attrs["wum.tick"]) - Number(s.attrs["wum.replica_tick"]));
+}
+
 /** Resyncs by the reason they gave, so two different causes never read as one number. */
 function resyncReasons(spans) {
   const by = new Map();
@@ -646,13 +663,21 @@ for (let run = 1; run <= RUNS; run++) {
 
     await playInputs(page, box, CYCLES, leg.hiccupMs, seeded(SEED));
 
-    const { records, spans, dropped, after, diagAfter } = await page.evaluate(() => ({
-      records: globalThis.__mythraProbe.drain(),
-      spans: globalThis.__mythraProbe.drainSpans(),
-      dropped: globalThis.__mythraProbe.dropped,
-      after: globalThis.__mythraProbe.counters(),
-      diagAfter: { ...globalThis.__mythraDiag },
-    }));
+    // Both loss counters are read BEFORE the drains that reset them.
+    // Read after, they are always zero — which is what they were, so a
+    // full ring has never once been reported in this harness.
+    const { records, spans, dropped, droppedSpans, after, diagAfter } = await page.evaluate(() => {
+      const dropped = globalThis.__mythraProbe.dropped;
+      const droppedSpans = globalThis.__mythraProbe.droppedSpans;
+      return {
+        dropped,
+        droppedSpans,
+        records: globalThis.__mythraProbe.drain(),
+        spans: globalThis.__mythraProbe.drainSpans(),
+        after: globalThis.__mythraProbe.counters(),
+        diagAfter: { ...globalThis.__mythraDiag },
+      };
+    });
     const session = {
       events: diagAfter.events - diagBefore.events,
       rollbacks: diagAfter.rollbacks - diagBefore.rollbacks,
@@ -677,6 +702,19 @@ for (let run = 1; run <= RUNS; run++) {
       `    session: events=${session.events} rollbacks=${session.rollbacks}` +
         ` resyncs=${session.resyncs} mismatches=${session.mismatches} rejects=${session.rejects}`,
     );
+    // What the journal's events cost to deliver, which is the number the
+    // pipeline question turns on. Reported on every leg; the clean one is
+    // the one to read, since nothing else is folded into it there.
+    const margins = arrivalMargins(spans);
+    if (margins.length > 0) {
+      const sorted = [...margins].sort((a, b) => a - b);
+      const late = margins.filter((m) => m < 0).length;
+      console.log(
+        `    arrival margin: median ${quantile(sorted, 0.5)} ticks ` +
+          `(p10 ${quantile(sorted, 0.1)}, p90 ${quantile(sorted, 0.9)}) over ${margins.length} events; ` +
+          `${late} arrived already late`,
+      );
+    }
     // A surviving mismatch is the one thing that must never be read past,
     // so its correlation prints whenever one happens — not only on a fail.
     if (session.mismatches > 0) {
@@ -715,7 +753,8 @@ for (let run = 1; run <= RUNS; run++) {
         ` backward=${after.backwardTicks - before.backwardTicks}` +
         ` jumps=${after.ownDogJumps - before.ownDogJumps}` +
         ` freezes=${after.freezeRuns - before.freezeRuns}` +
-        (dropped ? ` (ring dropped ${dropped})` : ""),
+        (dropped ? ` (ring dropped ${dropped})` : "") +
+        (droppedSpans ? ` (SPANS DROPPED ${droppedSpans} — oldest evidence is gone)` : ""),
     );
     if (leg.gates.length > 0) {
       console.log(`    gate: ${fails.length === 0 ? "PASS" : `FAIL — ${fails.join("; ")}`}`);

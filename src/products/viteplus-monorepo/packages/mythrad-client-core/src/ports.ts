@@ -90,7 +90,7 @@ export interface Ports {
 }
 
 /**
- * Telemetry codes the session core emits, 1..18. The numbers are the
+ * Telemetry codes the session core emits, 1..19. The numbers are the
  * contract and are shared with the Rust crate; host-minted codes live in
  * `HostEmit` and start at 1000 so the two can never be confused in a
  * dashboard or a span attribute.
@@ -127,6 +127,20 @@ export const Emit = {
    * near it in time rather than the ones it actually touched.
    */
   replayed: 18,
+  /**
+   * arrived(event tick, replica tick): where the replica stood the moment
+   * an event was accepted into the queue, before anything was done with
+   * it. The MARGIN is `a - b`: positive means the event beat the replica
+   * to its own tick, negative means it was already late and a repair is
+   * owed. Both are raw absolute ticks because the slots are unsigned and a
+   * negative margin could not be carried — the subtraction, and its sign,
+   * belong to the reader.
+   *
+   * With the replica's measured trail this is what turns the authority's
+   * stamp-to-wire delay from an estimate into a number: delay = trail
+   * minus margin.
+   */
+  eventArrived: 19,
 } as const;
 
 /**
