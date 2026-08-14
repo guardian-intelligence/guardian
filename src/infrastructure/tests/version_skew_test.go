@@ -232,6 +232,36 @@ func TestInstallCanaryReleaseContractMatchesCutter(t *testing.T) {
 	}
 }
 
+// The wum-dev stack's ClickHouse server (the multitool clickhouse-server
+// pin, -stable channel) mirrors the Cozystack chart's hard-pinned analytics
+// server so locally validated DDL and queries run the prod server line.
+// Renovate never sees a -stable tag (the ClickHouse rule is -lts-only by
+// design), so this doorbell is the only binding: the pin moves with the
+// chart's stated server version in the Cozystack upgrade runbook.
+func TestDevClickHouseServerTracksAnalyticsChartPin(t *testing.T) {
+	chAppYAML := "src/infrastructure/deployments/analytics/system/clickhouse.yaml"
+
+	pins := regexp.MustCompile(`ClickHouse/ClickHouse/releases/download/v([0-9.]+)-stable/`).
+		FindAllStringSubmatch(readText(t, runfilePath(toolLockRunfile)), -1)
+	if len(pins) == 0 {
+		t.Fatalf("%s: no -stable ClickHouse server pin found", toolLockRunfile)
+	}
+	pinned := pins[0][1]
+	for _, m := range pins {
+		if m[1] != pinned {
+			t.Fatalf("%s: -stable ClickHouse pins disagree (%s vs %s): a half-edited platform pair", toolLockRunfile, pinned, m[1])
+		}
+	}
+	chart := regexp.MustCompile(`Server ([0-9.]+) \(chart hard-pin\)`).
+		FindStringSubmatch(readText(t, runfilePath(chAppYAML)))
+	if chart == nil {
+		t.Fatalf("%s: no 'Server <version> (chart hard-pin)' statement found — restate the chart's server version so the dev-stack pin stays bound to it", chAppYAML)
+	}
+	if pinned != chart[1] {
+		t.Fatalf("multitool clickhouse-server pin %s but the analytics chart runs %s: the dev stack would validate DDL on a server prod does not run — move them together", pinned, chart[1])
+	}
+}
+
 const (
 	tofuManifestDirRunfile = "src/infrastructure/deployments/guardian/tofu/kustomization.yaml"
 	moduleBazelRunfile     = "MODULE.bazel"

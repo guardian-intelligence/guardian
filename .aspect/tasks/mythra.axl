@@ -382,7 +382,7 @@ dev_up = task(
     implementation = _dev_up_impl,
     name = "up",
     group = ["mythra", "dev"],
-    summary = "Start the container-free local Wake Up Mythra stack in the background: pinned-PostgreSQL journal, dev OIDC issuer, mythrad, and the vite dev server.",
+    summary = "Start the container-free local Wake Up Mythra stack in the background: pinned-PostgreSQL journal, ClickHouse analytics sink, OTel collector, flagd, analytics ingest, dev OIDC issuer, mythrad, and the vite dev server.",
 )
 
 dev_down = task(
@@ -405,7 +405,7 @@ dev_logs = task(
     group = ["mythra", "dev"],
     summary = "Tail local Wake Up Mythra dev logs: recent lines from every leg, or follow one leg with --leg.",
     args = {
-        "leg": args.string(default = "", description = "Leg to follow (pg|devissuer|mythrad|web); empty shows recent lines from every leg."),
+        "leg": args.string(default = "", description = "Leg to follow (pg|ch|otelcol|flagd|ingest|devissuer|mythrad|web); empty shows recent lines from every leg."),
     },
 )
 

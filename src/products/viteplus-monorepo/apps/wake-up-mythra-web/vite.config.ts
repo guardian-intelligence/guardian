@@ -57,6 +57,7 @@ export default defineConfig({
     // devProxy — vite's server.proxy never sees these paths.
     nitro({
       devProxy: {
+        "/api/events/**": `http://127.0.0.1:${process.env["WUM_DEV_INGEST_PORT"] ?? "9636"}`,
         "/wt-info": "http://127.0.0.1:9634",
         "/session": "http://127.0.0.1:9634",
         "/terrain/**": "http://127.0.0.1:9634",

@@ -19,8 +19,9 @@ export function startFlags(): void {
   started = true;
   // Polling stays at the provider default (disabled): the SSE stream plus
   // the provider's built-in refresh-on-tab-visible cover everything a poll
-  // would. Dev talks straight to a local flagd's OFREP port — run it with
-  // --cors-allowed-origins='*' — and skips the stream (no notify service).
+  // would. Dev talks straight to the local flagd OFREP port that
+  // `aspect mythra dev up` starts (scripts/wum-dev.sh) and skips the
+  // stream (no notify service).
   const dev = import.meta.env.DEV;
   // The cast bridges exactOptionalPropertyTypes: the provider declares
   // `hooks?: Hook[] | undefined` where the SDK's Provider forbids an

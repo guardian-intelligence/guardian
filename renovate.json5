@@ -225,7 +225,11 @@
 
     // ClickHouse stays on the -lts channel: tags that do not match this
     // pattern (-stable, -prestable) are not versions at all to Renovate, and
-    // the 4th component compares as a patch so lts hotfixes surface.
+    // the 4th component compares as a patch so lts hotfixes surface. That
+    // also deliberately hides the clickhouse-server lockfile pin (-stable):
+    // it tracks the Cozystack chart's hard-pinned analytics server, moves
+    // only with the chart in the Cozystack upgrade runbook, and
+    // TestDevClickHouseServerTracksAnalyticsChartPin binds the pair.
     {
       matchPackageNames: ["ClickHouse/ClickHouse"],
       versioning: "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)-lts$",
@@ -249,6 +253,18 @@
       matchPackageNames: ["fluxcd/flux2"],
       prBodyNotes: [
         "flux CLI stays on the release line shipping the kustomize-controller series guardian-mgmt runs.",
+      ],
+    },
+    {
+      matchPackageNames: ["open-telemetry/opentelemetry-collector-releases"],
+      prBodyNotes: [
+        "The dev-host otelcol-contrib pin mirrors the in-cluster collector image (docker.io/otel/opentelemetry-collector-contrib in deployments/analytics/system/otel-collector.yaml); move both together so local pipelines exercise the config the cluster runs.",
+      ],
+    },
+    {
+      matchPackageNames: ["open-feature/flagd"],
+      prBodyNotes: [
+        "The dev-host flagd pin mirrors the flags deployment image (ghcr.io/open-feature/flagd in deployments/flags/prod/deployment.yaml); move both together so local flag evaluation matches prod.",
       ],
     },
 
@@ -367,6 +383,25 @@
       ],
       depNameTemplate: "kubernetes/kubernetes",
       datasourceTemplate: "github-releases",
+    },
+
+    // Host-CLI lockfile, flagd: the release tag is "flagd/v0.16.1" — the
+    // slash makes the GitHub matcher above capture the literal "flagd" as
+    // the version, which Renovate discards as unversioned, and the repin's
+    // tag reconciliation cannot parse it either. This manager owns the
+    // bump: extractVersion keeps only flagd component releases (the repo
+    // also tags flagd-proxy/core), and the template rewrites the version in
+    // both the tag path and the asset filename.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^src/tools/multitool\\.lock\\.json$/"],
+      matchStrings: [
+        '"url": "https://github\\.com/open-feature/flagd/releases/download/flagd/v(?<currentValue>[0-9.]+)/flagd_[0-9.]+_(?<assetSuffix>[A-Za-z0-9_]+\\.tar\\.gz)"',
+      ],
+      autoReplaceStringTemplate: '"url": "https://github.com/open-feature/flagd/releases/download/flagd/v{{{newValue}}}/flagd_{{{newValue}}}_{{{assetSuffix}}}"',
+      depNameTemplate: "open-feature/flagd",
+      datasourceTemplate: "github-releases",
+      extractVersionTemplate: "^flagd/v(?<version>[0-9.]+)$",
     },
 
     // Host-CLI lockfile, percona psql/pgbench: downloads.percona.com has no
