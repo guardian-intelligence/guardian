@@ -127,6 +127,14 @@ export const HostEmit = {
    * only reach a log line.
    */
   redial: 1000,
+  /**
+   * teardown(reason, 0). The core raises teardown via a request verb, not
+   * an emit, so without this the reason (ResyncReason.streamOverflow or
+   * .framing) would reach a log line but never analytics — and a redial
+   * storm from lost framing would be indistinguishable from ordinary
+   * backoff on a dashboard.
+   */
+  teardown: 1001,
 } as const;
 
 /**

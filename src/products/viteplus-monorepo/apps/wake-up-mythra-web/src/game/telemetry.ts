@@ -32,6 +32,10 @@ const RESYNC_WHY: Record<number, string> = {
   [ResyncReason.framing]: "unreadable frame length",
 };
 
+// Clock states as the sim/clock crate numbers them; the span carries the
+// name so dashboards never depend on the numeric order.
+const CLOCK_STATES = ["acquiring", "locked", "fast-forward", "snapshot-required"] as const;
+
 export type SignInFlow = "popup" | "redirect";
 
 export type Telemetry = {
@@ -116,8 +120,37 @@ export function createTelemetry(ctx: {
             "wum.park": park,
           });
           return;
+        case Emit.clockState:
+          // Fires on state transitions only. The deficit is signed:
+          // positive is behind the schedule, negative is ahead of it.
+          emitSpan("wum.netcode_clock", {
+            "wum.state": CLOCK_STATES[Number(a)] ?? `state ${a}`,
+            "wum.err_ticks": String(BigInt.asIntN(64, b)),
+            "wum.park": park,
+          });
+          return;
+        case Emit.rollback:
+          emitSpan("wum.netcode_rollback", {
+            "wum.depth_ticks": String(a),
+            "wum.to_tick": String(b),
+            "wum.park": park,
+          });
+          return;
+        case Emit.snapshotRestored:
+          emitSpan("wum.netcode_restore", {
+            "wum.seq": String(a),
+            "wum.tick": String(b),
+            "wum.park": park,
+          });
+          return;
         case HostEmit.redial:
           emitSpan("wum.redial", { "wum.backoff_ms": String(a), "wum.park": park });
+          return;
+        case HostEmit.teardown:
+          emitSpan("wum.netcode_teardown", {
+            "wum.why": whyOf(Number(a)),
+            "wum.park": park,
+          });
           return;
         case Emit.restoreFailed: {
           const id = reportError(new Error(`snapshot restore failed (code ${a})`), {
