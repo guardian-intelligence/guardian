@@ -1,0 +1,6 @@
+{
+  "$schema": "https://cursor.com/schemas/environment.schema.json",
+  "name": "Guardian",
+  "install": "eval \"$(scripts/bootstrap.sh path)\" && aspect tools install-agent-cloud --bin-dir \"$PWD/.guardian/tools/bin\"",
+  "start": "GUARDIAN_AGENT_PROVIDER=cursor bash scripts/agent-cloud-setup.sh"
+}

@@ -1,7 +1,8 @@
-# Product capabilities are derived from the unattended platform-agent instead
-# of widening that long-lived identity. The observer can enter one read-only
-# journal console; the operator can recycle only mythrad Deployment pods.
-# Each TokenRequest is capped at 15 minutes by both platform-agent VAPs.
+# Product capabilities are derived from the unattended platform-agent or the
+# expiring Cursor platform-read identity instead of widening either one. The
+# observer can enter one read-only journal console; the operator can recycle
+# only mythrad Deployment pods. Each TokenRequest is capped at 15 minutes by
+# the matching platform-read VAP.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -59,6 +60,9 @@ subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: Group
     name: guardian-persona-read
+  - kind: ServiceAccount
+    name: guardian-cloud-agent-cursor
+    namespace: tenant-root
 ---
 # Observation is not general pods/exec: RBAC fixes the destination pod and the
 # VAP fixes the container and client program. The console itself holds only a

@@ -1,0 +1,124 @@
+policy: guardian-cloud-agent-cursor-platform-read
+cases:
+  - name: Cursor may port-forward for read-only observability
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: portforward
+    objectName: observability-pod
+    user:
+      username: system:serviceaccount:tenant-root:guardian-cloud-agent-cursor
+      groups: [system:serviceaccounts, system:authenticated]
+    expect: allow
+  - name: Cursor may mint a fifteen-minute Mythra observer token
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-mythra-observer
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-mythra-observer, namespace: tenant-guardian-prod}
+      spec:
+        audiences: [https://10.8.0.250:6443]
+        expirationSeconds: 900
+    user:
+      username: system:serviceaccount:tenant-root:guardian-cloud-agent-cursor
+      groups: [system:serviceaccounts, system:authenticated]
+    expect: allow
+  - name: Cursor may mint a fifteen-minute Mythra operator token
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-mythra-operator
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-mythra-operator, namespace: tenant-guardian-prod}
+      spec:
+        audiences: [https://10.8.0.250:6443]
+        expirationSeconds: 900
+    user:
+      username: system:serviceaccount:tenant-root:guardian-cloud-agent-cursor
+      groups: [system:serviceaccounts, system:authenticated]
+    expect: allow
+  - name: Cursor cannot mint a longer Mythra token
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-mythra-operator
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-mythra-operator, namespace: tenant-guardian-prod}
+      spec:
+        audiences: [https://10.8.0.250:6443]
+        expirationSeconds: 901
+    user:
+      username: system:serviceaccount:tenant-root:guardian-cloud-agent-cursor
+      groups: [system:serviceaccounts, system:authenticated]
+    expect: deny
+  - name: Cursor cannot mint a Mythra token for another audience
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-mythra-observer
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-mythra-observer, namespace: tenant-guardian-prod}
+      spec:
+        audiences: [https://example.invalid]
+        expirationSeconds: 900
+    user:
+      username: system:serviceaccount:tenant-root:guardian-cloud-agent-cursor
+      groups: [system:serviceaccounts, system:authenticated]
+    expect: deny
+  - name: Cursor cannot renew its own bootstrap identity
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: guardian-cloud-agent-cursor
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: guardian-cloud-agent-cursor, namespace: tenant-root}
+      spec:
+        audiences: [https://10.8.0.250:6443]
+        expirationSeconds: 3600
+    user:
+      username: system:serviceaccount:tenant-root:guardian-cloud-agent-cursor
+      groups: [system:serviceaccounts, system:authenticated]
+    expect: deny
+  - name: Cursor cannot mint a secrets writer
+    operation: CREATE
+    resource: {group: "", version: v1, resource: serviceaccounts}
+    subResource: token
+    objectName: secrets-writer
+    object:
+      apiVersion: authentication.k8s.io/v1
+      kind: TokenRequest
+      metadata: {name: secrets-writer, namespace: tenant-guardian-prod}
+      spec:
+        audiences: [https://10.8.0.250:6443]
+        expirationSeconds: 600
+    user:
+      username: system:serviceaccount:tenant-root:guardian-cloud-agent-cursor
+      groups: [system:serviceaccounts, system:authenticated]
+    expect: deny
+  - name: Cursor cannot delete an arbitrary pod
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: arbitrary-pod
+    user:
+      username: system:serviceaccount:tenant-root:guardian-cloud-agent-cursor
+      groups: [system:serviceaccounts, system:authenticated]
+    expect: deny
+  - name: Devin is not matched by the Cursor policy
+    operation: CONNECT
+    resource: {group: "", version: v1, resource: pods}
+    subResource: portforward
+    objectName: observability-pod
+    user:
+      username: system:serviceaccount:tenant-root:guardian-cloud-agent-devin
+      groups: [system:serviceaccounts, system:authenticated]
+    expect: no-match

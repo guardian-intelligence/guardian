@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -34,6 +35,42 @@ func TestCloudAgentDeliveryReadBoundary(t *testing.T) {
 				t.Fatalf("delivery-read grants forbidden resource %q", stringValue(resource))
 			}
 		}
+	}
+
+	for _, bindingName := range []string{
+		"guardian-cloud-agent-cursor-view",
+		"guardian-cloud-agent-cursor-cluster-view",
+		"guardian-cloud-agent-cursor-portforward",
+	} {
+		binding := findDoc(t, docs, "ClusterRoleBinding", bindingName)
+		found := false
+		for _, item := range sliceValue(binding["subjects"]) {
+			subject := mapValue(item)
+			if stringValue(subject["kind"]) == "ServiceAccount" &&
+				stringValue(subject["name"]) == "guardian-cloud-agent-cursor" &&
+				stringValue(subject["namespace"]) == "tenant-root" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s does not bind guardian-cloud-agent-cursor", bindingName)
+		}
+	}
+
+	mythraPath := runfilePath("src/infrastructure/deployments/mythra/prod/agent-ops.yaml")
+	mythraDocs := yamlDocs(t, mythraPath)
+	mythraMinter := findDoc(t, mythraDocs, "RoleBinding", "guardian-mythra-token-minter")
+	cursorCanMintMythra := false
+	for _, item := range sliceValue(mythraMinter["subjects"]) {
+		subject := mapValue(item)
+		if stringValue(subject["kind"]) == "ServiceAccount" &&
+			stringValue(subject["name"]) == "guardian-cloud-agent-cursor" &&
+			stringValue(subject["namespace"]) == "tenant-root" {
+			cursorCanMintMythra = true
+		}
+	}
+	if !cursorCanMintMythra {
+		t.Fatal("Mythra token minter is not bound to guardian-cloud-agent-cursor")
 	}
 
 	minter := findDoc(t, docs, "ClusterRole", "guardian-persona-cloud-agent-token")
@@ -100,6 +137,37 @@ func TestCloudAgentDeliveryReadBoundary(t *testing.T) {
 	if len(validations) != 1 || stringValue(mapValue(validations[0])["expression"]) != "false" {
 		t.Fatalf("delivery-read policy must unconditionally deny matched writes: %v", validations)
 	}
+	deliveryMatch := stringValue(mapValue(sliceValue(spec["matchConditions"])[0])["expression"])
+	if !strings.Contains(deliveryMatch, "guardian-cloud-agent-devin") || strings.Contains(deliveryMatch, "guardian-cloud-agent-cursor") {
+		t.Fatalf("delivery-read policy must match only Devin: %q", deliveryMatch)
+	}
+
+	cursorPolicy := findDoc(t, docs, "ValidatingAdmissionPolicy", "guardian-cloud-agent-cursor-platform-read")
+	cursorSpec := mapValue(cursorPolicy["spec"])
+	if stringValue(cursorSpec["failurePolicy"]) != "Fail" {
+		t.Fatal("Cursor platform-read admission policy must fail closed")
+	}
+	cursorMatch := stringValue(mapValue(sliceValue(cursorSpec["matchConditions"])[0])["expression"])
+	if !strings.Contains(cursorMatch, "system:serviceaccount:tenant-root:guardian-cloud-agent-cursor") {
+		t.Fatalf("Cursor platform-read policy has the wrong identity match: %q", cursorMatch)
+	}
+	cursorValidation := stringValue(mapValue(sliceValue(cursorSpec["validations"])[0])["expression"])
+	for _, want := range []string{
+		`request.subResource == "portforward"`,
+		`request.name in ["guardian-mythra-observer", "guardian-mythra-operator"]`,
+		`request.namespace == "tenant-guardian-prod"`,
+		`object.spec.expirationSeconds <= 900`,
+		`object.spec.audiences[0] == "https://10.8.0.250:6443"`,
+	} {
+		if !strings.Contains(cursorValidation, want) {
+			t.Fatalf("Cursor platform-read policy is missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"secrets-writer", "guardian-cloud-agent-devin", "expirationSeconds <= 3600"} {
+		if strings.Contains(cursorValidation, forbidden) {
+			t.Fatalf("Cursor platform-read policy contains forbidden capability %q", forbidden)
+		}
+	}
 
 	for _, forbidden := range []string{"offline_access", "cluster-admin", "kind: Secret\n"} {
 		if strings.Contains(raw, forbidden) {
@@ -114,6 +182,8 @@ func TestCloudAgentSetupDoesNotExportStandingKubernetesIdentity(t *testing.T) {
 	for _, want := range []string{
 		"unset GUARDIAN_AGENT_KUBERNETES_TOKEN",
 		"guardian-${provider}-cloud",
+		"default_kubeconfig=",
+		"refusing to replace existing default kubeconfig",
 		"tls-server-name: k8s.guardianintelligence.org",
 		"auth whoami",
 	} {
@@ -122,7 +192,6 @@ func TestCloudAgentSetupDoesNotExportStandingKubernetesIdentity(t *testing.T) {
 	for _, forbidden := range []string{
 		"offline_access",
 		"kubectl-oidc_login",
-		"ln -sfn \"${kubeconfig}\" \"${HOME}/.kube/config\"",
 	} {
 		assertTextNotContains(t, setup, forbidden, setupPath)
 	}
@@ -130,6 +199,18 @@ func TestCloudAgentSetupDoesNotExportStandingKubernetesIdentity(t *testing.T) {
 	tokenPath := runfilePath("tools/ops/agent-cloud-token")
 	tokenHelper := readText(t, tokenPath)
 	assertTextContains(t, tokenHelper, "--audience=https://10.8.0.250:6443", tokenPath)
+
+	environmentPath := runfilePath(".cursor/environment.json")
+	var environment map[string]any
+	if err := json.Unmarshal([]byte(readText(t, environmentPath)), &environment); err != nil {
+		t.Fatalf("parse %s: %v", environmentPath, err)
+	}
+	if !strings.Contains(stringValue(environment["install"]), "install-agent-cloud") {
+		t.Fatalf("Cursor install command does not prepare agent-cloud tools: %v", environment["install"])
+	}
+	if stringValue(environment["start"]) != "GUARDIAN_AGENT_PROVIDER=cursor bash scripts/agent-cloud-setup.sh" {
+		t.Fatalf("Cursor start command does not install the per-run credential: %v", environment["start"])
+	}
 }
 
 func TestCloudAgentAspectTaskRegistered(t *testing.T) {
