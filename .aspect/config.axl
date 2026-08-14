@@ -46,6 +46,7 @@ load(
     ".aspect/tasks/mythra.axl",
     mythra_dev_down = "dev_down",
     mythra_dev_logs = "dev_logs",
+    mythra_dev_smoke = "dev_smoke",
     mythra_dev_status = "dev_status",
     mythra_dev_up = "dev_up",
     mythra_dump = "dump",
@@ -100,6 +101,7 @@ def config(ctx):
     ctx.tasks.add(mythra_dev_down)
     ctx.tasks.add(mythra_dev_status)
     ctx.tasks.add(mythra_dev_logs)
+    ctx.tasks.add(mythra_dev_smoke)
 
     # aspect tidy
     ctx.tasks.add(tidy)

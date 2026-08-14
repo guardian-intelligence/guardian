@@ -13,6 +13,7 @@ the background; drive it with:
 aspect mythra dev status              # per-leg health, non-zero if unhealthy
 aspect mythra dev logs                # recent lines from every leg
 aspect mythra dev logs --leg=mythrad  # follow one leg: pg|ch|otelcol|flagd|ingest|devissuer|mythrad|web
+aspect mythra dev smoke               # prove the stack end to end: a headless player connects and its telemetry lands
 aspect mythra dev down                # stop everything
 ```
 
