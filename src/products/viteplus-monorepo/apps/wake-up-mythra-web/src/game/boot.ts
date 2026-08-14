@@ -2,9 +2,10 @@
 // that turns the two into a live session. The session core (docs/netcode.md)
 // owns the protocol — ordering, rollback, resync, prediction, check
 // cadence — so what is left here is identity, the platform errands the
-// core asks for, and the controls.
+// host asks for, and the controls.
 
-import { Core, browserRandom32, type Ports, type RoleName } from "@guardian/mythrad-client-core";
+import type { Ports } from "@guardian/chunkies";
+import { WumGame, browserRandom32, type RoleName } from "@guardian/wum-client";
 import { OpenFeature } from "@openfeature/web-sdk";
 import * as v from "valibot";
 import {
@@ -118,54 +119,63 @@ async function run(hud: Hud): Promise<void> {
         // one under the pseudonym.
         hud.log("session expired — spectating; sign in to rejoin with your dog");
         await setIdentity();
-        core.reidentify(identity.myDog, identity.role);
+        game.reidentify(identity.myDog, identity.role);
       }
       return { token: null, device: deviceId(), spectate };
     };
 
+    let bytesDown = 0;
     const ports: Ports = {
-      transport: createTransport({ park, credentials, onDialed: telemetry.noteDial }),
-      fetchBehavior: async (kind, ref) => {
+      transport: createTransport({
+        park,
+        credentials,
+        onDialed: telemetry.noteDial,
+        onBytesDown: (n) => {
+          bytesDown += n;
+          hud.noteBytes(bytesDown);
+        },
+      }),
+      fetchModule: async (slot, ref) => {
+        const kind = slot === "session" ? "client" : "park";
         const r = await fetch(`/behavior/${kind}.wasm?v=${ref ?? Date.now()}`);
         if (!r.ok) throw new Error(`/behavior/${kind}.wasm ${r.status}`);
         return r.arrayBuffer();
       },
-      fetchTerrain: async (idHex) => {
-        const r = await fetch(`/terrain/${idHex}`);
-        if (!r.ok) throw new Error(`/terrain/${idHex} ${r.status}`);
+      fetchBlob: async (kind, id) => {
+        if (kind !== 1) throw new Error(`unknown blob kind ${kind}`);
+        const r = await fetch(`/terrain/${id}`);
+        if (!r.ok) throw new Error(`/terrain/${id} ${r.status}`);
         return r.arrayBuffer();
       },
-      now: () => Date.now(),
-      telemetry: (code, a, b) => {
-        telemetry.emit(code, a, b);
-        debug?.onEmit(code, a, b);
-        stats?.onEmit(code, a, b);
-      },
       random32: browserRandom32,
-      log: hud.log,
     };
 
-    const core = new Core(ports, {
+    const game = WumGame.create(ports, {
       myDog: identity.myDog,
       role: identity.role,
-      park,
       // The cadence is read once: it paces the session core, which takes
       // it at init. A flag flip reaches open pages on their next load.
       checkMs: Math.round(
         OpenFeature.getClient().getNumberValue(CHECK_SECONDS_FLAG, DEFAULT_CHECK_SECONDS) * 1000,
       ),
-      moduleRefs: { park: info.parkWasm, client: info.clientWasm },
+      moduleRefs: { session: info.clientWasm, replica: info.parkWasm },
+      telemetry: (code, a, b) => {
+        telemetry.emit(code, a, b);
+        debug?.onEmit(code, a, b);
+        stats?.onEmit(code, a, b);
+      },
+      log: hud.log,
     });
-    hud.bind(core);
-    // The core is idle until it dials, but the page has been promising a
+    hud.bind(game, park);
+    // The game is idle until it dials, but the page has been promising a
     // connection since it rendered, and the modules load in between.
     hud.setStatus("connecting");
-    telemetry.bind(core);
-    debug = import.meta.env.DEV ? createDebugPanel(core) : null;
+    telemetry.bind(game);
+    debug = import.meta.env.DEV ? createDebugPanel(game.host) : null;
     // Stats for Nerds ships to prod: `?stats=1` or backquote. It reads
     // the module's diagnostics record; dev values are tiny by nature —
     // production is where the trail number earns its keep.
-    stats = createStatsPane(core);
+    stats = createStatsPane(game.host);
     // The raw per-frame ring is opt-in because only a harness reads it; the
     // counters behind the once-a-minute span always run.
     const probe = query.has("probe");
@@ -173,7 +183,7 @@ async function run(hud: Hud): Promise<void> {
     // Under the probe the harness reads the spans alongside the frames:
     // the frames show a rewind, the spans say which repair asked for it.
     if (probe) tapSpans(jank.recordSpan);
-    const renderer = createRenderer({ core, hud, jank, myDog: () => identity.myDog });
+    const renderer = createRenderer({ game, hud, jank, myDog: () => identity.myDog });
 
     const onSignIn = async (o: SignInOutcome): Promise<void> => {
       if (o.status === "error") {
@@ -187,7 +197,7 @@ async function run(hud: Hud): Promise<void> {
       hud.log("signed in — bringing your dog to the park");
       // The replica state carries over, so the upgrade is a reconnect
       // under the new identity rather than a reload.
-      core.reidentify(identity.myDog, identity.role);
+      game.reidentify(identity.myDog, identity.role);
     };
 
     hud.controls.signin.onclick = () =>
@@ -195,7 +205,7 @@ async function run(hud: Hud): Promise<void> {
         void onSignIn(o);
       });
     hud.controls.checkin.onclick = () => {
-      core.checkIn();
+      game.checkIn();
     };
     hud.controls.recenter.onclick = () => renderer.followCamera();
     // Boost is a held button. Release insurance rides every channel a
@@ -204,20 +214,20 @@ async function run(hud: Hud): Promise<void> {
     const boost = hud.controls.boost;
     boost.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      core.setBoost(true);
+      game.setBoost(true);
     });
     for (const ev of ["pointerup", "pointercancel", "pointerleave"]) {
       boost.addEventListener(ev, () => {
-        core.setBoost(false);
+        game.setBoost(false);
       });
     }
     window.addEventListener("blur", () => {
-      core.setBoost(false);
+      game.setBoost(false);
     });
     document.addEventListener("visibilitychange", () => {
-      // Hidden pages go quiet: the core stops sending check datagrams.
-      core.setVisible(!document.hidden);
-      if (document.hidden) core.setBoost(false);
+      // Hidden pages go quiet: the session stops sending check datagrams.
+      game.host.setVisible(!document.hidden);
+      if (document.hidden) game.setBoost(false);
     });
 
     // The loop re-arms only after a frame that completed: a throw from the
@@ -228,9 +238,10 @@ async function run(hud: Hud): Promise<void> {
         // A frozen pump is a zero step budget, not a skipped call: the clock
         // keeps observing and events keep applying, the replica just stops
         // advancing. Skipping would stop the session dead.
-        if (debug?.frozen()) core.pump(0);
-        else core.pump();
+        if (debug?.frozen()) game.pump(undefined, 0);
+        else game.pump();
         renderer.frame(now);
+        hud.update();
         debug?.update();
       } catch (e) {
         const id = reportFrameFailure(e);
@@ -245,10 +256,10 @@ async function run(hud: Hud): Promise<void> {
     requestAnimationFrame(frame);
 
     hud.log(identity.role === "player" ? "joining with your dog" : "spectating — sign in to join");
-    await core.boot();
+    await game.boot();
     // A page that loaded in a background tab has never had a
-    // visibilitychange to tell the core it is not being watched.
-    core.setVisible(!document.hidden);
+    // visibilitychange to tell the session it is not being watched.
+    game.host.setVisible(!document.hidden);
   } catch (e) {
     const id = reportBootFailure(e);
     const detail = e instanceof Error ? e.message : String(e);

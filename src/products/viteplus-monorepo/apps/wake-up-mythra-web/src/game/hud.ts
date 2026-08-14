@@ -1,10 +1,11 @@
 // The page chrome: every DOM write outside the canvas, driven by the
-// session core's read surface. The element ids and the exact text they
-// carry are a test contract — the degradation drill reads #status, #rtt
-// and #world, and headless drill harnesses read __mythraDiag — so the
-// strings here are load-bearing, not decoration.
+// game's read surface. The element ids and the exact text they carry are
+// a test contract — the degradation drill reads #status, #rtt and #world,
+// and headless drill harnesses read __mythraDiag — so the strings here
+// are load-bearing, not decoration.
 
-import { UNREACHABLE_AFTER_DIALS, type Core } from "@guardian/mythrad-client-core";
+import type { HostState } from "@guardian/chunkies";
+import type { GameState, WumGame } from "@guardian/wum-client";
 import * as v from "valibot";
 
 // Sim reject codes 1-9 and doorman codes 100-101 (rejectReasonName in
@@ -65,7 +66,7 @@ export type Hud = {
   readonly diag: Diag;
   readonly controls: Controls;
   readonly log: (line: string) => void;
-  /** A status the core never reaches: an unsupported browser, a failed boot. */
+  /** A status the game never reaches: an unsupported browser, a failed boot. */
   readonly setStatus: (text: string) => void;
   readonly setWho: (text: string) => void;
   /** Anonymous spectators get the way in; signed-in players don't. */
@@ -73,9 +74,34 @@ export type Hud = {
   readonly showRecenter: (show: boolean) => void;
   /** The roster line, from the renderer's read of the presented world. */
   readonly setRoster: (names: string[], total: number) => void;
-  /** Starts the subscriptions that drive every field the core knows. */
-  readonly bind: (core: Core) => void;
+  /** Cumulative downlink bytes, from the transport's own count. */
+  readonly noteBytes: (total: number) => void;
+  /** Starts the subscription that drives every field the game knows. */
+  readonly bind: (game: WumGame, park: string) => void;
+  /**
+   * Refreshes the diagnostics-driven readouts (rtt, repair counters).
+   * Called from the frame loop, never from a subscription: a state
+   * notification can fire from inside a wasm call, where reading the
+   * diagnostics record would re-enter the session module.
+   */
+  readonly update: () => void;
 };
+
+/** The pill text for a phase — `connected` is the drill contract for a live session. */
+function statusText(connection: HostState): string {
+  switch (connection.phase) {
+    case "live":
+    case "resyncing":
+      return "connected";
+    case "booting":
+      return "connecting";
+    case "connecting":
+    case "unreachable":
+      return connection.dialAttempts > 0 ? "reconnecting" : "connecting";
+    default:
+      return connection.phase;
+  }
+}
 
 function el(id: string): HTMLElement {
   return v.parse(v.instance(HTMLElement), document.getElementById(id));
@@ -122,6 +148,7 @@ export function createHud(): Hud {
 
   let connected = false;
   let whoText = "";
+  let boundGame: WumGame | null = null;
 
   const log = (line: string): void => {
     const row = document.createElement("div");
@@ -133,6 +160,14 @@ export function createHud(): Hud {
   const setStatus = (text: string): void => {
     nodes.status.textContent = text.toUpperCase();
     nodes.status.className = "pill" + (text === "connected" ? " connected" : "");
+  };
+
+  const drawBytes = (): void => {
+    // The headline cost metric: downlink bytes per hour of screen-on
+    // time, once there is enough screen-on time to divide by.
+    const hours = (Date.now() - (diag.startedAt || Date.now())) / 3600000;
+    nodes.bytes.textContent =
+      hours > 0.001 ? `${(diag.bytesDown / 1024 / hours).toFixed(1)}KB/h` : `${diag.bytesDown}B`;
   };
 
   return {
@@ -169,73 +204,75 @@ export function createHud(): Hud {
       whoText = text;
       nodes.who.textContent = text;
     },
-    bind: (core) => {
-      const checkinState = (): void => {
-        const player = core.state.role === "player";
+    noteBytes: (total) => {
+      diag.bytesDown = total;
+      drawBytes();
+    },
+    bind: (game, park) => {
+      let shownStatus = "";
+      let shownUnreachable = false;
+      let prev: GameState | null = null;
+
+      const checkinState = (s: GameState): void => {
+        const player = s.connection.role === "player";
         nodes.checkin.style.display = player ? "" : "none";
         nodes.boost.style.display = player ? "" : "none";
-        const checkedIn = core.state.checkedInToday;
-        nodes.checkin.disabled = !player || !core.state.present || checkedIn;
+        const checkedIn = s.hud?.checkedInToday ?? false;
+        nodes.checkin.disabled = !player || !(s.hud?.present ?? false) || checkedIn;
         nodes.checkin.textContent = checkedIn ? "Checked in ✓" : "Check in";
       };
 
-      core.subscribe("status", (status) => {
-        connected = status === "connected";
+      game.subscribe((s) => {
+        const status = statusText(s.connection);
+        connected = s.connection.phase === "live" || s.connection.phase === "resyncing";
         if (connected && diag.startedAt === 0) diag.startedAt = Date.now();
-        setStatus(status);
-      });
-      core.subscribe("dialFailures", (n) => {
-        // After a few straight failures, say so where the roster would be:
-        // dials keep retrying, but the user should know the park is
+        if (status !== shownStatus) {
+          shownStatus = status;
+          setStatus(status);
+        }
+        // Dials keep retrying, but the user should know the park is
         // unreachable rather than empty (iOS WebKit's WebTransport
         // networking crash looks exactly like this).
-        if (n === UNREACHABLE_AFTER_DIALS) nodes.who.textContent = UNREACHABLE;
+        if (s.connection.phase === "unreachable" && !shownUnreachable) {
+          nodes.who.textContent = UNREACHABLE;
+        }
+        shownUnreachable = s.connection.phase === "unreachable";
+
+        if (s.connection.role !== prev?.connection.role) {
+          nodes.role.textContent = `${s.connection.role ?? "spectator"} @ ${park}`;
+        }
+        if (
+          s.connection.role !== prev?.connection.role ||
+          s.hud?.present !== prev?.hud?.present ||
+          s.hud?.checkedInToday !== prev?.hud?.checkedInToday
+        ) {
+          checkinState(s);
+        }
+        if (s.worldTick !== prev?.worldTick) {
+          diag.tick = Number(s.worldTick);
+          nodes.tick.textContent = String(s.worldTick);
+        }
+        if (s.worldHashOk !== prev?.worldHashOk) {
+          nodes.world.textContent = s.worldHashOk === null ? "–" : s.worldHashOk ? "✓" : "✗";
+        }
+        if (s.hud?.parkEnergy !== prev?.hud?.parkEnergy) {
+          nodes.energy.textContent = String(s.hud?.parkEnergy ?? 0n);
+        }
+        prev = s;
       });
-      core.subscribe("role", (role) => {
-        nodes.role.textContent = `${role} @ ${core.state.park}`;
-        checkinState();
-      });
-      core.subscribe("present", checkinState);
-      core.subscribe("checkedInToday", checkinState);
-      core.subscribe("tick", (tick) => {
-        diag.tick = Number(tick);
-        nodes.tick.textContent = String(tick);
-      });
-      core.subscribe("rttMs", (ms) => {
-        nodes.rtt.textContent = `${ms.toFixed(0)}ms`;
-      });
-      core.subscribe("worldOk", (ok) => {
-        nodes.world.textContent = ok === null ? "–" : ok ? "✓" : "✗";
-      });
-      core.subscribe("parkEnergy", (energy) => {
-        nodes.energy.textContent = String(energy);
-      });
-      core.subscribe("bytesDown", (bytes) => {
-        diag.bytesDown = bytes;
-        // The headline cost metric: downlink bytes per hour of screen-on
-        // time, once there is enough screen-on time to divide by.
-        const hours = (Date.now() - (diag.startedAt || Date.now())) / 3600000;
-        nodes.bytes.textContent =
-          hours > 0.001 ? `${(bytes / 1024 / hours).toFixed(1)}KB/h` : `${bytes}B`;
-      });
-      core.subscribe("events", (n) => {
-        diag.events = n;
-      });
-      core.subscribe("rollbacks", (n) => {
-        diag.rollbacks = n;
-      });
-      core.subscribe("resyncs", (n) => {
-        diag.resyncs = n;
-      });
-      core.subscribe("checks", (n) => {
-        diag.checks = n;
-      });
-      core.subscribe("mismatches", (n) => {
-        diag.mismatches = n;
-      });
-      core.subscribe("rejects", (n) => {
-        diag.rejects = n;
-      });
+      boundGame = game;
+    },
+    update: () => {
+      const d = boundGame?.host.diag();
+      if (!d) return;
+      diag.events = d.events;
+      diag.rollbacks = d.rollbacks;
+      diag.resyncs = d.resyncs;
+      diag.checks = d.checks;
+      diag.mismatches = d.mismatches;
+      diag.rejects = d.rejects;
+      const rtt = `${d.rttMs.toFixed(0)}ms`;
+      if (nodes.rtt.textContent !== rtt) nodes.rtt.textContent = rtt;
     },
   };
 }

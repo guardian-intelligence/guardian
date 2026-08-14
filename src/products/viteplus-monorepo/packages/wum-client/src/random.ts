@@ -1,10 +1,5 @@
-// Default port implementations for hosts running on a platform that has
-// them. Ports stay interfaces-only in `ports.ts`; this is where a correct
-// implementation lives so no host has to write one from scratch and get
-// it subtly wrong.
-
 /**
- * The production `random32`: a full 32 bits from the platform CSPRNG.
+ * The production `random32` port: a full 32 bits from the platform CSPRNG.
  *
  * This exists because the obvious wrong answer — `Math.random()`, or a
  * truncated draw — fails silently. The value seeds the intent-id nonce,

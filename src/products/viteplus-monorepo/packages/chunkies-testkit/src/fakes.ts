@@ -4,13 +4,14 @@
 // shrink a failure to a seed and a delivery order.
 //
 import type {
-  BehaviorModule,
   Connection,
   ConnectionSink,
   Dialed,
+  HostOptions,
+  ModuleSlot,
   Ports,
   TransportPort,
-} from "@guardian/mythrad-client-core";
+} from "@guardian/chunkies";
 import { FrameDecoder, decodeClientFrame, type ClientFrame } from "./wire.ts";
 
 /** A clock that only moves when the test says so, plus the timers hanging off it. */
@@ -27,7 +28,7 @@ export class VirtualClock {
     return this.#now;
   }
 
-  /** The `schedule` port: returns its own canceller. */
+  /** The `schedule` option: returns its own canceller. */
   readonly schedule = (fn: () => void, ms: number): (() => void) => {
     const id = this.#seq++;
     this.#timers.set(id, { at: this.#now + ms, fn });
@@ -95,7 +96,7 @@ export type DialOutcome = { readonly ok: true } | { readonly ok: false; readonly
 
 /**
  * A transport the test drives byte by byte. It records everything the
- * core sends, and lets the test decide how server bytes are chopped up
+ * host sends, and lets the test decide how server bytes are chopped up
  * and in what order datagrams arrive.
  */
 export class ScriptedTransport implements TransportPort {
@@ -107,6 +108,8 @@ export class ScriptedTransport implements TransportPort {
   readonly sentStream: Uint8Array[] = [];
   readonly sentDatagrams: Uint8Array[] = [];
   closed = 0;
+  /** Stream plus datagram bytes handed to the host: the downlink cost a session paid. */
+  bytesDelivered = 0;
 
   #sink: ConnectionSink | null = null;
   #live = false;
@@ -135,6 +138,7 @@ export class ScriptedTransport implements TransportPort {
   /** Delivers stream bytes, optionally chopped into the given read sizes. */
   deliverStream(bytes: Uint8Array, chunkSizes?: number[]): void {
     if (!this.#sink) throw new Error("no connection to deliver on");
+    this.bytesDelivered += bytes.length;
     for (const piece of chop(bytes, chunkSizes)) this.#sink.onStreamBytes(piece);
   }
 
@@ -145,6 +149,7 @@ export class ScriptedTransport implements TransportPort {
 
   deliverDatagram(bytes: Uint8Array): void {
     if (!this.#sink) throw new Error("no connection to deliver on");
+    this.bytesDelivered += bytes.length;
     this.#sink.onDatagram(bytes);
   }
 
@@ -156,7 +161,7 @@ export class ScriptedTransport implements TransportPort {
     sink?.onClosed();
   }
 
-  /** Everything the core has written to the stream, decoded. */
+  /** Everything the host has written to the stream, decoded. */
   sentFrames(): ClientFrame[] {
     const d = new FrameDecoder();
     const out: ClientFrame[] = [];
@@ -196,50 +201,56 @@ export type Emitted = { readonly code: number; readonly a: bigint; readonly b: b
 export type HarnessOptions = {
   readonly seed?: number;
   readonly startMs?: number;
-  /** Module bytes by kind. Absent entries make `fetchBehavior` reject. */
-  readonly modules?: Partial<Record<BehaviorModule, ArrayBuffer>>;
-  /** Terrain artifacts by 16-hex-char id. Absent entries make `fetchTerrain` reject. */
-  readonly terrain?: Record<string, ArrayBuffer>;
+  /** Module bytes by slot. Absent entries make `fetchModule` reject. */
+  readonly modules?: Partial<{ readonly [S in ModuleSlot]: ArrayBuffer }>;
+  /** Blob artifacts by 16-hex-char id. Absent entries make `fetchBlob` reject. */
+  readonly blobs?: ReadonlyMap<string, ArrayBuffer>;
 };
 
-/** Every port, wired to the deterministic fakes, plus the recordings a test asserts on. */
+/** Every port wired to the deterministic fakes, plus the recordings a test asserts on. */
 export class Harness {
   readonly clock: VirtualClock;
   readonly transport = new ScriptedTransport();
   readonly emitted: Emitted[] = [];
   readonly logs: string[] = [];
-  readonly behaviorFetches: { kind: BehaviorModule; ref?: string }[] = [];
-  readonly terrainFetches: string[] = [];
+  readonly moduleFetches: { slot: ModuleSlot; ref?: string }[] = [];
+  readonly blobFetches: string[] = [];
   readonly ports: Ports;
-  readonly schedule: (fn: () => void, ms: number) => () => void;
+  /** The non-port injections a host (or a game over one) takes. */
+  readonly hostOptions: Pick<
+    Required<HostOptions>,
+    "now" | "schedule" | "telemetry" | "sha256" | "log"
+  >;
 
-  #modules: Partial<Record<BehaviorModule, ArrayBuffer>>;
-  #terrain: Record<string, ArrayBuffer>;
+  #modules: Partial<{ [S in ModuleSlot]: ArrayBuffer }>;
+  #blobs: ReadonlyMap<string, ArrayBuffer>;
   #random: () => number;
 
   constructor(options: HarnessOptions = {}) {
     this.clock = new VirtualClock(options.startMs);
-    this.schedule = this.clock.schedule;
     this.#modules = options.modules ?? {};
-    this.#terrain = options.terrain ?? {};
+    this.#blobs = options.blobs ?? new Map();
     this.#random = seededRandom32(options.seed ?? 1);
     this.ports = {
       transport: this.transport,
-      fetchBehavior: (kind, ref) => {
-        this.behaviorFetches.push(ref === undefined ? { kind } : { kind, ref });
-        const bytes = this.#modules[kind];
-        return bytes ? Promise.resolve(bytes) : Promise.reject(new Error(`no ${kind} module`));
+      fetchModule: (slot, ref) => {
+        this.moduleFetches.push(ref === undefined ? { slot } : { slot, ref });
+        const bytes = this.#modules[slot];
+        return bytes ? Promise.resolve(bytes) : Promise.reject(new Error(`no ${slot} module`));
       },
-      fetchTerrain: (idHex) => {
-        this.terrainFetches.push(idHex);
-        const bytes = this.#terrain[idHex];
-        return bytes ? Promise.resolve(bytes) : Promise.reject(new Error(`no terrain ${idHex}`));
+      fetchBlob: (_kind, id) => {
+        this.blobFetches.push(id);
+        const bytes = this.#blobs.get(id);
+        return bytes ? Promise.resolve(bytes) : Promise.reject(new Error(`no blob ${id}`));
       },
+      random32: () => this.#random(),
+    };
+    this.hostOptions = {
       now: () => this.clock.now(),
+      schedule: this.clock.schedule,
       telemetry: (code, a, b) => {
         this.emitted.push({ code, a, b });
       },
-      random32: () => this.#random(),
       // Node has webcrypto on the global, so this matches the browser
       // default rather than standing in for it.
       sha256: (bytes) => crypto.subtle.digest("SHA-256", bytes),
@@ -249,9 +260,9 @@ export class Harness {
     };
   }
 
-  /** Swaps what `fetchBehavior` serves, so a test can change what a re-fetch returns. */
-  setModule(kind: BehaviorModule, bytes: ArrayBuffer): void {
-    this.#modules = { ...this.#modules, [kind]: bytes };
+  /** Swaps what `fetchModule` serves, so a test can change what a re-fetch returns. */
+  setModule(slot: ModuleSlot, bytes: ArrayBuffer): void {
+    this.#modules = { ...this.#modules, [slot]: bytes };
   }
 
   /** Codes emitted so far, for asserting a choreography without pinning arguments. */
@@ -263,7 +274,7 @@ export class Harness {
    * Lets pending async work finish. Microtask drains alone are not
    * enough: instantiating a module and hashing it go through host
    * promises that settle on the macrotask queue, and a module swap
-   * chains several. The real timer here is safe — the core's own timers
+   * chains several. The real timer here is safe — the host's own timers
    * come from the injected scheduler, so nothing virtual advances.
    */
   async settle(turns = 4): Promise<void> {

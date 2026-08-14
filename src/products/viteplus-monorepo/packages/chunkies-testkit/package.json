@@ -20,7 +20,7 @@
     "typecheck": "vp exec tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@guardian/mythrad-client-core": "workspace:*",
+    "@guardian/chunkies": "workspace:*",
     "fflate": "catalog:"
   },
   "devDependencies": {

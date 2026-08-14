@@ -1,8 +1,8 @@
 {
-  "name": "@guardian/mythrad-client-core",
+  "name": "@guardian/chunkies",
   "version": "0.1.0",
   "private": true,
-  "description": "Platform-agnostic Wake Up Mythra replica host: the client.wasm session-core host bindings and the two park slots it steps. Plain TypeScript over injected ports so the browser, and later a native shell, share one implementation.",
+  "description": "Game-agnostic replica host for journaled deterministic sims: binds a session-core wasm module and a replica wasm module over injected ports, with the game layered above through typed extension and projection doors. The name is a deliberate find-and-replaceable placeholder.",
   "files": [
     "src"
   ],

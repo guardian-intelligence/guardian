@@ -5,18 +5,27 @@
 // instantiation failure at boot. Neither announces itself until the code
 // runs.
 //
-// The name tables live in src/abi.ts, where `Core.boot` verifies them
-// against the fetched modules before any cast. Set equality against the
-// committed modules turns ABI drift in either direction into a failing
-// test at the moment it lands, in either repo.
+// The framework name tables live in src/abi.ts, where `ReplicaHost.boot`
+// verifies them against the fetched modules before any cast; the game's
+// extension and projection exports go through the guarded doors instead
+// and are named here only so set equality against the committed modules
+// still turns ABI drift in either direction into a failing test at the
+// moment it lands, in either repo.
 
 import { describe, expect, it } from "vitest";
-import { CLIENT_EXPORTS, HOST_IMPORTS, PARK_EXPORTS } from "../src/abi.ts";
-import { ActionKind, Emit, HostEmit } from "../src/ports.ts";
+import { HOST_IMPORTS, REPLICA_EXPORTS, SESSION_EXPORTS } from "../src/abi.ts";
+import { HostEmit } from "../src/ports.ts";
+import { Emit } from "../src/telemetry.gen.ts";
 import { bringTheDogIn, dogPayload, Ev, modules, rig } from "@guardian/chunkies-testkit";
 
-/** Park exports the host has no use for, but the module legitimately has. */
-const PARK_UNUSED = ["sim_epoch", "sim_rate", "sim_anchor_tick", "sim_anchor_ns"];
+/** The committed session module's extension exports: WUM's intent verbs. */
+const SESSION_EXTENSIONS = ["intent_join", "intent_check_in", "intent_move_to", "intent_boost"];
+
+/** The committed replica module's projection exports: WUM's read surfaces. */
+const REPLICA_PROJECTIONS = ["sim_view", "sim_hud"];
+
+/** Replica exports the host has no use for, but the module legitimately has. */
+const REPLICA_UNUSED = ["sim_epoch", "sim_rate", "sim_anchor_tick", "sim_anchor_ns"];
 
 function names(list: { name: string }[]): Set<string> {
   return new Set(list.map((e) => e.name));
@@ -31,8 +40,10 @@ describe("client.wasm", () => {
     expect(WebAssembly.Module.exports(mod).find((e) => e.name === "memory")?.kind).toBe("memory");
   });
 
-  it("exports exactly what ClientExports declares", () => {
-    expect([...exports].sort()).toEqual([...CLIENT_EXPORTS, "memory"].sort());
+  it("exports exactly the framework surface plus the named extensions", () => {
+    expect([...exports].sort()).toEqual(
+      [...SESSION_EXPORTS, ...SESSION_EXTENSIONS, "memory"].sort(),
+    );
   });
 
   it("imports exactly the eleven host functions, all from module `host`", () => {
@@ -51,12 +62,14 @@ describe("park.wasm", () => {
     expect(WebAssembly.Module.imports(mod)).toHaveLength(0);
   });
 
-  it("exports everything ParkExports declares", () => {
-    for (const name of PARK_EXPORTS) expect(exports.has(name), name).toBe(true);
+  it("exports everything ReplicaExports declares", () => {
+    for (const name of REPLICA_EXPORTS) expect(exports.has(name), name).toBe(true);
   });
 
-  it("declares no park export the module does not have", () => {
-    expect([...exports].sort()).toEqual([...PARK_EXPORTS, ...PARK_UNUSED, "memory"].sort());
+  it("declares no replica export the module does not have", () => {
+    expect([...exports].sort()).toEqual(
+      [...REPLICA_EXPORTS, ...REPLICA_PROJECTIONS, ...REPLICA_UNUSED, "memory"].sort(),
+    );
   });
 });
 
@@ -74,8 +87,8 @@ describe("the telemetry vocabulary", () => {
 
     // Exercise enough paths that the common vocabulary shows up: an
     // intent, its answer, a repair, a check and its verdict.
-    r.core.checkIn();
-    r.core.setBoost(true);
+    r.checkIn();
+    r.setBoost(true);
     await r.run(300);
     r.answerChecks();
     const arrival = r.authority.apply(Ev.join, dogPayload(0x9802n));
@@ -89,26 +102,5 @@ describe("the telemetry vocabulary", () => {
     const unnamed = [...seen].filter((code) => !named.has(code)).sort((a, b) => a - b);
     expect(seen.size, "codes observed").toBeGreaterThan(5);
     expect(unnamed, "telemetry codes this host cannot name").toEqual([]);
-  });
-
-  it("names every action kind a host can send", async () => {
-    // The action verbs are the host's whole write surface, and the kind
-    // rides every action span as a bare number. A verb whose kind has no
-    // row in ActionKind reaches dashboards as "kind N" — this is the only
-    // thing that notices the table going stale.
-    const r = await rig({ role: "player", myDog: 0x9803n });
-    await r.establish();
-    await bringTheDogIn(r, 0x9803n);
-    r.core.checkIn();
-    r.core.moveTo(1);
-    r.core.setBoost(true);
-    await r.run(300);
-
-    const sent = r.harness.emitted
-      .filter((e) => e.code === Emit.intentSent)
-      .map((e) => Number(e.a));
-    expect(new Set(sent).size, "distinct kinds exercised").toBeGreaterThanOrEqual(4);
-    const unnamed = [...new Set(sent)].filter((kind) => !(kind in ActionKind));
-    expect(unnamed, "action kinds without a name").toEqual([]);
   });
 });

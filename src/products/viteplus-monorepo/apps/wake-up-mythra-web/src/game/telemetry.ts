@@ -4,16 +4,8 @@
 // numbers on the left may change with the core, the strings on the right
 // may not.
 
-import {
-  ActionKind,
-  CLOCK_STATE_NAMES,
-  Emit,
-  HostEmit,
-  IntentDrop,
-  ResyncReason,
-  moduleWordHex,
-  type Core,
-} from "@guardian/mythrad-client-core";
+import { Emit, HostEmit, IntentDrop, ResyncReason, moduleWordHex } from "@guardian/chunkies";
+import { actionName, type WumGame } from "@guardian/wum-client";
 import { emitSpan, reportError } from "@guardian/telemetry";
 import { rejectText } from "./hud";
 import type { JankCounters } from "./jank";
@@ -21,6 +13,10 @@ import type { JankCounters } from "./jank";
 // Why the replica asked for a snapshot, or — for the last two — tore the
 // stream down instead. The dashboard groups `wum.why`, so these stay the
 // sentences proto 3 emitted.
+// The clock's dashboard vocabulary: the sim/clock crate's numbering, in
+// the exact strings the dashboards group by.
+const CLOCK_SPAN_NAMES = ["acquiring", "locked", "fast-forward", "snapshot-required"] as const;
+
 const RESYNC_WHY: Record<number, string> = {
   [ResyncReason.clock]: "clock: beyond the recovery window",
   [ResyncReason.lateEvent]: "late event beyond rollback ring",
@@ -71,12 +67,12 @@ export function jank(park: string, c: JankCounters): void {
 }
 
 export type Telemetry = {
-  /** The `telemetry` port: the core's numeric vocabulary, mapped to spans. */
+  /** The `telemetry` injection: the session's numeric vocabulary, mapped to spans. */
   readonly emit: (code: number, a: bigint, b: bigint) => void;
   /** What the dial that just succeeded cost, for the connected span. */
   readonly noteDial: (dialMs: number, anon: boolean) => void;
-  /** Subscribes to the connection lifecycle the core owns. */
-  readonly bind: (core: Core) => void;
+  /** Subscribes to the connection lifecycle the game owns. */
+  readonly bind: (game: WumGame) => void;
 };
 
 export function signedIn(flow: SignInFlow): void {
@@ -115,9 +111,9 @@ export function createTelemetry(ctx: {
       dialMs = ms;
       anon = wasAnon;
     },
-    bind: (core) => {
-      core.subscribe("role", (r) => {
-        role = r;
+    bind: (game) => {
+      game.subscribe((s) => {
+        role = s.connection.role ?? role;
       });
     },
     emit: (code, a, b) => {
@@ -145,7 +141,7 @@ export function createTelemetry(ctx: {
           // this is the per-action latency dashboards rank kinds by.
           const kind = Number(a & 0xffffn);
           span("wum.action", {
-            "wum.kind": ActionKind[kind] ?? `kind ${kind}`,
+            "wum.kind": actionName(kind) ?? `kind ${kind}`,
             "wum.ms": String(b),
             "wum.resends": String(a >> 16n),
             "wum.park": park,
@@ -156,7 +152,7 @@ export function createTelemetry(ctx: {
           const kind = Number(a & 0xffffn);
           const why = Number(a >> 16n);
           span("wum.action_dropped", {
-            "wum.kind": ActionKind[kind] ?? `kind ${kind}`,
+            "wum.kind": actionName(kind) ?? `kind ${kind}`,
             "wum.why": why === IntentDrop.overflow ? "overflow" : "reidentify",
             "wum.held_ms": String(b),
             "wum.park": park,
@@ -195,7 +191,7 @@ export function createTelemetry(ctx: {
           // Fires on state transitions only. The deficit is signed:
           // positive is behind the schedule, negative is ahead of it.
           span("wum.netcode_clock", {
-            "wum.state": CLOCK_STATE_NAMES[Number(a)] ?? `state ${a}`,
+            "wum.state": CLOCK_SPAN_NAMES[Number(a)] ?? `state ${a}`,
             "wum.err_ticks": String(BigInt.asIntN(64, b)),
             "wum.park": park,
           });

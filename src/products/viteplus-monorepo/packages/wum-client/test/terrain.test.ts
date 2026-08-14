@@ -4,8 +4,11 @@ import { TerrainError, decodeTerrain, terrainBytes } from "../src/terrain.ts";
 /** Builds an artifact whose every plane byte names the plane it belongs to. */
 function artifact(w: number, h: number): Uint8Array {
   const blob = new Uint8Array(terrainBytes(w, h));
-  new DataView(blob.buffer).setUint16(8, w, true);
-  new DataView(blob.buffer).setUint16(10, h, true);
+  const dv = new DataView(blob.buffer);
+  blob.set(new TextEncoder().encode("MYT1"), 0);
+  dv.setUint32(4, 1, true);
+  dv.setUint16(8, w, true);
+  dv.setUint16(10, h, true);
   const cells = w * h;
   const marks = [
     [16, cells, 1], // ground
@@ -60,6 +63,22 @@ describe("decodeTerrain", () => {
     const t = decodeTerrain(inner);
     expect([t.w, t.h]).toEqual([3, 3]);
     expect([...new Set(t.variant)]).toEqual([5]);
+  });
+
+  it("refuses a blob without the MYT1 magic", () => {
+    // The same refusal the Rust reader and the Go server make: bytes that
+    // are not a terrain artifact must not be sliced into planes as if
+    // they were one — an error page fetched as terrain would otherwise
+    // render as geography.
+    const blob = artifact(4, 4);
+    blob[0] = 0x58;
+    expect(() => decodeTerrain(blob)).toThrow(/MYT1/);
+  });
+
+  it("refuses a schema this reader does not know", () => {
+    const blob = artifact(4, 4);
+    new DataView(blob.buffer).setUint32(4, 2, true);
+    expect(() => decodeTerrain(blob)).toThrow(/schema 2/);
   });
 
   it("refuses a blob shorter than its own dimensions demand", () => {

@@ -1,21 +1,21 @@
 // Dev-only: the clock's account of itself, and a way to starve it.
-// Freezing pumps the core with a zero step budget, so the clock still
+// Freezing pumps the session with a zero step budget, so the clock still
 // observes and escalates and events still apply while nothing steps —
 // the deficit grows, the state walks to fast-forward and on to
 // snapshot-required, and the recovery after resume all happen on screen.
 
-import { CLOCK_STATE_NAMES, Emit, type Core } from "@guardian/mythrad-client-core";
+import { Emit, type ReplicaHost } from "@guardian/chunkies";
 import * as v from "valibot";
 
 export type DebugPanel = {
   /** True while step execution is starved; the frame loop pumps a zero budget. */
   readonly frozen: () => boolean;
-  /** Fed the core's telemetry so the panel can narrate verdicts. */
+  /** Fed the session's telemetry so the panel can narrate verdicts. */
   readonly onEmit: (code: number, a: bigint, b: bigint) => void;
   readonly update: () => void;
 };
 
-export function createDebugPanel(core: Core): DebugPanel {
+export function createDebugPanel(host: ReplicaHost): DebugPanel {
   const panel = document.createElement("div");
   panel.style.cssText =
     "position:fixed;bottom:8px;right:8px;background:#161a21ee;color:#f4f1ea;" +
@@ -61,13 +61,12 @@ export function createDebugPanel(core: Core): DebugPanel {
       }
     },
     update: () => {
-      const state = core.state;
-      const d = core.diag();
+      const hz = host.state.rateHz ?? 0;
+      const d = host.diag();
       if (!d) return;
       line("dbg-clock").textContent =
-        `clock ${CLOCK_STATE_NAMES[d.clockState] ?? "?"}${frozen() ? " (frozen)" : ""}` +
-        ` · rtt ${d.rttMs}ms`;
-      const seconds = state.hz > 0 ? ` (${(d.errorTicks / state.hz).toFixed(2)}s)` : "";
+        `clock ${d.clockState}${frozen() ? " (frozen)" : ""}` + ` · rtt ${d.rttMs}ms`;
+      const seconds = hz > 0 ? ` (${(d.errorTicks / hz).toFixed(2)}s)` : "";
       line("dbg-desync").textContent = `desync ${d.errorTicks.toFixed(1)} ticks${seconds}`;
       line("dbg-replica").textContent =
         `replica tick ${d.tick} seq ${d.seq}` + ` · ${d.rollbacks} rollbacks, ${d.resyncs} resyncs`;

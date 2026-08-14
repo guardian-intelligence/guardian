@@ -1,12 +1,14 @@
-// The record layouts cross the wasm boundary as raw little-endian bytes:
-// the Rust writers place fields, these decoders find them. The goldens
-// are bytes those writers actually produced, stamped with their decoded
-// fields on the Rust side — so every offset and width here is tested
-// against the writer, not trusted to match its doc comment.
+// The game record layouts cross the wasm boundary as raw little-endian
+// bytes: the Rust writers place fields, these decoders find them. The
+// goldens are bytes those writers actually produced, stamped with their
+// decoded fields on the Rust side — so every offset and width here is
+// tested against the writer, not trusted to match its doc comment. The
+// framework record (session_diag) is pinned the same way in chunkies.
 
 import { describe, expect, it } from "vitest";
 import goldens from "@guardian/chunkies-testkit/goldens/records.json";
-import { decodeDiag, decodeHud, decodeViewDog, DIAG_BYTES, HUD_BYTES } from "../src/abi.ts";
+import { decodeHud, HUD_BYTES } from "../src/projections/hud.ts";
+import { decodeViewDog } from "../src/projections/view.ts";
 import { decodeTerrain, terrainBytes } from "../src/terrain.ts";
 
 function bytesOf(hex: string): Uint8Array {
@@ -28,28 +30,6 @@ describe("record-layout goldens", () => {
       parkEnergy: BigInt(g.parkEnergy),
       selfEnergy: g.selfEnergy,
       boosting: g.boosting,
-    });
-  });
-
-  it("decodes the session_diag record the session wrote", () => {
-    const g = goldens.diag;
-    const bytes = bytesOf(g.hex);
-    expect(bytes.length).toBe(DIAG_BYTES);
-    expect(decodeDiag(bytes)).toEqual({
-      clockState: g.clockState,
-      rttMs: g.rttMs,
-      trailTicks: Number(BigInt(g.trailQ16)) / 65536,
-      errorTicks: Number(BigInt(g.errorQ16)) / 65536,
-      tick: BigInt(g.tick),
-      seq: BigInt(g.seq),
-      trailTargetTicks: g.trailTargetTicks,
-      cushionTicks: g.cushionTicks,
-      events: g.events,
-      rollbacks: g.rollbacks,
-      resyncs: g.resyncs,
-      checks: g.checks,
-      mismatches: g.mismatches,
-      rejects: g.rejects,
     });
   });
 

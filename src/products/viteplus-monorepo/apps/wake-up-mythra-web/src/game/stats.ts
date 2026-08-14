@@ -11,13 +11,14 @@
 //
 // Visible with `?stats=1`, or toggled any time with the backquote key.
 
-import { ActionKind, CLOCK_STATE_NAMES, Emit, type Core } from "@guardian/mythrad-client-core";
+import { Emit, type ReplicaHost } from "@guardian/chunkies";
+import { actionName } from "@guardian/wum-client";
 
 const RING = 128;
 const REFRESH_MS = 250;
 
 export type StatsPane = {
-  /** Fed the core's telemetry stream, same tap as the other consumers. */
+  /** Fed the session's telemetry stream, same tap as the other consumers. */
   readonly onEmit: (code: number, a: bigint, b: bigint) => void;
 };
 
@@ -27,7 +28,7 @@ function median(xs: readonly number[]): number | null {
   return s[Math.floor(s.length / 2)]!;
 }
 
-export function createStatsPane(core: Core): StatsPane {
+export function createStatsPane(host: ReplicaHost): StatsPane {
   const margins: number[] = [];
   const actions = new Map<number, number[]>();
 
@@ -52,22 +53,21 @@ export function createStatsPane(core: Core): StatsPane {
 
   setInterval(() => {
     if (!visible) return;
-    const d = core.diag();
+    const d = host.diag();
     if (!d) {
       panel.textContent = "no session yet";
       return;
     }
-    const state = core.state;
     const lines = [
       `trail   ${d.trailTicks.toFixed(1)} ticks (target ≤${d.trailTargetTicks}, cushion ${d.cushionTicks})`,
-      `clock   ${CLOCK_STATE_NAMES[d.clockState] ?? "?"} · rtt ${d.rttMs}ms · ${state.hz}Hz`,
+      `clock   ${d.clockState} · rtt ${d.rttMs}ms · ${host.state.rateHz ?? 0}Hz`,
       `world   tick ${d.tick} · seq ${d.seq}`,
       `repairs ${d.rollbacks} rollbacks · ${d.resyncs} resyncs · ${d.mismatches} mismatches`,
       `events  ${d.events} applied · ${d.rejects} rejected`,
       `arrive  margin p50 ${median(margins)?.toFixed(0) ?? "—"} ticks (${margins.length})`,
     ];
     for (const [kind, ms] of actions) {
-      const name = ActionKind[kind] ?? `kind ${kind}`;
+      const name = actionName(kind) ?? `kind ${kind}`;
       lines.push(
         `action  ${name} ×${ms.length} · last ${ms[ms.length - 1]}ms · p50 ${median(ms)?.toFixed(0)}ms`,
       );

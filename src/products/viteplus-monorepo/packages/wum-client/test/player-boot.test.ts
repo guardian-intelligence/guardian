@@ -6,8 +6,9 @@
 // should be at most half a round trip past that.
 
 import { describe, expect, it } from "vitest";
-import { Emit } from "../src/ports.ts";
-import { dogPayload, Ev, rig, Role, type Rig } from "@guardian/chunkies-testkit";
+import { Emit } from "@guardian/chunkies";
+import { dogPayload, Ev, Role } from "@guardian/chunkies-testkit";
+import { wumRig, type WumRig } from "./rig.ts";
 
 const TICK_MS = 1000 / 24;
 /** The ring keeps one entry a second, so a repair reaches back at most this far. */
@@ -29,7 +30,7 @@ function lagBudget(rttMs: number): number {
  * that only steps when the client does cannot drift away from it, which
  * is the thing under test.
  */
-function liveWorld(r: Rig) {
+function liveWorld(r: WumRig) {
   const startMs = r.harness.clock.now();
   const startTick = r.authority.tick;
   return () => {
@@ -58,7 +59,7 @@ function dogsIn(view: Uint8Array): Map<bigint, string> {
 describe("a player attaching to a running park", () => {
   it("never runs further ahead of arriving events than the trip time explains", async () => {
     const RTT = 200;
-    const r = await rig({ role: "player", checkMs: 200, myDog: 0x7001n });
+    const r = await wumRig({ role: "player", checkMs: 200, myDog: 0x7001n });
     const step = liveWorld(r);
     const samples: Sample[] = [];
 
@@ -77,7 +78,7 @@ describe("a player attaching to a running park", () => {
     for (let t = 0; t < RTT / 2; t += 20) {
       r.harness.clock.advance(20);
       step();
-      r.core.pump();
+      r.pump();
       await r.harness.settle();
     }
     r.deliver([welcome, snapshot]);
@@ -88,7 +89,7 @@ describe("a player attaching to a running park", () => {
       for (let t = 0; t < ms; t += 16) {
         r.harness.clock.advance(16);
         step();
-        r.core.pump();
+        r.pump();
         r.answerChecksOverRtt(RTT);
         await r.harness.settle();
       }
@@ -101,10 +102,10 @@ describe("a player attaching to a running park", () => {
     const stampedAt = r.authority.tick;
     await pumpFor(RTT / 2);
     samples.push({
-      at: r.core.state.tick,
-      replica: r.core.state.tick,
+      at: r.state.tick,
+      replica: r.state.tick,
       authority: r.authority.tick,
-      ahead: Number(r.core.state.tick - stampedAt),
+      ahead: Number(r.state.tick - stampedAt),
     });
     r.deliver([joinEvent]);
     await pumpFor(1000);
@@ -116,10 +117,10 @@ describe("a player attaching to a running park", () => {
       const stamp = r.authority.tick;
       await pumpFor(RTT / 2);
       samples.push({
-        at: r.core.state.tick,
-        replica: r.core.state.tick,
+        at: r.state.tick,
+        replica: r.state.tick,
         authority: r.authority.tick,
-        ahead: Number(r.core.state.tick - stamp),
+        ahead: Number(r.state.tick - stamp),
       });
       r.deliver([frame]);
       await pumpFor(400);
@@ -136,7 +137,7 @@ describe("a player attaching to a running park", () => {
     // the one before it is a world that visibly jumps backwards and then
     // races to catch up, which is the repair leaking onto the screen.
     const RTT = 200;
-    const r = await rig({ role: "player", checkMs: 200, myDog: 0x7003n });
+    const r = await wumRig({ role: "player", checkMs: 200, myDog: 0x7003n });
     const step = liveWorld(r);
     for (let t = 0; t < 2000; t += 20) {
       r.harness.clock.advance(20);
@@ -150,7 +151,7 @@ describe("a player attaching to a running park", () => {
 
     const frames: { tick: bigint; dogs: Map<bigint, string> }[] = [];
     const observe = () => {
-      const view = r.core.view();
+      const view = r.frame();
       if (view) frames.push({ tick: view.tick, dogs: dogsIn(view.viewBytes) });
     };
 
@@ -158,7 +159,7 @@ describe("a player attaching to a running park", () => {
       for (let t = 0; t < ms; t += 16) {
         r.harness.clock.advance(16);
         step();
-        r.core.pump();
+        r.pump();
         r.answerChecksOverRtt(RTT);
         observe();
         await r.harness.settle();
@@ -171,13 +172,13 @@ describe("a player attaching to a running park", () => {
     const frame = r.authority.apply(Ev.join, dogPayload(0x7300n));
     const stamp = r.authority.tick;
     await pumpFor(RTT / 2);
-    expect(Number(r.core.state.tick - stamp)).toBeGreaterThan(0);
+    expect(Number(r.state.tick - stamp)).toBeGreaterThan(0);
 
     const settled = frames.length;
     const before = frames.at(-1)!;
     r.deliver([frame]);
     await pumpFor(400);
-    expect(r.core.state.rollbacks).toBeGreaterThan(0);
+    expect(r.state.rollbacks).toBeGreaterThan(0);
 
     // No frame after the repair may show the world earlier than the frame
     // that preceded it.
@@ -210,7 +211,7 @@ describe("a player attaching to a running park", () => {
     // applied, which is the park's to decide and no one else's. The world
     // simply does not carry a dog the journal has not placed.
     const RTT = 200;
-    const r = await rig({ role: "player", checkMs: 200, myDog: 0x7005n, rttMs: RTT });
+    const r = await wumRig({ role: "player", checkMs: 200, myDog: 0x7005n, rttMs: RTT });
     const step = liveWorld(r);
     for (let t = 0; t < 2000; t += 20) {
       r.harness.clock.advance(20);
@@ -225,9 +226,9 @@ describe("a player attaching to a running park", () => {
       for (let t = 0; t < ms; t += 16) {
         r.harness.clock.advance(16);
         step();
-        r.core.pump();
+        r.pump();
         r.answerChecks();
-        const view = r.core.view();
+        const view = r.frame();
         const mine = view && dogsIn(view.viewBytes).get(0x7005n);
         if (mine) seen.add(mine);
         await r.harness.settle();
@@ -236,8 +237,8 @@ describe("a player attaching to a running park", () => {
     await pumpFor(600);
     // The join is on the wire and unanswered, so the park we present is
     // the park the journal describes: four dogs, none of them ours.
-    expect(r.core.state.present).toBe(false);
-    expect(r.core.state.dogCount).toBe(4);
+    expect(r.state.present).toBe(false);
+    expect(r.state.dogCount).toBe(4);
     expect(seen.size).toBe(0);
 
     // Other dogs keep arriving and the world keeps changing; ours still is
@@ -247,7 +248,7 @@ describe("a player attaching to a running park", () => {
       await pumpFor(300);
     }
     expect(seen.size).toBe(0);
-    expect(r.core.state.present).toBe(false);
+    expect(r.state.present).toBe(false);
 
     // The journal places it. From then on it is an ordinary dog: it may
     // walk, but it may not jump — a placed dog moves at most a cell
@@ -257,9 +258,9 @@ describe("a player attaching to a running park", () => {
     for (let t = 0; t < 800; t += 16) {
       r.harness.clock.advance(16);
       step();
-      r.core.pump();
+      r.pump();
       r.answerChecks();
-      const view = r.core.view();
+      const view = r.frame();
       const mine = view && dogsIn(view.viewBytes).get(0x7005n);
       if (mine) {
         const [x, y] = mine.split(",").map(Number);
@@ -267,7 +268,7 @@ describe("a player attaching to a running park", () => {
       }
       await r.harness.settle();
     }
-    expect(r.core.state.present).toBe(true);
+    expect(r.state.present).toBe(true);
     expect(track.length).toBeGreaterThan(0);
     for (let i = 1; i < track.length; i++) {
       const dx = Math.abs(track[i]![0] - track[i - 1]![0]);
@@ -284,7 +285,7 @@ describe("a player attaching to a running park", () => {
     // which a leading replica has already passed, so each one costs a
     // rewind the size of the lead. That is the price of freshness, and
     // in-frame replay is what makes it invisible rather than free.
-    const r = await rig({ role: "player", checkMs: 500, myDog: 0x8001n, rttMs: 0, seed: 11 });
+    const r = await wumRig({ role: "player", checkMs: 500, myDog: 0x8001n, rttMs: 0, seed: 11 });
     const step = liveWorld(r);
     for (let t = 0; t < 1000; t += 20) {
       r.harness.clock.advance(20);
@@ -318,18 +319,18 @@ describe("a player attaching to a running park", () => {
     for (let t = 0; t < 11_000; t += 16) {
       r.harness.clock.advance(16);
       step();
-      r.core.pump();
+      r.pump();
       r.answerChecks();
-      if (r.core.state.tick > 0n) journalIntents();
+      if (r.state.tick > 0n) journalIntents();
       if (t >= nextMove) {
-        r.core.moveTo(200 + ((moves * 37) % 4000));
+        r.moveTo(200 + ((moves * 37) % 4000));
         moves++;
         nextMove = t + 900;
       }
-      const view = r.core.view();
+      const view = r.frame();
       if (view) presented.push(view.tick);
-      if (r.core.state.tick > 0n) {
-        maxLead = Math.max(maxLead, Number(r.core.state.tick - r.authority.tick));
+      if (r.state.tick > 0n) {
+        maxLead = Math.max(maxLead, Number(r.state.tick - r.authority.tick));
       }
       await r.harness.settle();
     }
@@ -341,10 +342,10 @@ describe("a player attaching to a running park", () => {
       .map((e) => ({ late: Number(e.b >> 32n), rewound: Number(e.b & 0xffffffffn) }));
 
     expect(moves).toBeGreaterThan(8);
-    expect(r.core.state.present).toBe(true);
+    expect(r.state.present).toBe(true);
 
     // Nothing on a clean leg is beyond local repair.
-    expect(Number(r.core.state.resyncs)).toBe(0);
+    expect(Number(r.state.resyncs)).toBe(0);
 
     // One repair per own action at most: our own events are journalled at
     // the authority's tick and so arrive behind a replica that has already
@@ -372,7 +373,7 @@ describe("a player attaching to a running park", () => {
     // tick. However far the replica runs ahead to feel live, the gap must
     // stay near the trip time instead of growing.
     const RTT = 300;
-    const r = await rig({ role: "player", checkMs: 200, myDog: 0x7002n });
+    const r = await wumRig({ role: "player", checkMs: 200, myDog: 0x7002n });
     const step = liveWorld(r);
     for (let t = 0; t < 1500; t += 20) {
       r.harness.clock.advance(20);
@@ -385,11 +386,11 @@ describe("a player attaching to a running park", () => {
     for (let t = 0; t < 8000; t += 16) {
       r.harness.clock.advance(16);
       step();
-      r.core.pump();
+      r.pump();
       r.answerChecksOverRtt(RTT);
       await r.harness.settle();
-      if (t % 400 === 0 && r.core.state.tick > 0n) {
-        gaps.push(Number(r.core.state.tick - r.authority.tick));
+      if (t % 400 === 0 && r.state.tick > 0n) {
+        gaps.push(Number(r.state.tick - r.authority.tick));
       }
     }
     const budget = lagBudget(RTT);

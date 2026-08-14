@@ -5,6 +5,10 @@
 // copies — the blob outlives them, and it is reloaded verbatim into every
 // fresh park instance a module swap creates.
 
+/** Little-endian "MYT1", the artifact magic the Rust and Go readers also demand. */
+const MAGIC = 0x3154594d;
+const SCHEMA = 1;
+
 /** Offset of the first plane. Everything before it is the header. */
 const PLANES_AT = 16;
 
@@ -38,15 +42,23 @@ export class TerrainError extends Error {
 }
 
 /**
- * Slices a fetched artifact into renderer planes. Throws when the blob is
- * shorter than its own dimensions demand — a truncated fetch would
- * otherwise surface as a silently blank world.
+ * Slices a fetched artifact into renderer planes. Throws on a blob that
+ * is not a schema-1 MYT1 artifact or is shorter than its own dimensions
+ * demand — a truncated or mis-served fetch would otherwise surface as a
+ * silently blank world.
  */
 export function decodeTerrain(blob: Uint8Array): TerrainPlanes {
   if (blob.length < PLANES_AT) {
     throw new TerrainError(`terrain blob is ${blob.length}B, shorter than its header`);
   }
   const dv = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
+  if (dv.getUint32(0, true) !== MAGIC) {
+    throw new TerrainError("terrain blob does not carry the MYT1 magic");
+  }
+  const schema = dv.getUint32(4, true);
+  if (schema !== SCHEMA) {
+    throw new TerrainError(`terrain blob is schema ${schema}; this reader knows ${SCHEMA}`);
+  }
   const w = dv.getUint16(8, true);
   const h = dv.getUint16(10, true);
   const cells = w * h;
