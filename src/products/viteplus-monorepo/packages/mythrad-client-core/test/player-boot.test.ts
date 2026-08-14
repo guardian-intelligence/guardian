@@ -7,8 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Emit } from "../src/ports.ts";
-import { Role } from "../src/wire.ts";
-import { Ev, dogPayload, rig, type Rig } from "./wasm.ts";
+import { dogPayload, Ev, rig, Role, type Rig } from "@guardian/chunkies-testkit";
 
 const TICK_MS = 1000 / 24;
 /** The ring keeps one entry a second, so a repair reaches back at most this far. */

@@ -12,18 +12,21 @@
 import { describe, expect, it } from "vitest";
 import { Emit, HostEmit, ResyncReason } from "../src/ports.ts";
 import { PumpFlag, clockStateOf } from "../src/abi.ts";
-import { Role, decodeCheck, encodeEvent, type ClientFrame } from "../src/wire.ts";
 import {
   bringTheDogIn,
+  decodeCheck,
+  dogPayload,
+  encodeEvent,
+  epochAdvancePayload,
   Ev,
   intentId,
   intentsSent,
-  Reject,
-  dogPayload,
-  epochAdvancePayload,
   modules,
+  Reject,
   rig,
-} from "./wasm.ts";
+  Role,
+  type ClientFrame,
+} from "@guardian/chunkies-testkit";
 
 /** One tick at the fixture park's 24Hz, in milliseconds. */
 const TICK_MS = 1000 / 24;

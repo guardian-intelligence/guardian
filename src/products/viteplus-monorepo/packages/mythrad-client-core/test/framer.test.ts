@@ -15,7 +15,7 @@ import {
   encodeWelcome,
   varintLen,
   Role,
-} from "../src/wire.ts";
+} from "@guardian/chunkies-testkit";
 
 function concat(parts: Uint8Array[]): Uint8Array {
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));

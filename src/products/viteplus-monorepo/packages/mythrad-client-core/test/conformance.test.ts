@@ -33,7 +33,7 @@ import {
   varintLen,
   type ClientFrame,
   type ServerFrame,
-} from "../src/wire.ts";
+} from "@guardian/chunkies-testkit";
 
 function bytes(hexDump: string): Uint8Array {
   const clean = hexDump.replace(/\s+/g, "");

@@ -41,7 +41,7 @@ import {
   readVarint,
   varintLen,
   writeVarint,
-} from "../src/wire.ts";
+} from "@guardian/chunkies-testkit";
 
 /** Parses a whitespace-separated hex dump into bytes, so goldens read like a spec. */
 function h(dump: string): Uint8Array {

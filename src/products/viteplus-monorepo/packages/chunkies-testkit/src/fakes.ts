@@ -3,9 +3,6 @@
 // function of its script — which is what makes the DST suite able to
 // shrink a failure to a seed and a delivery order.
 //
-// This file is the harness, not a test. Vitest only collects
-// `test/**/*.test.ts`.
-
 import type {
   BehaviorModule,
   Connection,
@@ -13,8 +10,8 @@ import type {
   Dialed,
   Ports,
   TransportPort,
-} from "../src/ports.ts";
-import { FrameDecoder, decodeClientFrame, type ClientFrame } from "../src/wire.ts";
+} from "@guardian/mythrad-client-core";
+import { FrameDecoder, decodeClientFrame, type ClientFrame } from "./wire.ts";
 
 /** A clock that only moves when the test says so, plus the timers hanging off it. */
 export class VirtualClock {

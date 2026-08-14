@@ -10,7 +10,7 @@
 // moment it happened to catch and looks like a steady state.
 
 import { describe, expect, it } from "vitest";
-import { bringTheDogIn, rig } from "./wasm.ts";
+import { bringTheDogIn, rig } from "@guardian/chunkies-testkit";
 
 /** One tick at the fixture park's 24Hz. */
 const TICK_MS = 1000 / 24;

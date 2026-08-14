@@ -2,7 +2,7 @@
   "name": "@guardian/mythrad-client-core",
   "version": "0.1.0",
   "private": true,
-  "description": "Platform-agnostic Wake Up Mythra replica host: proto-4 wire codec, the client.wasm session-core host bindings, and the two park slots it steps. Plain TypeScript over injected ports so the browser, and later a native shell, share one implementation.",
+  "description": "Platform-agnostic Wake Up Mythra replica host: the client.wasm session-core host bindings and the two park slots it steps. Plain TypeScript over injected ports so the browser, and later a native shell, share one implementation.",
   "files": [
     "src"
   ],
@@ -11,10 +11,6 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./wire": {
-      "types": "./src/wire.ts",
-      "default": "./src/wire.ts"
     },
     "./package.json": "./package.json"
   },
@@ -26,6 +22,7 @@
     "fflate": "catalog:"
   },
   "devDependencies": {
+    "@guardian/chunkies-testkit": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
