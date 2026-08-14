@@ -13,12 +13,22 @@ APP="$ROOT/src/products/viteplus-monorepo/apps/wake-up-mythra-web"
 RUN_DIR="$ROOT/.guardian/dev/wum"
 ISSUER_PORT="${WUM_DEV_ISSUER_PORT:-9635}"
 PG_PORT="${WUM_DEV_PG_PORT:-55432}"
+CH_PORT="${WUM_DEV_CH_PORT:-59000}"
+CH_HTTP_PORT="${WUM_DEV_CH_HTTP_PORT:-58123}"
+INGEST_PORT="${WUM_DEV_INGEST_PORT:-9636}"
 ISSUER="http://127.0.0.1:${ISSUER_PORT}/realms/dev"
 MYTHRAD_HTTP_PORT=9634
 MYTHRAD_METRICS_PORT=9633
 WEB_PORT=4254
+OTLP_GRPC_PORT="${WUM_DEV_OTLP_GRPC_PORT:-4317}"
+OTLP_HTTP_PORT="${WUM_DEV_OTLP_HTTP_PORT:-4318}"
+FLAGD_PORT="${WUM_DEV_FLAGD_PORT:-8013}"
+FLAGD_MGMT_PORT="${WUM_DEV_FLAGD_MGMT_PORT:-8014}"
+# The web app's dev flag client hardcodes OFREP at 127.0.0.1:8016.
+FLAGD_OFREP_PORT=8016
+FLAGS_FILE="$ROOT/src/infrastructure/deployments/flags/prod/flags/flags.json"
 
-LEGS="pg devissuer mythrad web"
+LEGS="pg ch otelcol flagd ingest devissuer mythrad web"
 STARTED=""
 
 pidfile() { echo "$RUN_DIR/$1.pid"; }
@@ -31,6 +41,10 @@ leg_pid() {
 leg_command_pattern() {
   case "$1" in
   pg) echo "postgres" ;;
+  ch) echo "clickhouse" ;;
+  otelcol) echo "otelcol-contrib" ;;
+  flagd) echo "flagd" ;;
+  ingest) echo "analytics/ingest" ;;
   devissuer) echo "devissuer" ;;
   mythrad) echo "mythrad" ;;
   web) echo "vp dev" ;;
@@ -50,6 +64,10 @@ leg_alive() {
 leg_port() {
   case "$1" in
   pg) echo "$PG_PORT" ;;
+  ch) echo "$CH_PORT" ;;
+  otelcol) echo "$OTLP_GRPC_PORT" ;;
+  flagd) echo "$FLAGD_OFREP_PORT" ;;
+  ingest) echo "$INGEST_PORT" ;;
   devissuer) echo "$ISSUER_PORT" ;;
   mythrad) echo "$MYTHRAD_HTTP_PORT" ;;
   web) echo "$WEB_PORT" ;;
@@ -59,6 +77,12 @@ leg_port() {
 probe() {
   case "$1" in
   pg) [ "$(leg_pid pg)" = "$(head -1 "$RUN_DIR/pgdata/postmaster.pid" 2>/dev/null)" ] && (exec 3<>"/dev/tcp/127.0.0.1/$PG_PORT") 2>/dev/null ;;
+  ch) [ "$(curl -fsS --max-time 2 "http://127.0.0.1:${CH_HTTP_PORT}/?query=SELECT+1" 2>/dev/null)" = 1 ] ;;
+  # Ownership, not reachability: a foreign process already on the OTLP port
+  # would answer a bare connect while our collector dies on bind.
+  otelcol) lsof -nP -a -p "$(leg_pid otelcol)" -iTCP:"$OTLP_GRPC_PORT" -sTCP:LISTEN >/dev/null 2>&1 ;;
+  flagd) curl -fsS --max-time 2 "http://127.0.0.1:${FLAGD_MGMT_PORT}/readyz" >/dev/null 2>&1 ;;
+  ingest) curl -fsS --max-time 2 "http://127.0.0.1:${INGEST_PORT}/healthz" >/dev/null 2>&1 ;;
   devissuer) curl -fsS --max-time 2 "$ISSUER/.well-known/openid-configuration" >/dev/null 2>&1 ;;
   mythrad) curl -fsS --max-time 2 "http://127.0.0.1:${MYTHRAD_METRICS_PORT}/readyz" >/dev/null 2>&1 ;;
   web) [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${WEB_PORT}/" 2>/dev/null)" = 200 ] ;;
@@ -143,6 +167,70 @@ start_leg() {
     STARTED="pg $STARTED"
     scripts/wum-dev-db.sh start || fail_leg pg
     ;;
+  ch)
+    STARTED="ch $STARTED"
+    mkdir -p "$RUN_DIR/ch/data"
+    cat >"$RUN_DIR/ch/config.xml" <<EOF
+<clickhouse>
+  <path>$RUN_DIR/ch/data/</path>
+  <listen_host>127.0.0.1</listen_host>
+  <tcp_port>$CH_PORT</tcp_port>
+  <http_port>$CH_HTTP_PORT</http_port>
+  <logger>
+    <console>1</console>
+    <level>warning</level>
+  </logger>
+  <user_directories>
+    <users_xml>
+      <path>config.xml</path>
+    </users_xml>
+  </user_directories>
+  <users>
+    <default>
+      <password></password>
+      <networks><ip>127.0.0.1</ip><ip>::1</ip></networks>
+      <profile>default</profile>
+      <quota>default</quota>
+      <access_management>1</access_management>
+    </default>
+  </users>
+  <profiles><default/></profiles>
+  <quotas><default/></quotas>
+</clickhouse>
+EOF
+    "$ROOT/$CLICKHOUSE" server --config-file="$RUN_DIR/ch/config.xml" >>"$(logfile ch)" 2>&1 &
+    echo $! >"$(pidfile ch)"
+    await_ready ch 60 || fail_leg ch
+    ;;
+  otelcol)
+    STARTED="otelcol $STARTED"
+    WUM_DEV_CH_PORT="$CH_PORT" \
+      WUM_DEV_OTLP_GRPC_PORT="$OTLP_GRPC_PORT" \
+      WUM_DEV_OTLP_HTTP_PORT="$OTLP_HTTP_PORT" \
+      "$ROOT/$OTELCOL" --config="$ROOT/scripts/wum-dev-otelcol.yaml" >>"$(logfile otelcol)" 2>&1 &
+    echo $! >"$(pidfile otelcol)"
+    await_ready otelcol 60 || fail_leg otelcol
+    ;;
+  flagd)
+    STARTED="flagd $STARTED"
+    "$ROOT/$FLAGD" start \
+      --sources "[{\"uri\":\"$FLAGS_FILE\",\"provider\":\"fsnotify\"}]" \
+      --port="$FLAGD_PORT" --management-port="$FLAGD_MGMT_PORT" --ofrep-port="$FLAGD_OFREP_PORT" \
+      --cors-origin='*' --log-format=json >>"$(logfile flagd)" 2>&1 &
+    echo $! >"$(pidfile flagd)"
+    await_ready flagd 60 || fail_leg flagd
+    ;;
+  ingest)
+    STARTED="ingest $STARTED"
+    INGEST_LISTEN="127.0.0.1:${INGEST_PORT}" \
+      CLICKHOUSE_ADDR="127.0.0.1:${CH_PORT}" \
+      CLICKHOUSE_USER=default \
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="127.0.0.1:${OTLP_GRPC_PORT}" \
+      IP2ASN_PATH="$IP2ASN" \
+      "$ROOT/$INGEST" >>"$(logfile ingest)" 2>&1 &
+    echo $! >"$(pidfile ingest)"
+    await_ready ingest 60 || fail_leg ingest
+    ;;
   devissuer)
     STARTED="devissuer $STARTED"
     PORT="$ISSUER_PORT" "$ROOT/$DEVISSUER" >>"$(logfile devissuer)" 2>&1 &
@@ -157,17 +245,29 @@ start_leg() {
       BEHAVIOR_DIR="$ROOT/src/services/mythrad/behaviors" \
       ASSET_DIR="$ROOT/src/services/mythrad/assets" \
       PUBLIC_ADDR="${WUM_DEV_PUBLIC_ADDR:-127.0.0.1:4433}" \
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="127.0.0.1:${OTLP_GRPC_PORT}" \
       "$ROOT/$MYTHRAD" >>"$(logfile mythrad)" 2>&1 &
     echo $! >"$(pidfile mythrad)"
     await_ready mythrad 60 || fail_leg mythrad
     ;;
   web)
     STARTED="web $STARTED"
-    (cd "$APP" && exec env VITE_OIDC_ISSUER="$ISSUER" vp dev) >>"$(logfile web)" 2>&1 &
+    (cd "$APP" && exec env VITE_OIDC_ISSUER="$ISSUER" WUM_DEV_INGEST_PORT="$INGEST_PORT" vp dev) >>"$(logfile web)" 2>&1 &
     echo $! >"$(pidfile web)"
     await_ready web 240 || fail_leg web
     ;;
   esac
+}
+
+# Runs on every up, not only when this up started ch: a ClickHouse that
+# survived an interrupted run may predate the schema, and every statement is
+# IF NOT EXISTS.
+apply_ch_ddl() {
+  {
+    "$ROOT/$CLICKHOUSE" client --port "$CH_PORT" --query "CREATE DATABASE IF NOT EXISTS guardian_analytics" &&
+      "$ROOT/$CLICKHOUSE" client --port "$CH_PORT" --multiquery <"$ROOT/src/infrastructure/analytics/events-table.sql" &&
+      "$ROOT/$CLICKHOUSE" client --port "$CH_PORT" --multiquery <"$ROOT/src/infrastructure/analytics/otel-traces-single-node.sql"
+  } >>"$(logfile ch)" 2>&1 || fail_leg ch
 }
 
 up() {
@@ -183,25 +283,40 @@ up() {
   [ -z "$missing" ] || exit 1
 
   acquire_lock
-  echo "wum-dev: building mythrad + devissuer…" >&2
-  bazelisk build //src/services/mythrad //src/services/mythrad/devissuer >&2
+  echo "wum-dev: building mythrad + devissuer + telemetry legs…" >&2
+  bazelisk build //src/services/mythrad //src/services/mythrad/devissuer \
+    //src/products/analytics/ingest @ip2asn_combined//file \
+    @multitool//tools/clickhouse-server @multitool//tools/otelcol-contrib @multitool//tools/flagd >&2
   MYTHRAD="$(bazelisk cquery --output=files //src/services/mythrad 2>/dev/null | head -1)"
   DEVISSUER="$(bazelisk cquery --output=files //src/services/mythrad/devissuer 2>/dev/null | head -1)"
+  INGEST="$(bazelisk cquery --output=files //src/products/analytics/ingest 2>/dev/null | head -1)"
+  CLICKHOUSE="$(bazelisk cquery --output=files @multitool//tools/clickhouse-server 2>/dev/null | head -1)"
+  OTELCOL="$(bazelisk cquery --output=files @multitool//tools/otelcol-contrib 2>/dev/null | head -1)"
+  FLAGD="$(bazelisk cquery --output=files @multitool//tools/flagd 2>/dev/null | head -1)"
+  # Joined against output_base, not execution_root: later bazel invocations
+  # (the pg leg builds initdb) prune execroot external symlinks they don't use.
+  IP2ASN="$(bazelisk info output_base 2>/dev/null)/$(bazelisk cquery --output=files @ip2asn_combined//file 2>/dev/null | head -1)"
   for leg in $LEGS; do
     start_leg "$leg"
+    if [ "$leg" = ch ]; then
+      apply_ch_ddl
+    fi
   done
   echo >&2
   echo "wum-dev: up — open http://127.0.0.1:${WEB_PORT} and sign in as any name" >&2
   echo "  aspect mythra dev status" >&2
   echo "  aspect mythra dev logs --leg=mythrad" >&2
   echo "  aspect mythra dev down" >&2
+  echo "  events:    $ROOT/$CLICKHOUSE client --port $CH_PORT --query 'SELECT count() FROM guardian_analytics.events'" >&2
+  echo "  spans:     $ROOT/$CLICKHOUSE client --port $CH_PORT --query 'SELECT count() FROM guardian_analytics.otel_traces'" >&2
+  echo "  flags:     edit $FLAGS_FILE (flagd hot-reloads it)" >&2
   echo >&2
 }
 
 down() {
   acquire_lock
   rc=0
-  for leg in web mythrad devissuer pg; do
+  for leg in web mythrad devissuer ingest flagd otelcol ch pg; do
     stop_leg "$leg" || {
       echo "wum-dev: $leg refused to stop" >&2
       rc=1

@@ -61,6 +61,32 @@
         "os": "linux",
         "cpu": "x86_64",
         "file": "clickhouse-common-static-26.3.17.56/usr/bin/clickhouse"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/ClickHouse/ClickHouse/releases/download/v26.3.17.56-lts/clickhouse-macos-aarch64",
+        "sha256": "35f2c5a99e224a4c61d03aebaba7f3ec72c87ae7009c8417ce4e5cc9231446bc",
+        "os": "macos",
+        "cpu": "arm64"
+      }
+    ]
+  },
+  "clickhouse-server": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/ClickHouse/ClickHouse/releases/download/v24.9.2.42-stable/clickhouse-common-static-24.9.2.42-amd64.tgz",
+        "sha256": "03c8f9a9b543b538008fd0a9417a179dc56e9950ff6e1a0e5bbf05895a791ea4",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "clickhouse-common-static-24.9.2.42/usr/bin/clickhouse"
+      },
+      {
+        "kind": "file",
+        "url": "https://github.com/ClickHouse/ClickHouse/releases/download/v24.9.2.42-stable/clickhouse-macos-aarch64",
+        "sha256": "ecb81cb8f84b79f7b989ac108ea277b0f2754070478cccae3f8baa28891e9b00",
+        "os": "macos",
+        "cpu": "arm64"
       }
     ]
   },
@@ -138,6 +164,26 @@
         "os": "macos",
         "cpu": "arm64",
         "file": "doggo"
+      }
+    ]
+  },
+  "flagd": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/open-feature/flagd/releases/download/flagd/v0.16.1/flagd_0.16.1_Linux_x86_64.tar.gz",
+        "sha256": "3ce77bd80f740254b1714ed0745487583398a4841db03ef1e88907a3c7594677",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "flagd_linux_x86_64"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/open-feature/flagd/releases/download/flagd/v0.16.1/flagd_0.16.1_Darwin_arm64.tar.gz",
+        "sha256": "4716da952956d3240442654304f4bad7212684123f0c97bc56887009c7ccca0f",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "flagd_darwin_arm64"
       }
     ]
   },
@@ -336,6 +382,26 @@
         "os": "macos",
         "cpu": "arm64",
         "file": "oras"
+      }
+    ]
+  },
+  "otelcol-contrib": {
+    "binaries": [
+      {
+        "kind": "archive",
+        "url": "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.155.0/otelcol-contrib_0.155.0_linux_amd64.tar.gz",
+        "sha256": "229cfddeb0621d2a011bfd1c8894335479e46349b93a0cfbccbe653443a3ec95",
+        "os": "linux",
+        "cpu": "x86_64",
+        "file": "otelcol-contrib"
+      },
+      {
+        "kind": "archive",
+        "url": "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.155.0/otelcol-contrib_0.155.0_darwin_arm64.tar.gz",
+        "sha256": "dc9ecd5243bc632a2901d028bfc7a705fb6317b269c9514b5f8187b80caf8c56",
+        "os": "macos",
+        "cpu": "arm64",
+        "file": "otelcol-contrib"
       }
     ]
   },
