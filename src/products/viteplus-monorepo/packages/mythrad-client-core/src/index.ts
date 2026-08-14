@@ -29,8 +29,6 @@ export {
   decodeWelcomeEmit,
   HUD_BYTES,
   PumpFlag,
-  SLOT_JOURNAL,
-  SLOT_PRESENTED,
   type ClientExports,
   type HostImports,
   type Hud,

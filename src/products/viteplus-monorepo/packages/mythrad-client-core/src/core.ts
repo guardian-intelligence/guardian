@@ -1,12 +1,12 @@
-// The host. It owns three wasm instances — two park slots and the
-// client module carrying the session core — and does exactly four things:
+// The host. It owns two wasm instances — the park carrying the world and
+// the client module carrying the session core — and does exactly four things:
 // copies bytes between their linear memories on the park verbs, routes
 // frames to and from the transport, performs the platform errands the
 // core asks for (fetch terrain, fetch a module, inflate), and projects
 // what the core knows into a read surface a renderer and a HUD can use.
 //
 // All protocol behavior — ordering, rollback, resync, strikes, intent
-// identity, prediction, check cadence — lives in the session core. If a
+// identity, check cadence — lives in the session core. If a
 // decision about the protocol is being made in this file, it is in the
 // wrong place.
 
@@ -18,8 +18,7 @@ import {
   clockStateOf,
   decodeWelcomeEmit,
   HUD_BYTES,
-  SLOT_JOURNAL,
-  SLOT_PRESENTED,
+  PumpFlag,
   type ClientExports,
   type HostImports,
   type Hud,
@@ -38,6 +37,76 @@ export const DEFAULT_STEP_BUDGET_US = 8000;
 const MODULE_RETRY_MS = 3000;
 /** Straight dial failures before the surface should tell the user the park is unreachable. */
 export const UNREACHABLE_AFTER_DIALS = 3;
+
+/**
+ * How long the presenter takes to absorb a re-derivation. The presented
+ * world is the journal plus our unanswered intents, and re-deriving it is
+ * how the two are kept from drifting apart — but a re-derivation moves
+ * dogs without time passing, which is the one thing a renderer cannot
+ * interpolate through. So the host keeps showing them where they were and
+ * closes the gap over this window.
+ */
+export const GLIDE_MS = 150;
+
+/**
+ * The fastest the presenter will move a dog to close that gap, in cells
+ * per second. A dog walks three, so this is a correction hurrying visibly
+ * without becoming a teleport — and it is a RATE rather than a per-frame
+ * step, so the bound holds at any refresh rate rather than only at the one
+ * it was tuned on. A gap too large for `GLIDE_MS` at this speed takes
+ * longer instead of moving faster.
+ *
+ * Twelve keeps the worst frame under a third of a cell on a 30Hz display,
+ * which is the slowest refresh worth designing for; a faster display only
+ * makes the same motion smoother.
+ */
+export const GLIDE_MAX_CELLS_PER_SEC = 12;
+
+/**
+ * The largest gap the presenter will close on the screen's behalf, in
+ * cells. A re-derivation costs at most about a round trip of walking, so
+ * anything past this is not a correction being hidden — it is a world
+ * change, and gliding a dog across one pretends a continuity that did not
+ * happen. Beyond the cap the dog simply arrives where the world says it
+ * is, which is the honest picture of a world that really did change.
+ */
+export const GLIDE_MAX_CELLS = 4;
+
+/** Q16.16, the fixed point the view and the sim share. */
+const Q16 = 65536;
+
+/** id u64, x i32, y i32, then the per-dog byte fields. */
+const VIEW_RECORD_BYTES = 20;
+
+/** Re-check for departed dogs about every four seconds of a 60Hz loop. */
+const GLIDE_PRUNE_FRAMES = 256;
+
+/** Smoothstep's peak slope: the fastest moment of a glide, relative to a linear one. */
+const GLIDE_PEAK_SLOPE = 1.5;
+
+/**
+ * How long a correction of `cells` may take. Small ones take `GLIDE_MS`;
+ * larger ones stretch, so the dog never crosses the gap faster than
+ * `GLIDE_MAX_CELLS_PER_SEC` at the steepest point of the curve. Stretching
+ * rather than capping means there is no cliff at any particular size — a
+ * correction one cell bigger looks one cell bigger, not suddenly instant.
+ */
+function glideWindowMs(cells: number): number {
+  const atFullSpeed = (GLIDE_PEAK_SLOPE * cells * 1000) / GLIDE_MAX_CELLS_PER_SEC;
+  return Math.max(GLIDE_MS, atFullSpeed);
+}
+
+/**
+ * How much of a glide is still owed after `elapsedMs` of its `windowMs`.
+ * Smooth at both ends, so neither taking the glide on nor finishing it is
+ * a kink in the dog's motion.
+ */
+function glideRemaining(elapsedMs: number, windowMs: number): number {
+  if (elapsedMs <= 0) return 1;
+  if (elapsedMs >= windowMs) return 0;
+  const u = elapsedMs / windowMs;
+  return 1 - u * u * (3 - 2 * u);
+}
 
 export type ConnectionStatus = "idle" | "connecting" | "connected" | "reconnecting";
 
@@ -118,7 +187,8 @@ export class Core {
   readonly #schedule: (fn: () => void, ms: number) => () => void;
 
   #client: ClientExports | null = null;
-  readonly #slots: (ParkExports | null)[] = [null, null];
+  /** The world. One instance: the journal is what the renderer reads. */
+  #park: ParkExports | null = null;
 
   /** The dog the HUD reads. Follows `reidentify`, so it is not read from options. */
   #myDog: bigint;
@@ -153,6 +223,14 @@ export class Core {
   /** Reused so a 60Hz render loop does not allocate a view copy per frame. */
   #viewScratch = new Uint8Array(0);
   readonly #hudScratch = new Uint8Array(HUD_BYTES);
+
+  /** Where each dog was last shown, in Q16 view units, and when. */
+  readonly #shown = new Map<bigint, { x: number; y: number; frame: number }>();
+  /** What a re-derivation owes each dog, in Q16 view units, and since when. */
+  readonly #glide = new Map<bigint, { dx: number; dy: number; sinceMs: number; ms: number }>();
+  /** Raised by a pump that re-derived, consumed by the next `view()`. */
+  #corrected = false;
+  #viewFrame = 0;
 
   constructor(ports: Ports, options: CoreOptions) {
     this.#ports = ports;
@@ -210,8 +288,7 @@ export class Core {
     this.#client = client;
 
     const parkWord = await this.#wordOf(parkBytes);
-    this.#slots[SLOT_JOURNAL] = await instantiatePark(parkBytes);
-    this.#slots[SLOT_PRESENTED] = await instantiatePark(parkBytes);
+    this.#park = await instantiatePark(parkBytes);
 
     client.session_init(
       this.#myDog,
@@ -221,7 +298,7 @@ export class Core {
       BigInt(this.#ports.now()),
     );
     client.session_set_visible(1);
-    // Seeds the core's notion of which module the slots are running, so the
+    // Seeds the core's notion of which module the world is running, so the
     // first verdict compares against something. Safe here and nowhere
     // later: no world is live yet, so it has no state to disturb.
     client.session_module_swapped(parkWord);
@@ -379,17 +456,17 @@ export class Core {
 
   #hostImports(): HostImports {
     return {
-      park_apply: (slot, ptr, len) => {
-        const park = this.#slots[slot];
+      park_apply: (ptr, len) => {
+        const park = this.#park;
         if (!park || len > park.io_cap()) return 1;
         this.#intoPark(park, ptr, len);
         return park.sim_apply(len);
       },
-      park_step: (slot) => {
-        this.#slots[slot]?.sim_step();
+      park_step: () => {
+        this.#park?.sim_step();
       },
-      park_snapshot: (slot, dst, cap) => {
-        const park = this.#slots[slot];
+      park_snapshot: (dst, cap) => {
+        const park = this.#park;
         const client = this.#client;
         if (!park || !client) return 0;
         const len = park.sim_snapshot();
@@ -398,14 +475,14 @@ export class Core {
         new Uint8Array(client.memory.buffer).set(new Uint8Array(park.memory.buffer, at, len), dst);
         return len;
       },
-      park_restore: (slot, ptr, len) => {
-        const park = this.#slots[slot];
+      park_restore: (ptr, len) => {
+        const park = this.#park;
         if (!park || len > park.io_cap()) return 1;
         this.#intoPark(park, ptr, len);
         return park.sim_restore(len);
       },
-      park_hash: (slot) => this.#slots[slot]?.sim_hash() ?? 0n,
-      park_tick: (slot) => this.#slots[slot]?.sim_tick() ?? 0n,
+      park_hash: () => this.#park?.sim_hash() ?? 0n,
+      park_tick: () => this.#park?.sim_tick() ?? 0n,
       send_stream: (ptr, len) => {
         this.#conn?.sendStream(this.#fromClient(ptr, len));
       },
@@ -504,10 +581,10 @@ export class Core {
   // -------------------------------------------------------------------------
 
   /**
-   * Fetches a terrain artifact and loads it into BOTH slots before telling
-   * the core it is ready. A snapshot restores into either slot, so a
+   * Fetches a terrain artifact and loads it into the world before telling
+   * the core it is ready. A snapshot restores into it, so a
    * half-loaded world would surface as an unexplained restore refusal
-   * (park code 4) on whichever slot missed it.
+   * (park code 4) if it went missing.
    */
   #loadTerrain(id: bigint): void {
     this.#terrainQueue = this.#terrainQueue.then(() => this.#runTerrainLoad(id));
@@ -515,8 +592,8 @@ export class Core {
 
   async #runTerrainLoad(id: bigint): Promise<void> {
     if (this.#terrainId === id && this.#terrain) {
-      // Already loaded into the live slots: a second request for the same
-      // world is a re-ask after a restore, not a reason to refetch.
+      // Already loaded into the live world: a second request for the same
+      // one is a re-ask after a restore, not a reason to refetch.
       this.#client?.session_terrain_ready(id, 1);
       return;
     }
@@ -525,9 +602,7 @@ export class Core {
     try {
       const blob = new Uint8Array(await this.#ports.fetchTerrain(hex));
       const planes = decodeTerrain(blob);
-      for (const park of this.#slots) {
-        if (park) loadTerrainInto(park, blob, hex);
-      }
+      if (this.#park) loadTerrainInto(this.#park, blob, hex);
       this.#terrain = planes;
       this.#terrainId = id;
       ok = true;
@@ -539,10 +614,10 @@ export class Core {
   }
 
   /**
-   * Replaces both slots with instances of the current park module. The
-   * core resyncs afterwards and restores the snapshot into them, so the
-   * fresh instances need only their terrain back — no state carries over
-   * from the retired module, by design.
+   * Replaces the world with an instance of the current park module. The
+   * core resyncs afterwards and restores a snapshot into it, so the fresh
+   * instance needs only its terrain back — no state carries over from the
+   * retired module, by design.
    */
   async #swapModule(pw: number): Promise<void> {
     if (this.#fetchingModule) return;
@@ -558,30 +633,22 @@ export class Core {
           `park module fetch is ${moduleWordHex(word)}, not the announced ${moduleWordHex(pw)}`,
         );
       }
-      // Everything is prepared on locals and published only once it has
+      // Everything is prepared on a local and published only once it has
       // all succeeded. A new module can legitimately refuse the terrain we
       // hold — tightening the terrain schema is exactly the kind of change
-      // that ships with a module — and publishing first would leave two
-      // live instances with no world, `session_module_swapped` never
-      // called, and the core's latch stuck: a frozen park that every
-      // retry then fails to repair in the same way.
-      const [journal, presented] = await Promise.all([
-        instantiatePark(bytes),
-        instantiatePark(bytes),
-      ]);
+      // that ships with a module — and publishing first would leave a live
+      // instance with no world, `session_module_swapped` never called, and
+      // the core's latch stuck: a frozen park that every retry then fails
+      // to repair in the same way.
+      const staged = await instantiatePark(bytes);
       const blob = this.#terrain?.blob;
-      if (blob) {
-        const hex = hex64(this.#terrainId);
-        loadTerrainInto(journal, blob, hex);
-        loadTerrainInto(presented, blob, hex);
-      }
-      this.#slots[SLOT_JOURNAL] = journal;
-      this.#slots[SLOT_PRESENTED] = presented;
+      if (blob) loadTerrainInto(staged, blob, hex64(this.#terrainId));
+      this.#park = staged;
       this.#fetchingModule = false;
       this.#log(`park module ${moduleWordHex(word)} staged`);
       this.#client?.session_module_swapped(word);
     } catch (e) {
-      // The old slots are untouched, so the world keeps running on the
+      // The live instance is untouched, so the world keeps running on the
       // retired module until a retry succeeds.
       this.#log(`module swap failed: ${messageOf(e)}`);
       this.#cancelModuleRetry?.();
@@ -696,6 +763,10 @@ export class Core {
     if (!client) return 0;
     const flags = client.session_pump(BigInt(this.#ports.now()), budgetUs);
     this.#lastPumpFlags = flags;
+    // Latched rather than read straight from the flags: several pumps can
+    // pass between two frames, and the glide is owed from the last
+    // position a viewer actually saw, not from the last pump.
+    if ((flags & PumpFlag.corrected) !== 0) this.#corrected = true;
     this.#refresh(flags);
     this.#drainTeardown();
     return flags;
@@ -739,6 +810,35 @@ export class Core {
   }
 
   /**
+   * The canonical hash of the world, as the authority would compute it.
+   * This is what a check datagram carries, so it is the one number that
+   * says whether this replica and the park agree.
+   */
+  worldHash(): bigint {
+    return this.#park?.sim_hash() ?? 0n;
+  }
+
+  /**
+   * How much correction the presenter is still carrying, in cells, summed
+   * over every dog. Zero means the view is showing the world exactly as
+   * the session holds it.
+   *
+   * This exists for the same reason `worldHash` does: it is the only way to
+   * state the invariant that the glide is TEMPORARY. A presenter that
+   * never pays its debt off shows a wrong position forever, and every
+   * continuity gate in the suite would pass while it did.
+   */
+  glideDebtCells(): number {
+    const now = this.#ports.now();
+    let owed = 0;
+    for (const g of this.#glide.values()) {
+      const left = glideRemaining(now - g.sinceMs, g.ms);
+      owed += (Math.abs(g.dx) + Math.abs(g.dy)) * left;
+    }
+    return owed / Q16;
+  }
+
+  /**
    * Watches one field. Fires immediately with the current value, then
    * after any pump that changes it. Returns the unsubscribe.
    */
@@ -757,21 +857,101 @@ export class Core {
   /**
    * The renderer's frame. `viewBytes` aliases a buffer this instance
    * reuses, so a caller that needs it past the next `view()` must copy.
+   *
+   * The positions here are the presented ones, glide included. That is
+   * deliberate and it is the whole point of doing it in this method: a
+   * renderer, a probe ring, a jank counter and a test all read the same
+   * numbers, so none of them can disagree about where a dog was, and none
+   * of them needs to know that the world was corrected under them.
    */
   view(): FrameView | null {
-    const park = this.#slots[SLOT_PRESENTED];
+    const park = this.#park;
     const client = this.#client;
     if (!park || !client) return null;
     const len = park.sim_view();
     if (this.#viewScratch.length < len) this.#viewScratch = new Uint8Array(len * 2);
     const out = this.#viewScratch.subarray(0, len);
     out.set(new Uint8Array(park.memory.buffer, park.io_buf(), len));
+    this.#glideView(out);
     return {
       viewBytes: out,
       terrain: this.#terrain,
       phaseQ16: client.session_phase_q16(),
       tick: park.sim_tick(),
     };
+  }
+
+  /**
+   * Carries the screen across a re-derivation. On the frame after one, each
+   * dog is owed the difference between where it was last shown and where
+   * the re-derived world puts it; that debt is paid off over `GLIDE_MS`,
+   * so what a viewer sees is continuous even though the world underneath
+   * moved without time passing.
+   *
+   * The world is not edited — only this copy is. The park instance keeps
+   * whatever the session put in it, so hashes and checks are untouched by
+   * anything here.
+   */
+  #glideView(out: Uint8Array): void {
+    const dv = new DataView(out.buffer, out.byteOffset, out.byteLength);
+    const n = dv.getUint32(0, true);
+    const now = this.#ports.now();
+    const frame = ++this.#viewFrame;
+
+    if (this.#corrected) {
+      this.#corrected = false;
+      for (let i = 0; i < n; i++) {
+        const at = 4 + i * VIEW_RECORD_BYTES;
+        const was = this.#shown.get(dv.getBigUint64(at, true));
+        // A dog nobody has seen yet has no continuity to keep.
+        if (!was) continue;
+        const dx = was.x - dv.getInt32(at + 8, true);
+        const dy = was.y - dv.getInt32(at + 12, true);
+        if (dx === 0 && dy === 0) continue;
+        // Measured as a distance, not per axis: a correction that is three
+        // cells north AND three cells east is a five-cell correction, and
+        // capping the axes would let it through as two small ones.
+        const cells = Math.hypot(dx, dy) / Q16;
+        if (cells > GLIDE_MAX_CELLS) continue;
+        const ms = glideWindowMs(cells);
+        this.#glide.set(dv.getBigUint64(at, true), { dx, dy, sinceMs: now, ms });
+      }
+    }
+
+    for (let i = 0; i < n; i++) {
+      const at = 4 + i * VIEW_RECORD_BYTES;
+      const id = dv.getBigUint64(at, true);
+      let x = dv.getInt32(at + 8, true);
+      let y = dv.getInt32(at + 12, true);
+      const owed = this.#glide.get(id);
+      if (owed) {
+        const left = glideRemaining(now - owed.sinceMs, owed.ms);
+        if (left <= 0) this.#glide.delete(id);
+        else {
+          x += Math.round(owed.dx * left);
+          y += Math.round(owed.dy * left);
+          dv.setInt32(at + 8, x, true);
+          dv.setInt32(at + 12, y, true);
+        }
+      }
+      const seen = this.#shown.get(id);
+      if (seen) {
+        seen.x = x;
+        seen.y = y;
+        seen.frame = frame;
+      } else {
+        this.#shown.set(id, { x, y, frame });
+      }
+    }
+
+    // Dogs that have left the park stop being anyone's continuity.
+    if (frame % GLIDE_PRUNE_FRAMES === 0) {
+      for (const [id, seen] of this.#shown) {
+        if (seen.frame === frame) continue;
+        this.#shown.delete(id);
+        this.#glide.delete(id);
+      }
+    }
   }
 
   /**
@@ -802,7 +982,7 @@ export class Core {
    */
   #refresh(pumpFlags: number): void {
     const client = this.#client;
-    const park = this.#slots[SLOT_PRESENTED];
+    const park = this.#park;
     if (!client) return;
     let hud: Hud | null = null;
     if (park) {

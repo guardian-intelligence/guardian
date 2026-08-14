@@ -52,8 +52,10 @@ const DEADBAND_Q16: i64 = ONE / 4;
 const SLEW_MAX_Q16: i64 = (2 * ONE) / 100; // ±2% tick-rate adjustment
 /// err/SLEW_DIV = adjustment: reaches the ±2% clamp near the FF border.
 const SLEW_DIV: i64 = 64;
-/// Advisory pacing for FastForward: how much host budget one step costs.
-const STEP_COST_US: u32 = 30;
+/// Advisory pacing for catch-up work: how much host budget one step
+/// costs. Public because rollback replay spends the same frame budget on
+/// the same steps, and the two must price them identically.
+pub const STEP_COST_US: u32 = 30;
 const FF_MAX_STEPS: u32 = 4096;
 /// Re-ask for a snapshot while stuck (the first request can race a
 /// transport death).

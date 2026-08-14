@@ -6,6 +6,7 @@
 import type { Core, TerrainPlanes } from "@guardian/mythrad-client-core";
 import * as v from "valibot";
 import type { Hud } from "./hud";
+import type { Jank } from "./jank";
 
 const Q16 = 65536;
 const TILE_W = 16;
@@ -51,10 +52,12 @@ export type Renderer = {
 export function createRenderer(opts: {
   readonly core: Core;
   readonly hud: Hud;
+  /** Measures what was drawn, frame by frame. */
+  readonly jank: Jank;
   /** The dog to highlight and follow. Follows a sign-in, so it is read per frame. */
   readonly myDog: () => bigint;
 }): Renderer {
-  const { core, hud } = opts;
+  const { core, hud, jank } = opts;
   const canvas = v.parse(v.instance(HTMLCanvasElement), document.getElementById("grid"));
   const ctx = v.parse(v.instance(CanvasRenderingContext2D), canvas.getContext("2d"));
 
@@ -454,6 +457,7 @@ export function createRenderer(opts: {
       ctx.drawImage(deckLayer, -camX, -camY);
       for (const dg of dogs) if (dg.flags & 1) drawDog(dg, camX, camY, myDog);
       hud.setRoster(names, dogs.length);
+      jank.sample(now, Number(view.tick), view.phaseQ16, mine, camX, camY, dogs);
     },
   };
 }

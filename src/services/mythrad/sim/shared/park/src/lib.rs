@@ -15,6 +15,14 @@
 //!     loads through `sim_set_terrain` before `sim_init`/`sim_restore` and
 //!     around every `terrain_set` event. The state holds only the
 //!     artifact's identity, which every boundary call cross-checks.
+//!   - The reads are inert. `sim_hash`, `sim_view`, `sim_snapshot`, and
+//!     `sim_hud` touch no state, so a replica calling them every tick
+//!     derives the same world as an authority that barely calls them at
+//!     all. Measured rather than assumed: 600 ticks of one instance
+//!     polling all four every tick, against another polling none, is
+//!     hash-identical tick for tick. A divergence hunt can rule this out
+//!     on sight, and so can a rollback that snapshots per tick to record
+//!     its repair floors.
 //!
 //! Movement is stored as exactly (position, waypoint, target) per dog.
 //! Paths are never cached: the waypoint is recomputed only at state
@@ -893,6 +901,21 @@ pub extern "C" fn sim_restore(len: u32) -> u32 {
 /// Canonical state hash: FNV-1a over every state field in snapshot order,
 /// finalized with a splitmix64 mix. Two replicas holding the same state
 /// produce the same value; any single divergence changes it.
+///
+/// Sixty-four bits of identity, not a number. It is declared i64 because
+/// that is what wasm offers, so a host reading it as signed while the wire
+/// carries it unsigned will find half of all hashes disagreeing with
+/// themselves: `uint32`-truncate i32 results in Go, `BigInt.asUintN(64,
+/// ..)` in JavaScript, and normalize before comparing rather than only
+/// before printing — a formatter that normalizes while the comparison does
+/// not will show two identical hex strings and call them unequal.
+///
+/// The failure shapes are worth telling apart. A real divergence is
+/// systematic: the worlds part company at some tick and stay parted.
+/// Agreement that alternates tick by tick, with no relation to anything in
+/// the world, is a comparison bug — no state difference and no timing
+/// difference can produce it, because the tick is inside the hash and two
+/// replicas at different ticks disagree about every check, not some.
 #[unsafe(no_mangle)]
 pub extern "C" fn sim_hash() -> u64 {
     let p = park();
@@ -1725,6 +1748,48 @@ mod tests {
         let s = snapshot_vec();
         restore_vec(&s);
         assert_eq!(sim_hash(), h);
+    }
+
+    /// The replica announces every mutation of the world that is not a
+    /// step, and it knows which events those are from this list. A new
+    /// kind that relocates a dog and is not announced moves the rendered
+    /// world silently on every host that reads it, which is a jump on
+    /// screen with nothing to absorb it — so the list is pinned here,
+    /// where the rule actually lives.
+    #[test]
+    fn no_event_but_a_terrain_change_moves_a_dog_that_is_already_here() {
+        let _g = setup(23);
+        let blob = park_blob();
+        let t = Terrain::parse(&blob).unwrap();
+        assert_eq!(ev_id(EV_JOIN, 3), OK);
+        assert_eq!(ev_id(EV_JOIN, 7), OK);
+        for _ in 0..40 {
+            sim_step();
+        }
+        let was = {
+            let d = dog(3);
+            (d.x, d.y)
+        };
+        let mut check = |kind: u16, code: u32| {
+            assert_eq!(code, OK, "event {kind} was refused, so it proves nothing");
+            let d = dog(3);
+            assert_eq!((d.x, d.y), was, "event {kind} moved a dog with no step");
+        };
+        check(EV_CHECK_IN, ev_id(EV_CHECK_IN, 3));
+        check(EV_MOVE_TO, ev_move(3, Node::ground(t.idx(10, 2)).0));
+        check(EV_BOOST_SET, ev_boost(3, 1));
+        check(EV_DAY_RESET, ev(EV_DAY_RESET, &1u32.to_le_bytes()));
+        check(EV_RATE_SET, ev(EV_RATE_SET, &48u32.to_le_bytes()));
+        check(EV_CLOCK_SKIP, ev(EV_CLOCK_SKIP, &10_000u64.to_le_bytes()));
+        check(EV_LEAVE, ev_id(EV_LEAVE, 7));
+        let mut p = 9u32.to_le_bytes().to_vec();
+        p.extend_from_slice(&0u64.to_le_bytes());
+        check(EV_EPOCH_ADVANCE, ev(EV_EPOCH_ADVANCE, &p));
+        // A join places a dog nobody has seen yet, which has no position
+        // to keep, and is the only other apply that writes one.
+        assert_eq!(ev_id(EV_JOIN, 11), OK);
+        let d = dog(3);
+        assert_eq!((d.x, d.y), was);
     }
 
     #[test]
