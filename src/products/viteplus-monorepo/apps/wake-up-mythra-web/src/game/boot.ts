@@ -26,6 +26,7 @@ import {
   reportBootFailure,
   signInFailed,
   signedIn,
+  tapSpans,
   unsupported,
 } from "./telemetry";
 import { createTransport, type Credentials } from "./transport";
@@ -159,10 +160,11 @@ async function run(hud: Hud): Promise<void> {
     debug = import.meta.env.DEV ? createDebugPanel(core) : null;
     // The raw per-frame ring is opt-in because only a harness reads it; the
     // counters behind the once-a-minute span always run.
-    const jank = createJank({
-      probe: query.has("probe"),
-      emit: (counters) => jankSpan(park, counters),
-    });
+    const probe = query.has("probe");
+    const jank = createJank({ probe, emit: (counters) => jankSpan(park, counters) });
+    // Under the probe the harness reads the spans alongside the frames:
+    // the frames show a rewind, the spans say which repair asked for it.
+    if (probe) tapSpans(jank.recordSpan);
     const renderer = createRenderer({ core, hud, jank, myDog: () => identity.myDog });
 
     const onSignIn = async (o: SignInOutcome): Promise<void> => {

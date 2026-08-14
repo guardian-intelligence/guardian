@@ -186,6 +186,26 @@ only handle that marks an event as yours. Rejects go only to the sender.
    where divergence is measured, not through flags. Flags gate UI, features,
    rollout cohorts, and kill switches.
 
+- **A replica pays one invisible rollback per own action, priced at its
+  lead.** The authority stamps an intent at the tick IT holds, so a
+  replica running ahead of the authority — which any freshly restored
+  replica is, and any deliberately fresh one will be — receives its own
+  action stamped in its past and repairs it by rewind-and-replay inside
+  a single frame. Non-acting dogs replay bit-identically (the sim has no
+  dog-dog interaction; revisit this economy when it does), the presented
+  tick never regresses, and the repair's two costs are CPU (bounded by
+  the pump budget, resync as the escape) and nothing visible. Freshness
+  and rewind depth are the same dial; in-frame replay is what makes
+  turning it affordable.
+- **An unanswerable hash check is only evidence of staleness in one
+  direction.** The verdict carries the authority's own tick: a check the
+  park cannot answer because the replica asked about the park's near
+  future — the normal state of a leading replica — is benign and never
+  strikes; only a check outside the ring's past counts toward the
+  two-strike resync. Without this distinction a healthy, merely-ahead
+  client resyncs itself on a perfect link, and the fresher the client
+  runs, the more often.
+
 ## FAQ
 
 **What actually happens on pod restart?** Restore the latest snapshot,

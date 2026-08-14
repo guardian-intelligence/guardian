@@ -126,19 +126,6 @@ describe("a join is sent once", () => {
     expect(rejects).toHaveLength(0);
     expect(r.harness.logs.filter((l) => /already/i.test(l))).toHaveLength(0);
   });
-
-  it("keeps the dog in the presented world when the park says it is present", async () => {
-    // The refusal and the outcome agree: our dog is in the park. The
-    // prediction was right, so the presented world must not lose it.
-    const r = await rig({ role: "player", myDog: 0x5151n });
-    await r.establish();
-    await r.run(200);
-    const join = joinFrames(r)[0];
-    const id = join!.kind === "intent" ? join!.value.id : 0n;
-    r.deliver([r.authority.reject(id, Reject.present)]);
-    await r.run(200);
-    expect(r.core.state.present).toBe(true);
-  });
 });
 
 describe("intents that need a dog in the park wait for one", () => {

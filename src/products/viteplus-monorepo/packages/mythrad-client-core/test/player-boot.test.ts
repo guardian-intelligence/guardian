@@ -11,6 +11,10 @@ import { Role } from "../src/wire.ts";
 import { Ev, dogPayload, rig, type Rig } from "./wasm.ts";
 
 const TICK_MS = 1000 / 24;
+/** The ring keeps one entry a second, so a repair reaches back at most this far. */
+const RING_CADENCE_TICKS = 24;
+/** One terrain cell in the Q16.16 coordinates sim_view reports. */
+const ONE_CELL = 65536;
 
 /**
  * Half a round trip, in ticks, plus a tick of slack for the frame the
@@ -140,6 +144,9 @@ describe("a player attaching to a running park", () => {
       step();
       await r.harness.settle();
     }
+    // Bystanders: dogs already in the park when we attach, with nothing to
+    // do with the event or with our prediction.
+    for (let i = 0; i < 8; i++) r.authority.apply(Ev.join, dogPayload(BigInt(0x7200 + i)));
     r.deliver([r.authority.welcome(Role.player), r.authority.snapshot()]);
 
     const frames: { tick: bigint; dogs: Map<bigint, string> }[] = [];
@@ -181,65 +188,185 @@ describe("a player attaching to a running park", () => {
       );
     }
 
-    // And the dogs that had nothing to do with the event must not be seen
-    // standing where they stood several ticks ago.
+    // And a bystander seen at the same tick must be in the same place: the
+    // repair reproduces the world it rewound through, it does not re-roll
+    // it. Our own dog is excluded — its position is a prediction, and
+    // predictions are the next case.
     const after = frames[settled]!;
     expect(after.tick).toBeGreaterThanOrEqual(before.tick);
-    for (const [id, was] of before.dogs) {
-      const now = after.dogs.get(id);
-      if (now === undefined) continue;
-      if (after.tick === before.tick) expect(now).toBe(was);
+    if (after.tick === before.tick) {
+      let compared = 0;
+      for (const [id, was] of before.dogs) {
+        if (id === 0x7003n) continue;
+        const now = after.dogs.get(id);
+        if (now === undefined) continue;
+        compared++;
+        expect(now, `bystander ${id.toString(16)} moved without time passing`).toBe(was);
+      }
+      expect(compared).toBeGreaterThan(0);
     }
   });
 
-  it("rewinds no further than the event was late", async () => {
-    // Repairing a late event costs a replay over every tick between the
-    // state it rewinds to and the present, and that replay is real work on
-    // the frame it lands: for a full park, thousands of dog steps. So the
-    // cost has to follow how late the event was, not how long ago the last
-    // retained state happens to be. A rewind that cannot be paid for
-    // inside the frame's budget is a resync, not a longer replay.
+  it("shows our dog once the journal places it, and not before", async () => {
+    // Where a joining dog lands is drawn at the tick the join is applied,
+    // so there is no such thing as predicting it: a guess would be redrawn
+    // every time the overlay rebuilt, and the dog would wander the park
+    // until the journal answered. The presented world simply does not
+    // carry a dog the journal has not placed.
     const RTT = 200;
-    const r = await rig({ role: "player", checkMs: 200, myDog: 0x7004n, rttMs: RTT });
+    const r = await rig({ role: "player", checkMs: 200, myDog: 0x7005n, rttMs: RTT });
     const step = liveWorld(r);
     for (let t = 0; t < 2000; t += 20) {
       r.harness.clock.advance(20);
       step();
       await r.harness.settle();
     }
+    for (let i = 0; i < 4; i++) r.authority.apply(Ev.join, dogPayload(BigInt(0x7500 + i)));
     r.deliver([r.authority.welcome(Role.player), r.authority.snapshot()]);
 
+    const seen = new Set<string>();
     const pumpFor = async (ms: number) => {
       for (let t = 0; t < ms; t += 16) {
         r.harness.clock.advance(16);
         step();
         r.core.pump();
         r.answerChecks();
+        const view = r.core.view();
+        const mine = view && dogsIn(view.viewBytes).get(0x7005n);
+        if (mine) seen.add(mine);
         await r.harness.settle();
       }
     };
-    await pumpFor(1500);
+    await pumpFor(600);
+    // The join is on the wire and unanswered, so the park we present is
+    // the park the journal describes: four dogs, none of them ours.
+    expect(r.core.state.present).toBe(false);
+    expect(r.core.state.dogCount).toBe(4);
+    expect(seen.size).toBe(0);
 
-    const frame = r.authority.apply(Ev.join, dogPayload(0x7400n));
-    const stamp = r.authority.tick;
-    await pumpFor(RTT / 2);
-    const lateBy = Number(r.core.state.tick - stamp);
-    expect(lateBy).toBeGreaterThan(0);
+    // Other dogs arriving rebuild the overlay repeatedly; ours still is
+    // not in it, because nothing has placed it yet.
+    for (let i = 0; i < 4; i++) {
+      r.deliver([r.authority.apply(Ev.join, dogPayload(BigInt(0x7600 + i)))]);
+      await pumpFor(300);
+    }
+    expect(seen.size).toBe(0);
+    expect(r.core.state.present).toBe(false);
 
+    // The journal places it. From then on it is an ordinary dog: it may
+    // walk, but it may not jump — a placed dog moves at most a cell
+    // between frames, where a re-rolled spawn moves it across the park.
+    r.deliver([r.authority.apply(Ev.join, dogPayload(0x7005n))]);
+    const track: [number, number][] = [];
+    for (let t = 0; t < 800; t += 16) {
+      r.harness.clock.advance(16);
+      step();
+      r.core.pump();
+      r.answerChecks();
+      const view = r.core.view();
+      const mine = view && dogsIn(view.viewBytes).get(0x7005n);
+      if (mine) {
+        const [x, y] = mine.split(",").map(Number);
+        track.push([x!, y!]);
+      }
+      await r.harness.settle();
+    }
+    expect(r.core.state.present).toBe(true);
+    expect(track.length).toBeGreaterThan(0);
+    for (let i = 1; i < track.length; i++) {
+      const dx = Math.abs(track[i]![0] - track[i - 1]![0]);
+      const dy = Math.abs(track[i]![1] - track[i - 1]![1]);
+      expect(Math.max(dx, dy), `frame ${i}: dog jumped`).toBeLessThan(ONE_CELL);
+    }
+  });
+
+  it("plays a clean leg cleanly", async () => {
+    // The baseline every other case is a deviation from. A player on a
+    // fast link runs the same module on the same events, so nothing here
+    // should need a snapshot to repair it. Rollbacks are not zero and
+    // cannot be: an own action is journaled at the authority's tick,
+    // which a leading replica has already passed, so each one costs a
+    // rewind the size of the lead. That is the price of freshness, and
+    // in-frame replay is what makes it invisible rather than free.
+    const r = await rig({ role: "player", checkMs: 500, myDog: 0x8001n, rttMs: 0, seed: 11 });
+    const step = liveWorld(r);
+    for (let t = 0; t < 1000; t += 20) {
+      r.harness.clock.advance(20);
+      step();
+      await r.harness.settle();
+    }
+    for (let i = 0; i < 6; i++) r.authority.apply(Ev.join, dogPayload(BigInt(0x8100 + i)));
+    r.deliver([r.authority.welcome(Role.player), r.authority.snapshot()]);
+
+    // The authority journals an intent when it arrives, at the tick it
+    // holds then, and sends the event back — an intent's real round trip.
+    let forwarded = 0;
+    const journalIntents = () => {
+      const frames = r.harness.transport.sentFrames();
+      for (; forwarded < frames.length; forwarded++) {
+        const f = frames[forwarded]!;
+        if (f.kind !== "intent") continue;
+        try {
+          r.deliver([r.authority.apply(f.value.kind, f.value.p, f.value.id)]);
+        } catch {
+          // Refused; rejects are another case's business.
+        }
+      }
+    };
+
+    const presented: bigint[] = [];
+    let maxLead = 0;
+    let moves = 0;
+    let nextMove = 1500;
     const mark = r.harness.emitted.length;
-    r.deliver([frame]);
-    await pumpFor(400);
+    for (let t = 0; t < 11_000; t += 16) {
+      r.harness.clock.advance(16);
+      step();
+      r.core.pump();
+      r.answerChecks();
+      if (r.core.state.tick > 0n) journalIntents();
+      if (t >= nextMove) {
+        r.core.moveTo(200 + ((moves * 37) % 4000));
+        moves++;
+        nextMove = t + 900;
+      }
+      const view = r.core.view();
+      if (view) presented.push(view.tick);
+      if (r.core.state.tick > 0n) {
+        maxLead = Math.max(maxLead, Number(r.core.state.tick - r.authority.tick));
+      }
+      await r.harness.settle();
+    }
 
-    // rollback(late_ticks, rewound_ticks): how late the event was, and how
-    // far back the repair had to reach in order to place it.
+    // rollback(late_ticks, rewound_ticks)
     const rolls = r.harness.emitted
       .slice(mark)
       .filter((e) => e.code === Emit.rollback)
       .map((e) => ({ late: Number(e.a), rewound: Number(e.b) }));
-    expect(rolls.length).toBeGreaterThan(0);
+
+    expect(moves).toBeGreaterThan(8);
+    expect(r.core.state.present).toBe(true);
+
+    // Nothing on a clean leg is beyond local repair.
+    expect(Number(r.core.state.resyncs)).toBe(0);
+
+    // One repair per own action at most — the journal has nothing else to
+    // tell us that we did not already predict.
+    expect(rolls.length).toBeLessThanOrEqual(moves + 1);
+
     for (const roll of rolls) {
-      expect(roll.late).toBeLessThanOrEqual(lateBy + 1);
-      expect(roll.rewound).toBeLessThanOrEqual(roll.late + 1);
+      // A repair reaches back to the event, and from there to the newest
+      // retained state older than it. Entries land one a second, so how
+      // much further than the event it has to reach is wherever that
+      // event fell between two of them — never a whole cadence more.
+      expect(roll.late).toBeLessThanOrEqual(maxLead + 1);
+      expect(roll.rewound).toBeGreaterThanOrEqual(roll.late);
+      expect(roll.rewound).toBeLessThan(roll.late + RING_CADENCE_TICKS);
+    }
+
+    // And none of it is visible: the world never steps backwards.
+    for (let i = 1; i < presented.length; i++) {
+      expect(presented[i], `frame ${i} went backwards`).toBeGreaterThanOrEqual(presented[i - 1]!);
     }
   });
 

@@ -107,6 +107,14 @@ export class Authority {
   epoch = 1;
   hz = 24;
   parkName = "park-mythra";
+  /**
+   * World hash per tick, as the state stood on ENTRY to it — before any
+   * event stamped for that tick. A real park keeps this ring so it can
+   * answer a check about a tick it has already passed; without it every
+   * verdict about anything but the current instant reads as a mismatch,
+   * and the client is told its world is wrong when it is not.
+   */
+  readonly #hashes = new Map<bigint, bigint>();
 
   private constructor(park: ParkExports, terrain: Uint8Array, terrainId: bigint) {
     this.park = park;
@@ -124,7 +132,14 @@ export class Authority {
     if (code !== 0) throw new Error(`authority terrain rejected (code ${code})`);
     const init = park.sim_init(seed, parkId, 1);
     if (init !== 0) throw new Error(`authority init failed (code ${init})`);
-    return new Authority(park, m.terrain, park.sim_terrain_id());
+    const authority = new Authority(park, m.terrain, park.sim_terrain_id());
+    authority.seedHash();
+    return authority;
+  }
+
+  /** Records the starting world, so tick 0 is answerable like any other. */
+  seedHash(): void {
+    this.#recordHash();
   }
 
   get tick(): bigint {
@@ -136,7 +151,25 @@ export class Authority {
   }
 
   step(n = 1): void {
-    for (let i = 0; i < n; i++) this.park.sim_step();
+    for (let i = 0; i < n; i++) {
+      this.park.sim_step();
+      this.#recordHash();
+    }
+  }
+
+  #recordHash(): void {
+    this.#hashes.set(this.tick, this.hash());
+    // Bounded like the real one; long scenarios would otherwise grow it
+    // without limit.
+    if (this.#hashes.size > 2048) {
+      const oldest = this.#hashes.keys().next().value;
+      if (oldest !== undefined) this.#hashes.delete(oldest);
+    }
+  }
+
+  /** What this park held on entry to `tick`, if it still remembers. */
+  hashAt(tick: bigint): bigint | undefined {
+    return this.#hashes.get(tick);
   }
 
   welcome(role: number = Role.player): Uint8Array {
@@ -280,8 +313,9 @@ export class Authority {
     check: { tick: bigint; wh: bigint; ctMs: bigint },
     over: { known?: boolean; ok?: boolean; cw?: Uint8Array; pw?: Uint8Array } = {},
   ): Uint8Array {
-    const known = over.known ?? true;
-    const honest = check.tick === this.tick && check.wh === this.hash();
+    const mine = this.hashAt(check.tick);
+    const known = over.known ?? mine !== undefined;
+    const honest = mine !== undefined && mine === check.wh;
     return encodeVerdict({
       tick: check.tick,
       now: this.tick,

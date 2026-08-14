@@ -15,6 +15,11 @@
 //   WUM_DEV_PUBLIC_ADDR=127.0.0.1:14433 scripts/wum-dev.sh &
 //   node e2e/feel.mjs
 //
+// For an acceptance measurement, pin the candidate build and repeat, so the
+// numbers name a build and carry their spread:
+//
+//   WUM_FEEL_CANDIDATE=<client word> WUM_FEEL_RUNS=3 node e2e/feel.mjs
+//
 // Legs are network profiles, played identically:
 //   clean      no impairment: the floor. Anything here is not the network.
 //   home-wifi  40ms/30ms jitter/0.5% loss — an ordinary living room, and
@@ -31,6 +36,25 @@ const CYCLES = Number(process.env.WUM_FEEL_CYCLES ?? 6);
 const SEED = Number(process.env.WUM_FEEL_SEED ?? 7);
 /** Frames the sim needs to settle after an impairment change, before scoring. */
 const SETTLE_MS = 4000;
+/**
+ * Repeats of the whole leg sequence. Acceptance takes three, because one
+ * run of a game on a lossy path is an anecdote.
+ */
+const RUNS = Number(process.env.WUM_FEEL_RUNS ?? 1);
+/**
+ * The client module word this measurement is FOR. The park hot-swaps
+ * modules under a live session, so without a pin a run can silently score
+ * a build nobody proposed. Set it for an acceptance run:
+ *
+ *   WUM_FEEL_CANDIDATE=43e29e90 WUM_FEEL_RUNS=3 node e2e/feel.mjs
+ *
+ * Unset, the harness scores whatever is live and says so — useful for a
+ * lead, never for an acceptance.
+ */
+const CANDIDATE = process.env.WUM_FEEL_CANDIDATE ?? null;
+
+/** What the park is serving right now. Re-read before every leg. */
+const modules = async () => (await fetch(`${APP}/wt-info`, { cache: "no-store" })).json();
 
 // `hiccupMs` is a total dropout, taken once per play cycle at the moment
 // the dog is mid-walk with an intent unanswered. Real wifi does this — an
@@ -41,10 +65,12 @@ const LEGS = [
     name: "clean",
     impair: { latency_ms: 0, jitter_ms: 0, loss_pct: 0 },
     hiccupMs: 0,
-    // An unimpaired path has no excuse for showing the world at a tick it
-    // already passed, so the rewind check applies here even though the
-    // feel thresholds do not.
-    gates: ["live", "backwardTicks"],
+    // An unimpaired path has even less excuse than a degraded one for
+    // showing the world at a tick it already passed, or for moving a dog
+    // somewhere no walk could take it. The timing thresholds stay off:
+    // frame budget and stalls are the network's business, and there is no
+    // network here to blame.
+    gates: ["live", "backwardTicks", "ownDogJumps"],
   },
   {
     name: "home-wifi",
@@ -231,6 +257,47 @@ function worstJumps(records, count) {
   });
 }
 
+// The repairs the app announced during a leg, in order. The scorecard says
+// a rewind happened; these say which repair asked for it and how far back
+// it reached, which is the difference between a rollback that overshot and
+// a snapshot landing behind the replica.
+function repairs(spans) {
+  const out = [];
+  for (const s of spans) {
+    if (s.name === "wum.netcode_rollback") {
+      out.push(
+        `rollback: late ${s.attrs["wum.late_ticks"]} tick(s),` +
+          ` rewound ${s.attrs["wum.rewound_ticks"]}`,
+      );
+    } else if (s.name === "wum.netcode_resync") {
+      out.push(`resync: ${s.attrs["wum.why"]} at seq ${s.attrs["wum.seq"]}`);
+    } else if (s.name === "wum.netcode_restore") {
+      out.push(`restore: landed at seq ${s.attrs["wum.seq"]} tick ${s.attrs["wum.tick"]}`);
+    } else if (s.name === "wum.netcode_teardown") {
+      out.push(`teardown: ${s.attrs["wum.why"]}`);
+    }
+  }
+  return out;
+}
+
+// A rewind is one frame showing an earlier world than the frame before it.
+// Where it lands in the leg, and how far it goes, is what says whether a
+// rollback or a snapshot restore produced it.
+function rewinds(records) {
+  const out = [];
+  for (let i = 1; i < records.length; i++) {
+    const back = records[i - 1].tick - records[i].tick;
+    if (back <= 0) continue;
+    out.push(
+      `      rewind ${back} tick(s) at ${((records[i].t - records[0].t) / 1000).toFixed(1)}s` +
+        ` into the leg: tick ${records[i - 1].tick} → ${records[i].tick},` +
+        ` pos (${(records[i - 1].myX / Q16).toFixed(2)},${(records[i - 1].myY / Q16).toFixed(2)})` +
+        ` → (${(records[i].myX / Q16).toFixed(2)},${(records[i].myY / Q16).toFixed(2)})`,
+    );
+  }
+  return out;
+}
+
 function fmt(card) {
   const n = (v, d = 2) => (typeof v === "number" ? v.toFixed(d) : String(v));
   return [
@@ -341,75 +408,117 @@ await page.waitForFunction(
 // Which modules produced these numbers. A scorecard that cannot name the
 // build it scored is a number without a subject — and this stack hot-swaps
 // the park module underneath a running session by design.
-const info = await (await fetch(`${APP}/wt-info`, { cache: "no-store" })).json();
+const info = await modules();
 console.log(
   `signed in as ${PLAYER}; playing ${LEGS.length} legs of ${CYCLES} cycles` +
-    ` against park ${info.parkWasm} / client ${info.clientWasm}`,
+    ` x ${RUNS} run(s) against park ${info.parkWasm} / client ${info.clientWasm}` +
+    (CANDIDATE ? ` (candidate ${CANDIDATE})` : " (no candidate pinned — leads only)"),
 );
 
 const canvas = await page.waitForSelector("#grid");
 const box = await canvas.boundingBox();
 const results = [];
 
-for (const leg of LEGS) {
-  await impair(leg.impair);
-  await sleep(SETTLE_MS);
-  const [before, diagBefore] = await page.evaluate(() => [
-    globalThis.__mythraProbe.counters(),
-    { ...globalThis.__mythraDiag },
-  ]);
-  await page.evaluate(() => globalThis.__mythraProbe.drain());
+for (let run = 1; run <= RUNS; run++)
+  for (const leg of LEGS) {
+    const at = await modules();
+    // The park hot-swaps modules under a running session by design, so the
+    // build can change between legs. An acceptance run pinned to a
+    // candidate stops here rather than reporting numbers for whatever
+    // happened to be live.
+    if (CANDIDATE && at.clientWasm !== CANDIDATE) {
+      console.log(
+        `\nVOID: client is ${at.clientWasm}, not the candidate ${CANDIDATE}` +
+          ` — measurement abandoned at ${leg.name} run ${run}/${RUNS}`,
+      );
+      await browser.close();
+      process.exit(2);
+    }
+    const tag = `${leg.name} run ${run}/${RUNS} client ${at.clientWasm}`;
+    await impair(leg.impair);
+    await sleep(SETTLE_MS);
+    const [before, diagBefore] = await page.evaluate(() => [
+      globalThis.__mythraProbe.counters(),
+      { ...globalThis.__mythraDiag },
+    ]);
+    await page.evaluate(() => {
+      globalThis.__mythraProbe.drain();
+      globalThis.__mythraProbe.drainSpans();
+    });
 
-  await playInputs(page, box, CYCLES, leg.hiccupMs, seeded(SEED));
+    await playInputs(page, box, CYCLES, leg.hiccupMs, seeded(SEED));
 
-  const { records, dropped, after, diagAfter } = await page.evaluate(() => ({
-    records: globalThis.__mythraProbe.drain(),
-    dropped: globalThis.__mythraProbe.dropped,
-    after: globalThis.__mythraProbe.counters(),
-    diagAfter: { ...globalThis.__mythraDiag },
-  }));
-  const session = {
-    events: diagAfter.events - diagBefore.events,
-    rollbacks: diagAfter.rollbacks - diagBefore.rollbacks,
-    resyncs: diagAfter.resyncs - diagBefore.resyncs,
-    mismatches: diagAfter.mismatches - diagBefore.mismatches,
-    rejects: diagAfter.rejects - diagBefore.rejects,
-  };
-  const card = score(records);
-  const fails = gateFailures(card, session, leg.gates);
-  results.push({ leg, card, session, fails });
+    const { records, spans, dropped, after, diagAfter } = await page.evaluate(() => ({
+      records: globalThis.__mythraProbe.drain(),
+      spans: globalThis.__mythraProbe.drainSpans(),
+      dropped: globalThis.__mythraProbe.dropped,
+      after: globalThis.__mythraProbe.counters(),
+      diagAfter: { ...globalThis.__mythraDiag },
+    }));
+    const session = {
+      events: diagAfter.events - diagBefore.events,
+      rollbacks: diagAfter.rollbacks - diagBefore.rollbacks,
+      resyncs: diagAfter.resyncs - diagBefore.resyncs,
+      mismatches: diagAfter.mismatches - diagBefore.mismatches,
+      rejects: diagAfter.rejects - diagBefore.rejects,
+    };
+    const card = score(records);
+    const fails = gateFailures(card, session, leg.gates);
+    results.push({ leg, card, session, fails, run, client: at.clientWasm });
 
-  console.log(`\n[${leg.name}] ${JSON.stringify(leg.impair)} hiccup=${leg.hiccupMs}ms x${CYCLES}`);
-  console.log(`    ${fmt(card)}`);
-  // What the session actually went through. A leg that never rolled back or
-  // resynced did not test the repair paths, whatever its scorecard says.
-  console.log(
-    `    session: events=${session.events} rollbacks=${session.rollbacks}` +
-      ` resyncs=${session.resyncs} mismatches=${session.mismatches} rejects=${session.rejects}`,
-  );
-  // The page's own counters over the same frames. They feed wum.jank in
-  // production, so a disagreement here means the beacon is lying.
-  console.log(
-    `    beacon: long=${after.longFrames - before.longFrames}` +
-      ` backward=${after.backwardTicks - before.backwardTicks}` +
-      ` jumps=${after.ownDogJumps - before.ownDogJumps}` +
-      ` freezes=${after.freezeRuns - before.freezeRuns}` +
-      (dropped ? ` (ring dropped ${dropped})` : ""),
-  );
-  if (leg.gates.length > 0) {
-    console.log(`    gate: ${fails.length === 0 ? "PASS" : `FAIL — ${fails.join("; ")}`}`);
-    if (fails.length > 0) {
-      const evidence = worstJumps(records, 3);
-      if (evidence.length > 0) console.log(evidence.join("\n"));
+    console.log(`\n[${tag}] ${JSON.stringify(leg.impair)} hiccup=${leg.hiccupMs}ms x${CYCLES}`);
+    console.log(`    ${fmt(card)}`);
+    // What the session actually went through. A leg that never rolled back or
+    // resynced did not test the repair paths, whatever its scorecard says.
+    console.log(
+      `    session: events=${session.events} rollbacks=${session.rollbacks}` +
+        ` resyncs=${session.resyncs} mismatches=${session.mismatches} rejects=${session.rejects}`,
+    );
+    // Each repair, named. A count says the leg repaired something; these say
+    // what it thought was wrong and how far back it had to go.
+    for (const line of repairs(spans)) console.log(`    ${line}`);
+    // The page's own counters over the same frames. They feed wum.jank in
+    // production, so a disagreement here means the beacon is lying.
+    console.log(
+      `    beacon: long=${after.longFrames - before.longFrames}` +
+        ` backward=${after.backwardTicks - before.backwardTicks}` +
+        ` jumps=${after.ownDogJumps - before.ownDogJumps}` +
+        ` freezes=${after.freezeRuns - before.freezeRuns}` +
+        (dropped ? ` (ring dropped ${dropped})` : ""),
+    );
+    if (leg.gates.length > 0) {
+      console.log(`    gate: ${fails.length === 0 ? "PASS" : `FAIL — ${fails.join("; ")}`}`);
+      if (fails.length > 0) {
+        const evidence = [...rewinds(records), ...worstJumps(records, 3)];
+        if (evidence.length > 0) console.log(evidence.join("\n"));
+      }
     }
   }
-}
 
 await impair({ latency_ms: 0, jitter_ms: 0, loss_pct: 0 });
 await browser.close();
 
+// Across runs, per leg: the spread is the point. One green run of a game on
+// a lossy path says very little, and a metric that swings between runs is a
+// finding in itself rather than a number to average away.
+if (RUNS > 1) {
+  console.log(`\nacross ${RUNS} runs${CANDIDATE ? ` of candidate ${CANDIDATE}` : ""}:`);
+  for (const leg of LEGS) {
+    const mine = results.filter((r) => r.leg.name === leg.name);
+    const list = (pick) => mine.map(pick).join("/");
+    console.log(
+      `    ${leg.name}: backward ${list((r) => r.card.backwardTicks)}` +
+        ` · jumps ${list((r) => r.card.ownDogJumps)}` +
+        ` · own max ${mine.map((r) => r.card.ownDispMaxCells.toFixed(2)).join("/")} cells` +
+        ` · stalls ${list((r) => r.card.stallRuns)}` +
+        ` · rollbacks ${list((r) => r.session.rollbacks)}` +
+        ` · resyncs ${list((r) => r.session.resyncs)}` +
+        ` · mismatches ${list((r) => r.session.mismatches)}`,
+    );
+  }
+}
+
 const failed = results.filter((r) => r.fails.length > 0);
-console.log(
-  failed.length === 0 ? "\nFEEL OK" : `\nFEEL FAILED: ${failed.map((r) => r.leg.name).join(", ")}`,
-);
+const names = [...new Set(failed.map((r) => `${r.leg.name} (run ${r.run})`))];
+console.log(failed.length === 0 ? "\nFEEL OK" : `\nFEEL FAILED: ${names.join(", ")}`);
 process.exit(failed.length === 0 ? 0 : 1);

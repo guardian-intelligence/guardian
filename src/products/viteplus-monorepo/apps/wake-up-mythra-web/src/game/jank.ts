@@ -38,6 +38,12 @@ const JUMP_CELLS = 0.5;
 const PROBE_DOGS = 8;
 /** Frames the probe ring holds: about 68 seconds at 60fps. */
 const PROBE_CAP = 4096;
+/**
+ * Spans the probe ring holds. Frames are the what; these are the why, and
+ * a leg that produces hundreds of them has a bigger problem than a ring
+ * size.
+ */
+const SPAN_CAP = 256;
 /** How often the aggregate leaves the page. */
 const BEACON_MS = 60_000;
 
@@ -73,6 +79,13 @@ export type FrameRecord = {
   readonly dogs: (string | number)[];
 };
 
+/** A span the app emitted, as the probe keeps it for a harness to read. */
+export type SpanRecord = {
+  readonly t: number;
+  readonly name: string;
+  readonly attrs: Record<string, string>;
+};
+
 /** What `?probe=1` publishes as `__mythraProbe` for a harness to read. */
 export type Probe = {
   readonly cap: number;
@@ -80,6 +93,11 @@ export type Probe = {
   readonly dropped: number;
   /** Every held frame in order, oldest first, then empties the ring. */
   drain(): FrameRecord[];
+  /**
+   * Every span the app emitted since the last call, oldest first. The
+   * frames say a rewind happened; these say which repair asked for it.
+   */
+  drainSpans(): SpanRecord[];
   /**
    * The counters behind the beacon, cumulative since the page loaded. The
    * beacon reports differences of these, so a harness that differences them
@@ -89,6 +107,11 @@ export type Probe = {
 };
 
 export type Jank = {
+  /**
+   * Records a span the app emitted. Wired to the telemetry tap only under
+   * `?probe=1`; a no-op otherwise, and never a second emission path.
+   */
+  readonly recordSpan: (name: string, attrs: Record<string, string>) => void;
   /** Called once per drawn frame, from the render loop. */
   readonly sample: (
     t: number,
@@ -126,6 +149,7 @@ export function createJank(opts: {
     : [];
   let at = 0;
   let dropped = 0;
+  let spans: SpanRecord[] = [];
 
   // Counters are cumulative for the life of the page, and the beacon
   // differences against its own last report to get a minute. A reader — the
@@ -159,6 +183,11 @@ export function createJank(opts: {
         dropped = 0;
         return out;
       },
+      drainSpans: () => {
+        const out = spans;
+        spans = [];
+        return out;
+      },
       counters,
     };
     Object.assign(globalThis, { __mythraProbe: probe });
@@ -182,6 +211,11 @@ export function createJank(opts: {
   }, BEACON_MS);
 
   return {
+    recordSpan: (name, attrs) => {
+      if (!opts.probe) return;
+      spans.push({ t: performance.now(), name, attrs });
+      if (spans.length > SPAN_CAP) spans.splice(0, spans.length - SPAN_CAP);
+    },
     sample: (t, tick, phaseQ16, mine, camX, camY, dogs) => {
       frames++;
       const gap = lastT === 0 ? 0 : t - lastT;

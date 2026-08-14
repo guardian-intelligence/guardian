@@ -37,6 +37,21 @@ const RESYNC_WHY: Record<number, string> = {
 // name so dashboards never depend on the numeric order.
 const CLOCK_STATES = ["acquiring", "locked", "fast-forward", "snapshot-required"] as const;
 
+// Every span this module emits goes through one function, so a harness can
+// watch the whole vocabulary by tapping one place. The tap is a read: it
+// never replaces the emission, and nothing installs one outside `?probe=1`.
+let tap: ((name: string, attrs: Record<string, string>) => void) | null = null;
+
+/** Mirrors every span emitted from here to `fn`. Dev and harnesses only. */
+export function tapSpans(fn: (name: string, attrs: Record<string, string>) => void): void {
+  tap = fn;
+}
+
+function span(name: string, attrs: Record<string, string>): void {
+  emitSpan(name, attrs);
+  tap?.(name, attrs);
+}
+
 export type SignInFlow = "popup" | "redirect";
 
 /**
@@ -47,7 +62,7 @@ export type SignInFlow = "popup" | "redirect";
  * reports from production.
  */
 export function jank(park: string, c: JankCounters): void {
-  emitSpan("wum.jank", {
+  span("wum.jank", {
     "wum.long_frames": String(c.longFrames),
     "wum.backward_ticks": String(c.backwardTicks),
     "wum.own_dog_jumps": String(c.ownDogJumps),
@@ -66,15 +81,15 @@ export type Telemetry = {
 };
 
 export function signedIn(flow: SignInFlow): void {
-  emitSpan("wum.signin", { "wum.flow": flow });
+  span("wum.signin", { "wum.flow": flow });
 }
 
 export function signInFailed(reason: string, flow: SignInFlow): void {
-  emitSpan("wum.signin_failed", { "wum.reason": reason, "wum.flow": flow });
+  span("wum.signin_failed", { "wum.reason": reason, "wum.flow": flow });
 }
 
 export function unsupported(): void {
-  emitSpan("wum.unsupported", { "wum.feature": "webtransport" });
+  span("wum.unsupported", { "wum.feature": "webtransport" });
 }
 
 /** Reports a boot failure and returns the error id to show the user. */
@@ -104,7 +119,7 @@ export function createTelemetry(ctx: {
     emit: (code, a, b) => {
       switch (code) {
         case Emit.connectedHelloSent:
-          emitSpan("wum.connected", {
+          span("wum.connected", {
             "wum.park": park,
             "wum.role": role,
             "wum.anon": String(anon),
@@ -112,18 +127,18 @@ export function createTelemetry(ctx: {
           });
           return;
         case Emit.resyncRequested:
-          emitSpan("wum.netcode_resync", {
+          span("wum.netcode_resync", {
             "wum.why": whyOf(Number(a)),
             "wum.seq": String(b),
             "wum.park": park,
           });
           return;
         case Emit.mismatch:
-          emitSpan("wum.netcode_mismatch", { "wum.tick": String(a), "wum.park": park });
+          span("wum.netcode_mismatch", { "wum.tick": String(a), "wum.park": park });
           return;
         case Emit.reject:
           ctx.log(rejectText(Number(a)));
-          emitSpan("wum.netcode_reject", {
+          span("wum.netcode_reject", {
             "wum.reason": String(a),
             "wum.kind": String(b),
             "wum.park": park,
@@ -133,7 +148,7 @@ export function createTelemetry(ctx: {
           ctx.log("rejoining the park with your dog");
           return;
         case Emit.moduleSwapWanted:
-          emitSpan("wum.module_swap", {
+          span("wum.module_swap", {
             "wum.hash": moduleWordHex(Number(a)),
             "wum.park": park,
           });
@@ -141,31 +156,35 @@ export function createTelemetry(ctx: {
         case Emit.clockState:
           // Fires on state transitions only. The deficit is signed:
           // positive is behind the schedule, negative is ahead of it.
-          emitSpan("wum.netcode_clock", {
+          span("wum.netcode_clock", {
             "wum.state": CLOCK_STATES[Number(a)] ?? `state ${a}`,
             "wum.err_ticks": String(BigInt.asIntN(64, b)),
             "wum.park": park,
           });
           return;
         case Emit.rollback:
-          emitSpan("wum.netcode_rollback", {
-            "wum.depth_ticks": String(a),
-            "wum.to_tick": String(b),
+          // Two different quantities that a single "depth" used to blur:
+          // how late the event was, and how far back the ring's cadence
+          // forced the repair to reach to apply it. The second is usually
+          // the larger, and it is the one a player watches.
+          span("wum.netcode_rollback", {
+            "wum.late_ticks": String(a),
+            "wum.rewound_ticks": String(b),
             "wum.park": park,
           });
           return;
         case Emit.snapshotRestored:
-          emitSpan("wum.netcode_restore", {
+          span("wum.netcode_restore", {
             "wum.seq": String(a),
             "wum.tick": String(b),
             "wum.park": park,
           });
           return;
         case HostEmit.redial:
-          emitSpan("wum.redial", { "wum.backoff_ms": String(a), "wum.park": park });
+          span("wum.redial", { "wum.backoff_ms": String(a), "wum.park": park });
           return;
         case HostEmit.teardown:
-          emitSpan("wum.netcode_teardown", {
+          span("wum.netcode_teardown", {
             "wum.why": whyOf(Number(a)),
             "wum.park": park,
           });

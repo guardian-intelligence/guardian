@@ -12,13 +12,35 @@
 import { describe, expect, it } from "vitest";
 import { Emit, HostEmit, ResyncReason, Stat } from "../src/ports.ts";
 import { PumpFlag, clockStateOf } from "../src/abi.ts";
-import { Role, decodeCheck, encodeEvent } from "../src/wire.ts";
+import { Role, decodeCheck, encodeEvent, type ClientFrame } from "../src/wire.ts";
 import { Ev, Reject, dogPayload, epochAdvancePayload, modules, rig } from "./wasm.ts";
 
 /** One tick at the fixture park's 24Hz, in milliseconds. */
 const TICK_MS = 1000 / 24;
 /** The ring holds one entry per second; a rollback needs at least one. */
 const RING_WARMUP_MS = 3000;
+/** Ten entries at one per second: past this, the oldest retained state is gone. */
+const RING_DEPTH_MS = 10_000;
+
+/** Intent frames of one kind the client has written, oldest first. */
+function intentsSent(r: Awaited<ReturnType<typeof rig>>, kind: number) {
+  return r.harness.transport
+    .sentFrames()
+    .filter((f) => f.kind === "intent" && f.value.kind === kind);
+}
+
+function intentId(frame: ClientFrame | undefined): bigint {
+  return frame?.kind === "intent" ? frame.value.id : 0n;
+}
+
+/** Answers the join the core sent on connect, so the dog is really in the park. */
+async function bringTheDogIn(r: Awaited<ReturnType<typeof rig>>, dog: bigint): Promise<void> {
+  await r.run(100);
+  const id = intentId(intentsSent(r, Ev.join)[0]);
+  r.deliver([r.emit(Ev.join, dogPayload(dog), id)]);
+  const present = await r.until(() => r.core.state.present, 2000);
+  if (!present) throw new Error("the journal never placed the dog");
+}
 
 describe("boot and handshake", () => {
   it("lands a world: welcome, terrain fetch, snapshot", async () => {
@@ -169,13 +191,51 @@ describe("invariant 2/7: rollback", () => {
     expect(r.core.state.tick).toBeGreaterThanOrEqual(was);
   });
 
-  it("a late event deeper than the ring resyncs instead", async () => {
+  it("never shows the world earlier after a restore either", async () => {
+    // A snapshot describes the world at the tick it was taken, which can
+    // be behind where the replica has already presented. Landing it is a
+    // repair like any other: the tick the viewer has been shown is a
+    // floor, and the restore owes it back before the frame ends.
     const r = await rig();
     await r.establish();
-    await r.run(RING_WARMUP_MS);
+    // Taken now, delivered much later — the authority's answer to a
+    // resync is always a description of a moment already passing.
+    const stale = r.authority.snapshot();
+    await r.run(1500);
+
+    const seen: bigint[] = [];
+    const watch = () => {
+      const view = r.core.view();
+      if (view) seen.push(view.tick);
+    };
+    watch();
+    const high = seen[0]!;
+    const restores = r.count(Emit.snapshotRestored);
+    r.deliver([stale]);
+    for (let t = 0; t < 600; t += 16) {
+      r.harness.clock.advance(16);
+      r.core.pump();
+      watch();
+      await r.harness.settle();
+    }
+    expect(r.count(Emit.snapshotRestored)).toBeGreaterThan(restores);
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i], `frame ${i} went backwards`).toBeGreaterThanOrEqual(seen[i - 1]!);
+    }
+    expect(seen.at(-1)).toBeGreaterThanOrEqual(high);
+  });
+
+  it("a late event deeper than the ring resyncs instead", async () => {
+    // The ring is finite, so far enough back is unreachable and only a
+    // snapshot can place the event. Reaching that depth means outrunning
+    // every retained state, including the one the last restore left.
+    const r = await rig();
+    await r.establish();
+    const restoredAt = r.core.state.tick;
+    // Long enough that cadence pushes have evicted the restored floor.
+    await r.run(RING_DEPTH_MS + RING_WARMUP_MS);
     const resyncsBefore = r.core.state.resyncs;
-    // Tick 1 predates every ring entry: the oldest is a multiple of hz.
-    r.deliver([r.authority.frame(r.core.state.seq + 1n, 1n, Ev.join, dogPayload(0xf3n))]);
+    r.deliver([r.authority.frame(r.core.state.seq + 1n, restoredAt, Ev.join, dogPayload(0xf3n))]);
     expect(await r.until(() => r.core.state.resyncs > resyncsBefore, 500)).toBe(true);
     const resync = r.harness.emitted.find((e) => e.code === Emit.resyncRequested);
     expect(Number(resync!.a)).toBe(ResyncReason.lateEvent);
@@ -295,20 +355,35 @@ describe("invariant 5: snapshot restore", () => {
     expect(await r.until(() => r.core.state.seq === r.authority.seq, 1000)).toBe(true);
   });
 
-  it("resends intents the journal has not answered", async () => {
-    const r = await rig();
+  it("carries unanswered intents onto the next connection", async () => {
+    // A connection that died with an intent outstanding never got it to
+    // the park, so the next one has to say it again. Saying it twice on
+    // the SAME connection is not a resend, it is a duplicate.
+    const r = await rig({ role: "player", myDog: 0x88n });
     await r.establish();
-    const before = r.harness.transport
-      .sentFrames()
-      .filter((f) => f.kind === "intent" && f.value.kind === Ev.checkIn).length;
+    await bringTheDogIn(r, 0x88n);
+
     r.core.checkIn();
-    await r.run(100);
-    r.deliver([r.authority.snapshot()]);
-    await r.run(500);
-    const after = r.harness.transport
-      .sentFrames()
-      .filter((f) => f.kind === "intent" && f.value.kind === Ev.checkIn).length;
-    expect(after).toBeGreaterThan(before + 1);
+    await r.run(150);
+    expect(intentsSent(r, Ev.checkIn)).toHaveLength(1);
+    const id = intentId(intentsSent(r, Ev.checkIn)[0]);
+
+    r.harness.transport.drop();
+    expect(await r.until(() => r.harness.transport.dials > 1, 3000, 25)).toBe(true);
+    r.deliver([r.authority.welcome(Role.player), r.authority.snapshot()]);
+    await r.run(200);
+
+    // The park already holds the dog, so it answers the reconnecting
+    // join with "already present" — which is what re-establishes the
+    // presence the held intent was waiting on.
+    const rejoin = intentId(intentsSent(r, Ev.join).at(-1));
+    r.deliver([r.authority.reject(rejoin, Reject.present)]);
+    await r.run(300);
+
+    const sent = intentsSent(r, Ev.checkIn);
+    expect(sent).toHaveLength(2);
+    // The same intent, said again — not a new one.
+    expect(intentId(sent[1])).toBe(id);
   });
 
   it("reports a hash disagreement on the restored state", async () => {
@@ -446,13 +521,20 @@ describe("invariant 7: module epoch", () => {
 
 describe("invariant 8: the prediction overlay", () => {
   it("shows an own intent before the journal confirms it", async () => {
+    // The presented world is the journal plus what we have asked for and
+    // not yet been answered about, so an action reads as done the moment
+    // it is sent rather than a round trip later.
     const r = await rig({ role: "player", myDog: 0x777n });
     await r.establish();
-    // The join the core sent on connect is still unanswered, so the
-    // presented world already holds our dog while slot 0 does not.
-    await r.run(100);
-    expect(r.core.state.present).toBe(true);
-    expect(r.core.state.seq).toBe(0n);
+    await bringTheDogIn(r, 0x777n);
+    expect(r.core.state.boosting).toBe(false);
+    const seq = r.core.state.seq;
+
+    r.core.setBoost(true);
+    await r.run(150);
+    expect(r.core.state.boosting).toBe(true);
+    // Predicted, not journaled: slot 0 has heard nothing about it.
+    expect(r.core.state.seq).toBe(seq);
   });
 
   it("keeps the overlay after the journal answers, without double-applying", async () => {
@@ -472,15 +554,20 @@ describe("invariant 8: the prediction overlay", () => {
   // an intent the authority refused may not linger visibly as if it
   // had happened.
   it("drops the overlay entry when the intent is rejected", async () => {
+    // A refusal is the authority saying the prediction was wrong, so the
+    // presented world has to give it back rather than keep showing an
+    // action that never happened.
     const r = await rig({ role: "player", myDog: 0x778n });
     await r.establish();
-    await r.run(100);
-    const join = r.harness.transport
-      .sentFrames()
-      .find((f) => f.kind === "intent" && f.value.kind === Ev.join);
-    const id = join!.kind === "intent" ? join!.value.id : 0n;
+    await bringTheDogIn(r, 0x778n);
+
+    r.core.setBoost(true);
+    await r.run(150);
+    expect(r.core.state.boosting).toBe(true);
+
+    const id = intentId(intentsSent(r, Ev.boostSet)[0]);
     r.deliver([r.authority.reject(id, Reject.notYours)]);
-    expect(await r.until(() => r.core.state.present === false, 1000)).toBe(true);
+    expect(await r.until(() => r.core.state.boosting === false, 1000)).toBe(true);
     expect(r.core.state.rejects).toBe(1);
   });
 
@@ -500,25 +587,24 @@ describe("invariant 8: the prediction overlay", () => {
   });
 
   it("re-joins once when the park says our dog is absent", async () => {
+    // "Absent" answering anything but a join means the park lost the dog
+    // we believed was in it — a departure that raced us. Going back in is
+    // the repair, and once per window is the limit, because if the park
+    // keeps saying absent then re-joining is not working.
     const r = await rig({ role: "player", myDog: 0x77an });
     await r.establish();
-    await r.run(100);
+    await bringTheDogIn(r, 0x77an);
+    const joinsBefore = new Set(intentsSent(r, Ev.join).map(intentId)).size;
+
     r.core.checkIn();
-    await r.run(50);
-    const checkIn = r.harness.transport
-      .sentFrames()
-      .find((f) => f.kind === "intent" && f.value.kind === Ev.checkIn);
-    const id = checkIn!.kind === "intent" ? checkIn!.value.id : 0n;
+    await r.run(150);
+    const id = intentId(intentsSent(r, Ev.checkIn)[0]);
     r.deliver([r.authority.reject(id, Reject.absent)]);
-    await r.run(200);
+    await r.run(300);
+
     expect(r.codes()).toContain(Emit.autoRejoin);
-    const joins = r.harness.transport
-      .sentFrames()
-      .filter((f) => f.kind === "intent" && f.value.kind === Ev.join);
-    // Two distinct joins: the one sent on connect (possibly resent by the
-    // restore, same id) and exactly one auto-rejoin.
-    const ids = new Set(joins.map((f) => (f.kind === "intent" ? f.value.id : 0n)));
-    expect(ids.size).toBe(2);
+    const ids = new Set(intentsSent(r, Ev.join).map(intentId));
+    expect(ids.size).toBe(joinsBefore + 1);
   });
 });
 
