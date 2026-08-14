@@ -4,10 +4,8 @@
 // the deficit grows, the state walks to fast-forward and on to
 // snapshot-required, and the recovery after resume all happen on screen.
 
-import { Emit, type Core } from "@guardian/mythrad-client-core";
+import { CLOCK_STATE_NAMES, Emit, type Core } from "@guardian/mythrad-client-core";
 import * as v from "valibot";
-
-const CLOCK_STATES = ["acquiring", "locked", "fast-forward", "snapshot-required"] as const;
 
 export type DebugPanel = {
   /** True while step execution is starved; the frame loop pumps a zero budget. */
@@ -67,7 +65,7 @@ export function createDebugPanel(core: Core): DebugPanel {
       const d = core.diag();
       if (!d) return;
       line("dbg-clock").textContent =
-        `clock ${CLOCK_STATES[d.clockState] ?? "?"}${frozen() ? " (frozen)" : ""}` +
+        `clock ${CLOCK_STATE_NAMES[d.clockState] ?? "?"}${frozen() ? " (frozen)" : ""}` +
         ` · rtt ${d.rttMs}ms`;
       const seconds = state.hz > 0 ? ` (${(d.errorTicks / state.hz).toFixed(2)}s)` : "";
       line("dbg-desync").textContent = `desync ${d.errorTicks.toFixed(1)} ticks${seconds}`;

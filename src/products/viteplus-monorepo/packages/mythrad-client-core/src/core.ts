@@ -76,7 +76,7 @@ export const GLIDE_MAX_CELLS_PER_SEC = 12;
 export const GLIDE_MAX_CELLS = 4;
 
 /** Q16.16, the fixed point the view and the sim share. */
-const Q16 = 65536;
+export const Q16 = 65536;
 
 /** id u64, x i32, y i32, then the per-dog byte fields. */
 const VIEW_RECORD_BYTES = 20;

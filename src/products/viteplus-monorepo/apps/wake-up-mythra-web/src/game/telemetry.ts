@@ -6,6 +6,7 @@
 
 import {
   ActionKind,
+  CLOCK_STATE_NAMES,
   Emit,
   HostEmit,
   IntentDrop,
@@ -34,10 +35,6 @@ const RESYNC_WHY: Record<number, string> = {
   [ResyncReason.streamOverflow]: "stream overflow",
   [ResyncReason.framing]: "unreadable frame length",
 };
-
-// Clock states as the sim/clock crate numbers them; the span carries the
-// name so dashboards never depend on the numeric order.
-const CLOCK_STATES = ["acquiring", "locked", "fast-forward", "snapshot-required"] as const;
 
 // Every span this module emits goes through one function, so a harness can
 // watch the whole vocabulary by tapping one place. The tap is a read: it
@@ -193,7 +190,7 @@ export function createTelemetry(ctx: {
           // Fires on state transitions only. The deficit is signed:
           // positive is behind the schedule, negative is ahead of it.
           span("wum.netcode_clock", {
-            "wum.state": CLOCK_STATES[Number(a)] ?? `state ${a}`,
+            "wum.state": CLOCK_STATE_NAMES[Number(a)] ?? `state ${a}`,
             "wum.err_ticks": String(BigInt.asIntN(64, b)),
             "wum.park": park,
           });

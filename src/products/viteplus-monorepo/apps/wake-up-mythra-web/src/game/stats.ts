@@ -11,9 +11,8 @@
 //
 // Visible with `?stats=1`, or toggled any time with the backquote key.
 
-import { ActionKind, Emit, type Core } from "@guardian/mythrad-client-core";
+import { ActionKind, CLOCK_STATE_NAMES, Emit, type Core } from "@guardian/mythrad-client-core";
 
-const CLOCK_STATES = ["acquiring", "locked", "fast-forward", "snapshot-required"] as const;
 const RING = 128;
 const REFRESH_MS = 250;
 
@@ -61,7 +60,7 @@ export function createStatsPane(core: Core): StatsPane {
     const state = core.state;
     const lines = [
       `trail   ${d.trailTicks.toFixed(1)} ticks (target ≤${d.trailTargetTicks}, cushion ${d.cushionTicks})`,
-      `clock   ${CLOCK_STATES[d.clockState] ?? "?"} · rtt ${d.rttMs}ms · ${state.hz}Hz`,
+      `clock   ${CLOCK_STATE_NAMES[d.clockState] ?? "?"} · rtt ${d.rttMs}ms · ${state.hz}Hz`,
       `world   tick ${d.tick} · seq ${d.seq}`,
       `repairs ${d.rollbacks} rollbacks · ${d.resyncs} resyncs · ${d.mismatches} mismatches`,
       `events  ${d.events} applied · ${d.rejects} rejected`,

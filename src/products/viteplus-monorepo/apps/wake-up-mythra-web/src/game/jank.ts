@@ -8,9 +8,12 @@
 //
 // One set of definitions, two consumers. The counters run always — a
 // handful of comparisons per frame — and leave once a minute as an
-// aggregate span, which makes every real player a feel canary. The ring is
-// dev-only (`?probe=1`) and keeps the raw per-frame record, which is what a
-// play-test harness needs to compute distributions a counter cannot carry.
+// aggregate span, which makes every real player a feel canary. The buffers
+// are dev-only (`?probe=1`) and keep the raw per-frame record, which is
+// what a play-test harness needs to compute distributions a counter cannot
+// carry.
+
+import { Q16 } from "@guardian/mythrad-client-core";
 
 /**
  * A frame is long past this gap: three missed 60Hz frames, which is where a
@@ -19,27 +22,28 @@
 const LONG_FRAME_MS = 50;
 /**
  * The park has stalled when the tick has not moved for this long while
- * frames keep rendering. At 24Hz that is six ticks — well past the jitter a
- * healthy clock absorbs, and about where a player says the park froze.
+ * frames keep rendering. A purely perceptual threshold: a quarter second of
+ * the world standing still is about where a player says the park froze.
  */
 const FREEZE_MS = 250;
 /**
- * Own-dog displacement, in cells, that cannot be walking. A dog covers
- * roughly 0.05 cells per frame at 60fps, and the presentation smoother
- * snaps rather than interpolates past 8 cells; half a cell inside one frame
- * is a teleport in between — a rewind, a resync landing, or a snap.
+ * Own-dog displacement, in cells, that cannot be walking: half a cell
+ * inside one frame is a teleport — a rewind, a resync landing, or a snap
+ * from either presentation layer (the glide presenter gives up past
+ * `GLIDE_MAX_CELLS`, the smoother past the renderer's snap distance).
  *
  * Only counted on frames that were not themselves long: after a hitch the
  * dog is legitimately somewhere else, and counting that would report the
  * hitch twice under two names.
  */
 const JUMP_CELLS = 0.5;
-/** Dogs the probe ring records per frame, our own aside. */
+const JUMP_Q16_SQ = (JUMP_CELLS * Q16) ** 2;
+/** Dogs the probe records per frame, our own aside. */
 const PROBE_DOGS = 8;
-/** Frames the probe ring holds: about 68 seconds at 60fps. */
+/** Frames the probe holds: about 68 seconds at 60fps. */
 const PROBE_CAP = 4096;
 /**
- * Spans the probe ring holds. Frames are the what; these are the why.
+ * Spans the probe holds. Frames are the what; these are the why.
  *
  * Sized for a leg that emits one span per journalled event — around 140 —
  * plus its repairs, with room to spare. Overflow drops the OLDEST, which
@@ -50,8 +54,6 @@ const PROBE_CAP = 4096;
 const SPAN_CAP = 1024;
 /** How often the aggregate leaves the page. */
 const BEACON_MS = 60_000;
-
-const Q16 = 65536;
 
 /** Enough of a dog to place it. The renderer's view records satisfy this. */
 export type DogPos = {
@@ -68,7 +70,7 @@ export type JankCounters = {
   readonly freezeRuns: number;
 };
 
-/** One drawn frame, as the probe ring keeps it. Cells are Q16.16. */
+/** One drawn frame, as the probe keeps it. Cells are Q16.16. */
 export type FrameRecord = {
   readonly t: number;
   readonly tick: number;
@@ -79,8 +81,8 @@ export type FrameRecord = {
   readonly camX: number;
   readonly camY: number;
   readonly dogCount: number;
-  /** Flat id/x/y triples for up to PROBE_DOGS dogs; ids are hex. */
-  readonly dogs: (string | number)[];
+  /** Up to PROBE_DOGS dogs; ids are hex. */
+  readonly dogs: readonly { id: string; xq: number; yq: number }[];
 };
 
 /** A span the app emitted, as the probe keeps it for a harness to read. */
@@ -92,12 +94,11 @@ export type SpanRecord = {
 
 /** What `?probe=1` publishes as `__mythraProbe` for a harness to read. */
 export type Probe = {
-  readonly cap: number;
-  /** Frames overwritten before a drain. Nonzero means the harness is behind. */
+  /** Frames dropped to overflow before a drain. Nonzero means the harness is behind. */
   readonly dropped: number;
   /** Spans lost to overflow since the last drain. Non-zero means the oldest are gone. */
   readonly droppedSpans: number;
-  /** Every held frame in order, oldest first, then empties the ring. */
+  /** Every held frame in order, oldest first, then empties the buffer. */
   drain(): FrameRecord[];
   /**
    * Every span the app emitted since the last call, oldest first. The
@@ -114,8 +115,9 @@ export type Probe = {
 
 export type Jank = {
   /**
-   * Records a span the app emitted. Wired to the telemetry tap only under
-   * `?probe=1`; a no-op otherwise, and never a second emission path.
+   * Records a span the app emitted. The composition root wires it to the
+   * telemetry tap only under `?probe=1`, and it is never a second
+   * emission path.
    */
   readonly recordSpan: (name: string, attrs: Record<string, string>) => void;
   /** Called once per drawn frame, from the render loop. */
@@ -131,67 +133,50 @@ export type Jank = {
 };
 
 export function createJank(opts: {
-  /** Keep the raw per-frame ring and publish it. Dev and harnesses only. */
+  /** Keep the raw per-frame buffer and publish it. Dev and harnesses only. */
   readonly probe: boolean;
   /** Where a minute's counters go. */
   readonly emit: (counters: JankCounters) => void;
 }): Jank {
-  let frames = 0;
-  let longFrames = 0;
-  let backwardTicks = 0;
-  let ownDogJumps = 0;
-  let freezeRuns = 0;
+  const c: { -readonly [K in keyof JankCounters]: number } = {
+    frames: 0,
+    longFrames: 0,
+    backwardTicks: 0,
+    ownDogJumps: 0,
+    freezeRuns: 0,
+  };
 
   let lastT = 0;
   let lastTick = -1;
   let tickChangedAt = 0;
-  let stalled = false;
   let lastMineId: bigint | null = null;
   let lastMyX = 0;
   let lastMyY = 0;
 
-  const ring: (FrameRecord | undefined)[] = opts.probe
-    ? Array.from<undefined>({ length: PROBE_CAP })
-    : [];
-  let at = 0;
+  let held: FrameRecord[] = [];
   let dropped = 0;
-  let droppedSpans = 0;
   let spans: SpanRecord[] = [];
+  let droppedSpans = 0;
 
-  // Counters are cumulative for the life of the page, and the beacon
-  // differences against its own last report to get a minute. A reader — the
-  // probe, or a harness measuring one leg — can then difference over any
-  // window it likes without racing the beacon's reset.
-  const counters = (): JankCounters => ({
-    frames,
-    longFrames,
-    backwardTicks,
-    ownDogJumps,
-    freezeRuns,
-  });
-  let flushed: JankCounters = counters();
+  // Counters are cumulative for the life of the page; every reader — the
+  // beacon, the probe, a harness measuring one leg — differences them over
+  // its own window, so none races another's reset.
+  const counters = (): JankCounters => ({ ...c });
+  let flushed = counters();
 
   if (opts.probe) {
     const probe: Probe = {
-      cap: PROBE_CAP,
       get dropped() {
         return dropped;
       },
-      drain: () => {
-        const out: FrameRecord[] = [];
-        const held = Math.min(at, PROBE_CAP);
-        const start = at - held;
-        for (let i = start; i < at; i++) {
-          const rec = ring[i % PROBE_CAP];
-          if (rec) out.push(rec);
-        }
-        ring.fill(undefined);
-        at = 0;
-        dropped = 0;
-        return out;
-      },
       get droppedSpans() {
         return droppedSpans;
+      },
+      drain: () => {
+        const out = held;
+        held = [];
+        dropped = 0;
+        return out;
       },
       drainSpans: () => {
         const out = spans;
@@ -210,47 +195,43 @@ export function createJank(opts: {
     // to report, and a beacon of zeros from it would only dilute the ones
     // that do.
     if (now.frames > flushed.frames) {
-      opts.emit({
-        frames: now.frames - flushed.frames,
-        longFrames: now.longFrames - flushed.longFrames,
-        backwardTicks: now.backwardTicks - flushed.backwardTicks,
-        ownDogJumps: now.ownDogJumps - flushed.ownDogJumps,
-        freezeRuns: now.freezeRuns - flushed.freezeRuns,
-      });
+      const minute = {} as { -readonly [K in keyof JankCounters]: number };
+      for (const k of Object.keys(now) as (keyof JankCounters)[]) {
+        minute[k] = now[k] - flushed[k];
+      }
+      opts.emit(minute);
     }
     flushed = now;
   }, BEACON_MS);
 
   return {
     recordSpan: (name, attrs) => {
-      if (!opts.probe) return;
       spans.push({ t: performance.now(), name, attrs });
       if (spans.length > SPAN_CAP) {
-        droppedSpans += spans.length - SPAN_CAP;
-        spans.splice(0, spans.length - SPAN_CAP);
+        spans.shift();
+        droppedSpans++;
       }
     },
     sample: (t, tick, phaseQ16, mine, camX, camY, dogs) => {
-      frames++;
-      const gap = lastT === 0 ? 0 : t - lastT;
-      const long = gap > LONG_FRAME_MS;
-      if (long) longFrames++;
+      c.frames++;
+      const long = lastT !== 0 && t - lastT > LONG_FRAME_MS;
+      if (long) c.longFrames++;
 
-      if (tick < lastTick && lastTick >= 0) backwardTicks++;
+      if (tick < lastTick && lastTick >= 0) c.backwardTicks++;
       if (tick !== lastTick) {
         lastTick = tick;
         tickChangedAt = t;
-        stalled = false;
-      } else if (!stalled && tickChangedAt !== 0 && t - tickChangedAt > FREEZE_MS) {
-        stalled = true;
-        freezeRuns++;
+      } else if (t - tickChangedAt > FREEZE_MS) {
+        c.freezeRuns++;
+        // One count per stall run: park here until the tick moves again.
+        tickChangedAt = Infinity;
       }
 
       if (mine) {
         if (!long && lastMineId === mine.id) {
-          const dx = (mine.xq - lastMyX) / Q16;
-          const dy = (mine.yq - lastMyY) / Q16;
-          if (Math.hypot(dx, dy) > JUMP_CELLS) ownDogJumps++;
+          const dx = mine.xq - lastMyX;
+          const dy = mine.yq - lastMyY;
+          if (dx * dx + dy * dy > JUMP_Q16_SQ) c.ownDogJumps++;
         }
         lastMineId = mine.id;
         lastMyX = mine.xq;
@@ -261,13 +242,12 @@ export function createJank(opts: {
       lastT = t;
 
       if (!opts.probe) return;
-      const kept: (string | number)[] = [];
+      const kept: { id: string; xq: number; yq: number }[] = [];
       for (let i = 0; i < dogs.length && i < PROBE_DOGS; i++) {
         const dog = dogs[i]!;
-        kept.push(dog.id.toString(16), dog.xq, dog.yq);
+        kept.push({ id: dog.id.toString(16), xq: dog.xq, yq: dog.yq });
       }
-      if (at >= PROBE_CAP && ring[at % PROBE_CAP]) dropped++;
-      ring[at % PROBE_CAP] = {
+      held.push({
         t,
         tick,
         phaseQ16,
@@ -278,8 +258,11 @@ export function createJank(opts: {
         camY,
         dogCount: dogs.length,
         dogs: kept,
-      };
-      at++;
+      });
+      if (held.length > PROBE_CAP) {
+        held.shift();
+        dropped++;
+      }
     },
   };
 }

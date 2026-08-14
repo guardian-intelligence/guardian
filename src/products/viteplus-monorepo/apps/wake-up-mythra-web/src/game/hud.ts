@@ -121,6 +121,7 @@ export function createHud(): Hud {
   Object.assign(globalThis, { __mythraDiag: diag });
 
   let connected = false;
+  let whoText = "";
 
   const log = (line: string): void => {
     const row = document.createElement("div");
@@ -145,6 +146,7 @@ export function createHud(): Hud {
     log,
     setStatus,
     setWho: (text) => {
+      whoText = text;
       nodes.who.textContent = text;
     },
     setAnon: (anon) => {
@@ -158,10 +160,14 @@ export function createHud(): Hud {
       // it — a replica that never connected has zero dogs and would
       // otherwise report "the park is empty" to a user we couldn't reach.
       if (!connected) return;
-      nodes.who.textContent =
+      const text =
         total === 0
           ? "the park is empty"
           : `dogs here: ${names.join(", ")}${total > names.length ? ` +${total - names.length} more` : ""}`;
+      // Called per frame; only touch the DOM when the line changes.
+      if (text === whoText) return;
+      whoText = text;
+      nodes.who.textContent = text;
     },
     bind: (core) => {
       const checkinState = (): void => {
