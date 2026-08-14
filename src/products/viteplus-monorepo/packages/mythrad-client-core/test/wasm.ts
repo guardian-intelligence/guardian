@@ -294,7 +294,16 @@ export class Authority {
   }
 }
 
+/**
+ * The round trip every verdict takes unless a test asks for another. A
+ * verdict that answers instantly describes a network that does not exist,
+ * and compensating for the one that does is the clock's whole job.
+ */
+export const DEFAULT_RTT_MS = 120;
+
 export type RigOptions = HarnessOptions & {
+  /** Round trip for verdicts. Defaults to `DEFAULT_RTT_MS`. */
+  readonly rttMs?: number;
   readonly myDog?: bigint;
   readonly role?: RoleName;
   readonly checkMs?: number;
@@ -327,6 +336,16 @@ export type Rig = {
    * a test needs to be able to lie.
    */
   answerChecks(over?: { known?: boolean; ok?: boolean; cw?: Uint8Array; pw?: Uint8Array }): number;
+  /**
+   * Answers every outstanding check over a round trip: the authority sees
+   * the check after half of `rttMs` and stamps its verdict with the tick
+   * it holds THEN, and the client sees the answer half a trip later. An
+   * instant answer hides exactly the drift a clock exists to correct.
+   */
+  answerChecksOverRtt(
+    rttMs: number,
+    over?: { known?: boolean; ok?: boolean; cw?: Uint8Array; pw?: Uint8Array },
+  ): number;
   /** Waits until at least `n` check datagrams have been sent. */
   waitForChecks(n: number, ms?: number): Promise<boolean>;
   /** Telemetry codes seen so far, for asserting a choreography. */
@@ -421,11 +440,26 @@ export async function rig(options: RigOptions = {}): Promise<Rig> {
   };
 
   let answered = 0;
-  const answerChecks: Rig["answerChecks"] = (over = {}) => {
+  const answerChecks: Rig["answerChecks"] = (over = {}) =>
+    answerChecksOverRtt(options.rttMs ?? DEFAULT_RTT_MS, over);
+
+  const answerChecksOverRtt: Rig["answerChecksOverRtt"] = (rttMs, over = {}) => {
     const sent = harness.transport.sentDatagrams;
     let n = 0;
     for (; answered < sent.length; answered++, n++) {
-      harness.transport.deliverDatagram(authority.verdict(decodeCheck(sent[answered]!), over));
+      const check = decodeCheck(sent[answered]!);
+      harness.clock.schedule(() => {
+        // Stamped with the world as the authority holds it on arrival.
+        const verdict = authority.verdict(check, over);
+        harness.clock.schedule(() => {
+          try {
+            harness.transport.deliverDatagram(verdict);
+          } catch {
+            // The connection went away mid-flight; the datagram is lost,
+            // which is the contract.
+          }
+        }, rttMs / 2);
+      }, rttMs / 2);
     }
     return n;
   };
@@ -447,6 +481,7 @@ export async function rig(options: RigOptions = {}): Promise<Rig> {
     establish,
     emit,
     answerChecks,
+    answerChecksOverRtt,
     waitForChecks,
     codes,
     count,

@@ -44,12 +44,11 @@ describe("boot and handshake", () => {
     await r.establish();
     const sent = r.harness.transport.sentFrames();
     expect(sent[0]!.kind).toBe("hello");
+    // The core sends its own join from `session_connected`; the host has
+    // no part in it. How many frames that one intent is worth on the wire
+    // is a separate invariant, in the player-path suite.
     const joins = sent.filter((f) => f.kind === "intent" && f.value.kind === Ev.join);
-    // The snapshot restore resends unanswered intents, so the join can
-    // appear twice on the wire — but it is one intent, with one identity.
     expect(joins.length).toBeGreaterThanOrEqual(1);
-    const ids = new Set(joins.map((f) => (f.kind === "intent" ? f.value.id : 0n)));
-    expect(ids.size).toBe(1);
   });
 
   it("a spectator sends no join at all", async () => {
@@ -157,16 +156,16 @@ describe("invariant 2/7: rollback", () => {
     expect(r.codes()).toContain(Emit.rollback);
   });
 
-  it("the replica ends up back where it was, not stranded in the past", async () => {
+  it("never shows the world at an earlier tick than it already showed", async () => {
+    // A rollback is a repair, and a repair is not something the viewer is
+    // supposed to watch. Rewinding and replaying belong to the same frame:
+    // whatever the replica had reached, it still has when that frame ends.
     const r = await rig();
     await r.establish();
     await r.run(RING_WARMUP_MS);
     const was = r.core.state.tick;
     r.deliver([r.authority.frame(r.core.state.seq + 1n, was - 4n, Ev.join, dogPayload(0xf2n))]);
     expect(await r.until(() => r.core.state.rollbacks > 0, 500)).toBe(true);
-    // The rollback lands at the event's tick and leaves a deficit; the
-    // clock is what closes it, over the frames that follow.
-    await r.run(1000);
     expect(r.core.state.tick).toBeGreaterThanOrEqual(was);
   });
 
