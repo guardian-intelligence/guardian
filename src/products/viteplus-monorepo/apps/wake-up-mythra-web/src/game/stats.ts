@@ -34,7 +34,7 @@ export function createStatsPane(core: Core): StatsPane {
 
   const panel = document.createElement("div");
   panel.style.cssText =
-    "position:fixed;top:8px;right:8px;background:#161a21ee;color:#f4f1ea;" +
+    "position:fixed;top:64px;right:8px;background:#161a21ee;color:#f4f1ea;" +
     "font:12px ui-monospace,monospace;padding:10px 12px;border:1px solid #333;" +
     "border-radius:8px;z-index:9;min-width:260px;white-space:pre;display:none";
   document.body.appendChild(panel);
