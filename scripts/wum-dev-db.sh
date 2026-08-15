@@ -45,7 +45,7 @@ postmaster_pid() {
 postmaster_alive() {
   [ -n "$1" ] || return 1
   case "$(ps -p "$1" -o comm= 2>/dev/null)" in
-  postgres*) return 0 ;;
+  postgres | */postgres) return 0 ;;
   esac
   return 1
 }

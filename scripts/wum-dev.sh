@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Wake Up Mythra local development stack, fronted by `aspect mythra dev`:
 #
-#   scripts/wum-dev.sh [up|down|status|logs [leg]|smoke]
+#   scripts/wum-dev.sh [up|down|status|logs [leg]|smoke|latency]
 #
 # Everything mirrors prod: same admission path, same module distribution,
 # same ingress split.
@@ -17,8 +17,9 @@ CH_PORT="${WUM_DEV_CH_PORT:-59000}"
 CH_HTTP_PORT="${WUM_DEV_CH_HTTP_PORT:-58123}"
 INGEST_PORT="${WUM_DEV_INGEST_PORT:-9636}"
 ISSUER="http://127.0.0.1:${ISSUER_PORT}/realms/dev"
-MYTHRAD_HTTP_PORT=9634
-MYTHRAD_METRICS_PORT=9633
+MYTHRAD_HTTP_PORT="${WUM_DEV_MYTHRAD_HTTP_PORT:-9634}"
+MYTHRAD_METRICS_PORT="${WUM_DEV_MYTHRAD_METRICS_PORT:-9633}"
+MYTHRAD_WT_PORT="${WUM_DEV_MYTHRAD_WT_PORT:-4433}"
 WEB_PORT=4254
 OTLP_GRPC_PORT="${WUM_DEV_OTLP_GRPC_PORT:-4317}"
 OTLP_HTTP_PORT="${WUM_DEV_OTLP_HTTP_PORT:-4318}"
@@ -27,6 +28,7 @@ FLAGD_MGMT_PORT="${WUM_DEV_FLAGD_MGMT_PORT:-8014}"
 # The web app's dev flag client hardcodes OFREP at 127.0.0.1:8016.
 FLAGD_OFREP_PORT=8016
 FLAGS_FILE="$ROOT/src/infrastructure/deployments/flags/prod/flags/flags.json"
+DEV_TICK_HZ="${WUM_DEV_TICK_HZ:-24}"
 
 LEGS="pg ch otelcol flagd ingest devissuer mythrad web"
 STARTED=""
@@ -161,7 +163,7 @@ start_leg() {
     echo "wum-dev: $leg already running (pid $(leg_pid "$leg"))" >&2
     return 0
   fi
-  echo "wum-dev: starting $leg…" >&2
+  echo "wum-dev: starting ${leg}…" >&2
   case "$leg" in
   pg)
     STARTED="pg $STARTED"
@@ -240,11 +242,17 @@ EOF
   mythrad)
     STARTED="mythrad $STARTED"
     mkdir -p "$ROOT/src/services/mythrad/assets"
-    DATABASE_URL="$(scripts/wum-dev-db.sh url)" \
+    mythrad_database_url="$(scripts/wum-dev-db.sh url)"
+    DATABASE_URL="$mythrad_database_url" \
       OIDC_ISSUER="$ISSUER" \
       BEHAVIOR_DIR="$ROOT/src/services/mythrad/behaviors" \
       ASSET_DIR="$ROOT/src/services/mythrad/assets" \
-      PUBLIC_ADDR="${WUM_DEV_PUBLIC_ADDR:-127.0.0.1:4433}" \
+      PUBLIC_ADDR="${WUM_DEV_PUBLIC_ADDR:-127.0.0.1:${MYTHRAD_WT_PORT}}" \
+      HTTP_PORT="$MYTHRAD_HTTP_PORT" \
+      METRICS_PORT="$MYTHRAD_METRICS_PORT" \
+      WT_PORT="$MYTHRAD_WT_PORT" \
+      TICK_HZ="$DEV_TICK_HZ" \
+      WUM_DEV_LIVE_TICK_RATE=true \
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://127.0.0.1:${OTLP_GRPC_PORT}" \
       "$ROOT/$MYTHRAD" >>"$(logfile mythrad)" 2>&1 &
     echo $! >"$(pidfile mythrad)"
@@ -252,7 +260,7 @@ EOF
     ;;
   web)
     STARTED="web $STARTED"
-    (cd "$APP" && exec env VITE_OIDC_ISSUER="$ISSUER" WUM_DEV_INGEST_PORT="$INGEST_PORT" vp dev) >>"$(logfile web)" 2>&1 &
+    (cd "$APP" && exec env VITE_OIDC_ISSUER="$ISSUER" WUM_DEV_INGEST_PORT="$INGEST_PORT" WUM_DEV_MYTHRAD_HTTP_PORT="$MYTHRAD_HTTP_PORT" vp dev) >>"$(logfile web)" 2>&1 &
     echo $! >"$(pidfile web)"
     await_ready web 240 || fail_leg web
     ;;
@@ -310,6 +318,7 @@ up() {
   echo "  events:    $ROOT/$CLICKHOUSE client --port $CH_PORT --query 'SELECT count() FROM guardian_analytics.events'" >&2
   echo "  spans:     $ROOT/$CLICKHOUSE client --port $CH_PORT --query 'SELECT count() FROM guardian_analytics.otel_traces'" >&2
   echo "  flags:     edit $FLAGS_FILE (flagd hot-reloads it)" >&2
+  echo "  tick rate: ${DEV_TICK_HZ}Hz startup; 'aspect mythra dev latency' journals a live 24->48Hz boundary" >&2
   echo >&2
 }
 
@@ -443,6 +452,66 @@ smoke() {
   echo "wum-dev: SMOKE PASS — dial ${dial_ms}ms; +$events wum.connected event(s), +$spans mythrad 'POST /session' span(s)"
 }
 
+# Measures the actions the product exposes today on both sides of one live
+# 24->48Hz journal boundary. The same browser page must observe rate_set and
+# continue without redial, resync, restore, or reload. Client facts cover first
+# wire write -> local apply; mythrad spans split receipt -> next tick from the
+# rest of durable fan-out.
+latency() {
+  if ! status_output="$(status)"; then
+    printf '%s\n' "$status_output" >&2
+    echo "wum-dev: latency needs a healthy stack — start it with: aspect mythra dev up" >&2
+    return 1
+  fi
+  if ! resolve_clickhouse; then
+    echo "wum-dev: cannot resolve the pinned clickhouse client — run: aspect mythra dev up" >&2
+    return 1
+  fi
+
+  player="latency-$(date +%s)-$$"
+  t0="$(ch_query 'SELECT toUnixTimestamp64Milli(now64(3))')" || {
+    echo "wum-dev: ClickHouse did not answer on port $CH_PORT" >&2
+    return 1
+  }
+  latency_log="$RUN_DIR/latency.log"
+  : >"$latency_log"
+  echo "wum-dev: latency — one connected player crossing a live 24Hz -> 48Hz boundary…" >&2
+  if ! (cd "$APP" && WUM_LATENCY_PLAYER="$player" WUM_RATE_CONTROL_URL="http://127.0.0.1:${MYTHRAD_HTTP_PORT}/dev/tick-rate" node e2e/latency.mjs) >"$latency_log" 2>&1; then
+    echo "wum-dev: LATENCY FAIL — browser journey broke; journey log:" >&2
+    cat "$latency_log" >&2
+    return 1
+  fi
+  cat "$latency_log"
+  rates="$(sed -n 's/^LATENCY_JOURNEY rates=\([0-9]*,[0-9]*\).*/\1/p' "$latency_log" | tail -1)"
+  actions="$(sed -n 's/^LATENCY_JOURNEY .* actions=\([0-9]*\).*/\1/p' "$latency_log" | tail -1)"
+  from_hz="${rates%,*}"
+  to_hz="${rates#*,}"
+  if [ -z "$rates" ] || [ "$from_hz" = "$to_hz" ] || [ -z "$actions" ]; then
+    echo "wum-dev: LATENCY FAIL — journey did not report two rates and its action count" >&2
+    return 1
+  fi
+
+  # mythrad and the collector each batch asynchronously. Bound the wait and
+  # require every client-observed accepted action to have its server fact;
+  # a partial trace sample is not a latency measurement.
+  server_actions=0
+  poll_deadline=$((SECONDS + 60))
+  while :; do
+    server_actions="$(ch_query "SELECT count() FROM guardian_analytics.otel_traces WHERE SpanName = 'mythra.intent' AND SpanAttributes['wum.result'] = 'accepted' AND SpanAttributes['wum.rate_hz'] IN ('$from_hz', '$to_hz') AND toUnixTimestamp64Milli(Timestamp) >= $t0")" || server_actions=0
+    [ "$server_actions" -ge "$actions" ] && break
+    [ "$SECONDS" -lt "$poll_deadline" ] || break
+    sleep 2
+  done
+  if [ "$server_actions" -lt "$actions" ]; then
+    echo "wum-dev: LATENCY FAIL — only $server_actions/$actions accepted mythra.intent spans landed" >&2
+    return 1
+  fi
+
+  echo "SERVER_ACTIONS (receipt -> next tick -> durable fan-out)"
+  ch_query "SELECT SpanAttributes['wum.rate_hz'] AS rate_hz, SpanAttributes['wum.kind'] AS kind, count() AS n, round(quantileExact(0.5)(toFloat64OrZero(SpanAttributes['wum.tick_queue_ms'])), 2) AS queue_p50_ms, round(quantileExact(0.95)(toFloat64OrZero(SpanAttributes['wum.tick_queue_ms'])), 2) AS queue_p95_ms, round(quantileExact(0.5)(toFloat64OrZero(SpanAttributes['wum.authority_ms'])), 2) AS authority_p50_ms, round(quantileExact(0.95)(toFloat64OrZero(SpanAttributes['wum.authority_ms'])), 2) AS authority_p95_ms FROM guardian_analytics.otel_traces WHERE SpanName = 'mythra.intent' AND SpanAttributes['wum.result'] = 'accepted' AND SpanAttributes['wum.rate_hz'] IN ('$from_hz', '$to_hz') AND toUnixTimestamp64Milli(Timestamp) >= $t0 GROUP BY rate_hz, kind ORDER BY toUInt32(rate_hz), kind FORMAT PrettyCompactNoEscapes"
+  echo "wum-dev: LATENCY PASS — one page adopted ${from_hz}Hz -> ${to_hz}Hz; $actions client actions and $server_actions authority spans"
+}
+
 logs() {
   leg="${1:-}"
   if [ -z "$leg" ]; then
@@ -465,8 +534,9 @@ down) down ;;
 status) status ;;
 logs) logs "${2:-}" ;;
 smoke) smoke ;;
+latency) latency ;;
 *)
-  echo "usage: $0 [up|down|status|logs [leg]|smoke]" >&2
+  echo "usage: $0 [up|down|status|logs [leg]|smoke|latency]" >&2
   exit 2
   ;;
 esac

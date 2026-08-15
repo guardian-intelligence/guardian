@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-shopt -s globstar nullglob extglob
 
 root="$PWD"
 while [[ "$root" != "/" && ! -f "$root/MODULE.bazel" ]]; do
@@ -13,44 +12,23 @@ fi
 
 cd "$root"
 
-patterns=(
-  ".aspect/**/*.axl"
-  ".github/workflows/*.yml"
-  "*.bazel"
-  "*.md"
-  "*.yaml"
-  "*.yml"
-  "*.json"
-  "docs/**/*.md"
-  "docs/**/*.yaml"
-  "src/infrastructure/**/*.json"
-  "src/infrastructure/**/*.tf"
-  "src/infrastructure/**/*.yaml"
-  "tools/**/*.bazel"
-  "tools/**/*.bzl"
-)
-
 format_file() {
   local file="$1"
-  local line
-  local lines=()
-
-  mapfile -t lines < "$file"
-  : > "$file"
-  for line in "${lines[@]}"; do
-    line="${line%%+([[:blank:]])}"
-    printf '%s\n' "$line" >> "$file"
-  done
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/guardian-format.XXXXXX")"
+  awk '{ sub(/[[:blank:]]+$/, ""); print }' "$file" >"$tmp"
+  # Preserve the tracked file's mode while replacing only its contents.
+  command cat "$tmp" >"$file"
+  rm -f "$tmp"
 }
 
-seen=" "
-for pattern in "${patterns[@]}"; do
-  for file in $pattern; do
-    [[ -f "$file" ]] || continue
-    case "$seen" in
-      *" $file "*) continue ;;
-    esac
-    seen="$seen$file "
-    format_file "$file"
-  done
+{
+  find .aspect -type f -name '*.axl'
+  find .github/workflows -maxdepth 1 -type f -name '*.yml'
+  find . -maxdepth 1 -type f \( -name '*.bazel' -o -name '*.md' -o -name '*.yaml' -o -name '*.yml' -o -name '*.json' \)
+  find docs -type f \( -name '*.md' -o -name '*.yaml' \)
+  find src/infrastructure -type f \( -name '*.json' -o -name '*.tf' -o -name '*.yaml' \)
+  find tools -type f \( -name '*.bazel' -o -name '*.bzl' \)
+} | LC_ALL=C sort -u | while IFS= read -r file; do
+  format_file "$file"
 done

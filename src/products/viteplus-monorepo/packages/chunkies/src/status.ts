@@ -27,7 +27,7 @@ export type HostState = {
   readonly epoch: number;
   /** The running replica module, as its display word spells it. */
   readonly replicaModuleWord: string;
-  /** The tick rate from the welcome, or null before one arrives. */
+  /** The tick rate from welcome or the latest journaled rate boundary. */
   readonly rateHz: number | null;
   /**
    * The granted role, which may be narrower than the one asked for.

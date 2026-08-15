@@ -113,7 +113,12 @@ const DOG_REC: usize = 30;
 const HEADER: usize = 60;
 const HEADER3: usize = 80;
 pub const GENESIS_HZ: u32 = 24;
+pub const MIN_HZ: u32 = 12;
 pub const MAX_HZ: u32 = 1000;
+const _: () = assert!(
+    2 * nav::WALK_PER_SECOND <= MIN_HZ as i32 * (1 << 15),
+    "the minimum rate must keep a boosted sub-move within half a cell"
+);
 
 pub const EV_JOIN: u16 = 1;
 pub const EV_LEAVE: u16 = 2;
@@ -140,9 +145,11 @@ pub const ERR_NOOP: u32 = 10;
 pub const ERR_TICK: u32 = 11;
 
 const CHECK_IN_ENERGY: u32 = 10;
-/// A standing dog rolls to wander once per this many ticks on average
-/// (about eight seconds), out to this many cells away.
-const WANDER_ODDS: u32 = 192;
+/// A standing dog rolls to wander once per this many seconds on average,
+/// out to this many cells away. The per-step denominator is derived from
+/// the world's journaled rate, so a faster scheduler does not make dogs
+/// more restless.
+const WANDER_SECONDS: u32 = 8;
 const WANDER_RANGE: u32 = 8;
 const FLAG_DECK: u8 = 1;
 const FLAG_BOOST: u8 = 1 << 1;
@@ -333,6 +340,23 @@ fn node_of(t: &Terrain, d: &Dog) -> Node {
     Node::at(t.idx(d.x >> 16, d.y >> 16), d.flags & FLAG_DECK != 0)
 }
 
+/// This rate segment's exact distance for one step. Taking the difference
+/// of cumulative quotients distributes fixed-point remainder across ticks,
+/// so one wall second always sums to `per_second` at every supported rate
+/// without adding mutable integration residue to each dog.
+fn step_distance(per_second: i32, segment_tick: u64, rate_hz: u32) -> i32 {
+    let distance_at = |tick: u64| (tick as u128 * per_second as u128 / rate_hz as u128) as i64;
+    (distance_at(segment_tick + 1) - distance_at(segment_tick)) as i32
+}
+
+fn wall_elapsed_ns(p: &Park) -> u128 {
+    p.anchor_ns as u128 + (p.tick - p.anchor_tick) as u128 * 1_000_000_000u128 / p.rate_hz as u128
+}
+
+fn animation_frame(p: &Park) -> u8 {
+    ((wall_elapsed_ns(p) * 6 / 1_000_000_000u128) & 3) as u8
+}
+
 /// One tick: every dog runs its movement state machine, in roster (id)
 /// order. Pure function of state; identical on every surface by
 /// construction. Terrain identity is re-checked so a host that violated
@@ -403,7 +427,8 @@ fn patrol_target(t: &Terrain, s: &mut nav::Scratch, from: Node) -> Node {
 }
 
 fn step_dog(p: &mut Park, t: &Terrain, i: usize) {
-    let (seed, tick) = (p.seed, p.tick);
+    let (seed, tick, rate_hz) = (p.seed, p.tick, p.rate_hz);
+    let segment_tick = tick - p.anchor_tick;
     let d = &mut p.dogs[i];
     if d.target == NONE.0 {
         // a held boost turns idleness into the bridge patrol; an explicit
@@ -419,7 +444,7 @@ fn step_dog(p: &mut Park, t: &Terrain, i: usize) {
             }
         }
         // idle: roll to wander somewhere nearby and standable
-        if det_rand(seed, tick, d.id, WANDER_ODDS) != 0 {
+        if det_rand(seed, tick, d.id, WANDER_SECONDS * rate_hz) != 0 {
             return;
         }
         let span = 2 * WANDER_RANGE + 1;
@@ -459,6 +484,8 @@ fn step_dog(p: &mut Park, t: &Terrain, i: usize) {
         &mut on_deck,
         Node(d.waypoint),
         boosted,
+        step_distance(nav::WALK_PER_SECOND, segment_tick, rate_hz),
+        step_distance(nav::SWIM_PER_SECOND, segment_tick, rate_hz),
     );
     d.flags = if on_deck {
         d.flags | FLAG_DECK
@@ -626,7 +653,7 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             let Some(hz) = read_u32_exact(body, len) else {
                 return ERR_ENCODING;
             };
-            if hz == 0 || hz > MAX_HZ {
+            if !(MIN_HZ..=MAX_HZ).contains(&hz) {
                 return ERR_ENCODING;
             }
             let p = park();
@@ -820,7 +847,7 @@ pub extern "C" fn sim_restore(len: u32) -> u32 {
     let (rate_hz, anchor_tick, anchor_ns) = if header == HEADER3 {
         let mut b8 = [0u8; 8];
         let hz = u32::from_le_bytes([buf[60], buf[61], buf[62], buf[63]]);
-        if hz == 0 || hz > MAX_HZ {
+        if !(MIN_HZ..=MAX_HZ).contains(&hz) {
             return 2;
         }
         b8.copy_from_slice(&buf[64..72]);
@@ -998,7 +1025,7 @@ pub extern "C" fn sim_view() -> u32 {
         if d.flags & FLAG_BOOST != 0 {
             flags |= 8;
         }
-        let anim = if moving { ((p.tick >> 2) & 3) as u8 } else { 0 };
+        let anim = if moving { animation_frame(p) } else { 0 };
         buf[at..at + 8].copy_from_slice(&d.id.to_le_bytes());
         buf[at + 8..at + 12].copy_from_slice(&d.x.to_le_bytes());
         buf[at + 12..at + 16].copy_from_slice(&d.y.to_le_bytes());
@@ -1267,6 +1294,7 @@ mod tests {
             sim_step(); // 2s at the genesis 24Hz
         }
         assert_eq!(ev(EV_RATE_SET, &0u32.to_le_bytes()), ERR_ENCODING);
+        assert_eq!(ev(EV_RATE_SET, &(MIN_HZ - 1).to_le_bytes()), ERR_ENCODING);
         assert_eq!(ev(EV_RATE_SET, &2000u32.to_le_bytes()), ERR_ENCODING);
         assert_eq!(ev(EV_RATE_SET, &24u32.to_le_bytes()), ERR_NOOP);
         assert_eq!(ev(EV_RATE_SET, &120u32.to_le_bytes()), OK);
@@ -1420,7 +1448,7 @@ mod tests {
     fn boost_doubles_ground_covered() {
         // Two identical walks along the open south row, one boosted: after
         // the same tick budget the boosted dog must be measurably ahead —
-        // and exactly at double speed until arrival (WALK_SPEED is exact).
+        // and exactly at double speed until arrival.
         let blob = park_blob();
         let t = Terrain::parse(&blob).unwrap();
         let start = Node::ground(t.idx(0, 10));
@@ -1455,6 +1483,71 @@ mod tests {
             "boosted dog should cover exactly double the distance"
         );
         assert!(fast > slow);
+    }
+
+    #[test]
+    fn movement_speed_is_wall_time_not_tick_count() {
+        // The same one-second walk at three rates must cover the same
+        // fixed-point distance. 120Hz deliberately does not divide the
+        // Q16.16 speed: this pins the cumulative-remainder distribution,
+        // not only the easy 24 -> 48 case.
+        let blob = park_blob();
+        let t = Terrain::parse(&blob).unwrap();
+        // A vertical lane that does not cross the river: the measurement
+        // stays pure velocity at both normal and boosted speed.
+        let start = Node::ground(t.idx(1, 0));
+        let goal = Node::ground(t.idx(1, 10)).0;
+        let run = |hz: u32, boosted: bool| -> i32 {
+            let _g = setup(77);
+            assert_eq!(ev_id(EV_JOIN, 8), OK);
+            {
+                let p = park();
+                let i = find(p, 8).unwrap();
+                let (x, y) = nav::center(&t, start);
+                p.dogs[i].x = x;
+                p.dogs[i].y = y;
+            }
+            if hz != GENESIS_HZ {
+                assert_eq!(ev(EV_RATE_SET, &hz.to_le_bytes()), OK);
+            }
+            if boosted {
+                assert_eq!(ev_boost(8, 1), OK);
+            }
+            assert_eq!(ev_move(8, goal), OK);
+            for _ in 0..hz {
+                sim_step();
+            }
+            let (_, sy) = nav::center(&t, start);
+            dog(8).y - sy
+        };
+
+        for hz in [GENESIS_HZ, 48, 120] {
+            assert_eq!(run(hz, false), nav::WALK_PER_SECOND, "walk at {hz}Hz");
+            assert_eq!(run(hz, true), 2 * nav::WALK_PER_SECOND, "boost at {hz}Hz");
+        }
+
+        // Half a second at 24Hz followed by half a second at 48Hz is still
+        // exactly one second of movement. This is the server-side boundary
+        // the connected-client drill crosses, not merely two cold starts.
+        let _g = setup(78);
+        assert_eq!(ev_id(EV_JOIN, 9), OK);
+        {
+            let p = park();
+            let i = find(p, 9).unwrap();
+            let (x, y) = nav::center(&t, start);
+            p.dogs[i].x = x;
+            p.dogs[i].y = y;
+        }
+        assert_eq!(ev_move(9, goal), OK);
+        for _ in 0..12 {
+            sim_step();
+        }
+        assert_eq!(ev(EV_RATE_SET, &48u32.to_le_bytes()), OK);
+        for _ in 0..24 {
+            sim_step();
+        }
+        let (_, sy) = nav::center(&t, start);
+        assert_eq!(dog(9).y - sy, nav::WALK_PER_SECOND);
     }
 
     #[test]
@@ -1710,7 +1803,7 @@ mod tests {
         assert_eq!(sim_restore(oob.len() as u32), 5);
         // an out-of-range rate is refused
         let mut badrate = s.clone();
-        badrate[60..64].copy_from_slice(&0u32.to_le_bytes());
+        badrate[60..64].copy_from_slice(&(MIN_HZ - 1).to_le_bytes());
         io()[..badrate.len()].copy_from_slice(&badrate);
         assert_eq!(sim_restore(badrate.len() as u32), 2);
         restore_vec(&s);

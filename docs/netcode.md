@@ -109,10 +109,15 @@ only handle that marks an event as yours. Rejects go only to the sender.
   converges via one `rate_set` event in the dark phase (reopen), which
   re-anchors the mapping piecewise — so raising, lowering, or rolling back
   a rate never stalls or forks a schedule, and every pod generation
-  derives the same one from the journal. Clients pace from `welcome.hz`;
-  a connection sees exactly one rate. (What changes with rate: game
-  tuning is tick-denominated — wander odds, soak windows — so a rate
-  change is also a balance change until constants are wall-derived.)
+  derives the same one from the journal. Clients start from `welcome.hz` and
+  consume any later `rate_set` at its journal tick, re-anchoring their clock
+  without reconnecting or restoring. Gameplay tuning is wall-time data:
+  movement distributes its fixed-point distance across the current rate
+  segment, wander odds derive from seconds, presentation animation derives
+  from the segment's wall-time mapping, and the server's module soak derives
+  ticks from its duration. A faster rate therefore buys an earlier input
+  boundary without making the world, its dogs, or its release machinery run
+  faster.
 
 ## Architecture invariants
 

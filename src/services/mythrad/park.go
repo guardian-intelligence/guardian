@@ -15,6 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 
@@ -42,6 +45,12 @@ const (
 	// restart). Longer gaps journal a clock_skip instead, keeping replay
 	// cost bounded and making the jump an event every replica sees.
 	darkStepWindow = 60 * time.Second
+
+	// Kept in lockstep with sim/shared/park's rate_set validation. Below
+	// 12Hz a boosted dog would cross more than half a cell in one axis
+	// sub-move, violating nav's collision boundary.
+	minTickHz = 12
+	maxTickHz = 1000
 )
 
 // wallEpoch is the instant of tick 0 for every park: tick N is defined as
@@ -276,11 +285,20 @@ func (h *parkHost) Apply(event []byte) uint32 {
 // stagedIntent is a session (or system) intent waiting for the tick
 // boundary. sess is nil for system events.
 type stagedIntent struct {
-	sess     *session
-	actor    string
-	intentID uint64
-	kind     uint16
-	payload  []byte
+	sess       *session
+	actor      string
+	intentID   uint64
+	kind       uint16
+	payload    []byte
+	receivedAt time.Time
+	dequeuedAt time.Time
+	rateHz     int
+	done       chan error
+}
+
+type rateChangeReq struct {
+	hz   int
+	done chan error
 }
 
 type attachReq struct {
@@ -378,6 +396,7 @@ type authority struct {
 	seenFifo []string
 
 	attach chan attachReq
+	rate   chan rateChangeReq
 	stop   chan struct{}
 
 	snapCache       snapCacheEntry
@@ -386,7 +405,11 @@ type authority struct {
 	utcDay          uint32
 }
 
-const soakTicks = 120 // ~5s of dark lockstep before an epoch swap commits
+const soakDuration = 5 * time.Second
+
+func soakTicks(hz int) int {
+	return int(soakDuration * time.Duration(hz) / time.Second)
+}
 
 func displayHash(b []byte) string {
 	sum := sha256.Sum256(b)
@@ -413,7 +436,7 @@ func (a *authority) swapPrelude() []stagedIntent {
 			mEpochSwaps.WithLabelValues("soak_abort").Inc()
 			return nil
 		}
-		a.cand, a.candHash, a.soakLeft = cand, hash, soakTicks
+		a.cand, a.candHash, a.soakLeft = cand, hash, soakTicks(a.hz)
 		sum := sha256.Sum256(bytes)
 		a.candSum = binary.LittleEndian.Uint64(sum[:8])
 		if err := cand.SetTerrainE(a.terrainBlob); err != nil {
@@ -424,7 +447,8 @@ func (a *authority) swapPrelude() []stagedIntent {
 			a.failSoak(hash, err)
 			return nil
 		}
-		log.Printf("park %s: module %s soaking for %d ticks (live %s)", a.name, hash, soakTicks, a.moduleHash)
+		log.Printf("park %s: module %s soaking for %s / %d ticks at %dHz (live %s)",
+			a.name, hash, soakDuration, a.soakLeft, a.hz, a.moduleHash)
 		return nil
 	}
 	if a.soakLeft > 0 {
@@ -527,8 +551,11 @@ func (a *authority) setTerrain(blob []byte) error {
 // snapshot does not replay to its recorded world hash is refused, never
 // served wrong.
 func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, j journal.Journal, mods *modules, tm timing) (*authority, error) {
-	if tm.hz <= 0 {
+	if tm.hz == 0 {
 		tm.hz = 24
+	}
+	if tm.hz < minTickHz || tm.hz > maxTickHz {
+		return nil, fmt.Errorf("tick rate %dHz outside supported range %d..%d", tm.hz, minTickHz, maxTickHz)
 	}
 	if tm.now == nil {
 		tm.now = time.Now
@@ -544,6 +571,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 		subs:       map[*session]bool{},
 		seen:       map[string]struct{}{},
 		attach:     make(chan attachReq),
+		rate:       make(chan rateChangeReq),
 		stop:       make(chan struct{}),
 		lastSnapAt: tm.now(),
 		// utcDay 0: the first tick after every open stages a day_reset, so
@@ -640,7 +668,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 	// The schedule is world state: derive it from the restored rate
 	// segment, then repay the gap between the stored tick and the wall
 	// clock before the doors open.
-	a.refreshSchedule()
+	a.refreshSchedule(true)
 	if target := a.targetTick(tm.now()); target > host.Tick() {
 		if time.Duration(target-host.Tick())*a.tickDur <= darkStepWindow {
 			// The world lives through a short restart: step it, filling
@@ -690,7 +718,7 @@ func (a *authority) rateChange(ctx context.Context, hz int) error {
 	a.lastSeq = firstSeq
 	mEventsAppended.Inc()
 	mRateChanges.Inc()
-	a.refreshSchedule()
+	a.refreshSchedule(true)
 	t := a.host.Tick()
 	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: a.host.Hash()}
 	a.ringHead = t
@@ -761,10 +789,77 @@ func simEvent(kind uint16, payload []byte) []byte {
 	return out
 }
 
+// playerActionName is deliberately bounded: a client-controlled numeric
+// kind must never become unbounded metric cardinality. Keep these four
+// names aligned with packages/wum-client/src/actions.ts; unknown attempts
+// share one bucket and are still visible as rejected authority spans.
+func playerActionName(kind uint16) string {
+	switch kind {
+	case evJoin:
+		return "join"
+	case evCheckIn:
+		return "check_in"
+	case evMoveTo:
+		return "move_to"
+	case evBoostSet:
+		return "boost"
+	default:
+		return "unknown"
+	}
+}
+
+func elapsed(from, to time.Time) time.Duration {
+	if from.IsZero() || to.Before(from) {
+		return 0
+	}
+	return to.Sub(from)
+}
+
+// recordIntent closes one server-observed action lifecycle. The span's
+// duration is receipt -> durable fan-out/reject; tick_queue_ms isolates the
+// only component a higher tick rate is expected to shrink. Intent/actor ids
+// never become attributes: kind, result, park and rate are bounded analysis
+// dimensions, while per-player identifiers would be both unnecessary and
+// high-cardinality.
+func (a *authority) recordIntent(in stagedIntent, result string, reject uint32, finished time.Time) {
+	if in.sess == nil || in.intentID == 0 || in.receivedAt.IsZero() {
+		return
+	}
+	kind := playerActionName(in.kind)
+	rateHz := in.rateHz
+	if rateHz == 0 {
+		rateHz = a.hz
+	}
+	queue := elapsed(in.receivedAt, in.dequeuedAt)
+	total := elapsed(in.receivedAt, finished)
+	mIntentQueueDur.WithLabelValues(kind).Observe(queue.Seconds())
+	mIntentAuthorityDur.WithLabelValues(kind, result).Observe(total.Seconds())
+
+	attrs := []attribute.KeyValue{
+		attribute.String("wum.kind", kind),
+		attribute.String("wum.result", result),
+		attribute.String("wum.park", a.name),
+		attribute.Int("wum.rate_hz", rateHz),
+		attribute.Float64("wum.tick_queue_ms", float64(queue.Microseconds())/1000),
+		attribute.Float64("wum.authority_ms", float64(total.Microseconds())/1000),
+	}
+	if reject != 0 {
+		attrs = append(attrs, attribute.String("wum.reject_reason", rejectReasonName(reject)))
+	}
+	_, span := otel.Tracer("guardian/mythrad/authority").Start(
+		context.Background(),
+		"mythra.intent",
+		trace.WithTimestamp(in.receivedAt),
+		trace.WithAttributes(attrs...),
+	)
+	span.End(trace.WithTimestamp(finished))
+}
+
 // stageIntent queues a session intent for the next tick boundary. Intents
 // are idempotent by (actor, intent_id): a resend after rejoin is dropped
 // here, and the original event (already fanned out) is the acknowledgment.
 func (a *authority) stageIntent(s *session, intentID uint64, kind uint16, payload []byte) {
+	receivedAt := a.tm.now()
 	a.mu.Lock()
 	// Intent id 0 marks connection-lifecycle intents (the departure staged
 	// on disconnect): every session of a sub uses the same id there, so
@@ -783,7 +878,10 @@ func (a *authority) stageIntent(s *session, intentID uint64, kind uint16, payloa
 			a.seenFifo = a.seenFifo[1:]
 		}
 	}
-	a.staged = append(a.staged, stagedIntent{sess: s, actor: s.sub, intentID: intentID, kind: kind, payload: payload})
+	a.staged = append(a.staged, stagedIntent{
+		sess: s, actor: s.sub, intentID: intentID, kind: kind, payload: payload,
+		receivedAt: receivedAt,
+	})
 	a.mu.Unlock()
 }
 
@@ -791,6 +889,54 @@ func (a *authority) stageSystem(kind uint16, payload []byte) {
 	a.mu.Lock()
 	a.staged = append(a.staged, stagedIntent{actor: "system", kind: kind, payload: payload})
 	a.mu.Unlock()
+}
+
+// requestRate journals a live rate boundary on the authority goroutine and
+// returns only after durable fan-out. It is wired only by the local-dev HTTP
+// control; production rate policy remains Git/deployment state.
+func (a *authority) requestRate(ctx context.Context, hz int) error {
+	done := make(chan error, 1)
+	select {
+	case a.rate <- rateChangeReq{hz: hz, done: done}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-a.stop:
+		return errors.New("authority closed")
+	}
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-a.stop:
+		return errors.New("authority closed")
+	}
+}
+
+func (a *authority) stageRateChange(req rateChangeReq) error {
+	if req.hz < minTickHz || req.hz > maxTickHz {
+		return fmt.Errorf("tick rate %dHz outside supported range %d..%d", req.hz, minTickHz, maxTickHz)
+	}
+	if req.hz == a.hz {
+		// The development drill restores its durable starting rate before
+		// every run. Treat an already-converged request as successful so the
+		// control is repeatable on a fresh authority as well as a used one.
+		req.done <- nil
+		return nil
+	}
+	var payload [4]byte
+	binary.LittleEndian.PutUint32(payload[:], uint32(req.hz))
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, in := range a.staged {
+		if in.kind == evRateSet {
+			return errors.New("another tick-rate change is pending")
+		}
+	}
+	a.staged = append(a.staged, stagedIntent{
+		actor: "system", kind: evRateSet, payload: payload[:], done: req.done,
+	})
+	return nil
 }
 
 func (a *authority) detach(s *session) {
@@ -814,23 +960,44 @@ func (a *authority) verdictFor(tick, wh uint64) (ok *bool, now uint64) {
 
 // refreshSchedule derives the tick schedule from the sim's rate segment —
 // state, not config, so every pod generation (and rollback) computes the
-// identical mapping. Called only while dark: the ring may be reallocated.
-func (a *authority) refreshSchedule() {
+// identical mapping. Live changes preserve and rehash the existing
+// verification ring while resizing it for the new wall-time depth. They
+// also preserve the park's sub-tick phase so the boundary itself does not
+// move; dark boot/convergence may derive the phase for its resulting rate.
+func (a *authority) refreshSchedule(rephase bool) {
 	a.hz = a.host.Rate()
 	a.tickDur = time.Second / time.Duration(a.hz)
-	a.phase = time.Duration(uint64(a.id) % uint64(a.tickDur))
+	if rephase {
+		a.phase = time.Duration(uint64(a.id) % uint64(a.tickDur))
+	}
 	a.anchorTick = a.host.AnchorTick()
 	a.anchor = wallEpoch.Add(time.Duration(a.host.AnchorNs()))
 	if need := ringSeconds * a.hz; len(a.ring) != need {
 		a.mu.Lock()
-		a.ring = make([]ringEntry, need)
+		next := make([]ringEntry, need)
+		for _, e := range a.ring {
+			if e.tick != 0 || e.wh != 0 {
+				at := e.tick % uint64(need)
+				if (next[at].tick == 0 && next[at].wh == 0) || e.tick > next[at].tick {
+					next[at] = e
+				}
+			}
+		}
+		a.ring = next
 		a.mu.Unlock()
 	}
 }
 
-// tickInstant is the wall-clock moment tick t is scheduled to run.
+// tickInstant is the wall-clock moment tick t is scheduled to run. Divide
+// cumulative ticks, rather than multiplying a truncated tick duration, so
+// rates that do not divide one second never accumulate scheduler drift.
 func (a *authority) tickInstant(t uint64) time.Time {
-	return a.anchor.Add(a.phase + time.Duration(t-a.anchorTick)*a.tickDur)
+	ticks := t - a.anchorTick
+	seconds := ticks / uint64(a.hz)
+	remainder := ticks % uint64(a.hz)
+	offset := time.Duration(seconds)*time.Second +
+		time.Duration(remainder*uint64(time.Second)/uint64(a.hz))
+	return a.anchor.Add(a.phase + offset)
 }
 
 // targetTick is the tick whose instant most recently passed: the tick the
@@ -840,7 +1007,10 @@ func (a *authority) targetTick(now time.Time) uint64 {
 	if d < 0 {
 		return a.anchorTick
 	}
-	return a.anchorTick + uint64(d/a.tickDur)
+	seconds := uint64(d / time.Second)
+	remainder := uint64(d % time.Second)
+	return a.anchorTick + seconds*uint64(a.hz) +
+		remainder*uint64(a.hz)/uint64(time.Second)
 }
 
 // run is the authority loop: the single goroutine touching the parkHost.
@@ -862,6 +1032,10 @@ func (a *authority) run() {
 			return
 		case req := <-a.attach:
 			req.done <- a.handleAttach(req)
+		case req := <-a.rate:
+			if err := a.stageRateChange(req); err != nil {
+				req.done <- err
+			}
 		case <-timer.C:
 			now := a.tm.now()
 			target := a.targetTick(now)
@@ -906,8 +1080,16 @@ func (a *authority) tickOnce() {
 	staged := append(prelude, a.staged...)
 	a.staged = nil
 	a.mu.Unlock()
+	dequeuedAt := a.tm.now()
+	for i := range staged {
+		if !staged[i].receivedAt.IsZero() {
+			staged[i].dequeuedAt = dequeuedAt
+			staged[i].rateHz = a.hz
+		}
+	}
 
 	var accepted []journal.Event
+	var acceptedIntents []stagedIntent
 	tick := a.host.Tick()
 	epoch := a.host.Epoch()
 	for _, in := range staged {
@@ -927,6 +1109,10 @@ func (a *authority) tickOnce() {
 			log.Printf("park %s: intent rejected: actor=%s kind=%d intent=%d reason=%s(%d)",
 				a.name, in.actor, in.kind, in.intentID, rejectReasonName(code), code)
 			mIntentsRejected.WithLabelValues(rejectReasonName(code)).Inc()
+			a.recordIntent(in, "rejected", code, a.tm.now())
+			if in.done != nil {
+				in.done <- fmt.Errorf("rate_set rejected: %s (%d)", rejectReasonName(code), code)
+			}
 			continue
 		}
 		// Feed the accepted event to the soaking candidate: a module that
@@ -943,6 +1129,7 @@ func (a *authority) tickOnce() {
 			Tick: tick, Epoch: epoch, Kind: in.kind,
 			Actor: in.actor, IntentID: in.intentID, Payload: in.payload,
 		})
+		acceptedIntents = append(acceptedIntents, in)
 	}
 
 	// Durable-before-visible: the batch commits before any session sees an
@@ -958,6 +1145,13 @@ func (a *authority) tickOnce() {
 		cancel()
 		if err != nil {
 			mAppendErrors.Inc()
+			finished := a.tm.now()
+			for _, in := range acceptedIntents {
+				a.recordIntent(in, "append_error", 0, finished)
+				if in.done != nil {
+					in.done <- fmt.Errorf("rate_set append: %w", err)
+				}
+			}
 			log.Printf("park %s: journal append failed (%v) — closing for a journal-clean reopen", a.name, err)
 			a.close()
 			return
@@ -973,6 +1167,26 @@ func (a *authority) tickOnce() {
 		}
 		a.lastSeq = accepted[len(accepted)-1].Seq
 		a.mu.Unlock()
+		for _, in := range acceptedIntents {
+			if in.kind != evRateSet || len(in.payload) != 4 {
+				continue
+			}
+			oldHz := a.hz
+			a.refreshSchedule(false)
+			a.mu.Lock()
+			a.snapCache = snapCacheEntry{}
+			a.mu.Unlock()
+			mRateChanges.Inc()
+			log.Printf("park %s: live rate_set %dHz -> %dHz at tick %d",
+				a.name, oldHz, a.hz, tick)
+		}
+		finished := a.tm.now()
+		for _, in := range acceptedIntents {
+			a.recordIntent(in, "accepted", 0, finished)
+			if in.done != nil {
+				in.done <- nil
+			}
+		}
 		a.eventsSinceSnap += len(accepted)
 	}
 
@@ -1186,4 +1400,14 @@ func (p *parks) get(ctx context.Context, name string) (*authority, error) {
 	go a.run()
 	mParks.Set(float64(len(p.byName)))
 	return a, nil
+}
+
+// current returns an already-running authority. The local rate drill uses
+// this instead of get: its subject is an existing connected session, so a
+// control request must not quietly create a new park and call that success.
+func (p *parks) current(name string) (*authority, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	a, ok := p.byName[name]
+	return a, ok && !a.isClosed()
 }

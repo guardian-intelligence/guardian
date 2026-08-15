@@ -21,6 +21,7 @@ aspect mythra dev status              # per-leg health, non-zero if unhealthy
 aspect mythra dev logs                # recent lines from every leg
 aspect mythra dev logs --leg=mythrad  # follow one leg: pg|ch|otelcol|flagd|ingest|devissuer|mythrad|web
 aspect mythra dev smoke               # prove the stack end to end: a headless player connects and its telemetry lands
+aspect mythra dev latency             # exercise every action; report client + authority latency from local telemetry
 aspect mythra dev down                # stop everything
 ```
 
@@ -36,6 +37,12 @@ The legs:
 | dev OIDC issuer | 127.0.0.1:9635/realms/dev | Keycloak-shaped; signs any subject; mythrad validates it through the same `oidcGate` path as prod |
 | mythrad | 127.0.0.1:9634 (HTTP), :4433 (WebTransport) | self-signed cert pinned via `certHashB64`; wasm modules hot-load from `src/services/mythrad/behaviors/` |
 | web app | http://127.0.0.1:4254 | vite dev server, proxying `/session` `/wt-info` `/terrain` `/behavior` `/assets` to mythrad and `/api/events` to the ingest exactly as the prod Ingress does |
+
+If another local tool owns a default port, override it consistently through
+the launcher, for example `WUM_DEV_PG_PORT=55433
+WUM_DEV_MYTHRAD_HTTP_PORT=19634 WUM_DEV_MYTHRAD_METRICS_PORT=19633 aspect
+mythra dev up`. The same variables must accompany later `status`, `latency`,
+and `down` commands for that stack.
 
 Every telemetry lane a change emits is queryable locally: the `up` card
 prints a copy-pasteable ClickHouse query (`guardian_analytics.events` for
@@ -58,6 +65,36 @@ only trusts it because `OIDC_ISSUER` says so.
   production deploy uses.
 - **mythrad (Go)**: `aspect mythra dev down && aspect mythra dev up`;
   clients redial and resync (also a prod-truthful path).
+
+### Tick-rate latency drill
+
+The local stack starts at 24Hz by default. Its server exposes a
+development-only control that journals a live `rate_set`; it is server-side
+truth, not a browser override. The connected client must consume that event,
+re-anchor its clock at the event tick, and keep the same world and transport.
+
+```sh
+aspect mythra dev latency
+```
+
+The probe signs in once, exercises join, check-in, move and boost through the
+real UI at 24Hz, asks the already-running authority to journal 48Hz, then
+exercises move and boost again in the same page. `RATE_CHANGE` proves the page
+identity stayed fixed, the world advanced, and there were no redials, resyncs,
+restores, or reloads. It also reports two deliberately separate latency views:
+
+- `CLIENT_ACTION`: first wire write until the journal event applies in the
+  browser, from the production `wum.action` fact;
+- `SERVER_ACTIONS`: server receipt until durable fan-out, with
+  `queue_p*_ms` isolating the wait for the next authority tick.
+
+Every row carries the rate the same connection actually observed, and the
+command fails unless every client-observed action has a corresponding
+completed `mythra.intent` span in local ClickHouse. Raising the rate is
+expected to shrink both the next-tick queue and the client's six-tick cushion
+in milliseconds; journal commit and network RTT are not tick-rate work and
+should not be credited to it. `WUM_DEV_TICK_HZ` changes the startup baseline
+when a different experiment needs one; it is not used by this live handoff.
 
 ## Load bots
 
