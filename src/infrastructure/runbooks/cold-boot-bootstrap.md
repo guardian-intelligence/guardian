@@ -264,14 +264,14 @@ curl -X POST "https://api.latitude.sh/servers/<server-id>/reinstall" \
 ```
 
 Server IDs: ash-earth `sv_vAPXaMxKM5epz`, ash-water `sv_8mop5gZo8Njxv`,
-ash-wind `sv_nPRbajqEB5koM`, ash-fire `sv_EvjLaBxRQNoqy` (WUM game worker —
+ash-wind `sv_nPRbajqEB5koM`, ash-worker0 `sv_EvjLaBxRQNoqy` (WUM game worker —
 reimage after the control plane is Ready; it joins as a worker and carries no
 etcd or edge role).
 
 Node public IPs — the dark-case constants (`k8s.guardianintelligence.org`
 and every other zone name is Cloudflare-hosted DNS, unresolvable while
 dark): ash-earth `206.223.228.101`, ash-wind `45.250.254.119`,
-ash-water `206.223.228.87`, ash-fire `206.223.228.99`.
+ash-water `206.223.228.87`, ash-worker0 `206.223.228.99`.
 
 **The outcome is bimodal — poll BOTH ssh:22 and Talos:50000 and branch:**
 

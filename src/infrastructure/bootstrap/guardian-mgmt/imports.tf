@@ -19,11 +19,11 @@ import {
 }
 
 import {
-  to = latitudesh_server.wum_region["ash-fire"]
+  to = latitudesh_server.wum_region["ash-worker0"]
   id = "sv_EvjLaBxRQNoqy"
 }
 
 import {
-  to = latitudesh_vlan_assignment.wum_region["ash-fire"]
+  to = latitudesh_vlan_assignment.wum_region["ash-worker0"]
   id = "vnasg_MDEOaPbGYNwgB"
 }

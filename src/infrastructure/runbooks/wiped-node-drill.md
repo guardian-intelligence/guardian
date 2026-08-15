@@ -17,7 +17,7 @@ Node map:
 | `ash-earth` | `206.223.228.101` | `10.8.0.11` |
 | `ash-wind` | `45.250.254.119` | `10.8.0.12` |
 | `ash-water` | `206.223.228.87` | `10.8.0.13` |
-| `ash-fire` (WUM game worker; no etcd member to remove) | `206.223.228.99` | `10.8.0.14` |
+| `ash-worker0` (WUM game worker; no etcd member to remove) | `206.223.228.99` | `10.8.0.14` |
 
 ## Preconditions
 
@@ -56,7 +56,7 @@ Set these variables for the one target:
 
 ```sh
 MINT=/dev/shm/guardian-talm-mint
-NODE=<ash-earth|ash-wind|ash-water|ash-fire>
+NODE=<ash-earth|ash-wind|ash-water|ash-worker0>
 PUBLIC_IP=<node-public-ip>
 PRIVATE_IP=<node-private-ip>
 ```
