@@ -10,7 +10,7 @@ read `docs/engineering-rules.md`, then only what your task routes to below.
   service/API conventions).
 - **Wake Up, Mythra! (WUM)** — most development happens here. Read
   `docs/wake-up-mythra-development.md` (plan of record and architecture
-  invariants), the repo `README.md` (one-command local loop), and
+  invariants), `src/services/mythrad/README.md` (one-command local loop), and
   `docs/netcode.md` (server-authoritative simulation contract). Gating client
   behavior: `docs/feature-flags.md`. Shipping a user-visible feature:
   `docs/canaries.md` and `docs/loadtest.md`. Following a user session across
