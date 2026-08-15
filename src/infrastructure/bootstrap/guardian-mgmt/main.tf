@@ -50,10 +50,10 @@ locals {
   # guardian-mgmt fabric is cross-project, so the worker still joins the
   # cluster over 10.8.0.0/24 like every other node.
   wum_region_nodes = {
-    ash-fire = {
-      name         = "ash-fire"
+    ash-worker0 = {
+      name         = "ash-worker0"
       server_id    = "sv_EvjLaBxRQNoqy"
-      hostname     = "ash-fire"
+      hostname     = "ash-worker0"
       project_id   = "proj_Yx2za1YgvaVrL"
       public_ipv4  = "206.223.228.99"
       private_ipv4 = "10.8.0.14"
