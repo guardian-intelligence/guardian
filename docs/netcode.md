@@ -2,18 +2,23 @@
 
 "Wake Up, Mythra!" uses a shared server-authoritative deterministic simulation with periodic reconciliation. Clients send inputs which are logged to a journal and broadcast to all connected clients. Product/platform plan: docs/wake-up-mythra-development.md.
 
-## Goals
+## High level
 
-Every surface — server, browser — runs the identical fixed-point
-wasm simulation. The server never streams world state; it streams an ordered
-list of **events** (the journal), and every replica derives the same world
-from it. The design optimizes for four things, in order: **correctness you
-can prove** (a 64-bit world hash makes divergence detectable, snapshots make
-it repairable), **surviving any restart** (the journal is Postgres rows, so
-recovery is the database's problem — a solved one), **cellular-class
-bandwidth** (an idle session costs ~zero bytes/tick; data moves when a human
-acts), and **shipping game rules to a live world** (code swaps ride the same
-event stream as everything else).
+* QUIC transport, binary-prefix envelope.
+* Server authoritative, not peer-to-peer
+* "Riot Direct"-like north/south
+* Newest gen Ryzen game server, deployed close to player
+* 120tick servers
+* Shared deterministic simulation for physics, periodic reconciliation upon divergence/corruption
+* "Hot Patch"ed servers + client background OTA updates -- server can update configuration, runtime feature flags.
+* Asset handling -- Assets marked as blocking, "Nice to have", or "lazy loaded".
+* Hot swapping -- version skew protection (want to dive into this one, its one that remains unsolved in WUM today)
+* Friendly to mobile plans, streaming input broadcasts only and replaying them on client
+* Dynamic Predictive -- specific actions get prediction (movement, NPC behavior, "over-time" effects like healing) while others require server ack. Prediction is bounded to avoid motion sickness upon resync, falling back to lockstep for everything. If no server ack within an upper bound, initiate force client reconnect flow. 
+* 1-tick ahead -- Clients aim to stay 1 tick behind the server, smoothly increasing the simulation speed when behind.
+* 0-RPO - Every tick records all inputs received to colocated hot-path durable ledger. Durable ledger growth bounded to ring buffer wall-clock length (WUM uses 30 seconds) and backed up. Something like Player inputs -> Server, per tick, acks all inputs and writes to in-mem store. In-mem store writes to off-pod PG. PG commits with configured PITR.
+* 0 Downtime -- server components independently deploy such that downtime is impossible by construction. Upon redeploy of ingress layer, clients signaled to switch between wt0, wt1, wt2 etc and wait for connections to drain before initiating deployment. Rolling update each ingress and monitor client behavior.
+* Anti-Cheat
 
 ## Guiding principles
 
