@@ -279,4 +279,4 @@ state-streaming architecture OOMKilled at this session count).
 deficit against verdict ticks: small → slew ±2%, seconds → fast-forward
 (budgeted extra steps per frame), beyond the ~30s ring → demand a snapshot.
 One state machine, property-tested in `sim/clock`; the dev debug panel and
-the netsim proxy (`docs/wum-local-dev.md`) exist to torture it.
+the netsim proxy (`README.md`) exist to torture it.
