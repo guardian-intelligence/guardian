@@ -20,8 +20,9 @@
 //!                     or AHEAD by > 2s (never step backward): ask the
 //!                     host to resync; only clock_reset leaves this state.
 //!
-//! The tick rate arrives per connection (`welcome.hz` -> `set_rate`); the
-//! wall-time thresholds above derive from it.
+//! The initial tick rate arrives in `welcome.hz`; a journaled `rate_set`
+//! re-anchors the same clock model at its event tick while connected. The
+//! wall-time thresholds above derive from the current rate.
 //!
 //! The server-tick model is a reference point (ref_ms, ref_tick) advanced
 //! by the local monotonic clock and corrected by verdict samples through
@@ -106,11 +107,45 @@ impl Clock {
         ((ms as i64) * (self.hz as i64) * ONE) / 1000
     }
 
-    /// The park's tick rate, from the welcome line. Rate changes only
-    /// happen while the server is dark, so a connection sees exactly one
-    /// rate: set it before the first sample.
+    /// The park's initial tick rate, from the welcome line. Set it before
+    /// the first sample.
     pub fn set_rate(&mut self, hz: u64) {
         self.hz = hz.clamp(1, 1000);
+    }
+
+    /// Adopt a journaled rate boundary without throwing away the clock's
+    /// estimate of server-now. The old model tells us how much wall time
+    /// has elapsed since `boundary_tick`; rescale that interval at the new
+    /// rate and anchor it at `now_ms`. This is deliberately not `reset`:
+    /// verdict history and RTT survive, and the smaller wall-time cushion
+    /// at a higher rate becomes catch-up work rather than a discontinuity.
+    pub fn change_rate(&mut self, hz: u64, boundary_tick: u64, now_ms: u64) {
+        let next = hz.clamp(1, 1000);
+        if next == self.hz {
+            return;
+        }
+        if self.state == State::Acquiring {
+            self.hz = next;
+            return;
+        }
+        let old = self.hz as i64;
+        let modeled_now = self.ref_tick_q16 + self.ticks_q16(now_ms.saturating_sub(self.ref_ms));
+        let boundary = (boundary_tick as i64).saturating_mul(ONE);
+        let since_boundary = modeled_now.saturating_sub(boundary);
+        self.hz = next;
+        self.ref_ms = now_ms;
+        self.ref_tick_q16 =
+            boundary.saturating_add(since_boundary.saturating_mul(next as i64) / old);
+        self.frac_q16 = 0;
+        self.last_frame_ms = now_ms;
+        // A rate increase intentionally shrinks the fixed-tick cushion in
+        // wall time. Pay that newly exposed deficit through the ordinary
+        // bounded catch-up path now; Locked's ±2% slew would otherwise
+        // spend seconds retaining the old, larger latency cushion.
+        let target = self.ref_tick_q16 - LAG_TICKS * ONE;
+        if self.state != State::SnapshotRequired && target - boundary > EXIT_FF_Q16 {
+            self.state = State::FastForward;
+        }
     }
 
     pub fn rate(&self) -> u64 {
@@ -466,6 +501,23 @@ mod tests {
         assert_eq!(f.snapshots, 0, "inside the ring must not resync");
         assert_eq!(f.clock.state(), State::Locked);
         assert!(f.err_ticks().abs() <= 5, "err={} ticks", f.err_ticks());
+    }
+
+    #[test]
+    fn live_rate_change_reanchors_at_the_journal_boundary() {
+        let mut c = Clock::NEW;
+        c.set_rate(24);
+        c.sample(0, 0, 10_000);
+
+        // At 250ms the old model is six ticks past the boundary. At 48Hz
+        // the same wall interval is twelve ticks, so the authority model
+        // becomes 10012 while the six-tick cushion targets 10006.
+        c.change_rate(48, 10_000, 250);
+        assert_eq!(c.rate(), 48);
+        assert_eq!(c.trail_q16(250, 10_000), 12 * ONE);
+        assert_eq!(c.error_q16(250, 10_000), 6 * ONE);
+        assert_eq!(c.frame(250, 10_000, 8_000) & 0xffff, 6);
+        assert_ne!(c.state(), State::SnapshotRequired);
     }
 
     #[test]

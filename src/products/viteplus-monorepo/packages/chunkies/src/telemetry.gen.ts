@@ -3,7 +3,7 @@
 // with `bazelisk run //src/services/mythrad/sim:refresh`.
 
 /**
- * Telemetry codes the session core emits, 1..22. Host-minted codes live in
+ * Telemetry codes the session core emits, 1..23. Host-minted codes live in
  * `HostEmit` (ports.ts) and start at 1000 so the two ranges can never be
  * confused.
  */
@@ -30,6 +30,7 @@ export const Emit = {
   intentAnswered: 20,
   intentResent: 21,
   intentDropped: 22,
+  rateChanged: 23,
 } as const;
 
 export type EmitCode = (typeof Emit)[keyof typeof Emit];

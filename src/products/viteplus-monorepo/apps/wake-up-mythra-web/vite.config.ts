@@ -17,6 +17,8 @@ const stripRouteManifestPaths = {
   },
 };
 
+const mythradOrigin = `http://127.0.0.1:${process.env["WUM_DEV_MYTHRAD_HTTP_PORT"] ?? "9634"}`;
+
 export default defineConfig({
   build: {
     // The apex Ingress path-routes /assets/ to the game service (streamed
@@ -40,8 +42,8 @@ export default defineConfig({
     // extension-less paths go to nitro (see devProxy below). Both proxies
     // point at a locally running mythrad, mirroring the prod Ingress split.
     proxy: {
-      "/assets": "http://127.0.0.1:9634",
-      "/behavior": "http://127.0.0.1:9634",
+      "/assets": mythradOrigin,
+      "/behavior": mythradOrigin,
     },
   },
   resolve: {
@@ -58,11 +60,11 @@ export default defineConfig({
     nitro({
       devProxy: {
         "/api/events/**": `http://127.0.0.1:${process.env["WUM_DEV_INGEST_PORT"] ?? "9636"}`,
-        "/wt-info": "http://127.0.0.1:9634",
-        "/session": "http://127.0.0.1:9634",
-        "/terrain/**": "http://127.0.0.1:9634",
-        "/assets/**": "http://127.0.0.1:9634",
-        "/behavior/**": "http://127.0.0.1:9634",
+        "/wt-info": mythradOrigin,
+        "/session": mythradOrigin,
+        "/terrain/**": mythradOrigin,
+        "/assets/**": mythradOrigin,
+        "/behavior/**": mythradOrigin,
       },
     }),
   ],

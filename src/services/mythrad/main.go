@@ -106,6 +106,16 @@ var (
 		Help:    "Tick-batched journal append commit time (the Append call alone).",
 		Buckets: []float64{.0005, .001, .0025, .005, .01, .02, .03, .0417, .06, .1, .25, .5},
 	})
+	mIntentQueueDur = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "mythra_intent_tick_queue_seconds",
+		Help:    "Player intent time from server receipt until the authority begins its next tick, by bounded action kind.",
+		Buckets: []float64{.0005, .001, .0025, .005, .0075, .01, .015, .02, .03, .0417, .06, .1, .25},
+	}, []string{"kind"})
+	mIntentAuthorityDur = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "mythra_intent_authority_seconds",
+		Help:    "Player intent time from server receipt through validation and durable append to fan-out (or rejection), by bounded action kind and result.",
+		Buckets: []float64{.0005, .001, .0025, .005, .0075, .01, .015, .02, .03, .0417, .06, .1, .25, .5},
+	}, []string{"kind", "result"})
 	mSessions = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "mythra_sessions", Help: "Connected sessions."}, []string{"role"})
 	mParks = promauto.NewGauge(prometheus.GaugeOpts{
@@ -470,6 +480,40 @@ func databaseURL() (string, error) {
 		user, url.QueryEscape(strings.TrimSpace(string(pw))), host, db), nil
 }
 
+func devTickRateHandler(registry *parks, allowedParks map[string]bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
+		park := r.URL.Query().Get("park")
+		if !allowedParks[park] {
+			http.NotFound(w, r)
+			return
+		}
+		hz, err := strconv.Atoi(r.URL.Query().Get("hz"))
+		if err != nil || hz < minTickHz || hz > maxTickHz {
+			http.Error(w, fmt.Sprintf("hz must be an integer in %d..%d", minTickHz, maxTickHz), http.StatusBadRequest)
+			return
+		}
+		a, ok := registry.current(park)
+		if !ok {
+			http.Error(w, "park has no live authority; connect the drill client first", http.StatusConflict)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := a.requestRate(ctx, hz); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		json.NewEncoder(w).Encode(map[string]any{"park": park, "rateHz": hz})
+	}
+}
+
 func main() {
 	wtPort := envInt("WT_PORT", 4433)
 	httpPort := envInt("HTTP_PORT", 9634)
@@ -479,10 +523,13 @@ func main() {
 	publicAddr := envStr("PUBLIC_ADDR", "") // "host:port" advertised to clients
 	allowedOrigins := envStr("ALLOWED_ORIGINS", "")
 	maxSessions := envInt("MAX_SESSIONS", 4000)
-	// The desired tick rate: parks whose journaled rate differs converge
-	// to it via a dark-phase rate_set on their next open. Clients pace
-	// from the welcome line, so no client change is needed.
+	// The desired startup tick rate: parks whose journaled rate differs
+	// converge to it via a dark-phase rate_set on their next open. A local
+	// drill can subsequently journal a live boundary for connected clients.
 	tickHz := envInt("TICK_HZ", 24)
+	if tickHz < minTickHz || tickHz > maxTickHz {
+		log.Fatalf("TICK_HZ=%d outside supported range %d..%d", tickHz, minTickHz, maxTickHz)
+	}
 	issuer := envStr("OIDC_ISSUER", "https://auth.wakeupmythra.com/realms/wakeupmythra.com")
 	jwksURL := envStr("OIDC_JWKS_URL", "")
 	clientIDs := envStr("OIDC_CLIENT_IDS", "wake-up-mythra,mythra-loadgen")
@@ -639,6 +686,10 @@ func main() {
 	}
 	pageMux := http.NewServeMux()
 	pageMux.HandleFunc("/session", handlers.handleSessionMint(gate, publicAddr, certHash))
+	if os.Getenv("WUM_DEV_LIVE_TICK_RATE") == "true" {
+		pageMux.HandleFunc("/dev/tick-rate", devTickRateHandler(registry, allowedParks))
+		log.Print("development live tick-rate control enabled at POST /dev/tick-rate")
+	}
 	pageMux.HandleFunc("/wt-info", func(w http.ResponseWriter, r *http.Request) {
 		addr := publicAddr
 		if addr == "" {

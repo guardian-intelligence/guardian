@@ -43,6 +43,9 @@ go_library(
         "@com_github_quic_go_webtransport_go//:go_default_library",
         "@com_github_tetratelabs_wazero//:go_default_library",
         "@com_github_tetratelabs_wazero//api:go_default_library",
+        "@io_opentelemetry_go_otel//:go_default_library",
+        "@io_opentelemetry_go_otel//attribute:go_default_library",
+        "@io_opentelemetry_go_otel_trace//:go_default_library",
     ],
 )
 

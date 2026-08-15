@@ -70,6 +70,7 @@ export const Ev = {
   moveTo: 4,
   epochAdvance: 6,
   boostSet: 8,
+  rateSet: 10,
 } as const;
 
 /** Sim reject codes the session core gives special treatment. */
@@ -217,6 +218,12 @@ export class Authority {
     const at = this.tick;
     const code = applyTo(this.park, kind, payload);
     if (code !== 0) throw new Error(`authority refused kind ${kind} (code ${code})`);
+    if (kind === Ev.rateSet && payload.length === 4) {
+      this.hz = new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getUint32(
+        0,
+        true,
+      );
+    }
     this.seq += 1n;
     return encodeEvent({ seq: this.seq, tick: at, kind, intent, p: payload });
   }

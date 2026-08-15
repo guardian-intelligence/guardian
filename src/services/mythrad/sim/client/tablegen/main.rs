@@ -13,7 +13,7 @@ struct Table {
 
 const TABLES: &[Table] = &[
     Table {
-        doc: "Telemetry codes the session core emits, 1..22. Host-minted codes \
+        doc: "Telemetry codes the session core emits, 1..23. Host-minted codes \
               live in `HostEmit` (ports.ts) and start at 1000 so the two ranges \
               can never be confused.",
         name: "Emit",
@@ -41,6 +41,7 @@ const TABLES: &[Table] = &[
             ("intentAnswered", s::T_INTENT_ANSWERED as u64),
             ("intentResent", s::T_INTENT_RESENT as u64),
             ("intentDropped", s::T_INTENT_DROPPED as u64),
+            ("rateChanged", s::T_RATE_CHANGED as u64),
         ],
     },
     Table {

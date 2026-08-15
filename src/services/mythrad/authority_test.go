@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/journal"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/controlplane/pgtest"
 )
 
@@ -70,11 +72,47 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 	if a.lastSeq != before {
 		t.Fatalf("duplicate (actor, intent_id) minted seq %d", a.lastSeq)
 	}
+
+	// The live drill's server half: an already-running authority journals
+	// and fans out a rate boundary, keeps its verification history, and
+	// continues serving under the new schedule.
+	boundary, boundaryHash := a.host.Tick(), a.host.Hash()
+	a.mu.Lock()
+	a.subs[s] = true
+	a.mu.Unlock()
+	done := make(chan error, 1)
+	if err := a.stageRateChange(rateChangeReq{hz: 48, done: done}); err != nil {
+		t.Fatalf("stage live rate: %v", err)
+	}
+	a.tickOnce()
+	if err := <-done; err != nil {
+		t.Fatalf("commit live rate: %v", err)
+	}
+	if a.hz != 48 || a.host.Rate() != 48 {
+		t.Fatalf("live rate = authority %d / sim %d, want 48", a.hz, a.host.Rate())
+	}
+	if ok, _ := a.verdictFor(boundary, boundaryHash); ok == nil || !*ok {
+		t.Fatal("live ring resize discarded the pre-boundary verification hash")
+	}
+	select {
+	case frame := <-s.out:
+		kind, payload, err := wire.NewReader(bytes.NewReader(frame)).Next()
+		if err != nil || kind != wire.KindEvent {
+			t.Fatalf("rate fanout frame: kind=%d err=%v", kind, err)
+		}
+		ev, err := wire.DecodeEvent(payload)
+		if err != nil || ev.Kind != evRateSet || ev.Tick != boundary {
+			t.Fatalf("rate fanout event: %+v err=%v", ev, err)
+		}
+	default:
+		t.Fatal("connected session did not receive the live rate_set")
+	}
 	wantHash := a.host.Hash()
 	wantTick := a.host.Tick()
 	a.host.close()
 
-	b, err := openAuthority(ctx, "park-test", defaultParkModule, fixtureTerrain, j, mods, fixedClock(wallEpoch))
+	b, err := openAuthority(ctx, "park-test", defaultParkModule, fixtureTerrain, j, mods,
+		timing{hz: 48, now: func() time.Time { return wallEpoch }})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -84,6 +122,9 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 	}
 	if got := b.host.Hash(); got != wantHash {
 		t.Fatalf("replayed park hash %016x, want %016x — journal does not reproduce the world", got, wantHash)
+	}
+	if b.hz != 48 {
+		t.Fatalf("reopened rate = %dHz, want journaled 48Hz", b.hz)
 	}
 }
 
@@ -168,7 +209,7 @@ func TestModuleEpochSwapLane(t *testing.T) {
 	// the sim.
 	variant := append(append([]byte{}, defaultParkModule...), 0x00, 0x03, 0x01, 0x74, 0x00)
 	mods.park.set(variant)
-	for i := 0; i < soakTicks+5; i++ {
+	for i := 0; i < soakTicks(a.hz)+5; i++ {
 		a.tickOnce()
 	}
 	if a.moduleHash != displayHash(variant) {

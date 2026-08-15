@@ -309,8 +309,11 @@ pub fn path_cost(t: &Terrain, s: &mut Scratch, from: Node, to: Node) -> Option<u
     }
 }
 
-pub const WALK_SPEED: i32 = ONE as i32 / 8; // 3 cells/s at 24Hz
-pub const SWIM_SPEED: i32 = ONE as i32 / 16;
+/// Movement tuning is a wall-time quantity. The park supplies this tick's
+/// exact fixed-point distance from its journaled rate segment; nav owns no
+/// tick-rate policy.
+pub const WALK_PER_SECOND: i32 = 3 * ONE as i32;
+pub const SWIM_PER_SECOND: i32 = WALK_PER_SECOND / 2;
 /// Within this Q16.16 distance of a waypoint's center, the waypoint is
 /// reached. A quarter cell: close enough that the next segment's line
 /// stays legal, far enough that arrival never oscillates.
@@ -369,11 +372,9 @@ pub fn step_toward(
     on_deck: &mut bool,
     waypoint: Node,
     boosted: bool,
+    walk_step: i32,
+    swim_step: i32,
 ) -> Step {
-    const _: () = assert!(
-        2 * WALK_SPEED <= HALF,
-        "a boosted axis sub-move must not span two boundaries"
-    );
     let (tx, ty) = center(t, waypoint);
     let (dx, dy) = ((tx - *x) as i64, (ty - *y) as i64);
     let dist = isqrt_q16(dx * dx + dy * dy);
@@ -382,7 +383,7 @@ pub fn step_toward(
     }
     let here = t.idx(*x >> 16, *y >> 16);
     let swimming = !*on_deck && t.class(here) == SWIM;
-    let base = if swimming { SWIM_SPEED } else { WALK_SPEED } as i64;
+    let base = if swimming { swim_step } else { walk_step } as i64;
     let speed = if boosted { 2 * base } else { base };
     let step = if dist < speed { dist } else { speed };
     let sx = (dx * step / dist) as i32;
@@ -681,7 +682,16 @@ mod tests {
         let wp = Node::ground(t.idx(4, 2));
         let mut arrived = false;
         for _ in 0..400 {
-            match step_toward(&t, &mut x, &mut y, &mut on_deck, wp, false) {
+            match step_toward(
+                &t,
+                &mut x,
+                &mut y,
+                &mut on_deck,
+                wp,
+                false,
+                WALK_PER_SECOND / 24,
+                SWIM_PER_SECOND / 24,
+            ) {
                 Step::Arrived => {
                     arrived = true;
                     break;
@@ -707,7 +717,16 @@ mod tests {
         let wp = Node::ground(t.idx(13, 13));
         let mut blocked = false;
         for _ in 0..200 {
-            match step_toward(&t, &mut x, &mut y, &mut on_deck, wp, false) {
+            match step_toward(
+                &t,
+                &mut x,
+                &mut y,
+                &mut on_deck,
+                wp,
+                false,
+                WALK_PER_SECOND / 24,
+                SWIM_PER_SECOND / 24,
+            ) {
                 Step::Blocked => {
                     blocked = true;
                     break;
@@ -729,7 +748,17 @@ mod tests {
         let mut on_deck = false;
         let wp = Node::deck(t.idx(5, 4));
         for _ in 0..100 {
-            if step_toward(&t, &mut x, &mut y, &mut on_deck, wp, false) == Step::Arrived {
+            if step_toward(
+                &t,
+                &mut x,
+                &mut y,
+                &mut on_deck,
+                wp,
+                false,
+                WALK_PER_SECOND / 24,
+                SWIM_PER_SECOND / 24,
+            ) == Step::Arrived
+            {
                 break;
             }
         }
@@ -765,7 +794,16 @@ mod tests {
                 waypoint = first_waypoint(&t, &mut s, here, target);
                 assert_ne!(waypoint, NONE);
             }
-            match step_toward(&t, &mut x, &mut y, &mut on_deck, waypoint, false) {
+            match step_toward(
+                &t,
+                &mut x,
+                &mut y,
+                &mut on_deck,
+                waypoint,
+                false,
+                WALK_PER_SECOND / 24,
+                SWIM_PER_SECOND / 24,
+            ) {
                 Step::Arrived => {
                     if waypoint == target {
                         break;

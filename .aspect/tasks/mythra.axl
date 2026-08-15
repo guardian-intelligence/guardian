@@ -327,6 +327,9 @@ def _dev_logs_impl(ctx):
 def _dev_smoke_impl(ctx):
     return _dev_verb(ctx, "smoke")
 
+def _dev_latency_impl(ctx):
+    return _dev_verb(ctx, "latency")
+
 def _common_args(extra = {}):
     out = {
         "kubeconfig": args.string(default = "", description = "Kubeconfig for guardian-mgmt. Defaults to KUBECONFIG/current context."),
@@ -417,6 +420,13 @@ dev_smoke = task(
     name = "smoke",
     group = ["mythra", "dev"],
     summary = "Prove the running local dev stack works end to end: a headless player signs in and connects, and the run's wum.connected event and mythrad 'POST /session' span both land in the local ClickHouse.",
+)
+
+dev_latency = task(
+    implementation = _dev_latency_impl,
+    name = "latency",
+    group = ["mythra", "dev"],
+    summary = "Prove one connected client adopts a live 24Hz-to-48Hz authority boundary, then report before/after action latency from client and server telemetry.",
 )
 
 restart = task(

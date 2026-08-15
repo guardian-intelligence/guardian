@@ -15,6 +15,7 @@ const PARK_B: u32 = 0x2222_2222;
 /// Park ABI values the core does not name for itself, so the mock can
 /// stand in for the two events that move the world sideways.
 const EV_CLOCK_SKIP: u16 = 9;
+const EV_RATE_SET: u16 = 10;
 const ERR_TICK: u32 = 11;
 const ERR_NOOP: u32 = 10;
 
@@ -1309,6 +1310,38 @@ fn the_welcome_telemetry_carries_the_granted_role() {
         );
         assert_eq!(r.s.role, role);
     }
+}
+
+#[test]
+fn a_connected_session_adopts_a_journaled_rate_without_resyncing() {
+    let mut r = Rig::boot(ROLE_PLAYER, 1008);
+    let boundary = r.s.tick();
+    r.m.clear();
+    r.event(
+        r.s.seq() + 1,
+        boundary,
+        EV_RATE_SET,
+        0,
+        &48u32.to_le_bytes(),
+    );
+    r.pump();
+
+    assert_eq!(r.s.hz, 48);
+    assert_eq!(r.s.clock.rate(), 48);
+    assert_eq!(
+        r.m.emits_of(T_RATE_CHANGED),
+        vec![(boundary, (HZ << 32) | 48)]
+    );
+    assert!(r.m.reqs.is_empty(), "rate adoption requested a repair");
+
+    let before = r.s.tick();
+    r.advance(500);
+    assert!(r.s.tick() >= before + 15, "the 48Hz clock did not advance");
+    assert!(r.m.emits_of(T_CONNECTED).is_empty(), "session reconnected");
+    assert!(
+        r.m.emits_of(T_RESYNC_REQUESTED).is_empty(),
+        "session resynced"
+    );
 }
 
 #[test]

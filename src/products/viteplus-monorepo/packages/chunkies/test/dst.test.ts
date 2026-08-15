@@ -114,6 +114,35 @@ describe("boot and handshake", () => {
     await r.establish(Role.spectator);
     expect(r.state.role).toBe("spectator");
   });
+
+  it("adopts a journaled live rate on the same connection and world", async () => {
+    const r = await rig();
+    await r.establish();
+    await r.run(500);
+    const connected = r.count(Emit.connectedHelloSent);
+    const restored = r.count(Emit.snapshotRestored);
+    const resynced = r.count(Emit.resyncRequested);
+    const before = r.state.tick;
+    const boundary = r.authority.tick;
+    const payload = new Uint8Array(4);
+    new DataView(payload.buffer).setUint32(0, 48, true);
+
+    r.deliver([r.authority.apply(Ev.rateSet, payload)]);
+    expect(await r.until(() => r.state.seq === r.authority.seq)).toBe(true);
+    expect(r.state.hz).toBe(48);
+    expect(r.count(Emit.rateChanged)).toBe(1);
+    expect(r.harness.emitted.filter((e) => e.code === Emit.rateChanged).at(-1)).toMatchObject({
+      a: boundary,
+      b: (24n << 32n) | 48n,
+    });
+
+    await r.run(500);
+    expect(r.state.tick).toBeGreaterThan(before);
+    expect(r.count(Emit.connectedHelloSent)).toBe(connected);
+    expect(r.count(Emit.snapshotRestored)).toBe(restored);
+    expect(r.count(Emit.resyncRequested)).toBe(resynced);
+    expect(r.harness.logs).toContain(`rate: 24Hz -> 48Hz at tick ${boundary}`);
+  });
 });
 
 describe("invariant 2: seq-dense application", () => {

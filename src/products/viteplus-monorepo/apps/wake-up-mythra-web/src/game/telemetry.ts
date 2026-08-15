@@ -105,6 +105,7 @@ export function createTelemetry(ctx: {
   let role = "spectator";
   let anon = true;
   let dialMs = 0;
+  let rateHz = 0;
 
   return {
     noteDial: (ms, wasAnon) => {
@@ -114,6 +115,7 @@ export function createTelemetry(ctx: {
     bind: (game) => {
       game.subscribe((s) => {
         role = s.connection.role ?? role;
+        rateHz = s.connection.rateHz ?? rateHz;
       });
     },
     emit: (code, a, b) => {
@@ -144,6 +146,21 @@ export function createTelemetry(ctx: {
             "wum.kind": actionName(kind) ?? `kind ${kind}`,
             "wum.ms": String(b),
             "wum.resends": String(a >> 16n),
+            "wum.rate_hz": String(rateHz),
+            "wum.park": park,
+          });
+          return;
+        }
+        case Emit.rateChanged: {
+          const oldHz = Number(BigInt.asUintN(32, b >> 32n));
+          const newHz = Number(BigInt.asUintN(32, b));
+          // Host state is patched after the telemetry callback, so advance
+          // the local dimension here before any following action finishes.
+          rateHz = newHz;
+          span("wum.tick_rate", {
+            "wum.from_hz": String(oldHz),
+            "wum.to_hz": String(newHz),
+            "wum.tick": String(a),
             "wum.park": park,
           });
           return;

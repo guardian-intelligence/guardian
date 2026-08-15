@@ -476,6 +476,13 @@ export class ReplicaHost {
         this.#log(`welcome: ${w.role}, epoch ${a}, ${w.hz}Hz`);
         return;
       }
+      case Emit.rateChanged: {
+        const oldHz = Number(BigInt.asUintN(32, b >> 32n));
+        const newHz = Number(BigInt.asUintN(32, b));
+        this.#patch({ rateHz: newHz });
+        this.#log(`rate: ${oldHz}Hz -> ${newHz}Hz at tick ${a}`);
+        return;
+      }
       case Emit.snapshotRestored:
         this.#log(`state at seq ${a}, tick ${b}`);
         return;

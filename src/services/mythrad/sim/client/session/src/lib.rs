@@ -152,6 +152,9 @@ pub const T_INTENT_RESENT: u32 = 21;
 /// invisible: no reject arrives, no event applies, the action just
 /// vanishes.
 pub const T_INTENT_DROPPED: u32 = 22;
+/// The connected authority crossed a journaled rate boundary. `a` is the
+/// boundary tick; `b` packs old Hz in the high half and new Hz in the low.
+pub const T_RATE_CHANGED: u32 = 23;
 /// A 33rd in-flight intent evicted the oldest.
 pub const DROP_OVERFLOW: u64 = 1;
 /// `reidentify`: the old identity's intents die with it.
@@ -256,6 +259,7 @@ const EV_EPOCH_ADVANCE: u16 = 6;
 /// blob cannot stand on is put back on the nearest ground it can.
 const EV_TERRAIN_SET: u16 = 7;
 const EV_BOOST_SET: u16 = 8;
+const EV_RATE_SET: u16 = 10;
 const ERR_PRESENT: u32 = 2;
 const ERR_ABSENT: u32 = 3;
 const ERR_NOOP: u32 = 10;
@@ -854,9 +858,9 @@ impl Session {
         };
         self.hz = hz.clamp(1, 1000) as u64;
         self.role = role as u32;
-        // The park's rate paces this whole connection (rate changes only
-        // happen while the authority is dark), and the welcome doubles as
-        // the clock's first sample: same-ms echo, rtt unknown.
+        // Welcome establishes the current rate. A later journaled rate_set
+        // re-anchors this same clock; welcome also doubles as the first
+        // sample: same-ms echo, rtt unknown.
         self.clock.set_rate(self.hz);
         self.clock.sample(now_ms, now_ms, tick);
         h.emit(T_WELCOME, epoch as u64, self.hz | ((role as u64) << 32));
@@ -1413,6 +1417,17 @@ impl Session {
                 if park_tick != self.tick {
                     self.tick = park_tick;
                     self.clock.reset(park_tick, now_ms);
+                }
+                if e.kind == EV_RATE_SET && e.plen == 4 {
+                    let mut b = [0u8; 4];
+                    b.copy_from_slice(&e.p[..4]);
+                    let next = u32::from_le_bytes(b).clamp(1, 1000) as u64;
+                    let old = self.hz;
+                    if next != old {
+                        self.hz = next;
+                        self.clock.change_rate(next, e.tick, now_ms);
+                        h.emit(T_RATE_CHANGED, e.tick, (old << 32) | next);
+                    }
                 }
                 self.stats[STAT_EVENTS as usize - 1] += 1;
                 if let Some(it) = self.intent_take(e.intent) {
