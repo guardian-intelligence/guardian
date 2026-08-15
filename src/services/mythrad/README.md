@@ -148,17 +148,17 @@ temporary kubeconfig as soon as the operation finishes.
 ```sh
 aspect infra auth --persona=read
 aspect mythra status
-aspect mythra logs --since=10m --tail=500
+aspect mythra logs --leg=gateway --since=10m --tail=500
 aspect mythra psql --query='SELECT * FROM park_events ORDER BY seq DESC LIMIT 10'
 aspect mythra dump > mythra.sql
-aspect mythra restart
+aspect mythra restart --leg=park
 ```
 
 `status` and `logs` use standing read authority. `psql` and `dump` derive
 `guardian-mythra-observer`, which can exec only `psql`/`pg_dump` in a fixed,
 network-confined console carrying PostgreSQL's native `mythra_readonly` role.
 `restart` derives `guardian-mythra-operator`, which can only delete a labeled
-`mythrad` pod; the Deployment recreates the Git-declared revision. Neither role
-can read Kubernetes Secrets, exec into mythrad or the shared Postgres pods, or
-touch payments/Directus. Scaling, image, behavior, and configuration changes
+game component pod; the Deployment recreates the Git-declared revision. Neither
+role can read Kubernetes Secrets, exec into the game or shared Postgres pods,
+or touch payments/Directus. Scaling, image, behavior, and configuration changes
 remain Git/Flux operations.

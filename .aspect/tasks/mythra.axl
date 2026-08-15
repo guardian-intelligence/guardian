@@ -19,6 +19,11 @@ API_AUDIENCE = "https://10.8.0.250:6443"
 OBSERVER = "guardian-mythra-observer"
 OPERATOR = "guardian-mythra-operator"
 CONSOLE = "mythra-journal-console-0"
+WORKLOADS = {
+    "gateway": {"app": "chunkies-gateway", "container": "gateway", "deployment": "chunkies-gateway"},
+    "legacy": {"app": "mythrad", "container": "mythrad", "deployment": "mythrad"},
+    "park": {"app": "chunkies-park", "container": "park", "deployment": "chunkies-park"},
+}
 
 def _kubectl_path(ctx):
     path = bazel_output_file(ctx, KUBECTL_TARGET)
@@ -140,6 +145,12 @@ def _observer_exec(ctx, command):
     _remove_capability_kubeconfig(ctx, capability)
     return rc
 
+def _workload(ctx):
+    if ctx.args.leg not in WORKLOADS:
+        ctx.std.io.stderr.write("ERROR: --leg must be gateway, park, or legacy\n")
+        return None
+    return WORKLOADS[ctx.args.leg]
+
 def _status_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
@@ -152,6 +163,8 @@ def _status_impl(ctx):
             NAMESPACE,
             "get",
             "deployment/mythrad",
+            "deployment/chunkies-gateway",
+            "deployment/chunkies-park",
             "statefulset/mythra-journal-console",
             "pod/" + CONSOLE,
         ]),
@@ -169,7 +182,7 @@ def _status_impl(ctx):
             "get",
             "pods",
             "-l",
-            "app.kubernetes.io/name=mythrad",
+            "app.kubernetes.io/name in (mythrad,chunkies-gateway,chunkies-park)",
             "-o",
             "wide",
         ]),
@@ -181,7 +194,10 @@ def _logs_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
         return 1
-    args = ["-n", NAMESPACE, "logs", "deployment/mythrad", "-c", "mythrad"]
+    workload = _workload(ctx)
+    if workload == None:
+        return 2
+    args = ["-n", NAMESPACE, "logs", "deployment/" + workload["deployment"], "-c", workload["container"]]
     if ctx.args.follow:
         args.append("--follow")
     if ctx.args.previous:
@@ -223,6 +239,9 @@ def _restart_impl(ctx):
     kubectl = _kubectl_path(ctx)
     if kubectl == None:
         return 1
+    workload = _workload(ctx)
+    if workload == None:
+        return 2
     raw_pods = _capture(
         ctx,
         kubectl,
@@ -232,11 +251,11 @@ def _restart_impl(ctx):
             "get",
             "pods",
             "-l",
-            "app.kubernetes.io/name=mythrad",
+            "app.kubernetes.io/name=" + workload["app"],
             "-o",
             "name",
         ]),
-        "find Mythra game-server pods",
+        "find " + workload["deployment"] + " pods",
     )
     if raw_pods == None:
         return 1
@@ -246,7 +265,7 @@ def _restart_impl(ctx):
         if pod != "":
             pods.append(pod)
     if len(pods) == 0:
-        ctx.std.io.stderr.write("ERROR: no mythrad Deployment pod found\n")
+        ctx.std.io.stderr.write("ERROR: no " + workload["deployment"] + " Deployment pod found\n")
         return 1
 
     capability = _capability_kubeconfig(ctx, kubectl, OPERATOR)
@@ -293,11 +312,11 @@ def _restart_impl(ctx):
             NAMESPACE,
             "rollout",
             "status",
-            "deployment/mythrad",
+            "deployment/" + workload["deployment"],
             "--timeout=" + ctx.args.wait_timeout,
         ]),
         cwd = ws_path(ctx),
-        label = "wait for Mythra game-server recovery",
+        label = "wait for " + workload["deployment"] + " recovery",
     )
 
 def _dev_verb(ctx, verb, extra = []):
@@ -350,10 +369,11 @@ logs = task(
     implementation = _logs_impl,
     name = "logs",
     group = ["mythra"],
-    summary = "Read live mythrad logs using the standing read persona.",
+    summary = "Read live game component logs using the standing read persona.",
     args = _common_args({
         "follow": args.boolean(default = False, description = "Follow the log stream."),
-        "previous": args.boolean(default = False, description = "Read the previous mythrad container instance."),
+        "leg": args.string(default = "legacy", description = "Component to read (gateway|park|legacy)."),
+        "previous": args.boolean(default = False, description = "Read the previous container instance."),
         "since": args.string(default = "30m", description = "Only return logs newer than this relative duration; empty means all available logs."),
         "tail": args.string(default = "200", description = "Maximum lines to return; empty uses kubectl's default."),
     }),
@@ -433,8 +453,9 @@ restart = task(
     implementation = _restart_impl,
     name = "restart",
     group = ["mythra"],
-    summary = "Recycle the live mythrad pod with a 15-minute operator capability and wait for its Git-declared Deployment to recover.",
+    summary = "Recycle one live game component with a 15-minute operator capability and wait for its Git-declared Deployment to recover.",
     args = _common_args({
+        "leg": args.string(default = "legacy", description = "Component to restart (gateway|park|legacy)."),
         "wait_timeout": args.string(default = "5m", description = "Timeout for old-pod deletion and Deployment recovery."),
     }),
 )

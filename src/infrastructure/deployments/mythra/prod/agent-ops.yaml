@@ -1,8 +1,3 @@
-# Product capabilities are derived from the unattended platform-agent or the
-# expiring Cursor platform-read identity instead of widening either one. The
-# observer can enter one read-only journal console; the operator can recycle
-# only mythrad Deployment pods. Each TokenRequest is capped at 15 minutes by
-# the matching platform-read VAP.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -112,9 +107,6 @@ subjects:
     name: guardian-mythra-observer
     namespace: tenant-guardian-prod
 ---
-# Immediate service recovery is intentionally narrower than write-basic: the
-# operator can delete a mythrad pod and let its Deployment recreate the exact
-# Git-declared revision. It cannot scale, patch, exec, or touch another product.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -224,14 +216,21 @@ spec:
         request.operation == "DELETE" && request.resource.group == "" &&
         request.resource.resource == "pods" && !has(request.subResource) &&
         request.namespace == "tenant-guardian-prod" &&
-        has(request.name) && request.name.startsWith("mythrad-") &&
+        has(request.name) &&
         oldObject != null && has(oldObject.metadata.labels) &&
         "app.kubernetes.io/name" in oldObject.metadata.labels &&
-        oldObject.metadata.labels["app.kubernetes.io/name"] == "mythrad" &&
+        (
+          request.name.startsWith("mythrad-") &&
+          oldObject.metadata.labels["app.kubernetes.io/name"] == "mythrad" ||
+          request.name.startsWith("chunkies-gateway-") &&
+          oldObject.metadata.labels["app.kubernetes.io/name"] == "chunkies-gateway" ||
+          request.name.startsWith("chunkies-park-") &&
+          oldObject.metadata.labels["app.kubernetes.io/name"] == "chunkies-park"
+        ) &&
         "guardian.dev/product" in oldObject.metadata.labels &&
         oldObject.metadata.labels["guardian.dev/product"] == "mythra"
       message: >-
-        the Mythra operator may only restart a labeled mythrad Deployment pod;
+        the Mythra operator may only restart a labeled game Deployment pod;
         configuration changes belong in Git
 ---
 apiVersion: admissionregistration.k8s.io/v1

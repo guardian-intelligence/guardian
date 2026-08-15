@@ -53,6 +53,17 @@ func TestMythraAgentOperationCapabilities(t *testing.T) {
 		}
 	}
 
+	operatorPolicy := findDoc(t, docs, "ValidatingAdmissionPolicy", "guardian-mythra-operator")
+	validations := sliceValue(mapValue(operatorPolicy["spec"])["validations"])
+	if len(validations) != 1 {
+		t.Fatalf("guardian-mythra-operator validations = %d, want 1", len(validations))
+	}
+	operatorExpression := stringValue(mapValue(validations[0])["expression"])
+	for _, name := range []string{"mythrad", "chunkies-gateway", "chunkies-park"} {
+		assertTextContains(t, operatorExpression, `request.name.startsWith("`+name+`-")`, "guardian-mythra-operator admission expression")
+		assertTextContains(t, operatorExpression, `oldObject.metadata.labels["app.kubernetes.io/name"] == "`+name+`"`, "guardian-mythra-operator admission expression")
+	}
+
 	console := findDoc(t, docs, "StatefulSet", "mythra-journal-console")
 	podSpec := mapValue(mapValue(mapValue(console["spec"])["template"])["spec"])
 	if enabled, ok := podSpec["automountServiceAccountToken"].(bool); !ok || enabled {

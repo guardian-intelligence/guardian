@@ -1230,6 +1230,14 @@ spec:
   healthChecks:
     - apiVersion: apps/v1
       kind: Deployment
+      name: chunkies-gateway
+      namespace: tenant-guardian-prod
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: chunkies-park
+      namespace: tenant-guardian-prod
+    - apiVersion: apps/v1
+      kind: Deployment
       name: mythrad
       namespace: tenant-guardian-prod
     - apiVersion: apps/v1

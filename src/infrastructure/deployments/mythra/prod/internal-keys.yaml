@@ -1,0 +1,73 @@
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata:
+  name: chunkies-ticket-key
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+spec:
+  length: 64
+  digits: 8
+  symbols: 0
+  noUpper: false
+  allowRepeat: true
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: chunkies-ticket-key
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+spec:
+  refreshPolicy: CreatedOnce
+  refreshInterval: "0"
+  target:
+    name: chunkies-ticket-key
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: chunkies-ticket-key
+---
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata:
+  name: chunkies-internal-key
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+spec:
+  length: 64
+  digits: 8
+  symbols: 0
+  noUpper: false
+  allowRepeat: true
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: chunkies-internal-key
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+spec:
+  refreshPolicy: CreatedOnce
+  refreshInterval: "0"
+  target:
+    name: chunkies-internal-key
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: chunkies-internal-key
