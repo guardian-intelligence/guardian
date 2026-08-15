@@ -57,3 +57,15 @@ output "control_plane_nodes" {
     }
   }
 }
+
+output "wum_region_nodes" {
+  value = {
+    for name, node in local.wum_region_nodes :
+    name => {
+      server_id    = latitudesh_server.wum_region[name].id
+      hostname     = latitudesh_server.wum_region[name].hostname
+      public_ipv4  = latitudesh_server.wum_region[name].primary_ipv4
+      private_ipv4 = node.private_ipv4
+    }
+  }
+}
