@@ -89,8 +89,12 @@ func runChunkiesGateway() {
 	for park := range backends {
 		allowedParks[park] = true
 	}
+	tickets, err := newTicketMint(os.Getenv("TICKET_KEY_FILE"))
+	if err != nil {
+		log.Fatalf("ticket key: %v", err)
+	}
 	admission := &gameHandlers{
-		tickets: newTicketMint(), maxSessions: maxSessions, allowedParks: allowedParks,
+		tickets: tickets, maxSessions: maxSessions, allowedParks: allowedParks,
 		anonMints: newAnonLimiter(),
 	}
 	gateway := &chunkiesGateway{admission: admission, backends: backends, key: key}

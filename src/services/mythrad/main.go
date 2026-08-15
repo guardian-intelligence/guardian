@@ -581,8 +581,12 @@ func runMythrad() {
 
 	mods := &modules{client: client, park: parkMod}
 	registry := newParks(func() []byte { b, _ := parkMod.get(); return b }, fixtureTerrain, j, mods, timing{hz: tickHz})
+	tickets, err := newTicketMint(os.Getenv("TICKET_KEY_FILE"))
+	if err != nil {
+		log.Fatalf("ticket key: %v", err)
+	}
 	handlers := &gameHandlers{
-		parks: registry, tickets: newTicketMint(), maxSessions: maxSessions,
+		parks: registry, tickets: tickets, maxSessions: maxSessions,
 		allowedParks: allowedParks, anonMints: newAnonLimiter(),
 	}
 	gate := newOIDCGate(issuer, jwksURL, clientIDs, requireEmail)

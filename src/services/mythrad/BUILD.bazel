@@ -78,6 +78,7 @@ go_binary(
 go_test(
     name = "mythrad_test",
     srcs = [
+        "auth_test.go",
         "authority_test.go",
         "proxy_test.go",
         "wasm_gate_test.go",
