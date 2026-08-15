@@ -1,24 +1,3 @@
-// netsim is the dev-time network impairment proxy for Wake Up Mythra
-// drills: a UDP relay between the browser's WebTransport dial and
-// mythrad's QUIC listener that degrades the path on command — latency,
-// jitter, loss, total silence (subway tunnel), path migration (tower
-// switch: the server sees the same connection arrive from a new source
-// port), and severance (interface teardown: permanent blackhole until
-// the client gives up and redials). Impairments are driven over a local
-// control API so headless drills own their own timelines, and jitter and
-// loss draw from a seeded generator so a scenario replays identically.
-//
-// Interpose it by advertising its port to clients:
-//
-//	WUM_DEV_PUBLIC_ADDR=127.0.0.1:14433 aspect mythra dev up
-//
-// Control (loopback only):
-//
-//	POST /impair?latency_ms=300&jitter_ms=80&loss_pct=5&seed=7
-//	POST /silence?ms=8000        blackhole both directions, then heal
-//	POST /migrate                rebind every flow's upstream socket
-//	POST /sever                  drop all flows; new dials still accepted
-//	GET  /state
 package main
 
 import (

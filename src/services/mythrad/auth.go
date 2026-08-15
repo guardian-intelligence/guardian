@@ -95,7 +95,7 @@ type oidcGate struct {
 
 // newOIDCGate validates tokens carrying the public issuer as their `iss`
 // but fetches signing keys from jwksURL. In the cluster that is the
-// internal Keycloak certs endpoint over plain HTTP: mythrad runs
+// internal Keycloak certs endpoint over plain HTTP: the gateway runs
 // hostNetwork on a distroless image with no CA bundle, so reaching the
 // public issuer would both hairpin through the edge and fail certificate
 // verification. An empty jwksURL falls back to discovery against the

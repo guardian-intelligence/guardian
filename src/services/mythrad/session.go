@@ -47,6 +47,7 @@ type session struct {
 	role     string
 	park     *authority
 	sess     *webtransport.Session
+	closeFn  func(string)
 	out      chan []byte
 	dogID    uint64
 	openedAt time.Time
@@ -84,7 +85,11 @@ func (s *session) closeSession(why string) {
 	s.closeOnce.Do(func() {
 		log.Printf("wt session close: sub=%s role=%s park=%s reason=%q dur=%s",
 			s.sub, s.role, s.park.name, why, time.Since(s.openedAt).Round(time.Millisecond))
-		s.sess.CloseWithError(4000, why)
+		if s.closeFn != nil {
+			s.closeFn(why)
+		} else {
+			s.sess.CloseWithError(4000, why)
+		}
 	})
 }
 
@@ -302,32 +307,40 @@ func (s *session) datagramLoop(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		chk, err := wire.DecodeCheck(data)
-		if err != nil {
+		verdict, ok := checkVerdict(s.park, data)
+		if !ok {
 			continue
 		}
-		ok, now := s.park.verdictFor(chk.Tick, chk.WH)
-		_, cw := s.park.mods.client.get()
-		_, pw := s.park.mods.park.get()
-		result := "unknown"
-		v := wire.Verdict{Tick: chk.Tick, Now: now, CTMS: chk.CTMS,
-			CW: wire.ModuleWord(cw), PW: wire.ModuleWord(pw)}
-		if ok != nil {
-			v.Flags = wire.VerdictKnown
-			if *ok {
-				v.Flags |= wire.VerdictOK
-				result = "ok"
-			} else {
-				result = "mismatch"
-			}
-		}
-		mChecks.WithLabelValues(result).Inc()
-		if s.sess.SendDatagram(wire.EncodeVerdict(v)) == nil {
+		if s.sess.SendDatagram(verdict) == nil {
 			mDgSent.Inc()
 		} else {
 			mDgErrors.Inc()
 		}
 	}
+}
+
+func checkVerdict(park *authority, data []byte) ([]byte, bool) {
+	chk, err := wire.DecodeCheck(data)
+	if err != nil {
+		return nil, false
+	}
+	ok, now := park.verdictFor(chk.Tick, chk.WH)
+	_, cw := park.mods.client.get()
+	_, pw := park.mods.park.get()
+	result := "unknown"
+	v := wire.Verdict{Tick: chk.Tick, Now: now, CTMS: chk.CTMS,
+		CW: wire.ModuleWord(cw), PW: wire.ModuleWord(pw)}
+	if ok != nil {
+		v.Flags = wire.VerdictKnown
+		if *ok {
+			v.Flags |= wire.VerdictOK
+			result = "ok"
+		} else {
+			result = "mismatch"
+		}
+	}
+	mChecks.WithLabelValues(result).Inc()
+	return wire.EncodeVerdict(v), true
 }
 
 // gameHandlers wires transport to parks and tickets.

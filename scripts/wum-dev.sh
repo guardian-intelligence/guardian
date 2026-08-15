@@ -17,9 +17,12 @@ CH_PORT="${WUM_DEV_CH_PORT:-59000}"
 CH_HTTP_PORT="${WUM_DEV_CH_HTTP_PORT:-58123}"
 INGEST_PORT="${WUM_DEV_INGEST_PORT:-9636}"
 ISSUER="http://127.0.0.1:${ISSUER_PORT}/realms/dev"
-MYTHRAD_HTTP_PORT="${WUM_DEV_MYTHRAD_HTTP_PORT:-9634}"
-MYTHRAD_METRICS_PORT="${WUM_DEV_MYTHRAD_METRICS_PORT:-9633}"
-MYTHRAD_WT_PORT="${WUM_DEV_MYTHRAD_WT_PORT:-4433}"
+GATEWAY_HTTP_PORT="${WUM_DEV_GATEWAY_HTTP_PORT:-9634}"
+GATEWAY_METRICS_PORT="${WUM_DEV_GATEWAY_METRICS_PORT:-9633}"
+GATEWAY_WT_PORT="${WUM_DEV_GATEWAY_WT_PORT:-4433}"
+PARK_PORT="${WUM_DEV_PARK_PORT:-9632}"
+PARK_HTTP_PORT="${WUM_DEV_PARK_HTTP_PORT:-9631}"
+PARK_METRICS_PORT="${WUM_DEV_PARK_METRICS_PORT:-9637}"
 WEB_PORT=4254
 OTLP_GRPC_PORT="${WUM_DEV_OTLP_GRPC_PORT:-4317}"
 OTLP_HTTP_PORT="${WUM_DEV_OTLP_HTTP_PORT:-4318}"
@@ -30,7 +33,7 @@ FLAGD_OFREP_PORT=8016
 FLAGS_FILE="$ROOT/src/infrastructure/deployments/flags/prod/flags/flags.json"
 DEV_TICK_HZ="${WUM_DEV_TICK_HZ:-24}"
 
-LEGS="pg ch otelcol flagd ingest devissuer mythrad web"
+LEGS="pg ch otelcol flagd ingest devissuer park gateway web"
 STARTED=""
 
 pidfile() { echo "$RUN_DIR/$1.pid"; }
@@ -48,7 +51,8 @@ leg_command_pattern() {
   flagd) echo "flagd" ;;
   ingest) echo "analytics/ingest" ;;
   devissuer) echo "devissuer" ;;
-  mythrad) echo "mythrad" ;;
+  park) echo "chunkies-park" ;;
+  gateway) echo "chunkies-gateway" ;;
   web) echo "vp dev" ;;
   esac
 }
@@ -71,7 +75,8 @@ leg_port() {
   flagd) echo "$FLAGD_OFREP_PORT" ;;
   ingest) echo "$INGEST_PORT" ;;
   devissuer) echo "$ISSUER_PORT" ;;
-  mythrad) echo "$MYTHRAD_HTTP_PORT" ;;
+  park) echo "$PARK_PORT" ;;
+  gateway) echo "$GATEWAY_HTTP_PORT" ;;
   web) echo "$WEB_PORT" ;;
   esac
 }
@@ -86,7 +91,8 @@ probe() {
   flagd) curl -fsS --max-time 2 "http://127.0.0.1:${FLAGD_MGMT_PORT}/readyz" >/dev/null 2>&1 ;;
   ingest) curl -fsS --max-time 2 "http://127.0.0.1:${INGEST_PORT}/healthz" >/dev/null 2>&1 ;;
   devissuer) curl -fsS --max-time 2 "$ISSUER/.well-known/openid-configuration" >/dev/null 2>&1 ;;
-  mythrad) curl -fsS --max-time 2 "http://127.0.0.1:${MYTHRAD_METRICS_PORT}/readyz" >/dev/null 2>&1 ;;
+  park) curl -fsS --max-time 2 "http://127.0.0.1:${PARK_METRICS_PORT}/readyz" >/dev/null 2>&1 ;;
+  gateway) curl -fsS --max-time 2 "http://127.0.0.1:${GATEWAY_METRICS_PORT}/readyz" >/dev/null 2>&1 ;;
   web) [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:${WEB_PORT}/" 2>/dev/null)" = 200 ] ;;
   esac
 }
@@ -239,28 +245,45 @@ EOF
     echo $! >"$(pidfile devissuer)"
     await_ready devissuer 60 || fail_leg devissuer
     ;;
-  mythrad)
-    STARTED="mythrad $STARTED"
+  park)
+    STARTED="park $STARTED"
     mkdir -p "$ROOT/src/services/mythrad/assets"
-    mythrad_database_url="$(scripts/wum-dev-db.sh url)"
-    DATABASE_URL="$mythrad_database_url" \
-      OIDC_ISSUER="$ISSUER" \
+    park_database_url="$(scripts/wum-dev-db.sh url)"
+    DATABASE_URL="$park_database_url" \
+      PARK_NAME=park-mythra \
+      PARK_PORT="$PARK_PORT" \
+      HTTP_PORT="$PARK_HTTP_PORT" \
+      METRICS_PORT="$PARK_METRICS_PORT" \
+      INTERNAL_KEY_FILE="$RUN_DIR/internal.key" \
       BEHAVIOR_DIR="$ROOT/src/services/mythrad/behaviors" \
-      ASSET_DIR="$ROOT/src/services/mythrad/assets" \
-      PUBLIC_ADDR="${WUM_DEV_PUBLIC_ADDR:-127.0.0.1:${MYTHRAD_WT_PORT}}" \
-      HTTP_PORT="$MYTHRAD_HTTP_PORT" \
-      METRICS_PORT="$MYTHRAD_METRICS_PORT" \
-      WT_PORT="$MYTHRAD_WT_PORT" \
       TICK_HZ="$DEV_TICK_HZ" \
       WUM_DEV_LIVE_TICK_RATE=true \
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://127.0.0.1:${OTLP_GRPC_PORT}" \
-      "$ROOT/$MYTHRAD" >>"$(logfile mythrad)" 2>&1 &
-    echo $! >"$(pidfile mythrad)"
-    await_ready mythrad 60 || fail_leg mythrad
+      "$ROOT/$PARK" >>"$(logfile park)" 2>&1 &
+    echo $! >"$(pidfile park)"
+    await_ready park 60 || fail_leg park
+    ;;
+  gateway)
+    STARTED="gateway $STARTED"
+    OIDC_ISSUER="$ISSUER" \
+      BEHAVIOR_DIR="$ROOT/src/services/mythrad/behaviors" \
+      ASSET_DIR="$ROOT/src/services/mythrad/assets" \
+      PUBLIC_ADDR="${WUM_DEV_PUBLIC_ADDR:-127.0.0.1:${GATEWAY_WT_PORT}}" \
+      HTTP_PORT="$GATEWAY_HTTP_PORT" \
+      METRICS_PORT="$GATEWAY_METRICS_PORT" \
+      WT_PORT="$GATEWAY_WT_PORT" \
+      PARK_BACKENDS="park-mythra=127.0.0.1:${PARK_PORT}" \
+      PARK_HTTP_URL="http://127.0.0.1:${PARK_HTTP_PORT}" \
+      INTERNAL_KEY_FILE="$RUN_DIR/internal.key" \
+      WUM_DEV_LIVE_TICK_RATE=true \
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://127.0.0.1:${OTLP_GRPC_PORT}" \
+      "$ROOT/$GATEWAY" >>"$(logfile gateway)" 2>&1 &
+    echo $! >"$(pidfile gateway)"
+    await_ready gateway 60 || fail_leg gateway
     ;;
   web)
     STARTED="web $STARTED"
-    (cd "$APP" && exec env VITE_OIDC_ISSUER="$ISSUER" WUM_DEV_INGEST_PORT="$INGEST_PORT" WUM_DEV_MYTHRAD_HTTP_PORT="$MYTHRAD_HTTP_PORT" vp dev) >>"$(logfile web)" 2>&1 &
+    (cd "$APP" && exec env VITE_OIDC_ISSUER="$ISSUER" WUM_DEV_INGEST_PORT="$INGEST_PORT" WUM_DEV_GATEWAY_HTTP_PORT="$GATEWAY_HTTP_PORT" vp dev) >>"$(logfile web)" 2>&1 &
     echo $! >"$(pidfile web)"
     await_ready web 240 || fail_leg web
     ;;
@@ -291,11 +314,12 @@ up() {
   [ -z "$missing" ] || exit 1
 
   acquire_lock
-  echo "wum-dev: building mythrad + devissuer + telemetry legs…" >&2
-  bazelisk build //src/services/mythrad //src/services/mythrad/devissuer \
+  echo "wum-dev: building Chunkies + devissuer + telemetry legs…" >&2
+  bazelisk build //src/services/mythrad:chunkies-gateway //src/services/mythrad:chunkies-park //src/services/mythrad/devissuer \
     //src/products/analytics/ingest @ip2asn_combined//file \
     @multitool//tools/clickhouse-server @multitool//tools/otelcol-contrib @multitool//tools/flagd >&2
-  MYTHRAD="$(bazelisk cquery --output=files //src/services/mythrad 2>/dev/null | head -1)"
+  GATEWAY="$(bazelisk cquery --output=files //src/services/mythrad:chunkies-gateway 2>/dev/null | head -1)"
+  PARK="$(bazelisk cquery --output=files //src/services/mythrad:chunkies-park 2>/dev/null | head -1)"
   DEVISSUER="$(bazelisk cquery --output=files //src/services/mythrad/devissuer 2>/dev/null | head -1)"
   INGEST="$(bazelisk cquery --output=files //src/products/analytics/ingest 2>/dev/null | head -1)"
   CLICKHOUSE="$(bazelisk cquery --output=files @multitool//tools/clickhouse-server 2>/dev/null | head -1)"
@@ -304,6 +328,9 @@ up() {
   # Joined against output_base, not execution_root: later bazel invocations
   # (the pg leg builds initdb) prune execroot external symlinks they don't use.
   IP2ASN="$(bazelisk info output_base 2>/dev/null)/$(bazelisk cquery --output=files @ip2asn_combined//file 2>/dev/null | head -1)"
+  if [ ! -s "$RUN_DIR/internal.key" ]; then
+    (umask 077; dd if=/dev/urandom bs=32 count=1 status=none | base64 >"$RUN_DIR/internal.key")
+  fi
   for leg in $LEGS; do
     start_leg "$leg"
     if [ "$leg" = ch ]; then
@@ -313,7 +340,7 @@ up() {
   echo >&2
   echo "wum-dev: up — open http://127.0.0.1:${WEB_PORT} and sign in as any name" >&2
   echo "  aspect mythra dev status" >&2
-  echo "  aspect mythra dev logs --leg=mythrad" >&2
+  echo "  aspect mythra dev logs --leg=gateway" >&2
   echo "  aspect mythra dev down" >&2
   echo "  events:    $ROOT/$CLICKHOUSE client --port $CH_PORT --query 'SELECT count() FROM guardian_analytics.events'" >&2
   echo "  spans:     $ROOT/$CLICKHOUSE client --port $CH_PORT --query 'SELECT count() FROM guardian_analytics.otel_traces'" >&2
@@ -325,7 +352,7 @@ up() {
 down() {
   acquire_lock
   rc=0
-  for leg in web mythrad devissuer ingest flagd otelcol ch pg; do
+  for leg in web gateway park devissuer ingest flagd otelcol ch pg; do
     stop_leg "$leg" || {
       echo "wum-dev: $leg refused to stop" >&2
       rc=1
@@ -406,10 +433,12 @@ smoke() {
   : >"$smoke_log"
   echo "wum-dev: smoke — headless player '$player' joining the park…" >&2
   if ! (cd "$APP" && WUM_SMOKE_PLAYER="$player" node e2e/smoke.mjs) >>"$smoke_log" 2>&1; then
-    echo "wum-dev: SMOKE FAIL — the journey broke (browser → devissuer sign-in → mythrad connect); journey log tail:" >&2
+    echo "wum-dev: SMOKE FAIL — the journey broke (browser → devissuer → gateway → park); journey log tail:" >&2
     tail -n 20 "$smoke_log" >&2
-    echo "wum-dev: mythrad log tail:" >&2
-    tail -n 10 "$(logfile mythrad)" >&2
+    echo "wum-dev: gateway log tail:" >&2
+    tail -n 10 "$(logfile gateway)" >&2
+    echo "wum-dev: park log tail:" >&2
+    tail -n 10 "$(logfile park)" >&2
     return 1
   fi
   dial_ms="$(sed -n 's/^SMOKE_JOURNEY dial_ms=\([0-9]*\).*/\1/p' "$smoke_log" | tail -1)"
@@ -428,7 +457,7 @@ smoke() {
   poll_deadline=$((SECONDS + 60))
   while :; do
     events="$(ch_query "SELECT count() FROM guardian_analytics.events WHERE event_name = 'wum.connected' AND page_id = unhex('$page_id') AND toUnixTimestamp64Milli(server_ts) >= $t0")" || events=0
-    spans="$(ch_query "SELECT count() FROM guardian_analytics.otel_traces WHERE ServiceName = 'mythrad' AND SpanName = 'POST /session' AND SpanAttributes['wum.sub'] = '$player'")" || spans=0
+    spans="$(ch_query "SELECT count() FROM guardian_analytics.otel_traces WHERE ServiceName = 'chunkies-gateway' AND SpanName = 'POST /session' AND SpanAttributes['wum.sub'] = '$player'")" || spans=0
     if [ "$events" -ge 1 ] && [ "$spans" -ge 1 ]; then
       break
     fi
@@ -443,19 +472,19 @@ smoke() {
     rc=1
   fi
   if [ "$spans" -lt 1 ]; then
-    echo "wum-dev: SMOKE FAIL — trace lane: no mythrad 'POST /session' span for $player (mythrad → otel collector → ClickHouse); otelcol log tail:" >&2
+    echo "wum-dev: SMOKE FAIL — trace lane: no chunkies-gateway 'POST /session' span for $player; otelcol log tail:" >&2
     tail -n 20 "$(logfile otelcol)" >&2
     rc=1
   fi
   [ "$rc" -eq 0 ] || return "$rc"
 
-  echo "wum-dev: SMOKE PASS — dial ${dial_ms}ms; +$events wum.connected event(s), +$spans mythrad 'POST /session' span(s)"
+  echo "wum-dev: SMOKE PASS — dial ${dial_ms}ms; +$events wum.connected event(s), +$spans chunkies-gateway 'POST /session' span(s)"
 }
 
 # Measures the actions the product exposes today on both sides of one live
 # 24->48Hz journal boundary. The same browser page must observe rate_set and
 # continue without redial, resync, restore, or reload. Client facts cover first
-# wire write -> local apply; mythrad spans split receipt -> next tick from the
+# wire write -> local apply; authority spans split receipt -> next tick from the
 # rest of durable fan-out.
 latency() {
   if ! status_output="$(status)"; then
@@ -476,7 +505,7 @@ latency() {
   latency_log="$RUN_DIR/latency.log"
   : >"$latency_log"
   echo "wum-dev: latency — one connected player crossing a live 24Hz -> 48Hz boundary…" >&2
-  if ! (cd "$APP" && WUM_LATENCY_PLAYER="$player" WUM_RATE_CONTROL_URL="http://127.0.0.1:${MYTHRAD_HTTP_PORT}/dev/tick-rate" node e2e/latency.mjs) >"$latency_log" 2>&1; then
+  if ! (cd "$APP" && WUM_LATENCY_PLAYER="$player" WUM_RATE_CONTROL_URL="http://127.0.0.1:${GATEWAY_HTTP_PORT}/dev/tick-rate" node e2e/latency.mjs) >"$latency_log" 2>&1; then
     echo "wum-dev: LATENCY FAIL — browser journey broke; journey log:" >&2
     cat "$latency_log" >&2
     return 1
@@ -491,7 +520,7 @@ latency() {
     return 1
   fi
 
-  # mythrad and the collector each batch asynchronously. Bound the wait and
+  # The park and collector each batch asynchronously. Bound the wait and
   # require every client-observed accepted action to have its server fact;
   # a partial trace sample is not a latency measurement.
   server_actions=0

@@ -1,10 +1,6 @@
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_shared_library", "rust_test")
 load("//src/services/mythrad/sim:wasm.bzl", "wasm_module")
 
-# Client tier: executed only by clients — mythrad distributes client.wasm
-# but never runs it. Presentation timing and netcode policy; reads sim
-# state, never defines it.
-
 SIM_ROOT = ["//src/services/mythrad/sim:__pkg__"]
 
 SESSION_SRCS = [

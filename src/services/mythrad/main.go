@@ -1,32 +1,3 @@
-// Package main is mythrad: the Wake Up Mythra game service — journal
-// authority, ticketed WebTransport session gateway, and module/asset
-// distribution. The netcode contract is docs/netcode.md: every surface
-// runs the identical fixed-point park module (Rust -> wasm); this binary
-// is the journal's writer, validator, and doorman, never a state streamer.
-//
-//   - tier 1 (content): dog skins are content-addressed assets mounted from a
-//     ConfigMap; clients stream them in on first sight.
-//   - tier 2 (modules): the park module (game state machine), the live/shadow
-//     behavior slots, and the client presentation module are mounted from a
-//     ConfigMap and hot-reloaded without a restart; hashes ride every verdict
-//     so connected pages fetch updates mid-session. Authorities instantiate
-//     the park module at open; an epoch_advance journal event is how a swap
-//     becomes effective for a running park.
-//   - tier 3 (terrain): each park's world is a content-addressed terrain
-//     artifact served at /terrain/<16-hex>. The welcome and snapshot frames
-//     carry the active identity; clients fetch the blob and load it into
-//     their replica before restoring — the same choreography the authority
-//     itself follows on boot and replay.
-//
-// Wire protocol v4 (binary frames on one bidi stream + binary datagrams;
-// little-endian, layouts in wire.go):
-//
-//	POST /session (OIDC bearer)  -> { ticket, endpoint, certHashB64? }
-//	stream frame:   qlen (QUIC varint of kind+payload) | kind u8 | payload
-//	client -> server:  1 hello, 2 intent, 3 resync
-//	server -> client:  16 welcome, 17 event, 18 reject, 19 snapshot
-//	client -> server datagram: check{tick, wh, ct_ms}
-//	server -> client datagram: verdict{tick, now, ct_ms, flags, cw, pw}
 package main
 
 import (
@@ -514,7 +485,7 @@ func devTickRateHandler(registry *parks, allowedParks map[string]bool) http.Hand
 	}
 }
 
-func main() {
+func runMythrad() {
 	wtPort := envInt("WT_PORT", 4433)
 	httpPort := envInt("HTTP_PORT", 9634)
 	metricsPort := envInt("METRICS_PORT", 9633)
@@ -792,4 +763,17 @@ func main() {
 	<-sig
 	log.Print("SIGTERM: closing sessions (clients rejoin the replacement by journal catch-up)")
 	wt.Close()
+}
+
+func main() {
+	switch filepath.Base(os.Args[0]) {
+	case "chunkies-gateway":
+		runChunkiesGateway()
+	case "chunkies-park":
+		runChunkiesPark()
+	case "mythrad":
+		runMythrad()
+	default:
+		log.Fatalf("unknown executable %q", filepath.Base(os.Args[0]))
+	}
 }

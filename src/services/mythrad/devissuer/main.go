@@ -1,19 +1,3 @@
-// devissuer is the local-development OIDC issuer for Wake Up Mythra: a
-// loopback-only, Keycloak-URL-shaped identity provider so that mythrad's
-// oidcGate, the web page's PKCE flow, and loadgen's client-credentials
-// grant all run their real code paths against a laptop — no auth bypass
-// flags anywhere. It signs whatever subject you type; the only security
-// property it needs is refusing to listen anywhere but 127.0.0.1.
-//
-// Endpoints mirror the realm layout under /realms/dev so the clients only
-// swap the issuer URL:
-//
-//	GET  /realms/dev/.well-known/openid-configuration
-//	GET  /realms/dev/protocol/openid-connect/certs      JWKS
-//	GET  /realms/dev/protocol/openid-connect/auth       code + PKCE form;
-//	     ?u=<name> skips the form (scripted browsers, tests)
-//	POST /realms/dev/protocol/openid-connect/token      authorization_code,
-//	     refresh_token, and client_credentials grants
 package main
 
 import (

@@ -40,8 +40,9 @@ event stream as everything else).
 | `sim/clock` (wasm, no_std) | client tick discipline | Acquiring → Locked (±2% slew) → FastForward (big deficits) → SnapshotRequired (beyond the ring). No floats, no host clocks — the host feeds it times and executes its step-count directives |
 | `sim/session` (wasm, no_std) | the replica session | the wire codec, seq-dense event ordering, snapshot ring + rollback, resync/strike policy, intent identity + resend, and the own-intent prediction overlay over two host-held park slots (journal replica / presented). Time and transport are inputs; the host executes its verbs |
 | `sim/client` (wasm) | presentation + the session ABI | render smoothing; re-exports the clock and the session. Never feeds back into world state |
-| `mythrad/park.go` | the authority | the anchored tick schedule, event stamping, journal append, hash ring, snapshot cadence, the module-swap lane |
-| `mythrad/session.go` | transport | WebTransport sessions, OIDC-ticket admission, intent→actor binding, fan-out |
+| `mythrad/gateway.go` | public transport | WebTransport, OIDC-ticket admission, intent→actor binding, and park routing |
+| `mythrad/park.go` | the authority | the anchored tick schedule, event stamping, journal append, hash ring, snapshot cadence, module swaps, and fan-out |
+| `mythrad/park_server.go` | park boundary | authenticated gateway sessions and one configured park authority |
 | `mythrad/journal` | durability | Postgres `park_events` / `park_snapshots` / `park_terrain`; per-park seq is dense and single-writer; `journaltest.Run` is the conformance suite |
 | `packages/chunkies` | the game-agnostic replica host | moves opaque bytes between wire, wasm, and screen: the session module, the replica slot, the transport, and the guarded extension/projection doors a game layer reaches its own exports through. Knows no game vocabulary; the name is a deliberate find-and-replaceable placeholder |
 | `packages/wum-client` | the game layer | WUM over the host: intent verbs, the HUD/view/terrain decodes, the glide presenter, and the isometric renderer. If TypeScript (or Go) can read a game rule, the rule is in the wrong place |
