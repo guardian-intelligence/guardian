@@ -347,6 +347,8 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 			case proxyDatagram:
 				if sess.SendDatagram(payload) != nil {
 					mDgErrors.Inc()
+				} else {
+					mDgSent.Inc()
 				}
 			case proxyClose:
 				sess.CloseWithError(4000, string(payload))

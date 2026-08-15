@@ -26,6 +26,7 @@ import (
 
 func runChunkiesPark() {
 	parkName := envStr("PARK_NAME", "park-mythra")
+	internalHost := envStr("INTERNAL_HOST", "127.0.0.1")
 	parkPort := envInt("PARK_PORT", 9632)
 	httpPort := envInt("HTTP_PORT", 9631)
 	metricsPort := envInt("METRICS_PORT", 9637)
@@ -93,7 +94,8 @@ func runChunkiesPark() {
 	}
 
 	var ready atomic.Bool
-	internal, err := net.Listen("tcp", fmt.Sprintf(":%d", parkPort))
+	internalAddr := net.JoinHostPort(internalHost, strconv.Itoa(parkPort))
+	internal, err := net.Listen("tcp", internalAddr)
 	if err != nil {
 		log.Fatalf("park listen: %v", err)
 	}
@@ -116,7 +118,8 @@ func runChunkiesPark() {
 	if os.Getenv("WUM_DEV_LIVE_TICK_RATE") == "true" {
 		parkMux.HandleFunc("/dev/tick-rate", devTickRateHandler(registry, map[string]bool{parkName: true}))
 	}
-	parkHTTP := &http.Server{Addr: fmt.Sprintf(":%d", httpPort), Handler: parkMux}
+	parkHTTPAddr := net.JoinHostPort(internalHost, strconv.Itoa(httpPort))
+	parkHTTP := &http.Server{Addr: parkHTTPAddr, Handler: parkMux}
 	go func() {
 		if err := parkHTTP.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("park http: %v", err)
@@ -143,7 +146,7 @@ func runChunkiesPark() {
 	}()
 
 	ready.Store(true)
-	log.Printf("chunkies-park: park=%s sessions=:%d http=:%d metrics=:%d", parkName, parkPort, httpPort, metricsPort)
+	log.Printf("chunkies-park: park=%s sessions=%s http=%s metrics=:%d", parkName, internalAddr, parkHTTPAddr, metricsPort)
 	<-ctx.Done()
 	ready.Store(false)
 	internal.Close()
