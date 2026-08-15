@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -36,13 +37,23 @@ type ticketMint struct {
 	key []byte
 }
 
-// newTicketMint keys the mint per boot: tickets are 60-second artifacts
-// between /session and the hello, so a restart invalidating them only
-// costs in-flight dials one extra /session round trip.
-func newTicketMint() *ticketMint {
+func newTicketMint(path string) (*ticketMint, error) {
 	key := make([]byte, 32)
-	rand.Read(key)
-	return &ticketMint{key: key}
+	if path == "" {
+		if _, err := rand.Read(key); err != nil {
+			return nil, err
+		}
+		return &ticketMint{key: key}, nil
+	}
+	key, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	key = []byte(strings.TrimSpace(string(key)))
+	if len(key) < 32 {
+		return nil, errors.New("ticket key must contain at least 32 bytes")
+	}
+	return &ticketMint{key: key}, nil
 }
 
 func (m *ticketMint) mint(t ticket) string {
@@ -95,7 +106,7 @@ type oidcGate struct {
 
 // newOIDCGate validates tokens carrying the public issuer as their `iss`
 // but fetches signing keys from jwksURL. In the cluster that is the
-// internal Keycloak certs endpoint over plain HTTP: mythrad runs
+// internal Keycloak certs endpoint over plain HTTP: the gateway runs
 // hostNetwork on a distroless image with no CA bundle, so reaching the
 // public issuer would both hairpin through the edge and fail certificate
 // verification. An empty jwksURL falls back to discovery against the

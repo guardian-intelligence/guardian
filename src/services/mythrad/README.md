@@ -19,7 +19,7 @@ the background; drive it with:
 ```sh
 aspect mythra dev status              # per-leg health, non-zero if unhealthy
 aspect mythra dev logs                # recent lines from every leg
-aspect mythra dev logs --leg=mythrad  # follow one leg: pg|ch|otelcol|flagd|ingest|devissuer|mythrad|web
+aspect mythra dev logs --leg=gateway  # follow one leg: pg|ch|otelcol|flagd|ingest|devissuer|park|gateway|web
 aspect mythra dev smoke               # prove the stack end to end: a headless player connects and its telemetry lands
 aspect mythra dev latency             # exercise every action; report client + authority latency from local telemetry
 aspect mythra dev down                # stop everything
@@ -34,13 +34,14 @@ The legs:
 | otel collector | 127.0.0.1:4317 (gRPC), :4318 (HTTP) | prod-shaped pipeline (redaction included) writing traces to the analytics db |
 | flagd | 127.0.0.1:8016 (OFREP), :8013/:8014 | serves the committed prod flag set; hot-reloads on file edit |
 | analytics ingest | 127.0.0.1:9636 | the real event Publish service, batching into the analytics db |
-| dev OIDC issuer | 127.0.0.1:9635/realms/dev | Keycloak-shaped; signs any subject; mythrad validates it through the same `oidcGate` path as prod |
-| mythrad | 127.0.0.1:9634 (HTTP), :4433 (WebTransport) | self-signed cert pinned via `certHashB64`; wasm modules hot-load from `src/services/mythrad/behaviors/` |
-| web app | http://127.0.0.1:4254 | vite dev server, proxying `/session` `/wt-info` `/terrain` `/behavior` `/assets` to mythrad and `/api/events` to the ingest exactly as the prod Ingress does |
+| dev OIDC issuer | 127.0.0.1:9635/realms/dev | Keycloak-shaped; signs any subject; the gateway validates it through the production `oidcGate` path |
+| chunkies-park | 127.0.0.1:9632 (sessions), :9631 (HTTP), :9637 (metrics) | one park authority and its journal |
+| chunkies-gateway | 127.0.0.1:9634 (HTTP), :4433 (WebTransport), :9633 (metrics) | admission, public transport, static content, and the authenticated park proxy |
+| web app | http://127.0.0.1:4254 | vite dev server proxying game requests to chunkies-gateway and events to ingest |
 
 If another local tool owns a default port, override it consistently through
 the launcher, for example `WUM_DEV_PG_PORT=55433
-WUM_DEV_MYTHRAD_HTTP_PORT=19634 WUM_DEV_MYTHRAD_METRICS_PORT=19633 aspect
+WUM_DEV_GATEWAY_HTTP_PORT=19634 WUM_DEV_GATEWAY_METRICS_PORT=19633 aspect
 mythra dev up`. The same variables must accompany later `status`, `latency`,
 and `down` commands for that stack.
 
@@ -51,7 +52,7 @@ committed flags.json path for flag flips.
 
 Nothing here bypasses production code paths: admission, module
 distribution, terrain serving, and the netcode all run the same code they
-run in the cluster. The only dev-specific piece is the issuer, and mythrad
+run in the cluster. The only dev-specific piece is the issuer, and the gateway
 only trusts it because `OIDC_ISSUER` says so.
 
 ## The edit loops
@@ -60,10 +61,10 @@ only trusts it because `OIDC_ISSUER` says so.
   in the vite-plus workspace (`src/products/viteplus-monorepo/`, see its
   `README.md` for the workspace commands).
 - **Sim (Rust → wasm)**: `bazelisk run //src/services/mythrad/sim:refresh`
-  while the stack runs. The new module lands in the behavior dir, mythrad's
-  2s poll hot-swaps it, and connected clients follow the same update lane a
+  while the stack runs. The new module lands in the behavior dir, the services
+  hot-swap it, and connected clients follow the same update lane a
   production deploy uses.
-- **mythrad (Go)**: `aspect mythra dev down && aspect mythra dev up`;
+- **Gateway/park (Go)**: `aspect mythra dev down && aspect mythra dev up`;
   clients redial and resync (also a prod-truthful path).
 
 ### Tick-rate latency drill
@@ -105,7 +106,7 @@ suffixes) works locally without secrets.
 ## Degradation harness
 
 `netsim` is a dev-time UDP impairment proxy between the browser's
-WebTransport dial and mythrad's QUIC listener. Chrome DevTools network
+WebTransport dial and chunkies-gateway's QUIC listener. Chrome DevTools network
 throttling does not touch QUIC, so this proxy is the only honest way to
 degrade the game path. It simulates latency/jitter, packet loss, subway
 tunnels (total silence), tower switches (path migration — the server

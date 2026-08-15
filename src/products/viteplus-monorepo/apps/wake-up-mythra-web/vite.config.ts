@@ -17,7 +17,7 @@ const stripRouteManifestPaths = {
   },
 };
 
-const mythradOrigin = `http://127.0.0.1:${process.env["WUM_DEV_MYTHRAD_HTTP_PORT"] ?? "9634"}`;
+const gatewayOrigin = `http://127.0.0.1:${process.env["WUM_DEV_GATEWAY_HTTP_PORT"] ?? "9634"}`;
 
 export default defineConfig({
   build: {
@@ -38,12 +38,9 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 4254,
     strictPort: true,
-    // File-suffixed paths (.wasm, .svg) traverse vite's middleware in dev;
-    // extension-less paths go to nitro (see devProxy below). Both proxies
-    // point at a locally running mythrad, mirroring the prod Ingress split.
     proxy: {
-      "/assets": mythradOrigin,
-      "/behavior": mythradOrigin,
+      "/assets": gatewayOrigin,
+      "/behavior": gatewayOrigin,
     },
   },
   resolve: {
@@ -53,18 +50,14 @@ export default defineConfig({
     stripRouteManifestPaths,
     tanstackStart({ srcDirectory: "src" }),
     viteReact(),
-    // Local loop: run mythrad locally (HTTP_PORT 9634) and the dev server
-    // forwards the game-service paths, mirroring the prod Ingress split.
-    // Nitro's dev server fronts every request, so the forwarding must be its
-    // devProxy — vite's server.proxy never sees these paths.
     nitro({
       devProxy: {
         "/api/events/**": `http://127.0.0.1:${process.env["WUM_DEV_INGEST_PORT"] ?? "9636"}`,
-        "/wt-info": mythradOrigin,
-        "/session": mythradOrigin,
-        "/terrain/**": mythradOrigin,
-        "/assets/**": mythradOrigin,
-        "/behavior/**": mythradOrigin,
+        "/wt-info": gatewayOrigin,
+        "/session": gatewayOrigin,
+        "/terrain/**": gatewayOrigin,
+        "/assets/**": gatewayOrigin,
+        "/behavior/**": gatewayOrigin,
       },
     }),
   ],

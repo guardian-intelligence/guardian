@@ -60,7 +60,7 @@ jobs:
         id: classify
         run: |
           names=(alert-relay analytics-ingest authorization canary-journeys
-            feature-flags-notify mythrad payments payments-canary
+            chunkies-gateway chunkies-park feature-flags-notify mythrad payments payments-canary
             postflight-controlplane tofu-runner company-site privatecut-web
             visual-harness wake-up-mythra-web)
           declare -A watch=(
@@ -68,6 +68,8 @@ jobs:
             [analytics-ingest]='^src/products/analytics/|^src/proto/'
             [authorization]='^src/services/authorization/|^src/proto/guardian/authorization/|^src/proto/gen/go/guardian/authorization/'
             [canary-journeys]='^src/products/viteplus-monorepo/packages/canary-journeys/|^src/products/viteplus-monorepo/pnpm-(lock|workspace)\.yaml$'
+            [chunkies-gateway]='^src/services/mythrad/'
+            [chunkies-park]='^src/services/mythrad/'
             [payments]='^src/services/payments/'
             [payments-canary]='^src/services/payments/'
             [postflight-controlplane]='^src/services/postflight/'
@@ -84,6 +86,8 @@ jobs:
             [analytics-ingest]='//src/products/analytics/ingest:push'
             [authorization]='//src/services/authorization:push'
             [canary-journeys]='//src/products/viteplus-monorepo/packages/canary-journeys:push'
+            [chunkies-gateway]='//src/services/mythrad:chunkies_gateway_push'
+            [chunkies-park]='//src/services/mythrad:chunkies_park_push'
             [payments]='//src/services/payments:push'
             [payments-canary]='//src/services/payments/canary:push'
             [postflight-controlplane]='//src/services/postflight/controlplane:push'
@@ -95,7 +99,7 @@ jobs:
             [wake-up-mythra-web]='//src/products/viteplus-monorepo/apps/wake-up-mythra-web/site:push'
             [visual-harness]='//src/products/viteplus-monorepo/packages/visual-harness:push'
           )
-          go_images=' alert-relay analytics-ingest authorization feature-flags-notify mythrad payments payments-canary postflight-controlplane tofu-runner '
+          go_images=' alert-relay analytics-ingest authorization chunkies-gateway chunkies-park feature-flags-notify mythrad payments payments-canary postflight-controlplane tofu-runner '
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'
 
           all=false changed=""

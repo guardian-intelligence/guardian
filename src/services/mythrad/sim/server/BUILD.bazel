@@ -1,8 +1,6 @@
 load("@rules_rust//rust:defs.bzl", "rust_shared_library")
 load("//src/services/mythrad/sim:wasm.bzl", "wasm_module")
 
-# Server tier: executed only by mythrad's live/shadow behavior slot.
-
 SIM_ROOT = ["//src/services/mythrad/sim:__pkg__"]
 
 filegroup(

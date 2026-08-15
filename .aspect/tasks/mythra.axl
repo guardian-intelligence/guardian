@@ -388,7 +388,7 @@ dev_up = task(
     implementation = _dev_up_impl,
     name = "up",
     group = ["mythra", "dev"],
-    summary = "Start the container-free local Wake Up Mythra stack in the background: pinned-PostgreSQL journal, ClickHouse analytics sink, OTel collector, flagd, analytics ingest, dev OIDC issuer, mythrad, and the vite dev server.",
+    summary = "Start the container-free local Wake Up Mythra stack, including chunkies-gateway and chunkies-park.",
 )
 
 dev_down = task(
@@ -411,7 +411,7 @@ dev_logs = task(
     group = ["mythra", "dev"],
     summary = "Tail local Wake Up Mythra dev logs: recent lines from every leg, or follow one leg with --leg.",
     args = {
-        "leg": args.string(default = "", description = "Leg to follow (pg|ch|otelcol|flagd|ingest|devissuer|mythrad|web); empty shows recent lines from every leg."),
+        "leg": args.string(default = "", description = "Leg to follow (pg|ch|otelcol|flagd|ingest|devissuer|park|gateway|web); empty shows recent lines from every leg."),
     },
 )
 
@@ -419,7 +419,7 @@ dev_smoke = task(
     implementation = _dev_smoke_impl,
     name = "smoke",
     group = ["mythra", "dev"],
-    summary = "Prove the running local dev stack works end to end: a headless player signs in and connects, and the run's wum.connected event and mythrad 'POST /session' span both land in the local ClickHouse.",
+    summary = "Prove a headless player traverses chunkies-gateway and chunkies-park and its telemetry lands in local ClickHouse.",
 )
 
 dev_latency = task(

@@ -130,6 +130,11 @@ func startFrame(kind byte, payloadLen int) []byte {
 	return append(AppendVarint(b, uint64(body)), kind)
 }
 
+func EncodeFrame(kind byte, payload []byte) []byte {
+	b := startFrame(kind, len(payload))
+	return append(b, payload...)
+}
+
 // Reader decodes the frame stream. Payloads are freshly allocated:
 // intents outlive the read, staged for a tick boundary and journaled.
 type Reader struct {

@@ -16,8 +16,11 @@ go_library(
     name = "mythrad_lib",
     srcs = [
         "auth.go",
+        "gateway.go",
         "main.go",
         "park.go",
+        "park_server.go",
+        "proxy.go",
         "session.go",
         "terrain.go",
     ],
@@ -56,12 +59,28 @@ go_binary(
     visibility = ["//visibility:public"],
 )
 
+go_binary(
+    name = "chunkies-gateway",
+    embed = [":mythrad_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)
+
+go_binary(
+    name = "chunkies-park",
+    embed = [":mythrad_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)
+
 # Fixed-point invariant, layer 2: scans the embedded wasm modules for float
 # value-type declarations (layer 1 is the source token gate in ./sim).
 go_test(
     name = "mythrad_test",
     srcs = [
+        "auth_test.go",
         "authority_test.go",
+        "proxy_test.go",
         "wasm_gate_test.go",
     ],
     data = [
@@ -123,5 +142,80 @@ oci_push(
     image = ":image",
     remote_tags = ["edge"],
     repository = "ghcr.io/guardian-intelligence/mythrad",
+    visibility = ["//visibility:public"],
+)
+
+pkg_tar(
+    name = "chunkies_gateway_layer",
+    files = {
+        ":chunkies-gateway": "app/chunkies-gateway",
+        "//src/services/mythrad/loadgen": "app/loadgen",
+    },
+    modes = {
+        "app/chunkies-gateway": "0755",
+        "app/loadgen": "0755",
+    },
+)
+
+oci_image(
+    name = "chunkies_gateway_image",
+    annotations = {
+        "org.opencontainers.image.description": "Wake Up Mythra WebTransport session gateway",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "chunkies-gateway",
+    },
+    architecture = "amd64",
+    os = "linux",
+    entrypoint = ["/app/chunkies-gateway"],
+    exposed_ports = [
+        "4433/udp",
+        "9634/tcp",
+    ],
+    tars = [":chunkies_gateway_layer"],
+    visibility = ["//visibility:public"],
+)
+
+oci_push(
+    name = "chunkies_gateway_push",
+    image = ":chunkies_gateway_image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/chunkies-gateway",
+    visibility = ["//visibility:public"],
+)
+
+pkg_tar(
+    name = "chunkies_park_layer",
+    files = {
+        ":chunkies-park": "app/chunkies-park",
+    },
+    modes = {
+        "app/chunkies-park": "0755",
+    },
+)
+
+oci_image(
+    name = "chunkies_park_image",
+    annotations = {
+        "org.opencontainers.image.description": "Wake Up Mythra single-park simulation authority",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "chunkies-park",
+    },
+    architecture = "amd64",
+    os = "linux",
+    entrypoint = ["/app/chunkies-park"],
+    exposed_ports = [
+        "9631/tcp",
+        "9632/tcp",
+        "9637/tcp",
+    ],
+    tars = [":chunkies_park_layer"],
+    visibility = ["//visibility:public"],
+)
+
+oci_push(
+    name = "chunkies_park_push",
+    image = ":chunkies_park_image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/chunkies-park",
     visibility = ["//visibility:public"],
 )
