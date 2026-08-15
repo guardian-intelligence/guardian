@@ -2,6 +2,8 @@ This is a Bazel polyglot monorepo and a free open-source repository housing all 
 
 The management cluster runs Cozystack, variant `isp-full` with opt-in Gateway API.
 
+`README.md` is the canonical guide to development setup and helpers: the one-command local stack (`aspect mythra dev up`), its edit loops and harnesses, the web-frontend workspace, and the product operations verbs.
+
 <operations_guidelines>
 * GitOps: never maintain manual configuration, apply changes through IaC. Things that don't belong in git: Secrets, data, cluster/node state.
 * Roll Forward, not Backward: avoid data corruption/security issues by root-causing issues and rolling the cluster forward to a known good state.
