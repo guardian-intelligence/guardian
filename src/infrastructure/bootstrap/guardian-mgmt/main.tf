@@ -43,6 +43,22 @@ locals {
       private_ipv4 = "10.8.0.13"
     }
   }
+  # Dedicated game workers: tainted cluster nodes serving a WUM region's
+  # QUIC plane from their own public IP. Reserved-term billing pins each
+  # server to the Latitude project it was reserved under (the API refuses
+  # project moves for reserved servers); the VLAN assignment onto the
+  # guardian-mgmt fabric is cross-project, so the worker still joins the
+  # cluster over 10.8.0.0/24 like every other node.
+  wum_region_nodes = {
+    ash-fire = {
+      name         = "ash-fire"
+      server_id    = "sv_EvjLaBxRQNoqy"
+      hostname     = "ash-fire"
+      project_id   = "proj_Yx2za1YgvaVrL"
+      public_ipv4  = "206.223.228.99"
+      private_ipv4 = "10.8.0.14"
+    }
+  }
 }
 
 resource "latitudesh_virtual_network" "management" {
@@ -100,6 +116,51 @@ resource "latitudesh_vlan_assignment" "control_plane" {
   for_each = local.control_plane_nodes
 
   server_id          = latitudesh_server.control_plane[each.key].id
+  virtual_network_id = latitudesh_virtual_network.management.id
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "latitudesh_server" "wum_region" {
+  for_each = local.wum_region_nodes
+
+  hostname         = each.value.hostname
+  plan             = data.latitudesh_plan.f4_metal_small.slug
+  site             = data.latitudesh_region.ash.slug
+  project          = each.value.project_id
+  operating_system = "ubuntu_24_04_x64_lts"
+
+  # Adoption guard: these fields can reinstall or otherwise mutate a live
+  # traffic-bearing node. OpenTofu stores the imported server identity now; Talos
+  # boot-chain convergence stays explicit until the full bootstrap graph owns it.
+  allow_reinstall = false
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [
+      billing,
+      disk_layout,
+      ipxe,
+      operating_system,
+      raid,
+      ssh_keys,
+      tags,
+      user_data,
+    ]
+
+    postcondition {
+      condition     = self.primary_ipv4 == local.wum_region_nodes[each.key].public_ipv4
+      error_message = "Latitude server public IPv4s drifted from the checked-in guardian-mgmt OpenTofu topology."
+    }
+  }
+}
+
+resource "latitudesh_vlan_assignment" "wum_region" {
+  for_each = local.wum_region_nodes
+
+  server_id          = latitudesh_server.wum_region[each.key].id
   virtual_network_id = latitudesh_virtual_network.management.id
 
   lifecycle {
