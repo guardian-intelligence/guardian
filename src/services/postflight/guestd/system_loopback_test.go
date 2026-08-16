@@ -1,3 +1,5 @@
+//go:build linux
+
 package guestd
 
 import (
@@ -206,7 +208,9 @@ func TestRealSystemLoopbackEncryptedConvergence(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(mountpoint, "sentinel"), sentinel, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	system.Sync()
+	if err := system.Sync(); err != nil {
+		t.Fatal(err)
+	}
 	if err := system.Unmount(mountpoint); err != nil {
 		t.Fatal(err)
 	}

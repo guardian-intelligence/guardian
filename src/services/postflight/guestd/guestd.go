@@ -99,11 +99,11 @@ func (c *Config) validate() error {
 		c.HostCID = vsock.Host
 	}
 	if c.Timing == nil {
-		bootID, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+		bootID, err := timing.BootID()
 		if err != nil {
 			return fmt.Errorf("guestd: read boot id: %w", err)
 		}
-		c.Timing, err = timing.New("guestd", strings.TrimSpace(string(bootID)))
+		c.Timing, err = timing.New("guestd", bootID)
 		if err != nil {
 			return err
 		}
@@ -718,7 +718,10 @@ func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
 	}
 	points = append(points, guestTiming(s.cfg.Timing.Point("quiesce_mounts_checked")))
 	points = append(points, guestTiming(s.cfg.Timing.Point("filesystem_sync_started")))
-	s.cfg.System.Sync()
+	if err := s.cfg.System.Sync(); err != nil {
+		s.quiesceFailed(fmt.Errorf("syncing mounted filesystems: %w", err), points)
+		return
+	}
 	points = append(points, guestTiming(s.cfg.Timing.Point("filesystem_sync_completed")))
 	if err := s.send(guestproto.Message{Kind: guestproto.KindQuiesced, Quiesced: &guestproto.Quiesced{
 		Timing: points,

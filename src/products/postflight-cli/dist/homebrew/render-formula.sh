@@ -15,7 +15,10 @@ checksums="$3"
 
 # The template's download URLs are the target list, so the renderer never
 # carries a second copy of it.
-mapfile -t targets < <(
+targets=()
+while IFS= read -r target; do
+  targets+=("${target}")
+done < <(
   grep -oE 'postflight-cli%2Fv@VERSION@/postflight-[A-Za-z0-9_.-]+' "$template" |
     sed 's|.*/postflight-||' |
     sort -u

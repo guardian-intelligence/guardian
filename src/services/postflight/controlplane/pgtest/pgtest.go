@@ -64,8 +64,22 @@ func Start(t testing.TB) string {
 		t.Fatalf("pgtest: starting postgres: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = server.Process.Kill()
-		_ = server.Wait()
+		// SIGINT asks PostgreSQL for a fast shutdown: active transactions are
+		// aborted, children exit, and the postmaster removes its IPC resources.
+		// SIGKILL as the normal path leaks PostgreSQL's small System V segment
+		// on macOS, eventually exhausting the host-wide segment limit.
+		_ = server.Process.Signal(os.Interrupt)
+		done := make(chan struct{})
+		go func() {
+			_ = server.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			_ = server.Process.Kill()
+			<-done
+		}
 	})
 
 	dsn := fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", sockDir)

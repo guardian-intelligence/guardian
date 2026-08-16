@@ -127,7 +127,7 @@ func (c *Config) validate() error {
 		c.Logger = slog.Default()
 	}
 	if c.Timing == nil {
-		bootID, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+		bootID, err := timing.BootID()
 		if err != nil {
 			return fmt.Errorf("vm: read boot id: %w", err)
 		}
@@ -135,7 +135,7 @@ func (c *Config) validate() error {
 		if err != nil {
 			return err
 		}
-		c.Timing, err = timing.New("hostd-qemu:"+recorderID, strings.TrimSpace(string(bootID)))
+		c.Timing, err = timing.New("hostd-qemu:"+recorderID, bootID)
 		if err != nil {
 			return err
 		}

@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_binary", "go_library")
+load("@rules_go//go:def.bzl", "go_binary", "go_cross_binary", "go_library")
 
 go_library(
     name = "guestd_lib",
@@ -12,8 +12,16 @@ go_library(
 )
 
 go_binary(
-    name = "guestd",
+    name = "guestd_native",
     embed = [":guestd_lib"],
     pure = "on",
+)
+
+# guestd is installed into a Linux guest image. The public artifact must not
+# silently follow the host platform when the image is assembled on macOS.
+go_cross_binary(
+    name = "guestd",
+    target = ":guestd_native",
+    platform = "@rules_go//go/toolchain:linux_amd64",
     visibility = ["//visibility:public"],
 )

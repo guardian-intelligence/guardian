@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -36,11 +34,11 @@ var _ Guest = (*VsockGuest)(nil)
 
 // NewVsockGuest wires the transport against the guestd listening port.
 func NewVsockGuest() (*VsockGuest, error) {
-	bootID, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	bootID, err := timing.BootID()
 	if err != nil {
 		return nil, fmt.Errorf("vm: read host boot id: %w", err)
 	}
-	recorder, err := timing.New("hostd-vsock", strings.TrimSpace(string(bootID)))
+	recorder, err := timing.New("hostd-vsock", bootID)
 	if err != nil {
 		return nil, err
 	}

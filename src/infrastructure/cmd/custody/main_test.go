@@ -93,6 +93,22 @@ func testOptions(t *testing.T, fake *fakeRestic) *options {
 	}
 }
 
+// useTestTmpfs gives lifecycle tests a private stand-in for /dev/shm while
+// retaining the same path-boundary check. Tests of the production guard do
+// not call this helper and continue to prove disk-backed paths are refused.
+func useTestTmpfs(t *testing.T, opts *options, name string) string {
+	t.Helper()
+	root := t.TempDir()
+	opts.validateTmpfs = func(dir string) error {
+		rel, err := filepath.Rel(root, filepath.Clean(dir))
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("%s is outside the test tmpfs root %s", dir, root)
+		}
+		return nil
+	}
+	return filepath.Join(root, name)
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -177,8 +193,7 @@ func TestFindUnsealKeyFingerprintMismatch(t *testing.T) {
 func TestLinstorGenerateCreatesOnceOnTmpfs(t *testing.T) {
 	fake := &fakeRestic{}
 	opts := testOptions(t, fake)
-	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-linstor-%d", os.Getpid()))
-	defer os.RemoveAll(opts.bundleDir)
+	opts.bundleDir = useTestTmpfs(t, opts, "guardian-custody-test-linstor")
 	if err := os.MkdirAll(opts.bundleDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -236,8 +251,7 @@ func TestCreateBacksUpChecksAndPrintsInstructions(t *testing.T) {
 	// Repo pre-initialized so ensureRepo takes the non-interactive path.
 	writeFile(t, filepath.Join(opts.repo, "config"), "restic config")
 	// Staging must land on tmpfs; use a unique subdir to keep tests parallel-safe.
-	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-%d", os.Getpid()))
-	defer os.RemoveAll(opts.bundleDir)
+	opts.bundleDir = useTestTmpfs(t, opts, "guardian-custody-test")
 
 	withRestoreMaterializer(t, opts, fake, nil)
 	if err := cmdCreate(opts); err != nil {
@@ -282,8 +296,7 @@ func TestCreateDoesNotShredOperatorOpenedBundle(t *testing.T) {
 
 	// Simulate a restored bundle the operator edited: bundle-layout dir at
 	// the fixed path.
-	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-open-%d", os.Getpid()))
-	defer os.RemoveAll(opts.bundleDir)
+	opts.bundleDir = useTestTmpfs(t, opts, "guardian-custody-test-open")
 	for _, m := range manifest {
 		if m.required {
 			writeFile(t, filepath.Join(opts.bundleDir, m.bundlePath), "x")
@@ -315,8 +328,7 @@ func TestCreateKeepsSourcesWhenRoundTripFails(t *testing.T) {
 	opts.talmRoot = populateLegacy(t, opts)
 	opts.yes = true
 	writeFile(t, filepath.Join(opts.repo, "config"), "restic config")
-	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-corrupt-%d", os.Getpid()))
-	defer os.RemoveAll(opts.bundleDir)
+	opts.bundleDir = useTestTmpfs(t, opts, "guardian-custody-test-corrupt")
 	withRestoreMaterializer(t, opts, fake, func(b []byte) []byte { return append(b, 'x') })
 
 	err := cmdCreate(opts)
@@ -337,8 +349,7 @@ func TestCreateShredsStagingWhenBackupFails(t *testing.T) {
 	opts.talmRoot = populateLegacy(t, opts)
 	opts.yes = true
 	writeFile(t, filepath.Join(opts.repo, "config"), "restic config")
-	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-bfail-%d", os.Getpid()))
-	defer os.RemoveAll(opts.bundleDir)
+	opts.bundleDir = useTestTmpfs(t, opts, "guardian-custody-test-bfail")
 
 	err := cmdCreate(opts)
 	if err == nil || !strings.Contains(err.Error(), "restic backup") {
@@ -355,8 +366,7 @@ func TestCreateInitializesRepoWithEnvPassword(t *testing.T) {
 	opts.talmRoot = populateLegacy(t, opts)
 	opts.yes = true
 	t.Setenv("RESTIC_PASSWORD", "from-env-password-123")
-	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-init-%d", os.Getpid()))
-	defer os.RemoveAll(opts.bundleDir)
+	opts.bundleDir = useTestTmpfs(t, opts, "guardian-custody-test-init")
 
 	withRestoreMaterializer(t, opts, fake, nil)
 	if err := cmdCreate(opts); err != nil {
@@ -422,21 +432,22 @@ func TestVerifyReadDataFlag(t *testing.T) {
 
 func TestWipeRefusesOffTmpfs(t *testing.T) {
 	fake := &fakeRestic{}
-	opts := testOptions(t, fake)
-	opts.bundleDir = t.TempDir()
-	if err := cmdWipe(opts); err == nil || !strings.Contains(err.Error(), "/dev/shm") {
-		t.Fatalf("wipe must refuse non-tmpfs dirs, got %v", err)
+	for _, dir := range []string{t.TempDir(), "/dev/shm/../tmp/custody"} {
+		opts := testOptions(t, fake)
+		opts.bundleDir = dir
+		if err := cmdWipe(opts); err == nil || !strings.Contains(err.Error(), "/dev/shm") {
+			t.Fatalf("wipe must refuse non-tmpfs dir %q, got %v", dir, err)
+		}
 	}
 }
 
 func TestRestoreRefusesWhenBundleOpen(t *testing.T) {
 	fake := &fakeRestic{}
 	opts := testOptions(t, fake)
-	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-ropen-%d", os.Getpid()))
+	opts.bundleDir = useTestTmpfs(t, opts, "guardian-custody-test-ropen")
 	if err := os.MkdirAll(opts.bundleDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(opts.bundleDir)
 	if err := cmdRestore(opts); err == nil || !strings.Contains(err.Error(), "wipe") {
 		t.Fatalf("restore must refuse over an open bundle, got %v", err)
 	}
@@ -455,7 +466,7 @@ func TestRestoreRefusesOffTmpfsAndForeignPaths(t *testing.T) {
 	}
 
 	// Snapshot recording a foreign absolute path refused before plaintext lands.
-	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-foreign-%d", os.Getpid()))
+	opts.bundleDir = useTestTmpfs(t, opts, "guardian-custody-test-foreign")
 	err := cmdRestore(opts)
 	if err == nil || !strings.Contains(err.Error(), "unmanaged location") {
 		t.Fatalf("restore must refuse snapshots recording foreign paths, got %v", err)
@@ -468,12 +479,12 @@ func TestRestoreRefusesOffTmpfsAndForeignPaths(t *testing.T) {
 }
 
 func TestRestoreSuccess(t *testing.T) {
-	bundle := filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-rok-%d", os.Getpid()))
-	defer os.RemoveAll(bundle)
-	fake := &fakeRestic{outputs: map[string][]byte{
-		"snapshots": []byte(`[{"id":"abcdef1234567890","time":"2026-07-07T00:00:00Z","paths":["` + bundle + `"]}]`),
-	}}
+	fake := &fakeRestic{}
 	opts := testOptions(t, fake)
+	bundle := useTestTmpfs(t, opts, "guardian-custody-test-rok")
+	fake.outputs = map[string][]byte{
+		"snapshots": []byte(`[{"id":"abcdef1234567890","time":"2026-07-07T00:00:00Z","paths":["` + bundle + `"]}]`),
+	}
 	opts.bundleDir = bundle
 	realRun := fake.run
 	opts.run = func(o *options, env []string, args ...string) error {
@@ -686,8 +697,7 @@ func withEnvEditMaterializer(t *testing.T, opts *options, fake *fakeRestic, envC
 func TestEnvSetEndToEnd(t *testing.T) {
 	fake := &fakeRestic{}
 	opts := testOptions(t, fake)
-	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-envset-%d", os.Getpid()))
-	defer os.RemoveAll(opts.bundleDir)
+	opts.bundleDir = useTestTmpfs(t, opts, "guardian-custody-test-envset")
 	opts.yes = true
 	opts.envKey = "ntfy_token"
 	opts.stdin = strings.NewReader("tok-secret-value\n")
@@ -719,8 +729,7 @@ func TestEnvSetEndToEnd(t *testing.T) {
 func TestEnvUnsetMissingKeyStillWipes(t *testing.T) {
 	fake := &fakeRestic{}
 	opts := testOptions(t, fake)
-	opts.bundleDir = filepath.Join("/dev/shm", fmt.Sprintf("guardian-custody-test-envunset-%d", os.Getpid()))
-	defer os.RemoveAll(opts.bundleDir)
+	opts.bundleDir = useTestTmpfs(t, opts, "guardian-custody-test-envunset")
 	opts.yes = true
 	opts.envKey = "absent_key"
 	var backedUp string

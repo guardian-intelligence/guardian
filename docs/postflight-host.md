@@ -6,6 +6,37 @@ The worker host: hostd's controllers, the QEMU profile doctrine, and the
 guest contract. On Confidential the host is an untrusted conduit, and that
 property holds by construction.
 
+## Development platforms
+
+Postflight's production substrate is Linux amd64; its policy, protocol, and
+orchestration packages support native development on macOS. The ordinary
+developer loop stays Bazel-native:
+
+```sh
+bazelisk build //src/services/postflight/...
+bazelisk test //src/services/postflight/...
+```
+
+The split is explicit rather than capability-skipping:
+
+- portable sources and fake-backed orchestration tests compile and execute on
+  every development host;
+- Linux syscall adapters live in `*_linux.go` files;
+- non-Linux counterparts fail with checkable unsupported errors, and native
+  tests assert those errors instead of pretending the privileged operation
+  succeeded;
+- the public `hostd` and `guestd` Bazel labels are `go_cross_binary` Linux
+  artifacts, so building an image on macOS cannot install a Darwin binary;
+- the control-plane image likewise consumes explicit Linux cross-binaries.
+
+Go build constraints choose implementation files inside a target. The Bazel
+test target itself remains compatible and executes on macOS; this is not a
+`target_compatible_with` exclusion hidden by a `//...` wildcard. A green macOS
+run proves the portable state machines and the compilation of the production
+Linux binaries. Kernel conformance for KVM, AF_VSOCK, systemd, mount, CRIU, and
+ZFS still requires the Linux host suite described by the golden-image verify
+procedure; macOS never substitutes an approximation for that evidence.
+
 ## Host substrate
 
 Each worker is a standalone machine — no management-cluster membership, no

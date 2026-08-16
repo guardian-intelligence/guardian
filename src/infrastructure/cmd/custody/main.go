@@ -93,6 +93,10 @@ type options struct {
 	stderr io.Writer
 	run    func(opts *options, extraEnv []string, args ...string) error
 	runOut func(opts *options, extraEnv []string, args ...string) ([]byte, error)
+	// validateTmpfs is injectable so unit tests can exercise the lifecycle on
+	// hosts without /dev/shm. Production leaves it nil and always uses the
+	// fail-closed /dev/shm guard below.
+	validateTmpfs func(string) error
 }
 
 func main() {
@@ -266,7 +270,7 @@ func proveRoundTrip(opts *options, env []string, staged string) error {
 		return err
 	}
 	proof := opts.bundleDir + ".proof"
-	if err := requireTmpfs(proof); err != nil {
+	if err := opts.requireTmpfs(proof); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(proof); err != nil {
@@ -345,10 +349,18 @@ func resolveSources(opts *options) (*sources, error) {
 // ever record — and restore can only ever re-materialize — the fixed tmpfs
 // location.
 func requireTmpfs(dir string) error {
-	if !strings.HasPrefix(dir, "/dev/shm/") {
+	clean := filepath.Clean(dir)
+	if clean != dir || !strings.HasPrefix(clean, "/dev/shm/") {
 		return fmt.Errorf("%s is not on /dev/shm; plaintext custody material must stay on tmpfs", dir)
 	}
 	return nil
+}
+
+func (opts *options) requireTmpfs(dir string) error {
+	if opts.validateTmpfs != nil {
+		return opts.validateTmpfs(dir)
+	}
+	return requireTmpfs(dir)
 }
 
 // resolveFromBundleLayout validates a directory already in bundle layout
@@ -491,7 +503,7 @@ func findSealSibling(dir, name string) (string, error) {
 // it fresh (fresh staging is shredded by create; a directory the operator
 // already had open is not).
 func stageBundle(opts *options, src *sources) (string, bool, error) {
-	if err := requireTmpfs(opts.bundleDir); err != nil {
+	if err := opts.requireTmpfs(opts.bundleDir); err != nil {
 		return "", false, err
 	}
 	if _, err := os.Stat(opts.bundleDir); err == nil {
@@ -774,7 +786,7 @@ func cmdRestore(opts *options) error {
 }
 
 func restoreLatest(opts *options) ([]string, error) {
-	if err := requireTmpfs(opts.bundleDir); err != nil {
+	if err := opts.requireTmpfs(opts.bundleDir); err != nil {
 		return nil, err
 	}
 	if _, err := os.Stat(opts.bundleDir); err == nil {
@@ -811,7 +823,7 @@ func restoreLatest(opts *options) ([]string, error) {
 }
 
 func cmdWipe(opts *options) error {
-	if err := requireTmpfs(opts.bundleDir); err != nil {
+	if err := opts.requireTmpfs(opts.bundleDir); err != nil {
 		return fmt.Errorf("refusing to wipe: %w", err)
 	}
 	if _, err := os.Stat(opts.bundleDir); err != nil {
@@ -826,7 +838,7 @@ func cmdWipe(opts *options) error {
 }
 
 func cmdLinstorGenerate(opts *options) error {
-	if err := requireTmpfs(opts.bundleDir); err != nil {
+	if err := opts.requireTmpfs(opts.bundleDir); err != nil {
 		return err
 	}
 	if _, err := os.Stat(opts.bundleDir); err != nil {

@@ -77,7 +77,10 @@ cleanup() {
     wait "${port_forward_pid}" 2>/dev/null || true
   fi
   local pid
-  for pid in "${observability_port_forward_pids[@]}"; do
+  # macOS still ships Bash 3.2, where expanding an empty array under `set -u`
+  # raises an unbound-variable error. `${array[@]-}` preserves the empty case.
+  for pid in "${observability_port_forward_pids[@]-}"; do
+    [[ -n "${pid}" ]] || continue
     if kill -0 "${pid}" 2>/dev/null; then
       kill "${pid}" 2>/dev/null || true
       wait "${pid}" 2>/dev/null || true

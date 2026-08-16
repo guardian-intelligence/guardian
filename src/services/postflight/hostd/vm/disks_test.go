@@ -12,7 +12,10 @@ func TestResolveWholeBlockDevicePinsDirectDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	want := filepath.Join(filepath.Dir(device), "zd42")
+	want, err := filepath.EvalSymlinks(filepath.Join(filepath.Dir(device), "zd42"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got != want {
 		t.Fatalf("resolved %q, want %q", got, want)
 	}
@@ -24,7 +27,10 @@ func TestResolveWholeBlockDeviceEscapesPartitionAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	want := filepath.Join(filepath.Dir(device), "zd42")
+	want, err := filepath.EvalSymlinks(filepath.Join(filepath.Dir(device), "zd42"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got != want {
 		t.Fatalf("resolved %q, want %q", got, want)
 	}
