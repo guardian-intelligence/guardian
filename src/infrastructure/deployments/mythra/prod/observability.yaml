@@ -107,7 +107,7 @@ spec:
             summary: "mythrad journal appends are failing"
             description: "Each failure closes the affected park authority for a journal-clean reopen (durable-before-visible); sustained failures mean the products Postgres is unhealthy or the mythra credentials are wrong."
         - alert: MythradIntentRejectSpike
-          expr: sum(increase(mythra_intents_rejected_total{job="mythrad-metrics"}[15m])) by (reason) > 20
+          expr: sum(increase(mythra_intents_rejected_total{job="mythrad-metrics",reason!="target"}[15m])) by (reason) > 20
           labels:
             severity: warning
             guardian_stage: prod
@@ -160,7 +160,7 @@ spec:
             summary: "chunkies-park journal appends are failing"
             description: "The park closed authority after a journal append failure."
         - alert: ChunkiesParkIntentRejectSpike
-          expr: sum(increase(mythra_intents_rejected_total{job="chunkies-park-metrics"}[15m])) by (reason) > 20
+          expr: sum(increase(mythra_intents_rejected_total{job="chunkies-park-metrics",reason!="target"}[15m])) by (reason) > 20
           labels:
             severity: warning
             guardian_stage: prod
