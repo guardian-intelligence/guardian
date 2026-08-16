@@ -1,7 +1,16 @@
 machine:
+  kubelet:
+    # Registration-time identity is required for the dedicated taint. Talos'
+    # dynamic NodeApply controller is not authorized to mutate its own taints.
+    extraArgs:
+      node-labels: guardian.dev/dedicated=wum
+      register-with-taints: guardian.dev/dedicated=wum:NoSchedule
   install:
     diskSelector:
       serial: "362510FCEFF6"
+    # This disposable worker deliberately uses ordinary Talos. Management
+    # control planes retain the shared Secure Boot installer default.
+    image: factory.talos.dev/metal-installer/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:89997784056d862a59c2a2d0f2fa78714a6c3ef76f34ef4f8d835dee829719d3
   logging:
     destinations:
       - endpoint: tcp://10.8.0.200:5170

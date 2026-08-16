@@ -1,0 +1,18 @@
+apiVersion: guardian.dev/v1alpha1
+kind: TalosWorkerAssets
+metadata:
+  name: ash-worker0
+spec:
+  architecture: amd64
+  talosVersion: v1.13.6
+  schematic:
+    id: be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5
+  installer:
+    image: factory.talos.dev/metal-installer/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6
+    digest: sha256:89997784056d862a59c2a2d0f2fa78714a6c3ef76f34ef4f8d835dee829719d3
+  diskImage:
+    url: https://factory.talos.dev/image/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5/v1.13.6/metal-amd64.raw.xz
+    sha256: 86a0e2cd51351096a682394d201a72ae23be34a1c063ddeeeca8dc4127cc0cd3
+    sizeBytes: 348968668
+    uncompressedSizeBytes: 4453302272
+    observedAt: "2026-08-16"

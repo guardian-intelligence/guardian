@@ -9,6 +9,7 @@ filegroup(
             "Chart.yaml",
             "secureboot-assets.yaml",
             "values.yaml",
+            "wum-worker-assets.yaml",
             "nodes/*.yaml",
             "templates/**",
             "charts/**",

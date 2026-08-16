@@ -84,15 +84,16 @@ floatingIP: "10.8.0.250"
 vipLink: "enp1s0f0.2140"
 # Talos Image Factory schematic be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5
 # contains the nine system extensions shipped by the Cozystack Talos profile.
-# The Secure Boot ISO and installer share Sidero's UKI and PCR signing lineage.
+# This shared default is the Secure Boot installer used by the management
+# control planes. Disposable workers may override it in their node overlay.
 image: "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:f6245aaf9c630fc40479e5798b616468c144c1601c29fc6e19de8d32cc7277e2"
 
-# Secure Boot and system-volume encryption are independent controls. Every
-# machine installs the Sidero-signed UKI above. The management control planes
-# additionally seal STATE and EPHEMERAL to their TPM because they persist
-# cluster identity and business-system state. Regional WUM workers are
-# disposable compute and persist no sensitive data, so their system volumes
-# remain plaintext and rebuildable.
+# Secure Boot and system-volume encryption are independent controls. The
+# management control planes use the Sidero-signed UKI above and seal STATE and
+# EPHEMERAL to their TPM because they persist cluster identity and
+# business-system state. Regional WUM workers are disposable compute and
+# persist no sensitive data, so their node overlays use ordinary Talos and
+# leave system volumes plaintext and rebuildable.
 systemVolumeEncryption:
   controlplane: true
   worker: false
@@ -280,15 +281,15 @@ etcd:
 #         - bar=baz
 extraKernelModules: []
 
-# Role-specific labels and taints. Control-plane nodes hold OpenBao static-seal
-# material; dedicated workers run only the regional WUM game plane.
+# Role-specific dynamic labels and taints. Control-plane nodes hold OpenBao
+# static-seal material. Dedicated worker identity is supplied through kubelet
+# registration flags in the node overlay because Talos' NodeApply controller
+# is not authorized to add a taint to its own existing Kubernetes Node.
 controlplaneNodeLabels:
   guardian.dev/openbao-static-seal: "true"
 controlplaneNodeTaints: {}
-workerNodeLabels:
-  guardian.dev/dedicated: "wum"
-workerNodeTaints:
-  guardian.dev/dedicated: "wum:NoSchedule"
+workerNodeLabels: {}
+workerNodeTaints: {}
 
 # Additional labels rendered on every machine after its role profile. Keep
 # these empty unless the label really belongs on both control planes and workers.
