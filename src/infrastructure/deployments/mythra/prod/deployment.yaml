@@ -1,17 +1,3 @@
-# mythrad: the Wake Up Mythra game service (session gateway + world sim).
-#
-# hostNetwork with a node pin: WebTransport needs public UDP 4433 and the
-# edge (Cloudflare) cannot proxy it, so the pod binds the node's public IP
-# directly (TigerBeetle precedent). The game-service HTTP paths (/wt-info,
-# /behavior, /assets, /terrain) are served through the normal proxied
-# ingress; only
-# the QUIC dial goes direct, authenticated by the certificate hash the page
-# fetches from /wt-info.
-#
-# Deliberately NO reloader annotation: behavior and asset ConfigMap changes
-# must reach the running process via the kubelet mount refresh (hot reload,
-# zero disconnects) - a pod restart here would defeat the update ladder this
-# service demonstrates.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -26,9 +12,6 @@ metadata:
 spec:
   replicas: 1
   revisionHistoryLimit: 3
-  # hostNetwork ports cannot overlap, so never surge a second pod; expressed
-  # as a constrained RollingUpdate because flipping strategy type on a live
-  # Deployment trips server-side apply on the defaulted rollingUpdate block.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -45,10 +28,6 @@ spec:
         app.kubernetes.io/component: mythrad
         guardian.dev/product: mythra
         guardian.dev/stage: prod
-        # Span producer — but Cilium sees this hostNetwork pod as the node,
-        # not an endpoint, so admission to the collector rides the
-        # fromEntities host/remote-node rule in the analytics CNP; the
-        # label documents intent and covers any future pod-network move.
         guardian.dev/otel: producer
     spec:
       automountServiceAccountToken: false
@@ -68,31 +47,20 @@ spec:
         - name: mythrad
           image: ghcr.io/guardian-intelligence/mythrad:edge@sha256:03cff9b7af909e4552e84b3663b0348831cc7a5c51a480bcd67e95d3280c5f40 # {"$imagepolicy": "guardian-imageops:mythrad"}
           env:
-            # The memory envelope: session cap × small QUIC flow-control
-            # windows, with the Go runtime held below the container limit.
             - name: MAX_SESSIONS
               value: "4000"
             - name: GOMEMLIMIT
               value: "750MiB"
             - name: OIDC_ISSUER
               value: "https://auth.wakeupmythra.com/realms/wakeupmythra.com"
-            # Tokens carry the public iss, but this hostNetwork distroless
-            # pod fetches signing keys from Keycloak in-cluster over plain
-            # HTTP — no CA bundle, no edge hairpin.
             - name: OIDC_JWKS_URL
               value: "http://keycloak.tenant-guardian-prod.svc/realms/wakeupmythra.com/protocol/openid-connect/certs"
             - name: OIDC_CLIENT_IDS
               value: "wake-up-mythra,mythra-loadgen"
-            # Flips to "true" once every enabled broker asserts verified
-            # email (Google does; revisit when a broker that doesn't lands).
             - name: REQUIRE_EMAIL_VERIFIED
               value: "false"
-            # The park registry: /session refuses names outside this list.
             - name: PARKS
               value: "park-mythra"
-            # Journal credentials arrive as a mounted file, not env, so
-            # rotation rides the kubelet Secret sync and this Deployment
-            # stays reloader-free (the hot-reload doctrine above).
             - name: PG_PASSWORD_FILE
               value: /etc/mythra/pg/mythra
             - name: WT_PORT
@@ -102,7 +70,7 @@ spec:
             - name: METRICS_PORT
               value: "9633"
             - name: PUBLIC_ADDR
-              value: "wt.wakeupmythra.com:4433" # DNS-only record -> ash-earth
+              value: "wt.wakeupmythra.com:4433"
             - name: TLS_CERT_FILE
               value: /etc/mythra/tls/tls.crt
             - name: TLS_KEY_FILE
@@ -167,14 +135,10 @@ spec:
         - name: assets
           configMap:
             name: mythra-assets
-        # optional: the pod runs on the self-signed fallback until the first
-        # ACME issuance lands; the server hot-loads the real cert on arrival.
         - name: wt-tls
           secret:
             secretName: mythra-wt-tls
             optional: true
-        # optional: hellos answer "park unavailable" until the products
-        # Postgres mints the mythra credentials; the journal retries.
         - name: pg-credentials
           secret:
             secretName: postgres-products-credentials
@@ -225,11 +189,6 @@ spec:
       targetPort: 9633
       protocol: TCP
 ---
-# The product apex, path-routed: the web app owns "/" (the page and its
-# /static/ chunks); the game service keeps only its API paths. Connected
-# sessions never touch "/" — flipping either backend never interrupts play.
-# A dedicated Ingress keeps this zone's Origin CA and AOP mTLS gate
-# isolated - same as rumi.engineering.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -241,18 +200,12 @@ metadata:
     guardian.dev/product: mythra
     guardian.dev/stage: prod
   annotations:
-    # Cloudflare terminates public TLS and proves itself to the origin via
-    # AOP mTLS; the origin-pull CA Secret already lives in this namespace
-    # (company kustomization). Only verified-edge fetches reach the backend.
     nginx.ingress.kubernetes.io/auth-tls-secret: tenant-guardian-prod/cloudflare-origin-pull-ca
     nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
     nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
 spec:
   ingressClassName: tenant-root
-  # wakeupmythra.com is not covered by the controller's default certificate
-  # (the guardianintelligence.org Origin CA cert); this tls block registers
-  # the zone's ACME-issued leaf for SNI selection.
   tls:
     - hosts:
         - wakeupmythra.com

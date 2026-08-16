@@ -4,22 +4,13 @@ resources:
   - agent-ops.yaml
   - behavior-configmap.yaml
   - certificate.yaml
+  - chunkies.yaml
+  - chunkies-canary.yaml
   - deployment.yaml
+  - internal-keys.yaml
   - networkpolicy.yaml
   - observability.yaml
   - web.yaml
-# The world-sim behavior modules, hot-loaded by mythrad from the mount
-# without a restart. live.wasm is the running behavior; adding shadow.wasm
-# starts a shadow launch (evaluated every tick, outputs diffed, divergence
-# exported as metrics, world untouched); promotion = move shadow's bytes
-# into live.wasm. client.wasm is the presentation module browsers fetch;
-# park.wasm is the game state machine every replica runs (docs/netcode.md);
-# their hashes ride every verdict so pages hot-swap modules mid-session.
-# The committed .wasm files are kept in lockstep with their Rust sources by
-# //src/services/mythrad/sim diff tests; regenerate via
-# `bazelisk run //src/services/mythrad/sim:refresh`. The name-suffix hash
-# stays disabled: a suffixed name would ripple into the Deployment and
-# restart the pod, defeating the hot-reload lane this service demonstrates.
 configMapGenerator:
   - name: mythra-behavior
     namespace: tenant-guardian-prod

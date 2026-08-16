@@ -72,13 +72,6 @@ WHERE TraceId = 'T'
 ORDER BY Timestamp;
 ```
 
-Log lines that carry a trace id print it as `trace_id=T` (e.g. mythrad's
-`session minted` line), so VictoriaLogs closes the loop:
-
-```
-_msg:trace_id=T
-```
-
 ## Error events
 
 Every uncaught exception, unhandled rejection, resource load failure, CSP
@@ -99,10 +92,7 @@ Netcode health rides the same pipeline: `wum.connected` (every successful
 WebTransport dial, with `wum.dial_ms`; its absence after a `wum.route_view`
 means the page never got in — a hung handshake times out after 10s and
 reports through the error path), `wum.netcode_reject`, `wum.netcode_resync`,
-`wum.netcode_mismatch`, and `wum.redial`. Server-side the same session shows
-as mythrad `wt session open` / `wt session close` log lines (sub, role,
-park, remote, close reason, duration) plus the per-reason
-`mythra_intents_rejected_total` metric (alert: `MythradIntentRejectSpike`).
+`wum.netcode_mismatch`, and `wum.redial`.
 
 ## What deliberately does NOT join
 
