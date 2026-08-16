@@ -5,6 +5,11 @@ This document is the current control description for the three-node
 encryption, LINSTOR volume encryption, synthetic-data exceptions, and the
 evidence an operator or auditor can collect.
 
+The dedicated `ash-worker0` WUM node is outside this storage-control boundary:
+it uses the same Sidero Secure Boot chain but has no etcd, OpenBao, LINSTOR data
+pool, or TPM-sealed system volumes. Its procedure and evidence are in
+`src/infrastructure/runbooks/wum-worker-reinstall.md`.
+
 ## Boot trust
 
 All three nodes run Talos from a Secure Boot UKI produced by the Sidero Labs
