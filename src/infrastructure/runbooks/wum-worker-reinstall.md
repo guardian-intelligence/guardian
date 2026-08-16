@@ -1,69 +1,88 @@
 # WUM worker reinstall
 
-This procedure installs or replaces a disposable regional WUM worker in the
-`guardian-mgmt` Kubernetes cluster. The worker boots the same Sidero-signed
-Talos UKI as the management nodes, but it has no etcd membership, public-edge
-origin, OpenBao seal material, LINSTOR data pool, or persistent sensitive data.
-Its `STATE` and `EPHEMERAL` volumes therefore use Talos defaults rather than
-TPM-backed LUKS2.
+This procedure wipes and rebuilds a disposable regional WUM worker in the
+`guardian-mgmt` Kubernetes cluster. Unlike the management control planes, this
+worker uses ordinary Talos with firmware Secure Boot disabled. It has no etcd
+membership, OpenBao seal material, LINSTOR data pool, public-edge origin, or
+persistent sensitive data, so neither Secure Boot enrollment nor TPM-backed
+system-volume encryption is required.
 
 Current node:
 
-| Node | Latitude server | Public IP | Private IP | Install-disk serial |
-|---|---|---|---|---|
-| `ash-worker0` | `sv_EvjLaBxRQNoqy` | `206.223.228.99` | `10.8.0.14` | `362510FCEFF6` |
+| Node | Latitude server | Public IP | Private IP | Talos disk serial | Staging disk serial |
+|---|---|---|---|---|---|
+| `ash-worker0` | `sv_EvjLaBxRQNoqy` | `206.223.228.99` | `10.8.0.14` | `362510FCEFF6` | `362510FCEFD5` |
+
+NVMe names are observations, never identities: this host has exchanged
+`nvme0n1` and `nvme1n1` assignments across reboots. Every destructive command
+must resolve and re-check the serial immediately before it runs.
 
 ## Preconditions
 
-1. Work from a revision merged to `main`; node configuration is Git-owned.
-2. Confirm the three control planes, Flux, and the cluster API are Ready.
+1. Work from a revision merged to `main`; node configuration and asset hashes
+   are Git-owned.
+2. Confirm the three control planes, Flux, the cluster API, and the WUM workload
+   are healthy away from this node.
 3. Restore the Talm mint root to tmpfs as described in `cert-rotation.md`.
-4. Download the ISO named in `talm/secureboot-assets.yaml` once and verify its
-   SHA-256 before attaching or serving it. If the factory URL returns different
-   bytes, stop and review the new ISO, enrollment payloads, signer certificate,
-   and hashes in a PR; never silently bless drift during a node operation.
-5. Resolve disks by serial. `/dev/nvme*` enumeration is not stable across boots.
-   The installer must select `362510FCEFF6`; the other disk is not part of the
-   Talos worker profile.
+4. Use the Talos version, Image Factory schematic, installer digest, raw-image
+   URL, and checksum declared in `talm/wum-worker-assets.yaml`. If the factory
+   URL returns different bytes, stop and review the changed artifact in a PR.
+5. In firmware, set Secure Boot to **Disabled**. Do not clear or enroll keys;
+   the worker profile does not use them.
 
-If an old Kubernetes Node object exists, drain and remove only that object:
+Drain the old node before taking it down:
 
 ```sh
 kubectl cordon ash-worker0
 kubectl drain ash-worker0 --ignore-daemonsets --delete-emptydir-data
+```
+
+After the kubelet is down, delete the old Kubernetes Node object. The new
+kubelet must create a fresh object so its registration-time dedicated taint is
+accepted by the API server:
+
+```sh
 kubectl delete node ash-worker0
 ```
 
-Do not run `talosctl etcd leave`, LINSTOR assignment changes, OpenBao recovery,
-or Cloudflare-origin changes for this worker.
+Do not run `talosctl etcd leave`, change LINSTOR assignments, recover OpenBao,
+or modify public-edge routing for this worker.
 
-## Enroll Secure Boot on new or reset firmware
+## Wipe and install the Talos disk
 
-Skip enrollment only when the firmware already trusts the Sidero certificate
-declared in `secureboot-assets.yaml` and a Talos maintenance boot reports
-`secureBoot: true`.
+Boot a trusted rescue environment or regular Talos maintenance media. Inspect
+both model and serial, then bind the target device name only for the lifetime of
+that boot. This example deliberately fails closed if the serial does not match:
 
-1. Put the board in UEFI Setup Mode by clearing its current Secure Boot keys.
-2. Boot the complete verified `metal-amd64-secureboot.iso` through KVM virtual
-   media or a minimal iPXE transport. Do not direct-boot only the UKI for first
-   enrollment; that bypasses the ISO boot menu.
-3. On bare metal, press Esc at the ISO boot menu and select
-   `Enroll Secure Boot keys: auto`. The stock ISO's automatic `if-safe` policy
-   does not enroll keys unattended on bare metal.
-4. Reboot the ISO and require this maintenance-mode result before installing:
+```sh
+lsblk -d -o NAME,MODEL,SERIAL,SIZE
 
-   ```sh
-   talosctl --endpoints 206.223.228.99 --nodes 206.223.228.99 \
-     get securitystate --insecure -o yaml
-   ```
+TARGET=/dev/nvme0n1 # replace with the device currently reporting the serial below
+test "$(lsblk -dn -o SERIAL "$TARGET" | tr -d ' ')" = "362510FCEFF6" || exit 1
+```
 
-   `secureBoot`, `bootedWithUKI`, and `moduleSignatureEnforced` must be true,
-   and the PCR signer must match `secureboot-assets.yaml`.
+Download the declared regular raw disk image and verify it before touching the
+disk:
 
-## Install the worker
+```sh
+curl --fail --location --output /tmp/metal-amd64.raw.xz \
+  https://factory.talos.dev/image/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5/v1.13.6/metal-amd64.raw.xz
+echo '86a0e2cd51351096a682394d201a72ae23be34a1c063ddeeeca8dc4127cc0cd3  /tmp/metal-amd64.raw.xz' | sha256sum --check
+xz --test /tmp/metal-amd64.raw.xz
+```
 
-Apply the generated worker base and its identity/network overlay from the Talm
-mint root:
+Re-run the serial assertion, discard the old Talos contents, and write the
+verified ordinary Talos image:
+
+```sh
+test "$(lsblk -dn -o SERIAL "$TARGET" | tr -d ' ')" = "362510FCEFF6" || exit 1
+blkdiscard --force "$TARGET"
+xz --decompress --stdout /tmp/metal-amd64.raw.xz | dd of="$TARGET" bs=16M status=progress conv=fsync
+sync
+```
+
+Boot the serial-selected Talos disk. In maintenance mode, apply the generated
+worker base plus its identity/network overlay from the Talm mint root:
 
 ```sh
 MINT=/dev/shm/guardian-talm-mint
@@ -75,28 +94,56 @@ talm apply --root "$MINT" --talosconfig "$MINT/talosconfig" \
   --insecure --skip-resource-validation
 ```
 
-Detach the ISO after the install starts. Talos installs the digest-pinned
-`metal-installer-secureboot` image to the serial-selected system disk and
-reboots into the installed UKI. Do not bootstrap etcd from a worker.
+The overlay pins the ordinary `metal-installer` image and registers the node
+with `--node-labels` and `--register-with-taints`. Do not move the dedicated
+taint into `machine.nodeTaints`: Talos' dynamic NodeApply controller is not
+authorized to add a taint to its own existing Kubernetes Node.
+
+If the machine ever joins before the registration flags are present, cordon and
+drain it, reboot it, delete the Node object while the kubelet is down, and let
+the configured kubelet recreate the object.
+
+## Wipe the staging disk
+
+Keep the staging disk intact until the new Talos disk has booted with an
+authenticated API, the serial-selected system disk is confirmed, and the node
+has joined successfully. Then locate the staging serial again in Talos' current
+disk inventory and wipe that device. The device name below is only an example:
+
+```sh
+talosctl --endpoints 206.223.228.99 --nodes 206.223.228.99 get disks -o yaml
+
+# After verifying that nvme0n1 currently has serial 362510FCEFD5:
+talosctl --endpoints 206.223.228.99 --nodes 206.223.228.99 \
+  wipe disk nvme0n1 --method ZEROES
+```
+
+Power-cycle once after the wipe. Re-resolve both serials and confirm the staging
+disk exposes no partitions or filesystems. Never infer this from its old NVMe
+name.
 
 ## Readiness gates
 
-The worker is ready only when all of these pass:
+The rebuild is complete only when all of these pass after the full power cycle:
 
-- Authenticated `securitystate` reports Secure Boot, UKI boot, module-signature
-  enforcement, and the declared PCR signer.
+- Authenticated `machinestatus` reports `stage: running` and `ready: true`.
+- Authenticated `securitystate` reports `secureBoot: false`; the kernel still
+  reports module-signature enforcement.
+- The Talos system disk has serial `362510FCEFF6`; serial `362510FCEFD5` is
+  present but has no partitions or filesystem signatures.
 - Kubernetes reports `ash-worker0` Ready with label
-  `guardian.dev/dedicated=wum` and taint
-  `guardian.dev/dedicated=wum:NoSchedule`.
-- The node advertises `10.8.0.14` on VLAN 2140, reaches the private API VIP,
-  and Kube-OVN plus pod DNS/TCP egress are healthy.
+  `guardian.dev/dedicated=wum`, exactly the intended
+  `guardian.dev/dedicated=wum:NoSchedule` taint, and no shutdown/network taints.
+- The node advertises `10.8.0.14` on VLAN 2140, reaches the private API VIP, and
+  the Kube-OVN CNI, pinger, and OVS/OVN DaemonSets are Ready on the node.
 - The machine configuration contains no `RawVolumeConfig`, no
-  `r-guardian-data`, and no TPM encryption override for `STATE` or
-  `EPHEMERAL`.
-- No etcd member, OpenBao static-seal label, LINSTOR `data` pool, or
-  Cloudflare public-edge origin is assigned to the worker.
-- The WUM workload is scheduled only through its dedicated toleration and its
-  WebTransport/QUIC UDP 4433 endpoint passes the live service check.
+  `r-guardian-data`, and no TPM encryption override for `STATE` or `EPHEMERAL`.
+- No etcd member, OpenBao static-seal label, LINSTOR `data` pool, or public-edge
+  origin is assigned to the worker.
+- No failed or shutdown pods remain attributed to the node.
 
-Treat a failed gate as an incomplete rebuild. Keep the node drained or absent
+Workload placement or traffic cutover is a separate GitOps change. Do not move
+WUM merely to prove that the rebuilt node is healthy.
+
+Treat a failed gate as an incomplete rebuild. Keep the node cordoned or absent
 from the cluster until the failed condition is corrected.

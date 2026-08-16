@@ -15,24 +15,27 @@ machine:
     extraConfig:
       cpuManagerPolicy: static
       maxPods: 512
+    extraArgs:
+      node-labels: guardian.dev/dedicated=wum
+      register-with-taints: guardian.dev/dedicated=wum:NoSchedule
     nodeIP:
       validSubnets:
         - 10.8.0.0/24
   install:
     # -- Discovered disks:
-    # /dev/nvme0n1:
-    #    model: MTFDKCC960TGP-1BK1JABYY
-    #    serial: 362510FCEFF6
-    #    wwid: eui.000000000000000100a0752552cf6087
-    #    size: 960 GB
-    # /dev/nvme1n1:
+    # /dev/nvme0n1 (device names can change across boots):
     #    model: MTFDKCC960TGP-1BK1JABYY
     #    serial: 362510FCEFD5
     #    wwid: eui.000000000000000100a0752552cf629e
     #    size: 960 GB
+    # /dev/nvme1n1 (device names can change across boots):
+    #    model: MTFDKCC960TGP-1BK1JABYY
+    #    serial: 362510FCEFF6
+    #    wwid: eui.000000000000000100a0752552cf6087
+    #    size: 960 GB
     diskSelector:
       serial: 362510FCEFF6
-    image: factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:f6245aaf9c630fc40479e5798b616468c144c1601c29fc6e19de8d32cc7277e2
+    image: factory.talos.dev/metal-installer/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:89997784056d862a59c2a2d0f2fa78714a6c3ef76f34ef4f8d835dee829719d3
   files:
     - content: |
         [plugins]
@@ -83,10 +86,6 @@ machine:
       - name: spl
       - name: vfio_pci
       - name: vfio_iommu_type1
-  nodeLabels:
-    guardian.dev/dedicated: wum
-  nodeTaints:
-    guardian.dev/dedicated: wum:NoSchedule
 cluster:
   controlPlane:
     endpoint: https://10.8.0.250:6443

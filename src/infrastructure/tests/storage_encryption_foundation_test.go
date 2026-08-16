@@ -130,8 +130,9 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 	}
 }
 
-func TestTalosSecureBootVolumeEncryptionConformance(t *testing.T) {
-	const installer = "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:f6245aaf9c630fc40479e5798b616468c144c1601c29fc6e19de8d32cc7277e2"
+func TestTalosBootAndVolumeEncryptionConformance(t *testing.T) {
+	const controlplaneInstaller = "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:f6245aaf9c630fc40479e5798b616468c144c1601c29fc6e19de8d32cc7277e2"
+	const workerInstaller = "factory.talos.dev/metal-installer/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:89997784056d862a59c2a2d0f2fa78714a6c3ef76f34ef4f8d835dee829719d3"
 
 	assetsPath := runfilePath("src/infrastructure/talm/secureboot-assets.yaml")
 	assets := singleYAMLDoc(t, assetsPath)
@@ -148,11 +149,23 @@ func TestTalosSecureBootVolumeEncryptionConformance(t *testing.T) {
 	assertNestedString(t, assets, "1ae5d7c8ac1032eaf0d2c1a2e6a952517342e8db6b5354d32791a9c960a9472e", "spec", "signatures", "secureBootCertificateSha256")
 	assertNestedString(t, assets, "9c42059148e157a030f5edc51bd4967a2a3b1bc64cdd48941a3ece3c3fdc032f", "spec", "signatures", "pcrSigningPublicSpkiSha256")
 
+	workerAssetsPath := runfilePath("src/infrastructure/talm/wum-worker-assets.yaml")
+	workerAssets := singleYAMLDoc(t, workerAssetsPath)
+	assertNestedString(t, workerAssets, "TalosWorkerAssets", "kind")
+	assertNestedString(t, workerAssets, "ash-worker0", "metadata", "name")
+	assertNestedString(t, workerAssets, "v1.13.6", "spec", "talosVersion")
+	assertNestedString(t, workerAssets, "be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5", "spec", "schematic", "id")
+	assertNestedString(t, workerAssets, "sha256:89997784056d862a59c2a2d0f2fa78714a6c3ef76f34ef4f8d835dee829719d3", "spec", "installer", "digest")
+	assertNestedString(t, workerAssets, "https://factory.talos.dev/image/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5/v1.13.6/metal-amd64.raw.xz", "spec", "diskImage", "url")
+	assertNestedString(t, workerAssets, "86a0e2cd51351096a682394d201a72ae23be34a1c063ddeeeca8dc4127cc0cd3", "spec", "diskImage", "sha256")
+	assertNestedString(t, workerAssets, "2026-08-16", "spec", "diskImage", "observedAt")
+
 	valuesPath := runfilePath("src/infrastructure/talm/values.yaml")
 	values := readText(t, valuesPath)
-	assertTextContains(t, values, `image: "`+installer+`"`, valuesPath)
+	assertTextContains(t, values, `image: "`+controlplaneInstaller+`"`, valuesPath)
 	assertTextContains(t, values, "- factory.talos.dev", valuesPath)
 	assertTextContains(t, values, "systemVolumeEncryption:\n  controlplane: true\n  worker: false", valuesPath)
+	assertTextContains(t, values, "workerNodeLabels: {}\nworkerNodeTaints: {}", valuesPath)
 
 	templatePath := runfilePath("src/infrastructure/talm/templates/_helpers.tpl")
 	template := readText(t, templatePath)
@@ -195,7 +208,7 @@ func TestTalosSecureBootVolumeEncryptionConformance(t *testing.T) {
 
 		nodePath := "src/infrastructure/talm/nodes/" + node + ".yaml"
 		nodeConfig := readText(t, runfilePath(nodePath))
-		assertTextContains(t, nodeConfig, "image: "+installer, nodePath)
+		assertTextContains(t, nodeConfig, "image: "+controlplaneInstaller, nodePath)
 		assertTextContains(t, nodeConfig, "name: STATE", nodePath)
 		assertTextContains(t, nodeConfig, "name: EPHEMERAL", nodePath)
 	}
@@ -206,9 +219,9 @@ func TestTalosSecureBootVolumeEncryptionConformance(t *testing.T) {
 		"type: worker",
 		"206.223.228.99",
 		"serial: 362510FCEFF6",
-		"guardian.dev/dedicated: wum",
-		"guardian.dev/dedicated: wum:NoSchedule",
-		"image: " + installer,
+		"node-labels: guardian.dev/dedicated=wum",
+		"register-with-taints: guardian.dev/dedicated=wum:NoSchedule",
+		"image: " + workerInstaller,
 	} {
 		assertTextContains(t, worker, want, workerPath)
 	}
@@ -217,6 +230,8 @@ func TestTalosSecureBootVolumeEncryptionConformance(t *testing.T) {
 		"name: EPHEMERAL",
 		"guardian.dev/openbao-static-seal",
 		"kind: Layer2VIPConfig",
+		"\n  nodeLabels:\n    guardian.dev/dedicated:",
+		"\n  nodeTaints:\n    guardian.dev/dedicated:",
 	} {
 		assertTextNotContains(t, worker, forbidden, workerPath)
 	}
@@ -228,6 +243,9 @@ func TestTalosSecureBootVolumeEncryptionConformance(t *testing.T) {
 		"hostname: ash-worker0",
 		"address: 10.8.0.14/24",
 		"node: ash-worker0",
+		"node-labels: guardian.dev/dedicated=wum",
+		"register-with-taints: guardian.dev/dedicated=wum:NoSchedule",
+		"image: " + workerInstaller,
 	} {
 		assertTextContains(t, workerOverlay, want, workerOverlayPath)
 	}

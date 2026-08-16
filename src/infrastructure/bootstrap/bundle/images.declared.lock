@@ -34,8 +34,10 @@
 #     is stale bookkeeping and fails the union — delete it here
 
 # --- bootstrap artifacts (not pod images) ---
-# Talos installer (machine.install.image)
+# Talos control-plane installer (machine.install.image default)
 factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:f6245aaf9c630fc40479e5798b616468c144c1601c29fc6e19de8d32cc7277e2
+# Talos disposable-worker installer (per-node override)
+factory.talos.dev/metal-installer/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:89997784056d862a59c2a2d0f2fa78714a6c3ef76f34ef4f8d835dee829719d3
 # Cozystack installer Helm chart (OCI)
 ghcr.io/cozystack/cozystack/cozy-installer:1.6.0@sha256:1a51bf1a58a4850a8f8c04ab2cfdb0c0b84a777fac7b1d83b3ef249e566559d2
 # Cozystack platform packages Flux artifact (pulled by source-controller, NOT containerd)
