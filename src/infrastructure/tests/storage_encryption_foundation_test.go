@@ -131,13 +131,13 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 }
 
 func TestTalosSecureBootVolumeEncryptionConformance(t *testing.T) {
-	const installer = "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:c3df0484a3f5f3bb68c77d04998fb977a9df6a5268b93bafdb23f668e6f4ed84"
+	const installer = "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:f6245aaf9c630fc40479e5798b616468c144c1601c29fc6e19de8d32cc7277e2"
 
 	assetsPath := runfilePath("src/infrastructure/talm/secureboot-assets.yaml")
 	assets := singleYAMLDoc(t, assetsPath)
 	assertNestedString(t, assets, "TalosSecureBootAssets", "kind")
 	assertNestedString(t, assets, "be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5", "spec", "schematic", "id")
-	assertNestedString(t, assets, "sha256:c3df0484a3f5f3bb68c77d04998fb977a9df6a5268b93bafdb23f668e6f4ed84", "spec", "installer", "digest")
+	assertNestedString(t, assets, "sha256:f6245aaf9c630fc40479e5798b616468c144c1601c29fc6e19de8d32cc7277e2", "spec", "installer", "digest")
 	assertNestedString(t, assets, "0eb58631ff9757a203dab2d761e258dc504f40a9c57df48119ed9b93c9bb51a8", "spec", "iso", "sha256")
 	assertNestedString(t, assets, "2026-08-16", "spec", "iso", "observedAt")
 	assertNestedString(t, assets, "siderolabs", "spec", "enrollment", "provider")
