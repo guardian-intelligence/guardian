@@ -1,3 +1,5 @@
+//go:build linux
+
 package vm
 
 import (
@@ -60,7 +62,7 @@ func (s *loopSystem) Unmount(mountpoint string) error {
 	return nil
 }
 
-func (s *loopSystem) Sync()              {}
+func (s *loopSystem) Sync() error        { return nil }
 func (s *loopSystem) Adopt(string) error { return nil }
 
 // TestVsockLoopbackTransportEndToEnd runs the real transport against a real

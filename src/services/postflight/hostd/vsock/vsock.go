@@ -1,6 +1,5 @@
-// Package vsock is a minimal AF_VSOCK dial/listen surface for the
-// hostd↔guestd channel: stream sockets wrapped as net.Conn/net.Listener,
-// nothing else. The host dials a VM's CID; guestd listens on every CID.
+//go:build linux
+
 package vsock
 
 import (
@@ -12,30 +11,6 @@ import (
 
 	"golang.org/x/sys/unix"
 )
-
-const (
-	// Host is the CID every host-originated connection bears inside a guest.
-	Host = unix.VMADDR_CID_HOST
-	// Local is the loopback CID served by the vsock_loopback transport.
-	Local = unix.VMADDR_CID_LOCAL
-	// Any binds every CID on listen.
-	Any = unix.VMADDR_CID_ANY
-	// PortAny requests an ephemeral port on listen; read the assignment
-	// back from Listener.Addr.
-	PortAny = unix.VMADDR_PORT_ANY
-)
-
-// Addr is a vsock endpoint.
-type Addr struct {
-	CID  uint32
-	Port uint32
-}
-
-// Network implements net.Addr.
-func (Addr) Network() string { return "vsock" }
-
-// String implements net.Addr.
-func (a Addr) String() string { return fmt.Sprintf("vsock:%d:%d", a.CID, a.Port) }
 
 // conn adapts a connected vsock socket to net.Conn. The fd is non-blocking
 // and registered with the runtime poller via os.NewFile, which is what makes

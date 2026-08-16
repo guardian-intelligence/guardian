@@ -475,11 +475,11 @@ func appendJobEnvironment(path string, env map[string]string) error {
 }
 
 func commandRecorder(source string) (*timing.Recorder, error) {
-	raw, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	bootID, err := timing.BootID()
 	if err != nil {
 		return nil, err
 	}
-	return timing.New(source, strings.TrimSpace(string(raw)))
+	return timing.New(source, bootID)
 }
 
 // IsRunnerWorkerExec detects the Runner.Worker path replaced by the image

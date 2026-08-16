@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sync/atomic"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 // Point is one observation on an originating process's clock.
@@ -19,9 +17,11 @@ type Point struct {
 	UnixNS      int64  `json:"unix_ns"`
 }
 
-// Recorder creates ordered points for one process life. BootID identifies
-// the CLOCK_BOOTTIME domain and must change when that clock resets; Sequence
-// may restart with the process. Monotonic values are never compared across
+// Recorder creates ordered points for one process life. In the supported
+// Linux runtime, BootID identifies the CLOCK_BOOTTIME domain and must change
+// when that clock resets; Sequence may restart with the process. Native
+// non-Linux builds use a process-local monotonic clock solely so portable
+// orchestration tests can execute. Monotonic values are never compared across
 // recorders with different source/boot tuples.
 type Recorder struct {
 	source string
@@ -42,18 +42,6 @@ func (r *Recorder) Point(event string) Point {
 	}
 	return Point{
 		Event: event, Source: r.source, BootID: r.bootID,
-		Sequence: r.seq.Add(1), MonotonicNS: boottimeNS(), UnixNS: time.Now().UnixNano(),
+		Sequence: r.seq.Add(1), MonotonicNS: monotonicNS(), UnixNS: time.Now().UnixNano(),
 	}
 }
-
-func boottimeNS() int64 {
-	var ts unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &ts); err != nil {
-		// CLOCK_BOOTTIME exists on every supported Linux guest/host. Keep a
-		// positive sample if a test kernel or seccomp profile denies it.
-		return time.Since(processStarted).Nanoseconds() + 1
-	}
-	return ts.Nano()
-}
-
-var processStarted = time.Now()

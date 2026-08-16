@@ -2,6 +2,20 @@ package timing
 
 import "testing"
 
+func TestBootIDStableWithinProcess(t *testing.T) {
+	first, err := BootID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := BootID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == "" || first != second {
+		t.Fatalf("BootID() = %q then %q, want one non-empty clock identity", first, second)
+	}
+}
+
 func TestRecorderOrdersProcessLocalPoints(t *testing.T) {
 	r, err := New("guest:vm-1", "boot-1")
 	if err != nil {

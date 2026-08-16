@@ -7,7 +7,10 @@ template="$2"
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
 
-mapfile -t targets < <(
+targets=()
+while IFS= read -r target; do
+  targets+=("${target}")
+done < <(
   grep -oE 'postflight-cli%2Fv@VERSION@/postflight-[A-Za-z0-9_.-]+' "$template" |
     sed 's|.*/postflight-||' |
     sort -u

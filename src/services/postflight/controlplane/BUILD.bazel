@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_go//go:def.bzl", "go_binary", "go_cross_binary", "go_library", "go_test")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
@@ -20,7 +20,7 @@ go_library(
         "github_api.go",
         "hostd_store.go",
         "hostd_sync.go",
-		"job_plan_resolver.go",
+        "job_plan_resolver.go",
         "job_plans.go",
         "main.go",
         "migrations.go",
@@ -39,10 +39,10 @@ go_library(
         "migrations/002_hostd_scheduler.sql",
         "migrations/003_workspace_generations.sql",
         "migrations/004_provider_installations.sql",
-		"migrations/005_confidential_generations.sql",
-		"migrations/006_durable_tool_generations.sql",
-		"migrations/007_durable_runner_model.sql",
-		"migrations/008_provider_acquisition_boundary.sql",
+        "migrations/005_confidential_generations.sql",
+        "migrations/006_durable_tool_generations.sql",
+        "migrations/007_durable_runner_model.sql",
+        "migrations/008_provider_acquisition_boundary.sql",
         "migrations/009_prepositioned_job_plans.sql",
         "migrations/010_workspace_scope_epochs.sql",
         "migrations/011_generation_transfer_lane.sql",
@@ -71,6 +71,12 @@ go_binary(
     embed = [":controlplane_lib"],
     pure = "on",
     visibility = ["//visibility:public"],
+)
+
+go_cross_binary(
+    name = "controlplane_linux_amd64",
+    target = ":controlplane",
+    platform = "@rules_go//go/toolchain:linux_amd64",
 )
 
 go_test(
@@ -111,7 +117,7 @@ go_test(
     deps = [
         "//src/services/postflight/controlplane/pgtest",
         "//src/services/postflight/hostd/agent",
-		"//src/services/postflight/hostd/guestproto",
+        "//src/services/postflight/hostd/guestproto",
         "//src/services/postflight/hostd/syncproto",
         "//src/services/postflight/hostd/vm",
         "//src/services/postflight/hostd/zvol",
@@ -123,8 +129,8 @@ go_test(
 pkg_tar(
     name = "controlplane_layer",
     files = {
-        ":controlplane": "app/controlplane",
-        "//src/services/postflight/canaryloop:canaryloop": "app/canary-loop",
+        ":controlplane_linux_amd64": "app/controlplane",
+        "//src/services/postflight/canaryloop:canaryloop_linux_amd64": "app/canary-loop",
     },
     modes = {
         "app/canary-loop": "0755",

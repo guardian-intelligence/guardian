@@ -34,6 +34,7 @@ type fakeSystem struct {
 	// mounted maps mountpoint -> device.
 	mounted map[string]string
 	syncs   int
+	syncErr error
 	journal []string
 }
 
@@ -149,11 +150,12 @@ func (f *fakeSystem) Unmount(mountpoint string) error {
 	return nil
 }
 
-func (f *fakeSystem) Sync() {
+func (f *fakeSystem) Sync() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.syncs++
 	f.log("sync")
+	return f.syncErr
 }
 
 func (f *fakeSystem) Adopt(mountpoint string) error {
@@ -695,6 +697,23 @@ func TestQuiesceRequiresMountedVolumesAndSyncs(t *testing.T) {
 	// A retried quiesce remains idempotent while the VM is alive.
 	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoints: []string{"/work"}}})
 	host.expect(guestproto.KindQuiesced)
+}
+
+func TestQuiesceFailsClosedWhenFilesystemSyncFails(t *testing.T) {
+	w := newWorld(t, nil, nil)
+	w.system.mounted["/work"] = "/dev/sdb"
+	w.system.syncErr = errors.New("sync denied")
+
+	host := w.listener.dial(t)
+	host.expect(guestproto.KindHello)
+	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoints: []string{"/work"}}})
+	message := host.expect(guestproto.KindQuiesceFailed)
+	if !strings.Contains(message.QuiesceFailed.Reason, "syncing mounted filesystems: sync denied") {
+		t.Fatalf("reason %q", message.QuiesceFailed.Reason)
+	}
+	if w.system.syncs != 1 {
+		t.Fatalf("sync attempts %d, want 1", w.system.syncs)
+	}
 }
 
 func TestQuiesceFailureCarriesTheReason(t *testing.T) {

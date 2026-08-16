@@ -1,3 +1,5 @@
+//go:build linux
+
 package guestd
 
 import (
@@ -24,18 +26,5 @@ func TestMountOptionsRouteDiscardToFilesystemData(t *testing.T) {
 func TestMakeFilesystemRefusesUnprovisionedTypes(t *testing.T) {
 	if err := (RealSystem{}).MakeFilesystem(context.Background(), "/dev/null", "xfs"); err == nil {
 		t.Fatal("mkfs argv splice not refused")
-	}
-}
-
-func TestUnescapeMountPath(t *testing.T) {
-	for escaped, want := range map[string]string{
-		`/plain`:            "/plain",
-		`/with\040space`:    "/with space",
-		`/tab\011and\134bs`: "/tab\tand\\bs",
-		`/trailing\`:        `/trailing\`,
-	} {
-		if got := unescapeMountPath(escaped); got != want {
-			t.Fatalf("unescapeMountPath(%q) = %q, want %q", escaped, got, want)
-		}
 	}
 }

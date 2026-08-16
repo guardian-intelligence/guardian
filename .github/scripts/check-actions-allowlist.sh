@@ -19,7 +19,10 @@ set -euo pipefail
 repo_root="${1:-.}"
 allowlist="${repo_root}/.github/actions-allowlist.json"
 
-mapfile -t allowed < <(python3 -c '
+allowed=()
+while IFS= read -r pattern; do
+  allowed+=("${pattern}")
+done < <(python3 -c '
 import json, sys
 print("\n".join(json.load(open(sys.argv[1]))["patterns_allowed"]))
 ' "${allowlist}")

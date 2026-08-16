@@ -2,7 +2,11 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "vsock",
-    srcs = ["vsock.go"],
+    srcs = [
+        "addr.go",
+        "vsock.go",
+        "vsock_unsupported.go",
+    ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/hostd/vsock",
     visibility = ["//visibility:public"],
     deps = ["@org_golang_x_sys//unix"],
@@ -10,7 +14,11 @@ go_library(
 
 go_test(
     name = "vsock_test",
-    srcs = ["vsock_test.go"],
+    srcs = [
+        "addr_test.go",
+        "vsock_test.go",
+        "vsock_unsupported_test.go",
+    ],
     embed = [":vsock"],
     deps = ["@org_golang_x_sys//unix"],
 )

@@ -38,7 +38,12 @@ func TestLocalAssignmentPublishesBeforeWorkerGateReleases(t *testing.T) {
 		host.Close()
 		guest.Close()
 	})
-	socket := filepath.Join(t.TempDir(), "assignment.sock")
+	socketRoot, err := os.MkdirTemp("/tmp", "postflight-assignment-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketRoot) })
+	socket := filepath.Join(socketRoot, "assignment.sock")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)

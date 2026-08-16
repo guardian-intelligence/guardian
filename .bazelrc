@@ -1,6 +1,11 @@
 build --incompatible_strict_action_env
 test --test_output=errors
 
+# Repository rules run hermetically under strict_action_env as well. Pin the
+# standard public Go proxy chain so a cold Bazel cache behaves like `go mod
+# download` without every developer exporting a Bazel-specific repo_env.
+common --repo_env=GOPROXY=https://proxy.golang.org,direct
+
 # Clippy findings (including the pedantic tier enabled at each crate root)
 # fail the build rather than scroll past as warnings.
 build --@rules_rust//rust/settings:clippy_flags=-Dwarnings
