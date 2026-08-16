@@ -266,7 +266,10 @@ curl -X POST "https://api.latitude.sh/servers/<server-id>/reinstall" \
 Server IDs: ash-earth `sv_vAPXaMxKM5epz`, ash-water `sv_8mop5gZo8Njxv`,
 ash-wind `sv_nPRbajqEB5koM`, ash-worker0 `sv_EvjLaBxRQNoqy` (WUM game worker —
 reimage after the control plane is Ready; it joins as a worker and carries no
-etcd or edge role).
+etcd or edge role). For a new worker or any worker whose firmware does not
+already trust the Sidero key, follow `wum-worker-reinstall.md` instead of the
+kexec path below; direct UKI boot does not expose the bare-metal key-enrollment
+menu.
 
 Node public IPs — the dark-case constants (`k8s.guardianintelligence.org`
 and every other zone name is Cloudflare-hosted DNS, unresolvable while

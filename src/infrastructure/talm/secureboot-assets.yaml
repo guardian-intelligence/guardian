@@ -22,14 +22,15 @@ spec:
     digest: sha256:c3df0484a3f5f3bb68c77d04998fb977a9df6a5268b93bafdb23f668e6f4ed84
   iso:
     url: https://factory.talos.dev/image/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5/v1.13.6/metal-amd64-secureboot.iso
-    sha256: f62fd4d79492b3a95bc9e99a71adcfe33353ebb9175ee93785393e537dfb6574
+    sha256: 0eb58631ff9757a203dab2d761e258dc504f40a9c57df48119ed9b93c9bb51a8
     sizeBytes: 366260224
+    observedAt: "2026-08-16"
   enrollment:
     provider: siderolabs
     includeWellKnownUefiCertificates: false
-    pkAuthSha256: 376357e93a6ec32db748c2eb45656f13c9ee6951af7ab83ee1a8153ae5052f7b # gitleaks:allow -- public enrollment artifact digest
-    kekAuthSha256: d3475be84bbdc6adfe98b5abd26b8ac90fbe4ee227a537713f8c964ae393922e # gitleaks:allow -- public enrollment artifact digest
-    dbAuthSha256: 8fa031d0ecebdab3e4469c7fe95b9b1ed1a390af966e0159093659ecb4d6dff1 # gitleaks:allow -- public enrollment artifact digest
+    pkAuthSha256: 7d7cf9ff27dea79cd039ddf1117ba1d860618bdc5cf52eb4dd2eaa458e169ddf # gitleaks:allow -- public enrollment artifact digest
+    kekAuthSha256: 6b9bfd2b026c4c2de6fd104f0f96e720f78b73f5910dfdff804b9d3d8c119796 # gitleaks:allow -- public enrollment artifact digest
+    dbAuthSha256: 3048c1a98e19d912d1dd8146dae64a5d09c93d5e91c4fb41cac767c0c8f68286 # gitleaks:allow -- public enrollment artifact digest
   signatures:
     secureBootCertificateSha256: 1ae5d7c8ac1032eaf0d2c1a2e6a952517342e8db6b5354d32791a9c960a9472e
     pcrSigningPublicSpkiSha256: 9c42059148e157a030f5edc51bd4967a2a3b1bc64cdd48941a3ece3c3fdc032f

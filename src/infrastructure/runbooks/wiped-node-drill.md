@@ -10,6 +10,10 @@ Run exactly one node at a time. Do not begin another replacement until the
 node, etcd, CNI, LINSTOR, OpenBao, and public edge have all passed their
 recovery gates.
 
+This procedure is only for the three management control-plane/storage nodes.
+Dedicated WUM workers use `wum-worker-reinstall.md`; do not run the etcd,
+LINSTOR, OpenBao, or public-edge steps below for a worker.
+
 Node map:
 
 | Node | Public IP | Private IP |
@@ -17,7 +21,6 @@ Node map:
 | `ash-earth` | `206.223.228.101` | `10.8.0.11` |
 | `ash-wind` | `45.250.254.119` | `10.8.0.12` |
 | `ash-water` | `206.223.228.87` | `10.8.0.13` |
-| `ash-worker0` (WUM game worker; no etcd member to remove) | `206.223.228.99` | `10.8.0.14` |
 
 ## Preconditions
 
@@ -56,7 +59,7 @@ Set these variables for the one target:
 
 ```sh
 MINT=/dev/shm/guardian-talm-mint
-NODE=<ash-earth|ash-wind|ash-water|ash-worker0>
+NODE=<ash-earth|ash-wind|ash-water>
 PUBLIC_IP=<node-public-ip>
 PRIVATE_IP=<node-private-ip>
 ```
@@ -267,9 +270,10 @@ The node is recovered only when all of the following pass:
 
 Use the exact ISO and hashes in
 `src/infrastructure/talm/secureboot-assets.yaml`. Put a new board in UEFI
-Setup mode, boot the pinned factory Sidero Secure Boot ISO, and let it enroll
-the declared PK/KEK/`db` set. Firmware that already has the declared keys
-does not need re-enrollment.
+Setup mode and boot the pinned factory Sidero Secure Boot ISO. On bare metal,
+press Esc at the ISO boot menu and select `Enroll Secure Boot keys: auto`;
+the stock ISO does not auto-enroll on bare metal without that selection.
+Firmware that already has the declared keys does not need re-enrollment.
 
 The managed trust database excludes well-known Microsoft certificates, so a
 provider's Microsoft-signed stock or rescue image is not a recovery

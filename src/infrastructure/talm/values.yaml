@@ -87,6 +87,16 @@ vipLink: "enp1s0f0.2140"
 # The Secure Boot ISO and installer share Sidero's UKI and PCR signing lineage.
 image: "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:c3df0484a3f5f3bb68c77d04998fb977a9df6a5268b93bafdb23f668e6f4ed84"
 
+# Secure Boot and system-volume encryption are independent controls. Every
+# machine installs the Sidero-signed UKI above. The management control planes
+# additionally seal STATE and EPHEMERAL to their TPM because they persist
+# cluster identity and business-system state. Regional WUM workers are
+# disposable compute and persist no sensitive data, so their system volumes
+# remain plaintext and rebuildable.
+systemVolumeEncryption:
+  controlplane: true
+  worker: false
+
 # Dark-uplink bundle mirror, OFF in steady state. Enabling it is a
 # bootstrap-only compromise entered and exited via PRs (pre-drill flip on,
 # aftermath flip off — regenerate the node configs both times): every
@@ -210,6 +220,7 @@ certSANs:
 - 206.223.228.101  # ash-earth
 - 45.250.254.119   # ash-wind
 - 206.223.228.87   # ash-water
+- 206.223.228.99   # ash-worker0
 nr_hugepages: 0
 allocateNodeCIDRs: true
 
@@ -269,22 +280,23 @@ etcd:
 #         - bar=baz
 extraKernelModules: []
 
-# Extra Kubernetes node labels rendered into every machine config. Current ASH
-# management nodes are the key-bearing OpenBao static-seal nodes; key material is
-# placed out of band under /var/lib/guardian/openbao/static-seal and must not be
-# written through machine.files.
-extraNodeLabels:
+# Role-specific labels and taints. Control-plane nodes hold OpenBao static-seal
+# material; dedicated workers run only the regional WUM game plane.
+controlplaneNodeLabels:
   guardian.dev/openbao-static-seal: "true"
+controlplaneNodeTaints: {}
+workerNodeLabels:
+  guardian.dev/dedicated: "wum"
+workerNodeTaints:
+  guardian.dev/dedicated: "wum:NoSchedule"
 
-# Extra Kubernetes node taints rendered into every machine config via kubelet
-# register-with-taints. MUST stay empty while every management node is also a
-# general workload node: register-with-taints applies on FIRST registration,
-# so a cold boot with a cluster-wide NoSchedule taint leaves the whole
-# platform (including the Cozystack installer's own hook Jobs) unschedulable.
-# The 2026-07-01 cold-boot drill hit exactly this; the old cluster never saw
-# it because the taint was added after its nodes had registered. Reintroduce
-# a static-seal taint only for dedicated OpenBao nodes that are not expected
-# to run general workloads (the OpenBao pods already carry the toleration).
+# Additional labels rendered on every machine after its role profile. Keep
+# these empty unless the label really belongs on both control planes and workers.
+extraNodeLabels: {}
+
+# Additional Kubernetes node taints rendered on every machine. A cluster-wide
+# NoSchedule taint can deadlock the Cozystack installer's hook Jobs, so keep the
+# shared extension point empty and put dedicated taints in the role profile.
 extraNodeTaints: {}
 
 # Extra kubelet args added to the preset's kubelet.extraConfig

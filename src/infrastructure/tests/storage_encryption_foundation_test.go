@@ -138,12 +138,13 @@ func TestTalosSecureBootVolumeEncryptionConformance(t *testing.T) {
 	assertNestedString(t, assets, "TalosSecureBootAssets", "kind")
 	assertNestedString(t, assets, "be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5", "spec", "schematic", "id")
 	assertNestedString(t, assets, "sha256:c3df0484a3f5f3bb68c77d04998fb977a9df6a5268b93bafdb23f668e6f4ed84", "spec", "installer", "digest")
-	assertNestedString(t, assets, "f62fd4d79492b3a95bc9e99a71adcfe33353ebb9175ee93785393e537dfb6574", "spec", "iso", "sha256")
+	assertNestedString(t, assets, "0eb58631ff9757a203dab2d761e258dc504f40a9c57df48119ed9b93c9bb51a8", "spec", "iso", "sha256")
+	assertNestedString(t, assets, "2026-08-16", "spec", "iso", "observedAt")
 	assertNestedString(t, assets, "siderolabs", "spec", "enrollment", "provider")
 	assertNestedBool(t, assets, false, "spec", "enrollment", "includeWellKnownUefiCertificates")
-	assertNestedString(t, assets, "376357e93a6ec32db748c2eb45656f13c9ee6951af7ab83ee1a8153ae5052f7b", "spec", "enrollment", "pkAuthSha256")
-	assertNestedString(t, assets, "d3475be84bbdc6adfe98b5abd26b8ac90fbe4ee227a537713f8c964ae393922e", "spec", "enrollment", "kekAuthSha256")
-	assertNestedString(t, assets, "8fa031d0ecebdab3e4469c7fe95b9b1ed1a390af966e0159093659ecb4d6dff1", "spec", "enrollment", "dbAuthSha256")
+	assertNestedString(t, assets, "7d7cf9ff27dea79cd039ddf1117ba1d860618bdc5cf52eb4dd2eaa458e169ddf", "spec", "enrollment", "pkAuthSha256")
+	assertNestedString(t, assets, "6b9bfd2b026c4c2de6fd104f0f96e720f78b73f5910dfdff804b9d3d8c119796", "spec", "enrollment", "kekAuthSha256")
+	assertNestedString(t, assets, "3048c1a98e19d912d1dd8146dae64a5d09c93d5e91c4fb41cac767c0c8f68286", "spec", "enrollment", "dbAuthSha256")
 	assertNestedString(t, assets, "1ae5d7c8ac1032eaf0d2c1a2e6a952517342e8db6b5354d32791a9c960a9472e", "spec", "signatures", "secureBootCertificateSha256")
 	assertNestedString(t, assets, "9c42059148e157a030f5edc51bd4967a2a3b1bc64cdd48941a3ece3c3fdc032f", "spec", "signatures", "pcrSigningPublicSpkiSha256")
 
@@ -151,11 +152,14 @@ func TestTalosSecureBootVolumeEncryptionConformance(t *testing.T) {
 	values := readText(t, valuesPath)
 	assertTextContains(t, values, `image: "`+installer+`"`, valuesPath)
 	assertTextContains(t, values, "- factory.talos.dev", valuesPath)
+	assertTextContains(t, values, "systemVolumeEncryption:\n  controlplane: true\n  worker: false", valuesPath)
 
 	templatePath := runfilePath("src/infrastructure/talm/templates/_helpers.tpl")
 	template := readText(t, templatePath)
 	for _, want := range []string{
 		`"a|^/dev/mapper/luks2-r-guardian-data$|"`,
+		`hasKey $systemVolumeEncryption .MachineType`,
+		`index $systemVolumeEncryption .MachineType`,
 		"name: STATE",
 		"name: EPHEMERAL",
 		"provider: luks2",
@@ -194,5 +198,40 @@ func TestTalosSecureBootVolumeEncryptionConformance(t *testing.T) {
 		assertTextContains(t, nodeConfig, "image: "+installer, nodePath)
 		assertTextContains(t, nodeConfig, "name: STATE", nodePath)
 		assertTextContains(t, nodeConfig, "name: EPHEMERAL", nodePath)
+	}
+
+	workerPath := "src/infrastructure/talm/nodes/ash-worker0.yaml"
+	worker := readText(t, runfilePath(workerPath))
+	for _, want := range []string{
+		"type: worker",
+		"206.223.228.99",
+		"serial: 362510FCEFF6",
+		"guardian.dev/dedicated: wum",
+		"guardian.dev/dedicated: wum:NoSchedule",
+		"image: " + installer,
+	} {
+		assertTextContains(t, worker, want, workerPath)
+	}
+	for _, forbidden := range []string{
+		"name: STATE",
+		"name: EPHEMERAL",
+		"guardian.dev/openbao-static-seal",
+		"kind: Layer2VIPConfig",
+	} {
+		assertTextNotContains(t, worker, forbidden, workerPath)
+	}
+
+	workerOverlayPath := "src/infrastructure/talm/nodes/ash-worker0-overlay.yaml"
+	workerOverlay := readText(t, runfilePath(workerOverlayPath))
+	for _, want := range []string{
+		`serial: "362510FCEFF6"`,
+		"hostname: ash-worker0",
+		"address: 10.8.0.14/24",
+		"node: ash-worker0",
+	} {
+		assertTextContains(t, workerOverlay, want, workerOverlayPath)
+	}
+	for _, forbidden := range []string{"kind: RawVolumeConfig", "r-guardian-data"} {
+		assertTextNotContains(t, workerOverlay, forbidden, workerOverlayPath)
 	}
 }

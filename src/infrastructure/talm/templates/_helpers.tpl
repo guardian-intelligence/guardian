@@ -9,8 +9,20 @@
 {{- /* Shared machine section: type, nodeLabels (controlplane), kubelet, sysctls, kernel, certSANs, files, install */ -}}
 {{- define "talos.config.machine.common" }}
 machine:
-  {{- if and (eq .MachineType "controlplane") (hasKey (.Values.extraNodeLabels | default dict) "node.kubernetes.io/exclude-from-external-load-balancers") }}
-  {{- fail "values.yaml: extraNodeLabels.node.kubernetes.io/exclude-from-external-load-balancers collides with the cozystack preset's control-plane label patch; remove it or fork the preset." }}
+  {{- $profileNodeLabels := ternary (.Values.controlplaneNodeLabels | default dict) (.Values.workerNodeLabels | default dict) (eq .MachineType "controlplane") }}
+  {{- $profileNodeTaints := ternary (.Values.controlplaneNodeTaints | default dict) (.Values.workerNodeTaints | default dict) (eq .MachineType "controlplane") }}
+  {{- if and (eq .MachineType "controlplane") (hasKey $profileNodeLabels "node.kubernetes.io/exclude-from-external-load-balancers") }}
+  {{- fail "values.yaml: controlplaneNodeLabels.node.kubernetes.io/exclude-from-external-load-balancers collides with the cozystack preset's control-plane label patch; remove it or fork the preset." }}
+  {{- end }}
+  {{- range $key, $_ := (.Values.extraNodeLabels | default dict) }}
+    {{- if hasKey $profileNodeLabels $key }}
+      {{- fail (printf "values.yaml: extraNodeLabels.%s collides with the %s node profile; remove the duplicate or fork the preset." $key $.MachineType) }}
+    {{- end }}
+  {{- end }}
+  {{- range $key, $_ := (.Values.extraNodeTaints | default dict) }}
+    {{- if hasKey $profileNodeTaints $key }}
+      {{- fail (printf "values.yaml: extraNodeTaints.%s collides with the %s node profile; remove the duplicate or fork the preset." $key $.MachineType) }}
+    {{- end }}
   {{- end }}
   {{- if .Values.darkBundleMirror.enabled }}
   # DARK BOOTSTRAP: a dark node has no route to public NTP; the mirror host
@@ -19,19 +31,27 @@ machine:
     servers:
       - {{ .Values.darkBundleMirror.timeServer }}
   {{- end }}
-  {{- if or (eq .MachineType "controlplane") .Values.extraNodeLabels }}
+  {{- if or (eq .MachineType "controlplane") $profileNodeLabels .Values.extraNodeLabels }}
   nodeLabels:
     {{- if eq .MachineType "controlplane" }}
     node.kubernetes.io/exclude-from-external-load-balancers:
       $patch: delete
     {{- end }}
+    {{- with $profileNodeLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
     {{- with .Values.extraNodeLabels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
   {{- end }}
-  {{- with .Values.extraNodeTaints }}
+  {{- if or $profileNodeTaints .Values.extraNodeTaints }}
   nodeTaints:
+    {{- with $profileNodeTaints }}
     {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.extraNodeTaints }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   {{- end }}
   type: {{ .MachineType }}
   {{- if eq .MachineType "controlplane" }}
@@ -477,6 +497,11 @@ apiVersion: v1alpha1
 kind: WatchdogTimerConfig
 device: /dev/watchdog0
 timeout: 1m
+{{- $systemVolumeEncryption := .Values.systemVolumeEncryption | default dict }}
+{{- if not (hasKey $systemVolumeEncryption .MachineType) }}
+{{- fail (printf "values.yaml: systemVolumeEncryption.%s must be set explicitly" .MachineType) }}
+{{- end }}
+{{- if (index $systemVolumeEncryption .MachineType) }}
 ---
 apiVersion: v1alpha1
 kind: VolumeConfig
@@ -504,6 +529,7 @@ encryption:
           pcrs:
             - 7
       lockToState: true
+{{- end }}
 ---
 # Host ingress firewall: default-deny. Talos does not exempt pod-sourced
 # traffic, so node and pod sources are admitted separately. The private VLAN
