@@ -87,22 +87,6 @@ data:
           }
         },
         {
-          "clientId": "mythra-loadgen",
-          "name": "Wake Up Mythra load driver",
-          "enabled": true,
-          "protocol": "openid-connect",
-          "publicClient": false,
-          "clientAuthenticatorType": "client-secret",
-          "secret": "${WUM_MYTHRA_LOADGEN_CLIENT_SECRET}",
-          "standardFlowEnabled": false,
-          "directAccessGrantsEnabled": false,
-          "implicitFlowEnabled": false,
-          "serviceAccountsEnabled": true,
-          "fullScopeAllowed": false,
-          "redirectUris": [],
-          "webOrigins": []
-        },
-        {
           "clientId": "wum-realm-reconciler",
           "name": "WUM realm reconciler",
           "enabled": true,
@@ -213,23 +197,6 @@ data:
         "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "https://wakeupmythra.com/"
       }
-    }
-  mythra-loadgen.json: |
-    {
-      "clientId": "mythra-loadgen",
-      "name": "Wake Up Mythra load driver",
-      "enabled": true,
-      "protocol": "openid-connect",
-      "publicClient": false,
-      "clientAuthenticatorType": "client-secret",
-      "secret": "${vault.mythra-loadgen-client-secret}",
-      "standardFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
-      "implicitFlowEnabled": false,
-      "serviceAccountsEnabled": true,
-      "fullScopeAllowed": false,
-      "redirectUris": [],
-      "webOrigins": []
     }
   wum-realm-reconciler.json: |
     {

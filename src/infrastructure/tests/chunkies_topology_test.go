@@ -50,11 +50,4 @@ func TestChunkiesDedicatedParkTopology(t *testing.T) {
 	assertTextContains(t, manifest, "name: INTERNAL_HOST\n              value: 127.0.0.1", path)
 	assertTextContains(t, manifest, `{"$imagepolicy": "guardian-imageops:chunkies-gateway"}`, path)
 	assertTextContains(t, manifest, `{"$imagepolicy": "guardian-imageops:chunkies-park"}`, path)
-
-	canaryPath := runfilePath("src/infrastructure/deployments/mythra/prod/chunkies-canary.yaml")
-	canary := readText(t, canaryPath)
-	assertTextContains(t, canary, "name: chunkies-loadgen-canary", canaryPath)
-	assertTextContains(t, canary, "value: https://206.223.228.99:4433/wt", canaryPath)
-	assertTextContains(t, canary, "value: http://chunkies-gateway.tenant-guardian-prod.svc/session", canaryPath)
-	assertTextContains(t, canary, "value: park-chunkies-canary", canaryPath)
 }

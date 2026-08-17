@@ -5,7 +5,6 @@ resources:
   - behavior-configmap.yaml
   - certificate.yaml
   - chunkies.yaml
-  - chunkies-canary.yaml
   - deployment.yaml
   - internal-keys.yaml
   - networkpolicy.yaml

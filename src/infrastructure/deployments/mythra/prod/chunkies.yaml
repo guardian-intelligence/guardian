@@ -61,7 +61,7 @@ spec:
             - name: OIDC_JWKS_URL
               value: http://keycloak.tenant-guardian-prod.svc/realms/wakeupmythra.com/protocol/openid-connect/certs
             - name: OIDC_CLIENT_IDS
-              value: wake-up-mythra,mythra-loadgen
+              value: wake-up-mythra
             - name: REQUIRE_EMAIL_VERIFIED
               value: "false"
             - name: PARK_BACKENDS
