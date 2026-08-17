@@ -45,7 +45,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: mythrad
-          image: ghcr.io/guardian-intelligence/mythrad:edge@sha256:03cff9b7af909e4552e84b3663b0348831cc7a5c51a480bcd67e95d3280c5f40 # {"$imagepolicy": "guardian-imageops:mythrad"}
+          image: ghcr.io/guardian-intelligence/mythrad:edge@sha256:6d431f6559c64aca926806cf53d2464b9ddaf8b3c2d8dbd3f351fb7667832043 # {"$imagepolicy": "guardian-imageops:mythrad"}
           env:
             - name: MAX_SESSIONS
               value: "4000"

@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: gateway
-          image: ghcr.io/guardian-intelligence/chunkies-gateway:edge@sha256:3c4083f4d4390036ace741520dc946cd2aad49da23100c6586e3c9bb065137e6 # {"$imagepolicy": "guardian-imageops:chunkies-gateway"}
+          image: ghcr.io/guardian-intelligence/chunkies-gateway:edge@sha256:d6999a8c248b92c628c1ec7a87d8d5d04bdf9a9fe635d0ab6b964649bb816a7c # {"$imagepolicy": "guardian-imageops:chunkies-gateway"}
           env:
             - name: MAX_SESSIONS
               value: "4000"
@@ -216,7 +216,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: park
-          image: ghcr.io/guardian-intelligence/chunkies-park:edge@sha256:5f871fa03362ab1c884399a715d6ca8b60721b6eafbea30b11a2c6e42fa86127 # {"$imagepolicy": "guardian-imageops:chunkies-park"}
+          image: ghcr.io/guardian-intelligence/chunkies-park:edge@sha256:ca2a2864a4cab9e9f9a94a7c3644ad83ef8ec7c976b204a38b9b21f2ece51f9e # {"$imagepolicy": "guardian-imageops:chunkies-park"}
           env:
             - name: PARK_NAME
               value: park-chunkies-canary
