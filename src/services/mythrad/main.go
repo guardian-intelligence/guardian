@@ -503,7 +503,7 @@ func runMythrad() {
 	}
 	issuer := envStr("OIDC_ISSUER", "https://auth.wakeupmythra.com/realms/wakeupmythra.com")
 	jwksURL := envStr("OIDC_JWKS_URL", "")
-	clientIDs := envStr("OIDC_CLIENT_IDS", "wake-up-mythra,mythra-loadgen")
+	clientIDs := envStr("OIDC_CLIENT_IDS", "wake-up-mythra")
 	requireEmail := envStr("REQUIRE_EMAIL_VERIFIED", "false") == "true"
 	// Parks are a fixed registry: /session refuses names outside it, so an
 	// authority (wazero runtime, goroutine, journal rows) only ever opens

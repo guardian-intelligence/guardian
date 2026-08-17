@@ -97,12 +97,6 @@ in milliseconds; journal commit and network RTT are not tick-rate work and
 should not be credited to it. `WUM_DEV_TICK_HZ` changes the startup baseline
 when a different experiment needs one; it is not used by this live handoff.
 
-## Load bots
-
-The dev issuer honors the `client_credentials` grant for any client id, so
-loadgen's real admission path (`azp=mythra-loadgen` + `?bot=<n>` subject
-suffixes) works locally without secrets.
-
 ## Degradation harness
 
 `netsim` is a dev-time UDP impairment proxy between the browser's

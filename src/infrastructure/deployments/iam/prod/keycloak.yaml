@@ -162,11 +162,6 @@ spec:
                 secretKeyRef:
                   name: keycloak-wum-realm-reconciler-client
                   key: password
-            - name: WUM_MYTHRA_LOADGEN_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-mythra-loadgen-client
-                  key: password
             # File-vault provider: the realm's GitHub IdP clientSecret is a
             # vault expression resolved at USE time from the mounted file
             # below, so the OAuth secret never enters the Keycloak database —
@@ -276,11 +271,6 @@ spec:
                   items:
                     - key: password
                       path: guardianintelligence.org_canary-janitor-client-secret
-              - secret:
-                  name: keycloak-mythra-loadgen-client
-                  items:
-                    - key: password
-                      path: wakeupmythra.com_mythra-loadgen-client-secret
               - secret:
                   name: keycloak-wum-realm-reconciler-client
                   items:

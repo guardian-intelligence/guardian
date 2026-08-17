@@ -208,20 +208,6 @@ func TestWakeUpMythraRealmConformance(t *testing.T) {
 		t.Fatal("the web client must require PKCE S256")
 	}
 
-	loadgen := importedClients["mythra-loadgen"]
-	if loadgen.Secret != "${WUM_MYTHRA_LOADGEN_CLIENT_SECRET}" || loadgen.PublicClient ||
-		!loadgen.ServiceAccountsEnabled || loadgen.FullScopeAllowed ||
-		loadgen.StandardFlowEnabled || loadgen.DirectAccessGrantsEnabled {
-		t.Fatal("the load driver must be a confidential service account with no login flows")
-	}
-	var loadgenDesired keycloakClientRepresentation
-	if err := json.Unmarshal([]byte(clientJSON["mythra-loadgen.json"]), &loadgenDesired); err != nil {
-		t.Fatal(err)
-	}
-	if loadgenDesired.Secret != "${vault.mythra-loadgen-client-secret}" {
-		t.Fatal("the load driver client secret must remain a Vault SPI reference")
-	}
-
 	reconcilerClient := importedClients["wum-realm-reconciler"]
 	if reconcilerClient.Secret != "${WUM_REALM_RECONCILER_CLIENT_SECRET}" ||
 		!reconcilerClient.ServiceAccountsEnabled || !reconcilerClient.FullScopeAllowed {
@@ -312,6 +298,4 @@ func TestWakeUpMythraRealmConformance(t *testing.T) {
 	}
 	assertTextNotContains(t, string(guardianRaw), `wake-up-mythra`,
 		"the Guardian realm must not carry the game's web client")
-	assertTextNotContains(t, string(guardianRaw), `mythra-loadgen`,
-		"the Guardian realm must not carry the game's load driver")
 }

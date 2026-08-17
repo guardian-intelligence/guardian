@@ -299,16 +299,6 @@ func (h *gameHandlers) handleSessionMint(gate *oidcGate, publicAddr string, cert
 				http.Error(w, "email verification required", http.StatusForbidden)
 				return
 			}
-			// The load driver's single service account fans out into distinct
-			// bot identities; only its azp may claim a suffix, so a stolen
-			// player token can never mint someone else's dog.
-			if bot := r.URL.Query().Get("bot"); bot != "" {
-				if id.Azp != "mythra-loadgen" || len(bot) > 16 {
-					http.Error(w, "bot suffix not allowed", http.StatusForbidden)
-					return
-				}
-				id.Sub += "/bot-" + bot
-			}
 			sub = id.Sub
 			mMints.WithLabelValues("ok").Inc()
 		}

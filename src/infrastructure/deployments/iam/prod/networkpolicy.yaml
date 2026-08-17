@@ -66,16 +66,6 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
-    # The mythra load driver mints WUM-realm client-credentials tokens over
-    # the in-cluster service (a pod identity — the host-entity admit that
-    # covers hostNetwork mythrad does not extend to it).
-    - fromEndpoints:
-        - matchLabels:
-            app.kubernetes.io/name: mythrad-loadgen
-      toPorts:
-        - ports:
-            - port: "8080"
-              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:

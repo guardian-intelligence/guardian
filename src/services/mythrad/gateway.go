@@ -84,7 +84,7 @@ func runChunkiesGateway() {
 	assets := newAssetCatalog(envStr("ASSET_DIR", "/etc/mythra/assets"))
 
 	issuer := envStr("OIDC_ISSUER", "https://auth.wakeupmythra.com/realms/wakeupmythra.com")
-	gate := newOIDCGate(issuer, envStr("OIDC_JWKS_URL", ""), envStr("OIDC_CLIENT_IDS", "wake-up-mythra,mythra-loadgen"), os.Getenv("REQUIRE_EMAIL_VERIFIED") == "true")
+	gate := newOIDCGate(issuer, envStr("OIDC_JWKS_URL", ""), envStr("OIDC_CLIENT_IDS", "wake-up-mythra"), os.Getenv("REQUIRE_EMAIL_VERIFIED") == "true")
 	allowedParks := map[string]bool{}
 	for park := range backends {
 		allowedParks[park] = true
