@@ -66,9 +66,9 @@ password, offline refresh cache, or write-persona token in a Cursor secret or
 environment snapshot.
 </cursor_cloud>
 
-Product Surfaces:
-
+<products>
 - Postflight - GitHub App, Blacksmith.sh but using QEMU warm pool, CRIU, on SEV-SNP hardware, ZFS for caching build artifacts and memory snapshots to create a "golden image" per repo. (In Progress)
 - "Wake Up, Mythra!" (WUM) - Web game (native mobile apps planned) online cooperative city simulation tied to real-world dog parks.
+</products>
 
 Small note: `docs/TRIBAL_KNOWLEDGE.md` is useful to read for tricky issues.
