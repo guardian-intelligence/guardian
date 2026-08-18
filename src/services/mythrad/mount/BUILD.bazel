@@ -1,0 +1,24 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+exports_files(
+    [
+        "behaviors/client.wasm",
+        "behaviors/park.wasm",
+    ],
+    visibility = ["//src/services/mythrad/sim:__pkg__"],
+)
+
+go_library(
+    name = "mount",
+    srcs = ["mount.go"],
+    embedsrcs = [
+        "behaviors/client.wasm",
+        "behaviors/park.wasm",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/mythrad/mount",
+    visibility = ["//src/services/mythrad:__subpackages__"],
+    deps = [
+        "@com_github_prometheus_client_golang//prometheus:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus/promauto:go_default_library",
+    ],
+)

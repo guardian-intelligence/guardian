@@ -1,4 +1,4 @@
-package main
+package parkproxy
 
 import (
 	"context"
@@ -19,12 +19,12 @@ import (
 const (
 	proxyMagic      = "CHUNKY01"
 	proxyMaxPayload = 1 << 20
-	proxyStream     = 1
-	proxyDatagram   = 2
-	proxyClose      = 3
+	KindStream     = 1
+	KindDatagram   = 2
+	KindClose      = 3
 )
 
-type proxyOpen struct {
+type Open struct {
 	Sub       string
 	Park      string
 	Role      string
@@ -33,12 +33,12 @@ type proxyOpen struct {
 	SinceTick uint64
 }
 
-type proxyConn struct {
+type Conn struct {
 	net.Conn
 	writeMu sync.Mutex
 }
 
-func proxyKey(path string) ([]byte, error) {
+func ReadKey(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -50,12 +50,12 @@ func proxyKey(path string) ([]byte, error) {
 	return b, nil
 }
 
-func dialProxy(ctx context.Context, addr string, key []byte, open proxyOpen) (*proxyConn, error) {
+func Dial(ctx context.Context, addr string, key []byte, open Open) (*Conn, error) {
 	c, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	p := &proxyConn{Conn: c}
+	p := &Conn{Conn: c}
 	if err := p.writeOpen(key, open); err != nil {
 		c.Close()
 		return nil, err
@@ -63,12 +63,12 @@ func dialProxy(ctx context.Context, addr string, key []byte, open proxyOpen) (*p
 	return p, nil
 }
 
-func acceptProxy(c net.Conn, key []byte, now time.Time) (*proxyConn, proxyOpen, error) {
-	p := &proxyConn{Conn: c}
+func Accept(c net.Conn, key []byte, now time.Time) (*Conn, Open, error) {
+	p := &Conn{Conn: c}
 	open, err := p.readOpen(key, now)
 	if err != nil {
 		c.Close()
-		return nil, proxyOpen{}, err
+		return nil, Open{}, err
 	}
 	return p, open, nil
 }
@@ -95,7 +95,7 @@ func takeProxyString(b []byte, at *int) (string, error) {
 	return s, nil
 }
 
-func (p *proxyConn) writeOpen(key []byte, open proxyOpen) error {
+func (p *Conn) writeOpen(key []byte, open Open) error {
 	b := make([]byte, 0, 128)
 	b = append(b, proxyMagic...)
 	b = binary.LittleEndian.AppendUint64(b, uint64(time.Now().Unix()))
@@ -130,37 +130,37 @@ func (p *proxyConn) writeOpen(key []byte, open proxyOpen) error {
 	return err
 }
 
-func (p *proxyConn) readOpen(key []byte, now time.Time) (proxyOpen, error) {
+func (p *Conn) readOpen(key []byte, now time.Time) (Open, error) {
 	p.SetReadDeadline(now.Add(5 * time.Second))
 	defer p.SetReadDeadline(time.Time{})
 	var size [2]byte
 	if _, err := io.ReadFull(p, size[:]); err != nil {
-		return proxyOpen{}, err
+		return Open{}, err
 	}
 	n := int(binary.LittleEndian.Uint16(size[:]))
 	if n < len(proxyMagic)+8+16+8+8+32 || n > 65535 {
-		return proxyOpen{}, errors.New("bad proxy open size")
+		return Open{}, errors.New("bad proxy open size")
 	}
 	b := make([]byte, n)
 	if _, err := io.ReadFull(p, b); err != nil {
-		return proxyOpen{}, err
+		return Open{}, err
 	}
 	body, sig := b[:len(b)-sha256.Size], b[len(b)-sha256.Size:]
 	mac := hmac.New(sha256.New, key)
 	mac.Write(body)
 	if !hmac.Equal(sig, mac.Sum(nil)) {
-		return proxyOpen{}, errors.New("bad proxy signature")
+		return Open{}, errors.New("bad proxy signature")
 	}
 	if string(body[:len(proxyMagic)]) != proxyMagic {
-		return proxyOpen{}, errors.New("bad proxy magic")
+		return Open{}, errors.New("bad proxy magic")
 	}
 	at := len(proxyMagic)
 	ts := int64(binary.LittleEndian.Uint64(body[at:]))
 	at += 8 + 16
 	if d := now.Sub(time.Unix(ts, 0)); d < -30*time.Second || d > 30*time.Second {
-		return proxyOpen{}, errors.New("stale proxy open")
+		return Open{}, errors.New("stale proxy open")
 	}
-	open := proxyOpen{
+	open := Open{
 		SinceSeq:  int64(binary.LittleEndian.Uint64(body[at:])),
 		SinceTick: binary.LittleEndian.Uint64(body[at+8:]),
 	}
@@ -169,17 +169,17 @@ func (p *proxyConn) readOpen(key []byte, now time.Time) (proxyOpen, error) {
 	for _, field := range fields {
 		s, err := takeProxyString(body, &at)
 		if err != nil {
-			return proxyOpen{}, err
+			return Open{}, err
 		}
 		*field = s
 	}
 	if at != len(body) || open.Sub == "" || open.Park == "" || (open.Role != "player" && open.Role != "spectator") {
-		return proxyOpen{}, errors.New("bad proxy open")
+		return Open{}, errors.New("bad proxy open")
 	}
 	return open, nil
 }
 
-func (p *proxyConn) writeMessage(kind byte, payload []byte) error {
+func (p *Conn) WriteMessage(kind byte, payload []byte) error {
 	if len(payload) > proxyMaxPayload {
 		return errors.New("proxy payload too large")
 	}
@@ -197,7 +197,7 @@ func (p *proxyConn) writeMessage(kind byte, payload []byte) error {
 	return err
 }
 
-func (p *proxyConn) readMessage() (byte, []byte, error) {
+func (p *Conn) ReadMessage() (byte, []byte, error) {
 	var head [5]byte
 	if _, err := io.ReadFull(p, head[:]); err != nil {
 		return 0, nil, err

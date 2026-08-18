@@ -54,19 +54,19 @@ sh_test(
 diff_test(
     name = "client_artifact_current_test",
     file1 = "//src/services/mythrad/sim/client:client_wasm",
-    file2 = "//src/services/mythrad:behaviors/client.wasm",
+    file2 = "//src/services/mythrad/mount:behaviors/client.wasm",
 )
 
 diff_test(
     name = "park_artifact_current_test",
     file1 = "//src/services/mythrad/sim/shared:park_wasm",
-    file2 = "//src/services/mythrad:behaviors/park.wasm",
+    file2 = "//src/services/mythrad/mount:behaviors/park.wasm",
 )
 
 diff_test(
     name = "fixture_artifact_current_test",
     file1 = "//src/services/mythrad/sim/shared:fixture_park",
-    file2 = "//src/services/mythrad:terrain/fixture_park.bin",
+    file2 = "//src/services/mythrad/wum:fixture_park.bin",
 )
 
 diff_test(
@@ -83,12 +83,12 @@ diff_test(
 
 diff_test(
     name = "client_configmap_lockstep_test",
-    file1 = "//src/services/mythrad:behaviors/client.wasm",
+    file1 = "//src/services/mythrad/mount:behaviors/client.wasm",
     file2 = "//src/infrastructure/deployments/mythra/prod:behavior/client.wasm",
 )
 
 diff_test(
     name = "park_configmap_lockstep_test",
-    file1 = "//src/services/mythrad:behaviors/park.wasm",
+    file1 = "//src/services/mythrad/mount:behaviors/park.wasm",
     file2 = "//src/infrastructure/deployments/mythra/prod:behavior/park.wasm",
 )

@@ -1,4 +1,4 @@
-package main
+package park
 
 import (
 	"encoding/binary"

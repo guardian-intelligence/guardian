@@ -1,0 +1,51 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "park",
+    srcs = [
+        "config.go",
+        "metrics.go",
+        "park.go",
+        "server.go",
+        "session.go",
+        "terrain.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/mythrad/park",
+    visibility = ["//src/services/mythrad:__subpackages__"],
+    deps = [
+        "//src/services/mythrad/journal",
+        "//src/services/mythrad/mount",
+        "//src/services/mythrad/parkproxy",
+        "//src/services/mythrad/wire",
+        "//src/services/mythrad/wum",
+        "//src/services/telemetry",
+        "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus/promauto:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus/promhttp:go_default_library",
+        "@com_github_tetratelabs_wazero//:go_default_library",
+        "@com_github_tetratelabs_wazero//api:go_default_library",
+        "@io_opentelemetry_go_otel//:go_default_library",
+        "@io_opentelemetry_go_otel//attribute:go_default_library",
+        "@io_opentelemetry_go_otel_trace//:go_default_library",
+    ],
+)
+
+go_test(
+    name = "park_test",
+    srcs = ["authority_test.go"],
+    data = [
+        "//src/tools/postgres:dist",
+        "//src/tools/postgres:initdb",
+    ],
+    embed = [":park"],
+    env = {"PGTEST_INITDB": "$(rootpath //src/tools/postgres:initdb)"},
+    deps = [
+        "//src/services/mythrad/journal",
+        "//src/services/mythrad/mount",
+        "//src/services/mythrad/wire",
+        "//src/services/mythrad/wum",
+        "//src/services/postflight/controlplane/pgtest",
+        "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
+    ],
+)

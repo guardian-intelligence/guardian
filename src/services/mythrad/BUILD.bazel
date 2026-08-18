@@ -1,52 +1,15 @@
-load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
-exports_files(
-    [
-        "behaviors/client.wasm",
-        "behaviors/park.wasm",
-        "terrain/fixture_park.bin",
-    ],
-    visibility = ["//src/services/mythrad/sim:__pkg__"],
-)
-
 go_library(
     name = "mythrad_lib",
-    srcs = [
-        "auth.go",
-        "gateway.go",
-        "main.go",
-        "park.go",
-        "park_server.go",
-        "proxy.go",
-        "session.go",
-        "terrain.go",
-    ],
-    embedsrcs = [
-        "behaviors/client.wasm",
-        "behaviors/park.wasm",
-        "terrain/fixture_park.bin",
-    ],
+    srcs = ["main.go"],
     importpath = "github.com/guardian-intelligence/guardian/src/services/mythrad",
     visibility = ["//visibility:private"],
     deps = [
-        "//src/services/mythrad/journal",
-        "//src/services/mythrad/wire",
-        "//src/services/telemetry",
-        "@com_github_coreos_go_oidc_v3//oidc:go_default_library",
-        "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
-        "@com_github_prometheus_client_golang//prometheus:go_default_library",
-        "@com_github_prometheus_client_golang//prometheus/promauto:go_default_library",
-        "@com_github_prometheus_client_golang//prometheus/promhttp:go_default_library",
-        "@com_github_quic_go_quic_go//:go_default_library",
-        "@com_github_quic_go_quic_go//http3:go_default_library",
-        "@com_github_quic_go_webtransport_go//:go_default_library",
-        "@com_github_tetratelabs_wazero//:go_default_library",
-        "@com_github_tetratelabs_wazero//api:go_default_library",
-        "@io_opentelemetry_go_otel//:go_default_library",
-        "@io_opentelemetry_go_otel//attribute:go_default_library",
-        "@io_opentelemetry_go_otel_trace//:go_default_library",
+        "//src/services/mythrad/gateway",
+        "//src/services/mythrad/park",
     ],
 )
 
@@ -62,29 +25,6 @@ go_binary(
     embed = [":mythrad_lib"],
     pure = "on",
     visibility = ["//visibility:public"],
-)
-
-go_test(
-    name = "mythrad_test",
-    srcs = [
-        "auth_test.go",
-        "authority_test.go",
-        "gateway_relay_test.go",
-        "gametest_wum_test.go",
-        "proxy_test.go",
-    ],
-    data = [
-        "//src/tools/postgres:dist",
-        "//src/tools/postgres:initdb",
-    ],
-    embed = [":mythrad_lib"],
-    env = {"PGTEST_INITDB": "$(rootpath //src/tools/postgres:initdb)"},
-    deps = [
-        "//src/services/mythrad/gametest",
-        "//src/services/mythrad/journal",
-        "//src/services/postflight/controlplane/pgtest",
-        "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
-    ],
 )
 
 pkg_tar(
@@ -113,6 +53,12 @@ oci_image(
     ],
     tars = [":chunkies_gateway_layer"],
     visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "chunkies_gateway_load",
+    image = ":chunkies_gateway_image",
+    repo_tags = ["guardian/chunkies-gateway:dev"],
 )
 
 oci_push(
