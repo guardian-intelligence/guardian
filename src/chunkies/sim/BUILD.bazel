@@ -91,11 +91,11 @@ diff_test(
 diff_test(
     name = "client_configmap_lockstep_test",
     file1 = "//src/chunkies/mount:behaviors/client.wasm",
-    file2 = "//src/infrastructure/deployments/mythra/prod:behavior/client.wasm",
+    file2 = "//src/games/wake-up-mythra/deploy/prod:behavior/client.wasm",
 )
 
 diff_test(
     name = "park_configmap_lockstep_test",
     file1 = "//src/chunkies/mount:behaviors/park.wasm",
-    file2 = "//src/infrastructure/deployments/mythra/prod:behavior/park.wasm",
+    file2 = "//src/games/wake-up-mythra/deploy/prod:behavior/park.wasm",
 )

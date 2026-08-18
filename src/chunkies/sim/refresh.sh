@@ -14,7 +14,7 @@ here="$(dirname "${BASH_SOURCE[0]}")"
 root="$here/../../.."
 game="$root/src/games/wake-up-mythra/sim"
 svc="$BUILD_WORKSPACE_DIRECTORY/src/chunkies/mount/behaviors"
-prod="$BUILD_WORKSPACE_DIRECTORY/src/infrastructure/deployments/mythra/prod/behavior"
+prod="$BUILD_WORKSPACE_DIRECTORY/src/games/wake-up-mythra/deploy/prod/behavior"
 
 install -m 0644 "$here/client/client.wasm" "$svc/client.wasm"
 install -m 0644 "$game/park.wasm" "$svc/park.wasm"

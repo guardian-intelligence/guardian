@@ -3,7 +3,7 @@
 Read-only status and logs use the standing platform-agent persona. Journal
 queries and immediate service recovery mint separate, 15-minute Kubernetes
 capability tokens; the corresponding RBAC and fail-closed admission policies
-live in deployments/mythra/prod/agent-ops.yaml.
+live in src/games/wake-up-mythra/deploy/prod/agent-ops.yaml.
 """
 
 load(

@@ -24,6 +24,7 @@ on:
       - "src/infrastructure/bootstrap/bundle/images.declared.lock"
       - "src/infrastructure/deployments/**"
       - "src/infrastructure/base/**"
+      - "src/games/wake-up-mythra/deploy/**"
       - "src/infrastructure/imageset/**"
       - "src/infrastructure/cmd/imageset/**"
       - "src/infrastructure/talm/values.yaml"
