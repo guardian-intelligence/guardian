@@ -133,7 +133,7 @@ sim ticks at 24Hz.
 
 | Artifact | Status | Notes |
 |---|---|---|
-| `//src/services/mythrad/sim:refresh` + lockstep diff tests | live | Committed wasm bytes provably match Rust source |
+| `//src/chunkies/sim:refresh` + lockstep diff tests | live | Committed wasm bytes provably match Rust source |
 | `world_hash` oracle | live | Core export, stamped on ticks 1/s, re-derived and verified by every client (world ✓ pill); the cross-surface determinism assertion |
 | `//qa:surfaces` runner | planned | One command: build → local server → scripted taps on every surface → all `world_hash` values equal at a barrier tick. `--devices` adds simulators + the physical rack |
 | Device rack | planned (~$2.4k) | Mac mini controller (iOS automation host + simulators + macOS surface), iPhone (have), base iPad, Pixel, mid-tier Samsung, low-end MediaTek (the floor gate), powered hub, scrcpy/QuickTime mirror wall |

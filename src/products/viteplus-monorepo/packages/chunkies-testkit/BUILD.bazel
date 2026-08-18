@@ -5,7 +5,7 @@ npm_link_all_packages()
 
 exports_files(
     ["goldens/records.json"],
-    visibility = ["//src/services/mythrad/sim:__pkg__"],
+    visibility = ["//src/chunkies/sim:__pkg__"],
 )
 
 exports_files(
@@ -13,7 +13,7 @@ exports_files(
         "goldens/caps.txt",
         "goldens/vectors.txt",
     ],
-    visibility = ["//src/services/mythrad/codec:__pkg__"],
+    visibility = ["//src/chunkies/codec:__pkg__"],
 )
 
 CHUNKIES_TESTKIT_SRCS = glob([

@@ -1,0 +1,158 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_shared_library", "rust_test", "rustfmt_test")
+load("//src/chunkies/sim:wasm.bzl", "wasm_module")
+
+SIM_ROOT = ["//src/chunkies/sim:__pkg__"]
+
+SESSION_SRCS = [
+    "session/src/lib.rs",
+    "session/src/tests.rs",
+]
+
+filegroup(
+    name = "sources",
+    srcs = [
+        "clock/src/lib.rs",
+        "goldens/main.rs",
+        "module/src/lib.rs",
+        "render/src/lib.rs",
+        "tablegen/main.rs",
+    ] + SESSION_SRCS,
+    visibility = SIM_ROOT,
+)
+
+# The wire codec, v5. Game-blind by construction: it must never grow a
+# dependency on any sim crate. Conformance is against the shared spec in
+# //src/chunkies/codec:spec, compiled in so the three language
+# implementations cannot drift apart.
+rust_library(
+    name = "codec",
+    srcs = [
+        "codec/src/lib.rs",
+        "codec/src/tests.rs",
+    ],
+    crate_name = "chunkies_codec",
+    crate_root = "codec/src/lib.rs",
+    edition = "2024",
+)
+
+rust_test(
+    name = "codec_test",
+    compile_data = ["//src/chunkies/codec:spec"],
+    crate = ":codec",
+    edition = "2024",
+)
+
+rust_library(
+    name = "render",
+    srcs = ["render/src/lib.rs"],
+    crate_name = "chunkies_render",
+    edition = "2024",
+)
+
+rust_test(
+    name = "render_test",
+    crate = ":render",
+    edition = "2024",
+)
+
+rust_library(
+    name = "clock",
+    srcs = ["clock/src/lib.rs"],
+    crate_name = "chunkies_clock",
+    edition = "2024",
+)
+
+rust_test(
+    name = "clock_test",
+    crate = ":clock",
+    edition = "2024",
+)
+
+rust_library(
+    name = "session",
+    srcs = SESSION_SRCS,
+    crate_name = "chunkies_session",
+    crate_root = "session/src/lib.rs",
+    edition = "2024",
+    deps = [
+        ":clock",
+        ":codec",
+    ],
+)
+
+rust_test(
+    name = "session_test",
+    crate = ":session",
+    edition = "2024",
+)
+
+rust_binary(
+    name = "tablegen",
+    srcs = ["tablegen/main.rs"],
+    edition = "2024",
+    deps = [":session"],
+)
+
+genrule(
+    name = "telemetry_gen_ts",
+    outs = ["telemetry.gen.ts"],
+    cmd = "$(location :tablegen) $@",
+    tools = [":tablegen"],
+    visibility = SIM_ROOT,
+)
+
+rust_binary(
+    name = "goldens_gen",
+    srcs = ["goldens/main.rs"],
+    edition = "2024",
+    deps = [
+        ":session",
+        "//src/games/wake-up-mythra/sim:park_lib",
+        "//src/games/wake-up-mythra/sim:terrain",
+    ],
+)
+
+genrule(
+    name = "goldens_json",
+    outs = ["records.json"],
+    cmd = "$(location :goldens_gen) $@",
+    tools = [":goldens_gen"],
+    visibility = SIM_ROOT,
+)
+
+rust_shared_library(
+    name = "client_cdylib",
+    srcs = ["module/src/lib.rs"],
+    crate_name = "chunkies_client",
+    edition = "2024",
+    target_compatible_with = ["@platforms//cpu:wasm32"],
+    deps = [
+        ":clock",
+        ":render",
+        ":session",
+    ],
+)
+
+wasm_module(
+    name = "client_wasm",
+    lib = ":client_cdylib",
+    out = "client.wasm",
+    visibility = SIM_ROOT,
+)
+
+# Formatting drift fails `bazelisk test //...`; the fix is `aspect tidy`.
+rustfmt_test(
+    name = "rustfmt_test",
+    targets = [
+        ":clock",
+        ":clock_test",
+        ":codec",
+        ":codec_test",
+        ":goldens_gen",
+        ":render",
+        ":render_test",
+        ":session",
+        ":session_test",
+        ":tablegen",
+    ],
+)

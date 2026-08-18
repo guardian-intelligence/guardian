@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+load("//src/chunkies:defs.bzl", "GAME_FACING")
+
+go_library(
+    name = "gametest",
+    testonly = True,
+    srcs = [
+        "gametest.go",
+        "host.go",
+        "wasmscan.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/chunkies/gametest",
+    visibility = GAME_FACING,
+    deps = [
+        "@com_github_tetratelabs_wazero//:go_default_library",
+        "@com_github_tetratelabs_wazero//api:go_default_library",
+    ],
+)
+
+# The suite run on the framework's own toy game — no WUM in the loop.
+go_test(
+    name = "toy_conformance_test",
+    srcs = ["toy_test.go"],
+    data = ["//src/chunkies/sim/shared:toy_wasm"],
+    embed = [":gametest"],
+)

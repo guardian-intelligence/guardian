@@ -10,12 +10,12 @@ read `docs/engineering-rules.md`, then only what your task routes to below.
   service/API conventions).
 - **Wake Up, Mythra! (WUM)** — most development happens here. Read
   `docs/wake-up-mythra-development.md` (plan of record and architecture
-  invariants), `src/services/mythrad/README.md` (one-command local loop), and
+  invariants), `src/chunkies/README.md` (one-command local loop), and
   `docs/netcode.md` (server-authoritative simulation contract). Gating client
   behavior: `docs/feature-flags.md`. Shipping a user-visible feature:
   `docs/canaries.md` and `docs/loadtest.md`. Following a user session across
   the stack: `docs/trace-correlation.md`. The substrate docs below matter
-  only when deploying or operating mythrad in the cluster.
+  only when deploying or operating the chunkies services in the cluster.
 - **Postflight** — `docs/postflight-architecture.md` is the entry point and
   names its companions
   (`postflight-{product,fleet,host,scheduling,storage,security-model,runner-lifecycle,lightning,cli-distribution}.md`).

@@ -1,0 +1,33 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "journal",
+    srcs = ["journal.go"],
+    embedsrcs = [
+        "migrations/0001_journal.sql",
+        "migrations/0002_terrain.sql",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/chunkies/journal",
+    visibility = ["//src/chunkies:__subpackages__"],
+    deps = [
+        "@com_github_jackc_pgx_v5//:pgx",
+        "@com_github_jackc_pgx_v5//pgconn:go_default_library",
+        "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
+    ],
+)
+
+go_test(
+    name = "journal_test",
+    srcs = ["pg_test.go"],
+    data = [
+        "//src/tools/postgres:dist",
+        "//src/tools/postgres:initdb",
+    ],
+    env = {"PGTEST_INITDB": "$(rootpath //src/tools/postgres:initdb)"},
+    deps = [
+        ":journal",
+        "//src/chunkies/journal/journaltest",
+        "//src/services/postflight/controlplane/pgtest",
+        "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
+    ],
+)

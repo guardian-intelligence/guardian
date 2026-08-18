@@ -6,7 +6,7 @@ go_library(
     srcs = ["pgtest.go"],
     importpath = "github.com/guardian-intelligence/guardian/src/services/postflight/controlplane/pgtest",
     visibility = [
-        "//src/services/mythrad:__subpackages__",
+        "//src/chunkies:__subpackages__",
         "//src/services/payments:__pkg__",
         "//src/services/postflight:__subpackages__",
         "//src/tools/postflight-hammer:__pkg__",

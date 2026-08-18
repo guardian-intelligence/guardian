@@ -2,7 +2,7 @@
 // headless spectator plays through it, asserting the client's behavior
 // under hostile conditions. Run against a proxied dev stack:
 //
-//   bazelisk run //src/services/mythrad/netsim &
+//   bazelisk run //src/chunkies/netsim &
 //   WUM_DEV_PUBLIC_ADDR=127.0.0.1:14433 aspect mythra dev up
 //   node e2e/degradation.mjs
 //

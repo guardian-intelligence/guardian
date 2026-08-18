@@ -1,0 +1,25 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+exports_files(
+    ["fixture_park.bin"],
+    visibility = ["//src/chunkies/sim:__pkg__"],
+)
+
+go_library(
+    name = "wum",
+    srcs = ["wum.go"],
+    embedsrcs = ["fixture_park.bin"],
+    importpath = "github.com/guardian-intelligence/guardian/src/games/wake-up-mythra/services/wum",
+    visibility = ["//src/chunkies:__subpackages__"],
+    deps = ["//src/chunkies/codec"],
+)
+
+go_test(
+    name = "wum_test",
+    srcs = ["conformance_test.go"],
+    embed = [":wum"],
+    deps = [
+        "//src/chunkies/gametest",
+        "//src/chunkies/mount",
+    ],
+)

@@ -5,7 +5,7 @@ npm_link_all_packages()
 
 exports_files(
     ["src/telemetry.gen.ts"],
-    visibility = ["//src/services/mythrad/sim:__pkg__"],
+    visibility = ["//src/chunkies/sim:__pkg__"],
 )
 
 CHUNKIES_SRCS = glob([
