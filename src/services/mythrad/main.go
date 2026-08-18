@@ -36,14 +36,10 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	webtransport "github.com/quic-go/webtransport-go"
-	"github.com/tetratelabs/wazero"
 
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/journal"
 	"github.com/guardian-intelligence/guardian/src/services/telemetry"
 )
-
-//go:embed behaviors/server.wasm
-var defaultBehavior []byte
 
 //go:embed behaviors/client.wasm
 var defaultClientModule []byte
@@ -117,8 +113,6 @@ var (
 		Name: "mythra_datagram_errors_total", Help: "SendDatagram failures."})
 	mDrops = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "mythra_fanout_dropped_total", Help: "Sessions closed for stream backlog."})
-	mBehaviorReloads = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "mythra_behavior_reloads_total", Help: "Behavior module hot-reloads."}, []string{"slot", "result"})
 	mBehaviorInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "mythra_behavior_script", Help: "1 for the currently loaded module hash per slot."}, []string{"slot", "hash"})
 	mEpochSwaps = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -139,64 +133,6 @@ func envStr(k, d string) string {
 }
 
 // ---------- module distribution ----------
-
-// A behaviorSlot holds a wazero-instantiated module for the shadow-launch
-// lane; the park module's live instances belong to their authorities.
-type behaviorSlot struct {
-	mu   sync.Mutex
-	name string
-	hash string
-	rt   wazero.Runtime
-}
-
-func newBehaviorSlot(name string) *behaviorSlot { return &behaviorSlot{name: name} }
-
-func (b *behaviorSlot) load(module []byte) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	sum := sha256.Sum256(module)
-	hash := hex.EncodeToString(sum[:4])
-	if hash == b.hash {
-		return nil
-	}
-	ctx := context.Background()
-	rt := wazero.NewRuntime(ctx)
-	mod, err := rt.Instantiate(ctx, module)
-	if err != nil || mod.Memory() == nil {
-		rt.Close(ctx)
-		mBehaviorReloads.WithLabelValues(b.name, "error").Inc()
-		if err == nil {
-			err = fmt.Errorf("module must export memory")
-		}
-		return fmt.Errorf("%s: %w", b.name, err)
-	}
-	if b.rt != nil {
-		b.rt.Close(ctx)
-	}
-	mBehaviorInfo.DeletePartialMatch(prometheus.Labels{"slot": b.name})
-	mBehaviorInfo.WithLabelValues(b.name, hash).Set(1)
-	mBehaviorReloads.WithLabelValues(b.name, "ok").Inc()
-	b.hash, b.rt = hash, rt
-	log.Printf("behavior %s loaded: %s", b.name, hash)
-	return nil
-}
-
-func (b *behaviorSlot) unload() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.rt != nil {
-		b.rt.Close(context.Background())
-		b.rt, b.hash = nil, ""
-		mBehaviorInfo.DeletePartialMatch(prometheus.Labels{"slot": b.name})
-		log.Printf("behavior %s unloaded", b.name)
-	}
-}
-
-func (b *behaviorSlot) loaded() (string, bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.hash, b.rt != nil
-}
 
 // clientModule tracks a distributed module's bytes plus content hash:
 // pages fetch by hash, so bytes are immutable per URL and a hash flip on a
@@ -226,35 +162,6 @@ func (c *clientModule) get() ([]byte, string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.bytes, c.hash
-}
-
-// watchBehaviors polls the mounted behavior dir; ConfigMap edits land on
-// the mount within ~a minute of Flux applying them, with no pod restart.
-func watchBehaviors(dir string, live, shadow *behaviorSlot, client, park *clientModule) {
-	load := func() {
-		if module, err := os.ReadFile(filepath.Join(dir, "live.wasm")); err == nil {
-			if err := live.load(module); err != nil {
-				log.Printf("behavior live reload rejected (keeping current): %v", err)
-			}
-		}
-		if module, err := os.ReadFile(filepath.Join(dir, "shadow.wasm")); err == nil {
-			if err := shadow.load(module); err != nil {
-				log.Printf("behavior shadow reload rejected: %v", err)
-			}
-		} else if _, ok := shadow.loaded(); ok {
-			shadow.unload()
-		}
-		if module, err := os.ReadFile(filepath.Join(dir, "client.wasm")); err == nil && len(module) > 8 {
-			client.set(module)
-		}
-		if module, err := os.ReadFile(filepath.Join(dir, "park.wasm")); err == nil && len(module) > 8 {
-			park.set(module)
-		}
-	}
-	load()
-	for range time.Tick(2 * time.Second) {
-		load()
-	}
 }
 
 // ---------- asset catalog ----------
@@ -531,16 +438,11 @@ func runMythrad() {
 	rc := newRotatingCert(sans)
 	fc := newFileCert(envStr("TLS_CERT_FILE", ""), envStr("TLS_KEY_FILE", ""))
 
-	live := newBehaviorSlot("live")
-	shadow := newBehaviorSlot("shadow")
-	if err := live.load(defaultBehavior); err != nil {
-		log.Fatalf("embedded default behavior invalid: %v", err)
-	}
 	client := &clientModule{slot: "client"}
 	client.set(defaultClientModule)
 	parkMod := &clientModule{slot: "park"}
 	parkMod.set(defaultParkModule)
-	go watchBehaviors(behaviorDir, live, shadow, client, parkMod)
+	go watchDistributedModules(behaviorDir, client, parkMod)
 
 	assets := newAssetCatalog(assetDir)
 

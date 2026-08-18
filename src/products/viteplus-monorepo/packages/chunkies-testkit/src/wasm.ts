@@ -40,14 +40,18 @@ type Modules = {
   client: Uint8Array;
   park: Uint8Array;
   terrain: Uint8Array;
-  /**
-   * The behavior-slot module. It instantiates cleanly and exports almost
-   * nothing, which makes it the honest stand-in for "a park module this
-   * host cannot put a world into": the failure lands AFTER instantiation,
-   * which is the ordering a module swap has to get right.
-   */
-  server: Uint8Array;
 };
+
+/**
+ * The smallest valid wasm module: magic and version, no sections. It
+ * instantiates cleanly and exports nothing, which makes it the honest
+ * stand-in for "a park module this host cannot put a world into": the
+ * failure lands AFTER instantiation, which is the ordering a module swap
+ * has to get right.
+ */
+export function strangerModule(): Uint8Array {
+  return Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00);
+}
 
 let cached: Modules | null = null;
 
@@ -56,7 +60,6 @@ export function modules(): Modules {
   cached ??= {
     client: repoFile(`${BEHAVIORS}client.wasm`),
     park: repoFile(`${BEHAVIORS}park.wasm`),
-    server: repoFile(`${BEHAVIORS}server.wasm`),
     terrain: repoFile("services/mythrad/terrain/fixture_park.bin"),
   };
   return cached;

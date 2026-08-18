@@ -24,6 +24,7 @@ import {
   Reject,
   rig,
   Role,
+  strangerModule,
   type ClientFrame,
 } from "@guardian/chunkies-testkit";
 
@@ -608,11 +609,11 @@ describe("invariant 7: module epoch", () => {
     const tickBefore = r.state.tick;
     const dogsBefore = r.state.dogCount;
 
-    // Serve a "new module" that cannot take our world. server.wasm is a
-    // real committed artifact with no park surface, so the swap dies at
-    // the ABI check — before a worldless instance can be published —
-    // which lands in the same catch as a terrain refusal would.
-    r.harness.setModule("replica", modules().server.slice().buffer);
+    // Serve a "new module" that cannot take our world: valid wasm with no
+    // park surface, so the swap dies at the ABI check — before a
+    // worldless instance can be published — which lands in the same catch
+    // as a terrain refusal would.
+    r.harness.setModule("replica", strangerModule().slice().buffer);
     r.deliver([r.emit(Ev.epochAdvance, epochAdvancePayload(2, 0xdeadbeefn))]);
     expect(await r.until(() => r.harness.logs.some((l) => l.includes("swap failed")), 2000)).toBe(
       true,

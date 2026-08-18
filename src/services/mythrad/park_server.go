@@ -50,16 +50,11 @@ func runChunkiesPark() {
 	defer traceShutdown(context.Background())
 
 	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/mythra/behavior")
-	live := newBehaviorSlot("live")
-	shadow := newBehaviorSlot("shadow")
-	if err := live.load(defaultBehavior); err != nil {
-		log.Fatalf("embedded behavior: %v", err)
-	}
 	client := &clientModule{slot: "client"}
 	client.set(defaultClientModule)
 	parkModule := &clientModule{slot: "park"}
 	parkModule.set(defaultParkModule)
-	go watchBehaviors(behaviorDir, live, shadow, client, parkModule)
+	go watchDistributedModules(behaviorDir, client, parkModule)
 
 	dsn, err := databaseURL()
 	if err != nil {

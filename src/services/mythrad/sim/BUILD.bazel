@@ -31,7 +31,6 @@ sh_binary(
         "//src/services/mythrad/sim/client:client_wasm",
         "//src/services/mythrad/sim/client:goldens_json",
         "//src/services/mythrad/sim/client:telemetry_gen_ts",
-        "//src/services/mythrad/sim/server:server_wasm",
         "//src/services/mythrad/sim/shared:fixture_park",
         "//src/services/mythrad/sim/shared:park_wasm",
     ],
@@ -45,19 +44,11 @@ sh_test(
     args = [
         "$(locations //src/services/mythrad/sim/shared:sources)",
         "$(locations //src/services/mythrad/sim/client:sources)",
-        "$(locations //src/services/mythrad/sim/server:sources)",
     ],
     data = [
         "//src/services/mythrad/sim/client:sources",
-        "//src/services/mythrad/sim/server:sources",
         "//src/services/mythrad/sim/shared:sources",
     ],
-)
-
-diff_test(
-    name = "server_artifact_current_test",
-    file1 = "//src/services/mythrad/sim/server:server_wasm",
-    file2 = "//src/services/mythrad:behaviors/server.wasm",
 )
 
 diff_test(
@@ -88,12 +79,6 @@ diff_test(
     name = "goldens_current_test",
     file1 = "//src/services/mythrad/sim/client:goldens_json",
     file2 = "//src/products/viteplus-monorepo/packages/chunkies-testkit:goldens/records.json",
-)
-
-diff_test(
-    name = "server_configmap_lockstep_test",
-    file1 = "//src/services/mythrad:behaviors/server.wasm",
-    file2 = "//src/infrastructure/deployments/mythra/prod:behavior/live.wasm",
 )
 
 diff_test(
