@@ -9,7 +9,6 @@ filegroup(
 exports_files(
     [
         "behavior/client.wasm",
-        "behavior/live.wasm",
         "behavior/park.wasm",
     ],
     visibility = ["//src/services/mythrad/sim:__pkg__"],

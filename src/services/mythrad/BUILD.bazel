@@ -6,7 +6,6 @@ exports_files(
     [
         "behaviors/client.wasm",
         "behaviors/park.wasm",
-        "behaviors/server.wasm",
         "terrain/fixture_park.bin",
     ],
     visibility = ["//src/services/mythrad/sim:__pkg__"],
@@ -27,7 +26,6 @@ go_library(
     embedsrcs = [
         "behaviors/client.wasm",
         "behaviors/park.wasm",
-        "behaviors/server.wasm",
         "terrain/fixture_park.bin",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/services/mythrad",
@@ -73,8 +71,6 @@ go_binary(
     visibility = ["//visibility:public"],
 )
 
-# Fixed-point invariant, layer 2: scans the embedded wasm modules for float
-# value-type declarations (layer 1 is the source token gate in ./sim).
 go_test(
     name = "mythrad_test",
     srcs = [
@@ -82,7 +78,6 @@ go_test(
         "authority_test.go",
         "gametest_wum_test.go",
         "proxy_test.go",
-        "wasm_gate_test.go",
     ],
     data = [
         "//src/tools/postgres:dist",

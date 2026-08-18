@@ -6,7 +6,6 @@ load("//src/services/mythrad/sim:wasm.bzl", "wasm_module")
 
 TIER_PKGS = [
     "//src/services/mythrad/sim/client:__pkg__",
-    "//src/services/mythrad/sim/server:__pkg__",
 ]
 
 SIM_ROOT = ["//src/services/mythrad/sim:__pkg__"]

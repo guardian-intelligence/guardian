@@ -100,11 +100,3 @@ spec:
           annotations:
             summary: "chunkies-park rejecting intents ({{ $labels.reason }})"
             description: "More than 20 intents were rejected for one reason in 15 minutes."
-        - alert: ChunkiesParkBehaviorReloadRejected
-          expr: increase(mythra_behavior_reloads_total{job="chunkies-park-metrics",result="error"}[10m]) > 0
-          labels:
-            severity: warning
-            guardian_stage: prod
-          annotations:
-            summary: "chunkies-park rejected a behavior module"
-            description: "A behavior module failed to load; the previous module remains active."

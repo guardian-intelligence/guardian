@@ -112,7 +112,6 @@ sim ticks at 24Hz.
 |---|---|---|
 | Web shell | live (single-file `mythra.html`) | Connection mgmt, DOM, input, wasm host. Grows into the product shell; stays the same artifact across desktop web, Android web, iOS web |
 | Rust→wasm sim core | live (crate, not shipped directly) | The shared deterministic core; compiled into every module below |
-| Rust→wasm **server behavior module** | live (`live.wasm` / `shadow.wasm`) | Authoritative step; wazero |
 | Rust→wasm **client presentation module** | live (`client.wasm`) | Interpolation/smoothing; hot-swapped via pong hash |
 | Rust→wasm **client rules module** | planned | Pack-synergy/bonus preview math for UI, compiled from the same core the server uses to compute the real thing — previews can never drift from truth |
 | Asset bundles | live (ConfigMap lane) | Content-addressed skins/tiles; graduates to CDN/R2 when size demands |
