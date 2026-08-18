@@ -47,7 +47,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: park
-          image: ghcr.io/guardian-intelligence/chunkies-park:edge@sha256:9ffe82c9da5ae0d3dc1d267a6425b3fb16493bf904c96e4fce2849e3d909ce6e # {"$imagepolicy": "guardian-imageops:chunkies-park"}
+          image: ghcr.io/guardian-intelligence/chunkies-park:edge@sha256:f4191907bb1c2b2ae1439962c241bfb96a299f506cda94f9394d0bd62c78c4a5 # {"$imagepolicy": "guardian-imageops:chunkies-park"}
           ports:
             - name: metrics
               containerPort: 9637
