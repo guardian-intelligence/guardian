@@ -28,8 +28,12 @@ var (
 
 // gameHandlers wires the admission surface: tickets and mint limits.
 type gameHandlers struct {
-	tickets      *ticketMint
-	maxSessions  int
-	allowedParks map[string]bool
-	anonMints    *anonLimiter
+	tickets     *ticketMint
+	maxSessions int
+	// directory is the live chunk directory: minting and routing must
+	// share one view, so a chunk added at runtime is mintable the same
+	// poll it becomes routable.
+	directory *chunkDirectory
+	game      string
+	anonMints *anonLimiter
 }

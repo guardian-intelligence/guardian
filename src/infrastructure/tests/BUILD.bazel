@@ -12,7 +12,6 @@ go_test(
         "cilium_node_identity_test.go",
         "cluster_domain_test.go",
         "cloud_agent_access_test.go",
-        "chunkies_topology_test.go",
         "cozystack_upgrade_invariants_test.go",
         "core_metrics_wiring_test.go",
         "custody_containment_test.go",

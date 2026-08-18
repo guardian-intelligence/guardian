@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -34,23 +33,9 @@ import (
 
 type chunkiesGateway struct {
 	admission *gameHandlers
-	backends  map[string]string
+	directory *chunkDirectory
+	game      string
 	key       []byte
-}
-
-func parseParkBackends(raw string) (map[string]string, error) {
-	backends := map[string]string{}
-	for _, entry := range strings.Split(raw, ",") {
-		park, addr, ok := strings.Cut(strings.TrimSpace(entry), "=")
-		if !ok || park == "" || addr == "" {
-			return nil, fmt.Errorf("bad PARK_BACKENDS entry %q", entry)
-		}
-		backends[park] = addr
-	}
-	if len(backends) == 0 {
-		return nil, errors.New("PARK_BACKENDS is empty")
-	}
-	return backends, nil
 }
 
 // Run is the chunkies-gateway process: public WebTransport, admission,
@@ -62,10 +47,16 @@ func Run() {
 	publicAddr := envStr("PUBLIC_ADDR", "")
 	allowedOrigins := envStr("ALLOWED_ORIGINS", "")
 	maxSessions := envInt("MAX_SESSIONS", 4000)
-	backends, err := parseParkBackends(envStr("PARK_BACKENDS", "park-mythra=127.0.0.1:9632"))
-	if err != nil {
-		log.Fatal(err)
+	game := envStr("GAME", "wum")
+	directoryFile := envStr("CHUNK_DIRECTORY_FILE", "/etc/chunkies/directory/chunks.conf")
+	directory := newChunkDirectory()
+	if err := loadChunkDirectory(directoryFile, directory); err != nil {
+		// Fail-open on boot would mean a gateway that can never route;
+		// fail-closed but alive means the watcher picks the file up the
+		// moment the mount appears.
+		log.Printf("chunk directory %s: %v (starting empty)", directoryFile, err)
 	}
+	go watchChunkDirectory(directoryFile, directory)
 	key, err := parkproxy.ReadKey(envStr("INTERNAL_KEY_FILE", ""))
 	if err != nil {
 		log.Fatalf("internal key: %v", err)
@@ -87,19 +78,15 @@ func Run() {
 
 	issuer := envStr("OIDC_ISSUER", "https://auth.wakeupmythra.com/realms/wakeupmythra.com")
 	gate := newOIDCGate(issuer, envStr("OIDC_JWKS_URL", ""), envStr("OIDC_CLIENT_IDS", "wake-up-mythra"), os.Getenv("REQUIRE_EMAIL_VERIFIED") == "true")
-	allowedParks := map[string]bool{}
-	for park := range backends {
-		allowedParks[park] = true
-	}
 	tickets, err := newTicketMint(os.Getenv("TICKET_KEY_FILE"))
 	if err != nil {
 		log.Fatalf("ticket key: %v", err)
 	}
 	admission := &gameHandlers{
-		tickets: tickets, maxSessions: maxSessions, allowedParks: allowedParks,
+		tickets: tickets, maxSessions: maxSessions, directory: directory, game: game,
 		anonMints: newAnonLimiter(),
 	}
-	gateway := &chunkiesGateway{admission: admission, backends: backends, key: key}
+	gateway := &chunkiesGateway{admission: admission, directory: directory, game: game, key: key}
 
 	sans := []net.IP{net.ParseIP("127.0.0.1")}
 	if host, _, err := net.SplitHostPort(publicAddr); err == nil {
@@ -294,7 +281,7 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 		sess.CloseWithError(4401, "bad ticket")
 		return
 	}
-	backend, ok := g.backends[ticket.Park]
+	backend, ok := g.directory.lookup(g.game, ticket.Park)
 	if !ok {
 		mHandshakes.WithLabelValues("park_unavailable").Inc()
 		sess.CloseWithError(4503, "park unavailable")

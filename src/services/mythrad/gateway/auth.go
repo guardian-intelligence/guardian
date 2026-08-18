@@ -251,7 +251,7 @@ func (h *gameHandlers) handleSessionMint(gate *oidcGate, publicAddr string, cert
 		if park == "" {
 			park = "park-mythra"
 		}
-		if !h.allowedParks[park] {
+		if !h.directory.allowed(h.game, park) {
 			mMints.WithLabelValues("unknown_park").Inc()
 			http.Error(w, "unknown park", http.StatusNotFound)
 			return

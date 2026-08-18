@@ -255,7 +255,7 @@ EOF
       HTTP_PORT="$PARK_HTTP_PORT" \
       METRICS_PORT="$PARK_METRICS_PORT" \
       INTERNAL_KEY_FILE="$RUN_DIR/internal.key" \
-      BEHAVIOR_DIR="$ROOT/src/services/mythrad/mount/behaviors" \
+      BEHAVIOR_DIR="$ROOT/src/services/mythrad/behaviors" \
       TICK_HZ="$DEV_TICK_HZ" \
       WUM_DEV_LIVE_TICK_RATE=true \
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://127.0.0.1:${OTLP_GRPC_PORT}" \
@@ -265,14 +265,15 @@ EOF
     ;;
   gateway)
     STARTED="gateway $STARTED"
+    printf 'wum park-mythra 127.0.0.1:%s\n' "$PARK_PORT" >"$RUN_DIR/chunks.conf"
     OIDC_ISSUER="$ISSUER" \
-      BEHAVIOR_DIR="$ROOT/src/services/mythrad/mount/behaviors" \
+      BEHAVIOR_DIR="$ROOT/src/services/mythrad/behaviors" \
       ASSET_DIR="$ROOT/src/services/mythrad/assets" \
       PUBLIC_ADDR="${WUM_DEV_PUBLIC_ADDR:-127.0.0.1:${GATEWAY_WT_PORT}}" \
       HTTP_PORT="$GATEWAY_HTTP_PORT" \
       METRICS_PORT="$GATEWAY_METRICS_PORT" \
       WT_PORT="$GATEWAY_WT_PORT" \
-      PARK_BACKENDS="park-mythra=127.0.0.1:${PARK_PORT}" \
+      CHUNK_DIRECTORY_FILE="$RUN_DIR/chunks.conf" \
       PARK_HTTP_URL="http://127.0.0.1:${PARK_HTTP_PORT}" \
       INTERNAL_KEY_FILE="$RUN_DIR/internal.key" \
       WUM_DEV_LIVE_TICK_RATE=true \

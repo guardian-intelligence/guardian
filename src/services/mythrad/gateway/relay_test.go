@@ -11,12 +11,14 @@ import (
 	"encoding/binary"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/quic-go/quic-go/http3"
 	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
 	webtransport "github.com/quic-go/webtransport-go"
 
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/parkproxy"
@@ -96,6 +98,8 @@ func waitFor(t *testing.T, d time.Duration, fn func() bool) bool {
 type relayHarness struct {
 	park    *fakePark
 	tickets *ticketMint
+	dir     *chunkDirectory
+	chunk   string
 	dial    func(t *testing.T) *webtransport.Session
 }
 
@@ -110,10 +114,12 @@ func newRelayHarness(t *testing.T) *relayHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dir := newChunkDirectory()
+	dir.replace(map[string]string{"wum/park-test": park.addr})
 	gw := &chunkiesGateway{
-		admission: &gameHandlers{tickets: tickets, maxSessions: 16, allowedParks: map[string]bool{"park-test": true}},
-		backends:  map[string]string{"park-test": park.addr},
-		key:       key,
+		admission: &gameHandlers{tickets: tickets, maxSessions: 16, directory: dir, game: "wum"},
+		directory: dir, game: "wum",
+		key: key,
 	}
 
 	rc := newRotatingCert([]net.IP{net.ParseIP("127.0.0.1")})
@@ -162,7 +168,7 @@ func newRelayHarness(t *testing.T) *relayHarness {
 		t.Cleanup(func() { sess.CloseWithError(0, "") })
 		return sess
 	}
-	return &relayHarness{park: park, tickets: tickets, dial: dial}
+	return &relayHarness{park: park, tickets: tickets, dir: dir, chunk: "park-test", dial: dial}
 }
 
 // hello opens the bidi stream and completes admission for the given role.
@@ -172,7 +178,7 @@ func (h *relayHarness) hello(t *testing.T, sess *webtransport.Session, sub, role
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := h.tickets.mint(ticket{Sub: sub, Park: "park-test", Role: role, Exp: time.Now().Add(time.Minute).Unix()})
+	raw := h.tickets.mint(ticket{Sub: sub, Park: h.chunk, Role: role, Exp: time.Now().Add(time.Minute).Unix()})
 	frame := wire.EncodeHello(wire.Hello{Proto: wire.Proto, SinceSeq: -1, Ticket: raw})
 	if _, err := stream.Write(frame); err != nil {
 		t.Fatal(err)
@@ -300,5 +306,45 @@ func TestRelayRejectsSpectatorIntents(t *testing.T) {
 	}
 	if got := h.park.received(parkproxy.KindStream); len(got) != 0 {
 		t.Fatalf("spectator intent reached the park: %x", got)
+	}
+}
+func TestRelayRoutesChunksAddedAtRuntime(t *testing.T) {
+	h := newRelayHarness(t)
+
+	// Before the directory knows the chunk, the hello is refused.
+	sess := h.dial(t)
+	stream, err := sess.OpenStreamSync(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := h.tickets.mint(ticket{Sub: "late-sub", Park: "park-late", Role: "player", Exp: time.Now().Add(time.Minute).Unix()})
+	if _, err := stream.Write(wire.EncodeHello(wire.Hello{Proto: wire.Proto, SinceSeq: -1, Ticket: raw})); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(t, 5*time.Second, func() bool {
+		_, err := stream.Read(make([]byte, 1))
+		return err != nil
+	}) {
+		t.Fatal("hello for an unknown chunk was not refused")
+	}
+
+	// The same file-load path the watcher runs makes it routable with no
+	// process restart.
+	path := filepath.Join(t.TempDir(), "chunks.conf")
+	if err := os.WriteFile(path, []byte("wum park-late "+h.park.addr+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := loadChunkDirectory(path, h.dir); err != nil {
+		t.Fatal(err)
+	}
+
+	h.chunk = "park-late"
+	sess2 := h.dial(t)
+	stream2 := h.hello(t, sess2, "late-sub", "player")
+	if _, err := stream2.Write(moveIntent("late-sub", 5, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(parkproxy.KindStream)) == 1 }) {
+		t.Fatal("intent to the runtime-added chunk never arrived")
 	}
 }

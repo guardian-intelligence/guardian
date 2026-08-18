@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: gateway
-          image: ghcr.io/guardian-intelligence/chunkies-gateway:edge@sha256:f0577ce0b43f954bfed75cd3ba00f5c3fe7a794c01bfa7a357e4329b849fcaf2 # {"$imagepolicy": "guardian-imageops:chunkies-gateway"}
+          image: ghcr.io/guardian-intelligence/chunkies-gateway:edge@sha256:ae1932538942810456e39ea7b1c451e2de5eb2132993adfca42ebd48c5ecc45e # {"$imagepolicy": "guardian-imageops:chunkies-gateway"}
           env:
             - name: MAX_SESSIONS
               value: "4000"
@@ -64,8 +64,10 @@ spec:
               value: wake-up-mythra
             - name: REQUIRE_EMAIL_VERIFIED
               value: "false"
-            - name: PARK_BACKENDS
-              value: park-mythra=127.0.0.1:9632
+            - name: GAME
+              value: wum
+            - name: CHUNK_DIRECTORY_FILE
+              value: /etc/chunkies/directory/chunks.conf
             - name: PARK_HTTP_URL
               value: http://127.0.0.1:9631
             - name: INTERNAL_KEY_FILE
@@ -147,6 +149,9 @@ spec:
             - name: ticket-key
               mountPath: /etc/chunkies/ticket
               readOnly: true
+            - name: chunk-directory
+              mountPath: /etc/chunkies/directory
+              readOnly: true
       volumes:
         - name: behavior
           configMap:
@@ -160,6 +165,9 @@ spec:
         - name: internal-key
           secret:
             secretName: chunkies-internal-key
+        - name: chunk-directory
+          configMap:
+            name: chunkies-directory
         - name: ticket-key
           secret:
             secretName: chunkies-ticket-key
@@ -216,7 +224,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: park
-          image: ghcr.io/guardian-intelligence/chunkies-park:edge@sha256:f71cddd54ad2abafb1f4c08efc62acc2ec83c88c8a4a3cf0d77edddff7a1dcea # {"$imagepolicy": "guardian-imageops:chunkies-park"}
+          image: ghcr.io/guardian-intelligence/chunkies-park:edge@sha256:deb5d29bd27419e0ba6687d7861bc4b48a438a54be537c98a10525c22fdab3c3 # {"$imagepolicy": "guardian-imageops:chunkies-park"}
           env:
             - name: PARK_NAME
               value: park-mythra
@@ -359,3 +367,20 @@ spec:
       port: 9637
       targetPort: metrics
       protocol: TCP
+---
+# The chunk directory: which (game, chunk) pairs exist and where their
+# authorities listen. The gateway hot-reloads this file — park topology
+# changes must never restart the process holding live player sessions.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chunkies-directory
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: chunkies-gateway
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+    guardian.dev/stage: prod
+data:
+  chunks.conf: |
+    wum park-mythra 127.0.0.1:9632
