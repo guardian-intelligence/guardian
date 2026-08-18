@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: gateway
-          image: ghcr.io/guardian-intelligence/chunkies-gateway:edge@sha256:719cd078a3bdcaa46c89273eec2d9ddf96e097fe12d51eab73c1a70d8e57e734 # {"$imagepolicy": "guardian-imageops:chunkies-gateway"}
+          image: ghcr.io/guardian-intelligence/chunkies-gateway:edge@sha256:ae1932538942810456e39ea7b1c451e2de5eb2132993adfca42ebd48c5ecc45e # {"$imagepolicy": "guardian-imageops:chunkies-gateway"}
           env:
             - name: MAX_SESSIONS
               value: "4000"
