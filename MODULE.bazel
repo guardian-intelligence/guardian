@@ -249,7 +249,7 @@ go_deps.gazelle_override(
 )
 go_deps.module_override(
     patch_strip = 1,
-    patches = ["//src/services/payments/patches:tigerbeetle-go-bazel.patch"],
+    patches = ["//src/payments/patches:tigerbeetle-go-bazel.patch"],
     path = "github.com/tigerbeetle/tigerbeetle-go",
 )
 

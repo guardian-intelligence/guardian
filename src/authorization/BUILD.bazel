@@ -10,7 +10,7 @@ go_library(
         "metrics.go",
         "spicedb.go",
     ],
-    importpath = "github.com/guardian-intelligence/guardian/src/services/authorization",
+    importpath = "github.com/guardian-intelligence/guardian/src/authorization",
     visibility = ["//visibility:private"],
     deps = [
         "//src/proto/gen/go/guardian/authorization/v1:authorizationv1",

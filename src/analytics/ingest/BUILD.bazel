@@ -24,7 +24,7 @@ go_library(
     deps = [
         "//src/proto/gen/go/guardian/analytics/v1:analyticsv1",
         "//src/proto/gen/go/guardian/analytics/v1/analyticsv1connect",
-        "//src/services/telemetry",
+        "//src/shared/go/telemetry",
         "@build_buf_go_protovalidate//:protovalidate",
         "@com_connectrpc_connect//:connect",
         "@com_connectrpc_otelconnect//:otelconnect",

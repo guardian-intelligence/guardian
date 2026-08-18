@@ -24,7 +24,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/guardian-intelligence/guardian/src/services/payments/paymentdb"
+	"github.com/guardian-intelligence/guardian/src/payments/paymentdb"
 )
 
 const maximumWebhookBytes = 1 << 20

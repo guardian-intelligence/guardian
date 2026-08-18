@@ -6,7 +6,7 @@
 # does not replicate alert state, so only some replica holds it) and pages
 # on silence, so a broken scrape/vmalert/alertmanager path pages instead of
 # going quiet.
-# Contract: src/services/alerting/relay/main.go.
+# Contract: src/alerting/relay/main.go.
 #
 # 2 replicas because this is the only pager — a node loss must not silence
 # it. Accepted trade-off: both replicas run the dead-man poll independently,

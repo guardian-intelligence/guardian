@@ -6,7 +6,7 @@ go_library(
         "http.go",
         "tracing.go",
     ],
-    importpath = "github.com/guardian-intelligence/guardian/src/services/telemetry",
+    importpath = "github.com/guardian-intelligence/guardian/src/shared/go/telemetry",
     visibility = ["//visibility:public"],
     deps = [
         "@io_opentelemetry_go_otel//:go_default_library",

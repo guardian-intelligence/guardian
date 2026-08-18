@@ -15,7 +15,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 
-	"github.com/guardian-intelligence/guardian/src/services/payments/paymentdb"
+	"github.com/guardian-intelligence/guardian/src/payments/paymentdb"
 )
 
 type providerProjector struct {

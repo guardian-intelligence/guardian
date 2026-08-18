@@ -23,7 +23,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/chunkies/parkproxy"
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
 	"github.com/guardian-intelligence/guardian/src/games/wake-up-mythra/services/wum"
-	"github.com/guardian-intelligence/guardian/src/services/telemetry"
+	"github.com/guardian-intelligence/guardian/src/shared/go/telemetry"
 )
 
 // Run is the chunkies-park process: one configured park authority behind

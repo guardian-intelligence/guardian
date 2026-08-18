@@ -18,7 +18,7 @@ import (
 	"github.com/stripe/stripe-go/v83/webhook"
 	tb "github.com/tigerbeetle/tigerbeetle-go"
 
-	"github.com/guardian-intelligence/guardian/src/services/payments/paymentdb"
+	"github.com/guardian-intelligence/guardian/src/payments/paymentdb"
 	"github.com/guardian-intelligence/guardian/src/postflight/controlplane/pgtest"
 )
 

@@ -28,7 +28,7 @@ ORDER BY session_seq;
 
 The trace id is the handle users (and the WUM HUD log: `[err <id>]`) can
 quote. Same-origin fetches carry it as `traceparent`; server middlewares
-(`src/services/telemetry`) continue it, so the browser-minted id IS the
+(`src/shared/go/telemetry`) continue it, so the browser-minted id IS the
 server span's TraceId — no joins through intermediate ids.
 
 ## The cookbook

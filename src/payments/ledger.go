@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 
-	"github.com/guardian-intelligence/guardian/src/services/payments/paymentdb"
+	"github.com/guardian-intelligence/guardian/src/payments/paymentdb"
 )
 
 const (

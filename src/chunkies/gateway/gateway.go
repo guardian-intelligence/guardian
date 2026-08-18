@@ -27,7 +27,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/chunkies/mount"
 	"github.com/guardian-intelligence/guardian/src/chunkies/parkproxy"
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
-	"github.com/guardian-intelligence/guardian/src/services/telemetry"
+	"github.com/guardian-intelligence/guardian/src/shared/go/telemetry"
 )
 
 type chunkiesGateway struct {

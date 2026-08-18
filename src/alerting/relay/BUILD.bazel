@@ -5,7 +5,7 @@ load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 go_library(
     name = "relay_lib",
     srcs = ["main.go"],
-    importpath = "github.com/guardian-intelligence/guardian/src/services/alerting/relay",
+    importpath = "github.com/guardian-intelligence/guardian/src/alerting/relay",
     visibility = ["//visibility:private"],
     deps = ["@org_golang_x_crypto_x509roots_fallback//:fallback"],
 )

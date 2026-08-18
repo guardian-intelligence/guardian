@@ -15,10 +15,10 @@ on:
     # promotion would mint a new edge digest and the system would promote
     # itself in a loop with no breaker.
     paths:
-      - "src/services/alerting/**"
-      - "src/services/authorization/**"
-      - "src/services/payments/**"
-      - "src/services/feature-flags-notify/**"
+      - "src/alerting/**"
+      - "src/authorization/**"
+      - "src/payments/**"
+      - "src/flags/notify/**"
       - "src/chunkies/**"
       - "src/infrastructure/cmd/tofu_runner/**"
       - "src/analytics/**"
@@ -74,16 +74,16 @@ jobs:
             postflight-controlplane tofu-runner company-site privatecut-web
             visual-harness wake-up-mythra-web)
           declare -A watch=(
-            [alert-relay]='^src/services/alerting/'
+            [alert-relay]='^src/alerting/'
             [analytics-ingest]='^src/analytics/|^src/proto/'
-            [authorization]='^src/services/authorization/|^src/proto/guardian/authorization/|^src/proto/gen/go/guardian/authorization/'
+            [authorization]='^src/authorization/|^src/proto/guardian/authorization/|^src/proto/gen/go/guardian/authorization/'
             [canary-journeys]='^src/shared/ts/canary-journeys/|^(pnpm-(lock|workspace)\.yaml|package\.json|vite\.config\.ts)$'
             [chunkies-gateway]='^src/chunkies/|^src/games/'
             [chunkies-park]='^src/chunkies/|^src/games/'
-            [payments]='^src/services/payments/'
-            [payments-canary]='^src/services/payments/'
+            [payments]='^src/payments/'
+            [payments-canary]='^src/payments/'
             [postflight-controlplane]='^src/postflight/(controlplane|canaryloop|hostd/syncproto)/'
-            [feature-flags-notify]='^src/services/feature-flags-notify/'
+            [feature-flags-notify]='^src/flags/notify/'
             [tofu-runner]='^src/infrastructure/cmd/tofu_runner/'
             [company-site]='^src/company/web/|^src/shared/ts/(brand|telemetry)/'
             [privatecut-web]='^src/privatecut/web/|^src/shared/ts/(brand|telemetry)/'
@@ -91,16 +91,16 @@ jobs:
             [visual-harness]='^src/shared/ts/visual-harness/|^(pnpm-(lock|workspace)\.yaml|package\.json|vite\.config\.ts)$'
           )
           declare -A push_target=(
-            [alert-relay]='//src/services/alerting/relay:push'
+            [alert-relay]='//src/alerting/relay:push'
             [analytics-ingest]='//src/analytics/ingest:push'
-            [authorization]='//src/services/authorization:push'
+            [authorization]='//src/authorization:push'
             [canary-journeys]='//src/shared/ts/canary-journeys:push'
             [chunkies-gateway]='//src/chunkies:chunkies_gateway_push'
             [chunkies-park]='//src/chunkies:chunkies_park_push'
-            [payments]='//src/services/payments:push'
-            [payments-canary]='//src/services/payments/canary:push'
+            [payments]='//src/payments:push'
+            [payments-canary]='//src/payments/canary:push'
             [postflight-controlplane]='//src/postflight/controlplane:push'
-            [feature-flags-notify]='//src/services/feature-flags-notify:push'
+            [feature-flags-notify]='//src/flags/notify:push'
             [tofu-runner]='//src/infrastructure/cmd/tofu_runner:push'
             [company-site]='//src/company/web/site:push'
             [privatecut-web]='//src/privatecut/web/site:push'

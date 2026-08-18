@@ -32,7 +32,7 @@ git (flags.json)
   detail behind the OFREP contract; it can be swapped without touching a
   client.
 - **Change notification**: `feature-flags-notify`
-  (`src/services/feature-flags-notify`) streams the *flag-set epoch* — a
+  (`src/flags/notify`) streams the *flag-set epoch* — a
   content hash of flags.json — over SSE at `/features/events`. No flag
   values on the stream, no per-user compute: one identical event fans out
   to every subscriber, and each client re-evaluates through OFREP with its

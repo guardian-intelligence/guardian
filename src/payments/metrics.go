@@ -6,7 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/guardian-intelligence/guardian/src/services/payments/paymentdb"
+	"github.com/guardian-intelligence/guardian/src/payments/paymentdb"
 )
 
 type paymentMetrics struct {

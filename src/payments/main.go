@@ -14,8 +14,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	tb "github.com/tigerbeetle/tigerbeetle-go"
 
-	"github.com/guardian-intelligence/guardian/src/services/payments/paymentdb"
-	"github.com/guardian-intelligence/guardian/src/services/telemetry"
+	"github.com/guardian-intelligence/guardian/src/payments/paymentdb"
+	"github.com/guardian-intelligence/guardian/src/shared/go/telemetry"
 )
 
 func main() {
