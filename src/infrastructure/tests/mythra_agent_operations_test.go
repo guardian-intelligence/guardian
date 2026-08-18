@@ -86,7 +86,7 @@ func TestMythraAgentOperationCapabilities(t *testing.T) {
 		t.Fatalf("journal console password ref = %v, want postgres-products-credentials/mythra_observer", secretKeyRef)
 	}
 
-	postgresPath := runfilePath("src/infrastructure/deployments/products/prod/postgres.yaml")
+	postgresPath := runfilePath("src/company/deploy/cms/postgres.yaml")
 	postgres := findDoc(t, yamlDocs(t, postgresPath), "Postgres", "products")
 	spec := mapValue(postgres["spec"])
 	if _, ok := mapValue(spec["users"])["mythra_observer"]; !ok {

@@ -122,7 +122,7 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 		"src/infrastructure/deployments/guardian/system/openbao-helmrelease.yaml": "storageClass: local-encrypted-retain",
 		"src/infrastructure/deployments/guardian/system/zot-helmrelease.yaml":     "storageClassName: replicated-encrypted",
 		"src/infrastructure/deployments/iam/prod/postgres.yaml":                   "storageClass: replicated-encrypted",
-		"src/infrastructure/deployments/products/prod/postgres.yaml":              "storageClass: replicated-encrypted",
+		"src/company/deploy/cms/postgres.yaml":              "storageClass: replicated-encrypted",
 	}
 	for workloadPath, want := range workloads {
 		raw := readText(t, runfilePath(workloadPath))

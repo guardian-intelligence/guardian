@@ -32,6 +32,7 @@ var ManifestTrees = []string{
 	"src/infrastructure/deployments",
 	"src/infrastructure/base",
 	"src/games/wake-up-mythra/deploy",
+	"src/company/deploy",
 }
 
 var sha256DigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
