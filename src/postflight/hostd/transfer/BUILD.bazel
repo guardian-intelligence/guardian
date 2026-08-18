@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "transfer",
+    srcs = ["transfer.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/postflight/hostd/transfer",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/postflight/hostd/zvol",
+    ],
+)
+
+go_test(
+    name = "transfer_test",
+    srcs = ["transfer_test.go"],
+    embed = [":transfer"],
+    deps = [
+        "//src/postflight/hostd/zvol",
+    ],
+)

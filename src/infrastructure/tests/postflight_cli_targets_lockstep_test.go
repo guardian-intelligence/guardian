@@ -246,7 +246,7 @@ func npmPlatformMap(t *testing.T) map[string]string {
 func shimEntries(t *testing.T) [][]string {
 	t.Helper()
 
-	const path = "src/products/postflight-cli/dist/npm/postflight/bin/postflight"
+	const path = "src/postflight/cli/dist/npm/postflight/bin/postflight"
 	entries := regexp.MustCompile(`"([a-z0-9]+ [a-z0-9_]+)":\s*"(@guardian-intelligence/postflight-[a-z0-9-]+)"`).
 		FindAllStringSubmatch(readText(t, runfilePath(path)), -1)
 	if entries == nil {
@@ -278,7 +278,7 @@ func shimPackages(t *testing.T) []string {
 func metaOptionalDependencies(t *testing.T) []string {
 	t.Helper()
 
-	const path = "src/products/postflight-cli/dist/npm/postflight/package.json"
+	const path = "src/postflight/cli/dist/npm/postflight/package.json"
 	var manifest struct {
 		OptionalDependencies map[string]string `json:"optionalDependencies"`
 	}
@@ -296,7 +296,7 @@ func metaOptionalDependencies(t *testing.T) []string {
 func assertPlatformPackageDeclaresItsPlatform(t *testing.T, target, suffix string) {
 	t.Helper()
 
-	path := "src/products/postflight-cli/dist/npm/postflight-" + suffix + "/package.json"
+	path := "src/postflight/cli/dist/npm/postflight-" + suffix + "/package.json"
 	var manifest struct {
 		Name string   `json:"name"`
 		OS   []string `json:"os"`
@@ -317,7 +317,7 @@ func assertPlatformPackageDeclaresItsPlatform(t *testing.T, target, suffix strin
 func assertFormulaCoversTargets(t *testing.T, targets []string) {
 	t.Helper()
 
-	const path = "src/products/postflight-cli/dist/homebrew/postflight.rb.tmpl"
+	const path = "src/postflight/cli/dist/homebrew/postflight.rb.tmpl"
 	formula := readText(t, runfilePath(path))
 
 	var downloaded, placeholders []string
@@ -357,7 +357,7 @@ func assertSameSet(t *testing.T, context string, want, got []string) {
 func TestSmokeGateUninstallSentinelIsBound(t *testing.T) {
 	const (
 		imageWorkflow = ".github/workflows/postflight-cli-image.yml"
-		installer     = "src/products/postflight-cli/dist/install.sh"
+		installer     = "src/postflight/cli/dist/install.sh"
 	)
 
 	workflow := readText(t, runfilePath(imageWorkflow))

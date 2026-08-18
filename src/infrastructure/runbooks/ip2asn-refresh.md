@@ -28,7 +28,7 @@ bump in `deployments/analytics/system/ingest.yaml`).
 
 ## Verify
 
-- `bazelisk test //src/products/analytics/ingest:ingest_test` passes (the
+- `bazelisk test //src/analytics/ingest:ingest_test` passes (the
   loader rejects malformed snapshots at startup, so a bad file fails the
   image before it ships).
 - Post-deploy: ingest logs `ip2asn table loaded` with a plausible range

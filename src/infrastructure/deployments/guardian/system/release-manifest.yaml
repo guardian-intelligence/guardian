@@ -5,7 +5,7 @@
 # committed public key and projects it — signature included — to the ghcr
 # path in the ref. Lanes mirror the CLI release channels: the nightly
 # promotion PR bumps this lane in the same commit as
-# src/products/postflight-cli/release/channels.yaml, and
+# src/postflight/cli/release/channels.yaml, and
 # TestReleaseManifestCoversReleaseChannels holds every hand-made bump to the
 # same rule.
 #

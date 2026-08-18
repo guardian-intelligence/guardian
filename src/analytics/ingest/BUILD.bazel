@@ -1,0 +1,128 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
+go_library(
+    name = "ingest_lib",
+    srcs = [
+        "asn.go",
+        "batch.go",
+        "clickhouse.go",
+        "device.go",
+        "identity.go",
+        "main.go",
+        "metrics.go",
+        "quota.go",
+        "redact.go",
+        "row.go",
+        "server.go",
+        "tracing.go",
+        "validate.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/analytics/ingest",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//src/proto/gen/go/guardian/analytics/v1:analyticsv1",
+        "//src/proto/gen/go/guardian/analytics/v1/analyticsv1connect",
+        "//src/services/telemetry",
+        "@build_buf_go_protovalidate//:protovalidate",
+        "@com_connectrpc_connect//:connect",
+        "@com_connectrpc_otelconnect//:otelconnect",
+        "@com_github_clickhouse_clickhouse_go_v2//:clickhouse-go",
+        "@com_github_clickhouse_clickhouse_go_v2//lib/driver",
+        "@com_github_mileusna_useragent//:useragent",
+        "@com_github_prometheus_client_golang//prometheus",
+        "@com_github_prometheus_client_golang//prometheus/promauto",
+        "@com_github_prometheus_client_golang//prometheus/promhttp",
+        "@io_opentelemetry_go_otel//:otel",
+        "@io_opentelemetry_go_otel//attribute",
+        "@io_opentelemetry_go_otel//semconv/v1.26.0:v1_26_0",
+        "@io_opentelemetry_go_otel_exporters_otlp_otlptrace_otlptracegrpc//:otlptracegrpc",
+        "@io_opentelemetry_go_otel_sdk//resource",
+        "@io_opentelemetry_go_otel_sdk//trace",
+        "@io_opentelemetry_go_otel_trace//:trace",
+        "@io_opentelemetry_go_otel_trace//noop",
+        "@org_golang_x_net//http2",
+        "@org_golang_x_net//http2/h2c",
+    ],
+)
+
+go_binary(
+    name = "ingest",
+    embed = [":ingest_lib"],
+    pure = "on",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "ingest_test",
+    srcs = [
+        "asn_test.go",
+        "batch_test.go",
+        "device_test.go",
+        "quota_test.go",
+        "redact_test.go",
+        "server_test.go",
+        "validate_test.go",
+    ],
+    embed = [":ingest_lib"],
+    deps = [
+        "//src/proto/gen/go/guardian/analytics/v1:analyticsv1",
+        "//src/proto/gen/go/guardian/analytics/v1/analyticsv1connect",
+        "@build_buf_go_protovalidate//:protovalidate",
+        "@com_connectrpc_connect//:connect",
+        "@com_github_prometheus_client_golang//prometheus/testutil",
+    ],
+)
+
+pkg_tar(
+    name = "ingest_layer",
+    files = {
+        ":ingest": "app/ingest",
+    },
+    modes = {
+        "app/ingest": "0755",
+    },
+)
+
+# BGP-derived IP->ASN snapshot, sha256-pinned in MODULE.bazel. Its own layer
+# so a data refresh doesn't invalidate the binary layer (and vice versa).
+pkg_tar(
+    name = "ip2asn_layer",
+    files = {
+        "@ip2asn_combined//file": "app/data/ip2asn-combined.tsv.gz",
+    },
+)
+
+oci_image(
+    name = "image",
+    annotations = {
+        "org.opencontainers.image.description": "Guardian analytics event ingest (Connect -> ClickHouse)",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "guardian-analytics-ingest",
+    },
+    architecture = "amd64",
+    os = "linux",
+    entrypoint = ["/app/ingest"],
+    exposed_ports = ["8080/tcp"],
+    tars = [
+        ":ingest_layer",
+        ":ip2asn_layer",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/analytics-ingest:dev"],
+)
+
+# Pushed by CI (.github/workflows/images.yml) on merges to main.
+oci_push(
+    name = "push",
+    image = ":image",
+    remote_tags = ["edge"],
+    repository = "ghcr.io/guardian-intelligence/analytics-ingest",
+    visibility = ["//visibility:public"],
+)

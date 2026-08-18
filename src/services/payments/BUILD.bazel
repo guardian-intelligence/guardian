@@ -74,7 +74,7 @@ go_test(
     deps = [
         "//src/proto/gen/go/guardian/authorization/v1:authorizationv1",
         "//src/services/payments/paymentdb",
-        "//src/services/postflight/controlplane/pgtest",
+        "//src/postflight/controlplane/pgtest",
         "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
         "@com_github_prometheus_client_golang//prometheus:go_default_library",
         "@com_github_stripe_stripe_go_v83//:go_default_library",

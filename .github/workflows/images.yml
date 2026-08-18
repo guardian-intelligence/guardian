@@ -18,11 +18,10 @@ on:
       - "src/services/alerting/**"
       - "src/services/authorization/**"
       - "src/services/payments/**"
-      - "src/services/postflight/**"
       - "src/services/feature-flags-notify/**"
       - "src/chunkies/**"
       - "src/infrastructure/cmd/tofu_runner/**"
-      - "src/products/analytics/**"
+      - "src/analytics/**"
       - "src/company/**"
       - "src/privatecut/**"
       - "src/postflight/**"
@@ -76,14 +75,14 @@ jobs:
             visual-harness wake-up-mythra-web)
           declare -A watch=(
             [alert-relay]='^src/services/alerting/'
-            [analytics-ingest]='^src/products/analytics/|^src/proto/'
+            [analytics-ingest]='^src/analytics/|^src/proto/'
             [authorization]='^src/services/authorization/|^src/proto/guardian/authorization/|^src/proto/gen/go/guardian/authorization/'
             [canary-journeys]='^src/shared/ts/canary-journeys/|^(pnpm-(lock|workspace)\.yaml|package\.json|vite\.config\.ts)$'
             [chunkies-gateway]='^src/chunkies/|^src/games/'
             [chunkies-park]='^src/chunkies/|^src/games/'
             [payments]='^src/services/payments/'
             [payments-canary]='^src/services/payments/'
-            [postflight-controlplane]='^src/services/postflight/'
+            [postflight-controlplane]='^src/postflight/(controlplane|canaryloop|hostd/syncproto)/'
             [feature-flags-notify]='^src/services/feature-flags-notify/'
             [tofu-runner]='^src/infrastructure/cmd/tofu_runner/'
             [company-site]='^src/company/web/|^src/shared/ts/(brand|telemetry)/'
@@ -93,14 +92,14 @@ jobs:
           )
           declare -A push_target=(
             [alert-relay]='//src/services/alerting/relay:push'
-            [analytics-ingest]='//src/products/analytics/ingest:push'
+            [analytics-ingest]='//src/analytics/ingest:push'
             [authorization]='//src/services/authorization:push'
             [canary-journeys]='//src/shared/ts/canary-journeys:push'
             [chunkies-gateway]='//src/chunkies:chunkies_gateway_push'
             [chunkies-park]='//src/chunkies:chunkies_park_push'
             [payments]='//src/services/payments:push'
             [payments-canary]='//src/services/payments/canary:push'
-            [postflight-controlplane]='//src/services/postflight/controlplane:push'
+            [postflight-controlplane]='//src/postflight/controlplane:push'
             [feature-flags-notify]='//src/services/feature-flags-notify:push'
             [tofu-runner]='//src/infrastructure/cmd/tofu_runner:push'
             [company-site]='//src/company/web/site:push'

@@ -18,9 +18,9 @@ on:
   push:
     branches: [main]
     paths:
-      - "src/products/postflight-cli/**"
+      - "src/postflight/cli/**"
       # Channel-pin promotion PRs advance release/ only — no rebuild.
-      - "!src/products/postflight-cli/release/**"
+      - "!src/postflight/cli/release/**"
       - ".github/workflows/postflight-cli-image.yml"
   workflow_dispatch:
 
@@ -77,7 +77,7 @@ jobs:
           rm zig.tar.xz cargo-zigbuild.tar.xz crane.tar.gz
 
       - name: Build release binaries for every target
-        working-directory: src/products/postflight-cli
+        working-directory: src/postflight/cli
         run: |
           # rustup reads rust-toolchain.toml: the pinned toolchain plus its
           # target list.
@@ -90,7 +90,7 @@ jobs:
           done
 
       - name: Smoke-test what was built
-        working-directory: src/products/postflight-cli
+        working-directory: src/postflight/cli
         run: |
           native=x86_64-unknown-linux-musl
           crate_version="$(awk -F'"' '
@@ -195,7 +195,7 @@ jobs:
 
       - name: Compute content digest and compare against the current edge
         id: dedup
-        working-directory: src/products/postflight-cli
+        working-directory: src/postflight/cli
         run: |
           digest="$(for target in $TARGETS; do
             sha256sum "target/$target/release/postflight" | cut -d' ' -f1
@@ -218,7 +218,7 @@ jobs:
 
       - name: Sign each binary
         if: steps.dedup.outputs.changed == 'true'
-        working-directory: src/products/postflight-cli
+        working-directory: src/postflight/cli
         run: |
           mkdir -p stage
           for target in $TARGETS; do
@@ -232,7 +232,7 @@ jobs:
       - name: Push the edge artifact
         if: steps.dedup.outputs.changed == 'true'
         id: push
-        working-directory: src/products/postflight-cli
+        working-directory: src/postflight/cli
         run: |
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' \
             -cf layer.tar -C stage .
@@ -253,7 +253,7 @@ jobs:
 
       - name: Sign the artifact and attest its SBOM
         if: steps.dedup.outputs.changed == 'true'
-        working-directory: src/products/postflight-cli
+        working-directory: src/postflight/cli
         run: |
           image="$IMAGE_REPO@${{ steps.push.outputs.digest }}"
           "${{ steps.syft.outputs.cmd }}" scan dir:. \
@@ -265,7 +265,7 @@ jobs:
 
       - name: Verify everything as a consumer would
         if: steps.dedup.outputs.changed == 'true'
-        working-directory: src/products/postflight-cli
+        working-directory: src/postflight/cli
         env:
           IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main
           ISSUER: https://token.actions.githubusercontent.com

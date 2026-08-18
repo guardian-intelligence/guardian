@@ -1,0 +1,39 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_cross_binary", "go_library")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+
+go_library(
+    name = "hostd_lib",
+    srcs = [
+        "config.go",
+        "main.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/postflight/hostd/cmd/hostd",
+    deps = [
+        "//src/postflight/hostd/agent",
+        "//src/postflight/hostd/checkoutbundle",
+        "//src/postflight/hostd/transfer",
+        "//src/postflight/hostd/vm",
+        "//src/postflight/hostd/zvol",
+    ],
+)
+
+go_binary(
+    name = "hostd_native",
+    embed = [":hostd_lib"],
+    pure = "on",
+)
+
+# hostd is a Linux host artifact regardless of the developer's workstation.
+# Keeping the established public label avoids host-dependent deployment output.
+go_cross_binary(
+    name = "hostd",
+    target = ":hostd_native",
+    platform = "@rules_go//go/toolchain:linux_amd64",
+    visibility = ["//visibility:public"],
+)
+
+sh_binary(
+    name = "postflight-tap",
+    srcs = ["postflight-tap.sh"],
+    visibility = ["//visibility:public"],
+)

@@ -49,17 +49,17 @@ go_test(
     timeout = "short",
     srcs = ["db_test.go"],
     data = [
-        "//src/services/postflight/controlplane:migrations",
+        "//src/postflight/controlplane:migrations",
         "//src/tools/postgres:dist",
         "//src/tools/postgres:initdb",
     ],
     embed = [":postflight_hammer_lib"],
     env = {
-        "HAMMER_MIGRATIONS": "$(rootpaths //src/services/postflight/controlplane:migrations)",
+        "HAMMER_MIGRATIONS": "$(rootpaths //src/postflight/controlplane:migrations)",
         "PGTEST_INITDB": "$(rootpath //src/tools/postgres:initdb)",
     },
     deps = [
-        "//src/services/postflight/controlplane/pgtest",
+        "//src/postflight/controlplane/pgtest",
         "@com_github_jackc_pgx_v5//:pgx",
     ],
 )

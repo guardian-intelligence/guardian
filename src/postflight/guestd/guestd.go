@@ -1,0 +1,755 @@
+// Package guestd is the agent inside every runner VM — the only process
+// that talks to the host. It accepts the host's vsock connection, converges
+// the assignment's mounts (no customer step runs before every mount is up),
+// execs the actions runner as the runner user, streams the runner lifecycle
+// back, and flushes the attached generation ahead of the host-side seal
+// snapshot.
+// A dead guestd is a dead VM by design: the host's probe fails and the slot
+// is destroyed and refilled, so nothing here ever restarts itself.
+package guestd
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"os"
+	"path"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/guardian-intelligence/guardian/src/postflight/generation"
+	"github.com/guardian-intelligence/guardian/src/postflight/hostd/guestproto"
+	"github.com/guardian-intelligence/guardian/src/postflight/hostd/vsock"
+	"github.com/guardian-intelligence/guardian/src/postflight/timing"
+)
+
+// WorkspaceMarker is the file guestd drops at a converged mountpoint's
+// root; the checkout action refuses to run on a workspace without it.
+const WorkspaceMarker = guestproto.WorkspaceReadyMarker
+
+// SyntheticFailureExitCode reports a runner that never ran: mounts that
+// would not converge, or an exec that failed. The host destroys the slot
+// either way; the code only distinguishes "we failed" from a real runner
+// exit in the assignment report.
+const SyntheticFailureExitCode = 254
+
+// Config is guestd's static shape.
+type Config struct {
+	// System is the privileged-operation seam.
+	System System
+	// RunRunner starts the actions runner and blocks until it exits.
+	RunRunner RunRunner
+	// MountDeadline bounds convergence of the whole assignment's mounts; a
+	// mount that cannot converge within it reports a synthetic failure exit
+	// and the job never starts against a partial workspace.
+	MountDeadline time.Duration
+	// RetryInterval paces mount convergence retries.
+	RetryInterval time.Duration
+	// HookDeadline bounds a hook that GitHub itself would otherwise allow
+	// to block forever.
+	HookDeadline time.Duration
+	// AssignmentSocketMode and AssignmentSocketGID restrict the runner's
+	// local synchronous assignment gate. Production uses 0660 and the
+	// runner account's primary group; tests default to the current process.
+	AssignmentSocketMode os.FileMode
+	AssignmentSocketGID  int
+	// Encryption is the baked at-rest mode for workspace volumes; the zero
+	// value mounts plaintext. See LoadEncryptionMode.
+	Encryption EncryptionMode
+	// Checkpoints owns the isolated customer capsule lifecycle. Durable process
+	// publication and restoration are rejected at the guest protocol boundary.
+	Checkpoints *ProcessCheckpoints
+	// HostCID is the only vsock peer CID accepted as the host. Anything in
+	// the guest — the runner user included — can dial this listener, so a
+	// connection from any other CID is dropped before a verb is read.
+	HostCID uint32
+	// Timing is the process-local high-resolution event recorder.
+	Timing *timing.Recorder
+	Logger *slog.Logger
+}
+
+func (c *Config) validate() error {
+	if c.System == nil {
+		return errors.New("guestd: System is required")
+	}
+	if c.RunRunner == nil {
+		return errors.New("guestd: RunRunner is required")
+	}
+	if c.MountDeadline <= 0 {
+		c.MountDeadline = 60 * time.Second
+	}
+	if c.RetryInterval <= 0 {
+		c.RetryInterval = 200 * time.Millisecond
+	}
+	if c.HookDeadline <= 0 {
+		c.HookDeadline = 2 * time.Minute
+	}
+	if c.AssignmentSocketMode == 0 {
+		c.AssignmentSocketMode = 0o600
+	}
+	if c.AssignmentSocketGID == 0 {
+		c.AssignmentSocketGID = -1
+	}
+	if c.HostCID == 0 {
+		c.HostCID = vsock.Host
+	}
+	if c.Timing == nil {
+		bootID, err := timing.BootID()
+		if err != nil {
+			return fmt.Errorf("guestd: read boot id: %w", err)
+		}
+		c.Timing, err = timing.New("guestd", bootID)
+		if err != nil {
+			return err
+		}
+	}
+	if c.Logger == nil {
+		c.Logger = slog.Default()
+	}
+	return nil
+}
+
+// Server is the guest agent. One VM runs exactly one Server for its whole
+// life, serving one host connection at a time; a newer connection always
+// supplants an older one, which is what makes host restarts converge.
+type Server struct {
+	cfg Config
+
+	mu            sync.Mutex
+	conn          net.Conn
+	prepared      *guestproto.Prepare
+	rendezvous    *guestproto.Rendezvous
+	authorized    *guestproto.Authorize
+	clock         *guestproto.ClockSample
+	bound         bool
+	statuses      []guestproto.RunnerStatus
+	assignment    *guestproto.Assignment
+	hookValidated bool
+	hookReleased  bool
+	workerGate    chan struct{}
+	gateOnce      sync.Once
+	gateErr       error
+
+	// writeMu serializes frames. It is separate from mu so a slow host —
+	// a blocked status write — can never stall inbound dispatch.
+	writeMu sync.Mutex
+}
+
+// New wires a Server.
+func New(cfg Config) (*Server, error) {
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	return &Server{cfg: cfg, workerGate: make(chan struct{})}, nil
+}
+
+// Serve accepts host connections until the context ends or the listener
+// fails. Rejection and supplanting happen here, on the accept goroutine:
+// "newer connection wins" is only well defined in arrival order, and a
+// concurrent handler for a dying dial must never get to close a healthy
+// successor.
+func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
+	stop := context.AfterFunc(ctx, func() { listener.Close() })
+	defer stop()
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("guestd: accept: %w", err)
+		}
+		if addr, ok := conn.RemoteAddr().(vsock.Addr); ok && addr.CID != s.cfg.HostCID {
+			s.cfg.Logger.Error("rejected non-host peer", "peer", addr.String())
+			conn.Close()
+			continue
+		}
+		go s.handle(conn, s.supplant(conn))
+	}
+}
+
+type replayState struct {
+	assignment *guestproto.Assignment
+	statuses   []guestproto.RunnerStatus
+}
+
+// supplant makes conn the current host connection and returns the runner
+// statuses the new host must be caught up on.
+func (s *Server) supplant(conn net.Conn) replayState {
+	s.mu.Lock()
+	old := s.conn
+	s.conn = conn
+	replay := replayState{statuses: append([]guestproto.RunnerStatus(nil), s.statuses...)}
+	if s.assignment != nil {
+		captured := *s.assignment
+		replay.assignment = &captured
+	}
+	s.mu.Unlock()
+	if old != nil {
+		old.Close()
+	}
+	return replay
+}
+
+// handle serves one host connection: greet, replay the runner status ladder
+// so a reconnecting host catches up (the latest status alone is not enough —
+// an exit replayed without its registration would un-happen the job on the
+// host's fold), then dispatch inbound verbs.
+func (s *Server) handle(conn net.Conn, replay replayState) {
+	if err := s.writeTo(conn, guestproto.Message{Kind: guestproto.KindHello, Hello: &guestproto.Hello{Version: guestproto.Version}}); err != nil {
+		s.drop(conn)
+		return
+	}
+	if replay.assignment != nil {
+		if err := s.writeTo(conn, guestproto.Message{Kind: guestproto.KindAssignment, Assignment: replay.assignment}); err != nil {
+			s.drop(conn)
+			return
+		}
+	}
+	for i := range replay.statuses {
+		if err := s.writeTo(conn, guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &replay.statuses[i]}); err != nil {
+			s.drop(conn)
+			return
+		}
+	}
+
+	decoder := guestproto.NewDecoder(conn)
+	for {
+		message, err := decoder.Read()
+		if err != nil {
+			s.drop(conn)
+			return
+		}
+		switch message.Kind {
+		case guestproto.KindPrepare:
+			s.handlePrepare(*message.Prepare)
+		case guestproto.KindRendezvous:
+			s.handleRendezvous(*message.Rendezvous)
+		case guestproto.KindAuthorize:
+			s.handleAuthorize(*message.Authorize)
+		case guestproto.KindQuiesce:
+			s.handleQuiesce(*message.Quiesce)
+		default:
+			s.cfg.Logger.Error("host sent a guest-bound verb", "kind", message.Kind)
+			s.drop(conn)
+			return
+		}
+	}
+}
+
+// drop retires a connection if it is still the current one.
+func (s *Server) drop(conn net.Conn) {
+	s.mu.Lock()
+	if s.conn == conn {
+		s.conn = nil
+	}
+	s.mu.Unlock()
+	conn.Close()
+}
+
+// send writes one frame to the current connection. Statuses are level
+// state and the greeting replay catches a host up on reconnect, so a lost
+// frame here is survivable — callers log, never fail.
+func (s *Server) send(message guestproto.Message) error {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return errors.New("guestd: no host connection")
+	}
+	return s.writeTo(conn, message)
+}
+
+func (s *Server) writeTo(conn net.Conn, message guestproto.Message) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := guestproto.NewEncoder(conn).Write(message); err != nil {
+		return err
+	}
+	return conn.SetWriteDeadline(time.Time{})
+}
+
+// sendStatus records the runner status and streams it if a host is
+// connected.
+func (s *Server) sendStatus(status guestproto.RunnerStatus) {
+	s.mu.Lock()
+	s.statuses = append(s.statuses, status)
+	s.mu.Unlock()
+	if err := s.send(guestproto.Message{Kind: guestproto.KindRunnerStatus, RunnerStatus: &status}); err != nil {
+		s.cfg.Logger.Warn("runner status not delivered", "state", status.State, "err", err)
+	}
+}
+
+// handlePrepare starts the one-job listener in an empty warm VM. The listener
+// itself is never checkpointed and publishes the assignment before
+// Runner.Worker is created.
+func (s *Server) handlePrepare(prepare guestproto.Prepare) {
+	s.mu.Lock()
+	if s.prepared != nil {
+		duplicate := s.prepared.MemberID == prepare.MemberID
+		s.mu.Unlock()
+		if !duplicate {
+			s.cfg.Logger.Error("conflicting preparation ignored", "member_id", prepare.MemberID)
+		}
+		return
+	}
+	claimed := prepare
+	s.prepared = &claimed
+	s.mu.Unlock()
+	started := guestTiming(s.cfg.Timing.Point("listener_prepare_received"))
+	go s.run(prepare, started)
+}
+
+func (s *Server) run(prepare guestproto.Prepare, started guestproto.TimingPoint) {
+	code, err := s.cfg.RunRunner(context.Background(), prepare.JITConfig, prepare.Env, func(event RunnerEvent) {
+		switch event {
+		case EventListening:
+			point := guestTiming(s.cfg.Timing.Point("runner_registered"))
+			s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerRegistered, Timing: []guestproto.TimingPoint{started, point}})
+		}
+	})
+	if err != nil {
+		s.cfg.Logger.Error("runner failed to run", "member_id", prepare.MemberID, "err", err)
+		point := guestTiming(s.cfg.Timing.Point("runner_exited"))
+		s.sendStatus(guestproto.RunnerStatus{
+			State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode,
+			Timing: []guestproto.TimingPoint{point},
+		})
+		return
+	}
+	point := guestTiming(s.cfg.Timing.Point("runner_exited"))
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerExited, ExitCode: code,
+		Timing: []guestproto.TimingPoint{point},
+	})
+}
+
+func (s *Server) handleRendezvous(rendezvous guestproto.Rendezvous) {
+	s.mu.Lock()
+	if s.assignment == nil || s.prepared == nil || s.prepared.MemberID != rendezvous.MemberID || rendezvous.AssignmentID == "" {
+		s.mu.Unlock()
+		s.cfg.Logger.Error("rendezvous arrived before local assignment", "member_id", rendezvous.MemberID, "assignment_id", rendezvous.AssignmentID)
+		return
+	}
+	if s.rendezvous != nil {
+		duplicate := s.rendezvous.MemberID == rendezvous.MemberID && s.rendezvous.AssignmentID == rendezvous.AssignmentID
+		s.mu.Unlock()
+		if !duplicate {
+			s.cfg.Logger.Error("conflicting rendezvous ignored", "member_id", rendezvous.MemberID, "assignment_id", rendezvous.AssignmentID)
+		}
+		return
+	}
+	claimed := rendezvous
+	s.rendezvous = &claimed
+	s.mu.Unlock()
+	go s.bindGeneration(rendezvous)
+}
+
+func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.MountDeadline)
+	emit := func(event string) guestproto.TimingPoint {
+		point := guestTiming(s.cfg.Timing.Point(event))
+		s.sendStatus(guestproto.RunnerStatus{
+			State: guestproto.RunnerProgress, Timing: []guestproto.TimingPoint{point},
+		})
+		return point
+	}
+	recycle := func(stage string, err error, restore *guestproto.RestoreStatus) {
+		cancel()
+		s.cfg.Logger.Error(stage, "member_id", rendezvous.MemberID, "assignment_id", rendezvous.AssignmentID, "err", err)
+		failed := guestTiming(s.cfg.Timing.Point("generation_recycle_required"))
+		s.sendStatus(guestproto.RunnerStatus{
+			State: guestproto.RunnerRecycleRequired, Reason: err.Error(), Restore: restore,
+			Timing: []guestproto.TimingPoint{failed},
+		})
+	}
+	received := emit("guest_rendezvous_received")
+	emit("mount_convergence_started")
+	s.cfg.Logger.Info("rendezvous timing", "event", received.Event, "monotonic_ns", received.MonotonicNS)
+	err := s.convergeMounts(ctx, rendezvous.Mounts)
+	if err != nil {
+		recycle("mount convergence failed", err, nil)
+		return
+	}
+	emit("mount_convergence_completed")
+	restoreStatus := &guestproto.RestoreStatus{Outcome: guestproto.RestoreNotRequested}
+	if rendezvous.Checkpoint != nil {
+		recycle("process restore rejected", errors.New("process checkpoint restoration is disabled"), &guestproto.RestoreStatus{
+			Outcome: guestproto.RestoreUnsafe, ProcessInvalidated: true,
+			FailureClass: string(generation.RestoreCleanup), FailureCode: "process-restore-disabled",
+		})
+		return
+	}
+	if s.cfg.Checkpoints != nil {
+		emit("cold_capsule_start_started")
+		if err := s.cfg.Checkpoints.Capsules.Start(ctx); err != nil {
+			recycle("cold capsule start failed", err, &guestproto.RestoreStatus{
+				Outcome: guestproto.RestoreUnsafe, FailureClass: string(generation.RestoreCleanup),
+				FailureCode: "cold-capsule-start",
+			})
+			return
+		}
+		emit("cold_capsule_start_completed")
+	}
+	cancel()
+	clock := sampleClock()
+	clock.AfterRestore = false
+	s.mu.Lock()
+	s.bound = true
+	s.clock = &clock
+	s.mu.Unlock()
+	ready := guestTiming(s.cfg.Timing.Point("generation_restore_completed"))
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerMountsReady, Clock: &clock, Restore: restoreStatus,
+		Timing: []guestproto.TimingPoint{ready},
+	})
+}
+
+func (s *Server) handleAuthorize(authorize guestproto.Authorize) {
+	s.mu.Lock()
+	if s.prepared == nil || s.prepared.MemberID != authorize.MemberID || s.assignment == nil ||
+		s.rendezvous == nil || s.rendezvous.AssignmentID != authorize.AssignmentID ||
+		s.assignment.RequestID != authorize.RequestID || authorize.Identity == nil || !s.bound || s.clock == nil {
+		s.mu.Unlock()
+		s.cfg.Logger.Error("authorization arrived before matching restored assignment", "member_id", authorize.MemberID, "assignment_id", authorize.AssignmentID)
+		return
+	}
+	if s.authorized != nil {
+		duplicate := s.authorized.MemberID == authorize.MemberID && s.authorized.AssignmentID == authorize.AssignmentID
+		s.mu.Unlock()
+		if !duplicate {
+			s.cfg.Logger.Error("conflicting authorization ignored", "member_id", authorize.MemberID, "assignment_id", authorize.AssignmentID)
+		}
+		return
+	}
+	claimed := authorize
+	clock := *s.clock
+	s.authorized = &claimed
+	s.mu.Unlock()
+	if s.cfg.Checkpoints != nil {
+		rootPID, err := s.cfg.Checkpoints.Capsules.RootPID()
+		if err != nil {
+			s.failWorkerGate(fmt.Errorf("locating restored capsule: %w", err))
+			return
+		}
+		if err := os.WriteFile(CapsulePIDPath, []byte(strconv.Itoa(rootPID)+"\n"), 0o644); err != nil {
+			s.failWorkerGate(fmt.Errorf("publishing restored capsule: %w", err))
+			return
+		}
+	} else if err := os.Remove(CapsulePIDPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		s.failWorkerGate(fmt.Errorf("selecting workspace-only worker: %w", err))
+		return
+	}
+	point := guestTiming(s.cfg.Timing.Point("runner_worker_released"))
+	s.sendStatus(guestproto.RunnerStatus{
+		State: guestproto.RunnerWorkerReady, Identity: authorize.Identity, Clock: &clock,
+		Timing: []guestproto.TimingPoint{point},
+	})
+	s.gateOnce.Do(func() { close(s.workerGate) })
+}
+
+func (s *Server) failWorkerGate(err error) {
+	s.mu.Lock()
+	s.gateErr = err
+	s.mu.Unlock()
+	s.gateOnce.Do(func() { close(s.workerGate) })
+}
+
+func sampleClock() guestproto.ClockSample {
+	source, _ := os.ReadFile("/sys/devices/system/clocksource/clocksource0/current_clocksource")
+	_, err := os.Stat("/run/systemd/timesync/synchronized")
+	return guestproto.ClockSample{
+		UnixNS: time.Now().UnixNano(), Synchronized: err == nil,
+		Clocksource: strings.TrimSpace(string(source)),
+	}
+}
+
+func (s *Server) convergeMounts(ctx context.Context, mounts []guestproto.Mount) error {
+	if len(mounts) == 0 {
+		return errors.New("assignment carries no mounts")
+	}
+	serials := make(map[string]bool, len(mounts))
+	mountpoints := make(map[string]bool, len(mounts))
+	for _, mount := range mounts {
+		if err := validateMount(mount); err != nil {
+			return err
+		}
+		if serials[mount.Serial] || mountpoints[mount.Mountpoint] {
+			return errors.New("assignment carries duplicate mount identity")
+		}
+		serials[mount.Serial] = true
+		mountpoints[mount.Mountpoint] = true
+	}
+	mountCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errs := make([]error, len(mounts))
+	done := make([]chan struct{}, len(mounts))
+	dependencies := make([][]int, len(mounts))
+	for index := range mounts {
+		done[index] = make(chan struct{})
+		for candidate := range mounts {
+			if index != candidate && strings.HasPrefix(mounts[index].Mountpoint, mounts[candidate].Mountpoint+"/") {
+				dependencies[index] = append(dependencies[index], candidate)
+			}
+		}
+	}
+	var wait sync.WaitGroup
+	wait.Add(len(mounts))
+	for index := range mounts {
+		index := index
+		go func() {
+			defer wait.Done()
+			defer close(done[index])
+			for _, dependency := range dependencies[index] {
+				select {
+				case <-done[dependency]:
+					if errs[dependency] != nil {
+						errs[index] = fmt.Errorf("parent mount %s did not converge", mounts[dependency].Mountpoint)
+						return
+					}
+				case <-mountCtx.Done():
+					errs[index] = mountCtx.Err()
+					return
+				}
+			}
+			started := time.Now()
+			errs[index] = s.convergeMount(mountCtx, mounts[index])
+			if errs[index] != nil {
+				cancel()
+			}
+			s.cfg.Logger.Info("postflight.guestd.mount.converged", "serial", mounts[index].Serial,
+				"duration_ns", time.Since(started).Nanoseconds(), "error", errs[index])
+		}()
+	}
+	wait.Wait()
+	for index, err := range errs {
+		if err != nil {
+			return fmt.Errorf("serial %s at %s: %w", mounts[index].Serial, mounts[index].Mountpoint, err)
+		}
+	}
+	return nil
+}
+
+func validateMount(mount guestproto.Mount) error {
+	switch {
+	case mount.Serial == "":
+		return errors.New("mount without a serial")
+	case mount.Filesystem == "":
+		return errors.New("mount without a filesystem")
+	case !validMountpoint(mount.Mountpoint):
+		return fmt.Errorf("unsafe mountpoint %q", mount.Mountpoint)
+	}
+	return nil
+}
+
+func validMountpoint(mountpoint string) bool {
+	return path.IsAbs(mountpoint) && path.Clean(mountpoint) == mountpoint && mountpoint != "/"
+}
+
+// convergeMount retries the whole observe-then-act ladder until the mount
+// is up or the deadline passes. Every attempt re-observes from scratch, so
+// a partial earlier attempt (device located, mkfs done, mount failed)
+// converges instead of erroring.
+func (s *Server) convergeMount(ctx context.Context, mount guestproto.Mount) error {
+	if err := validateMount(mount); err != nil {
+		return err
+	}
+	options := mount.Options
+	if !slices.Contains(options, "discard") {
+		options = append([]string{"discard"}, options...)
+	}
+	var lastErr error
+	for {
+		lastErr = s.tryMount(ctx, mount, options)
+		if lastErr == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return lastErr
+		case <-time.After(s.cfg.RetryInterval):
+		}
+	}
+}
+
+func (s *Server) tryMount(ctx context.Context, mount guestproto.Mount, options []string) error {
+	if mount.Serial == "tool" && mount.Mountpoint == RunnerHomeMountpoint {
+		return s.tryRunnerHomeMount(ctx, mount, options)
+	}
+	system := s.cfg.System
+	mounted, err := system.IsMounted(mount.Mountpoint)
+	if err != nil {
+		return err
+	}
+	if !mounted {
+		device, err := system.LocateDevice(ctx, mount.Serial)
+		if err != nil {
+			return err
+		}
+		if s.cfg.Encryption.enabled() {
+			device, err = s.openEncrypted(ctx, device, mount.Serial)
+			if err != nil {
+				return err
+			}
+		}
+		blank, err := system.IsBlank(ctx, device)
+		if err != nil {
+			return err
+		}
+		if blank {
+			if err := system.MakeFilesystem(ctx, device, mount.Filesystem); err != nil {
+				return err
+			}
+		}
+		if err := system.Mount(ctx, device, mount.Mountpoint, mount.Filesystem, options); err != nil {
+			return err
+		}
+	}
+	return system.Adopt(mount.Mountpoint)
+}
+
+func (s *Server) tryRunnerHomeMount(ctx context.Context, mount guestproto.Mount, options []string) error {
+	system := s.cfg.System
+	device, err := system.LocateDevice(ctx, mount.Serial)
+	if err != nil {
+		return err
+	}
+	if s.cfg.Encryption.enabled() {
+		device, err = s.openEncrypted(ctx, device, mount.Serial)
+		if err != nil {
+			return err
+		}
+	}
+	backingMounted, err := system.IsMounted(RunnerHomeBackingMountpoint)
+	if err != nil {
+		return err
+	}
+	if !backingMounted {
+		blank, err := system.IsBlank(ctx, device)
+		if err != nil {
+			return err
+		}
+		if blank {
+			if err := system.MakeFilesystem(ctx, device, mount.Filesystem); err != nil {
+				return err
+			}
+		}
+		if err := system.Mount(ctx, device, RunnerHomeBackingMountpoint, mount.Filesystem, options); err != nil {
+			return err
+		}
+	}
+	if err := system.MountOverlay(ctx,
+		RunnerHomeMountpoint, RunnerHomeLowerMountpoint,
+		RunnerHomeBackingMountpoint+"/upper", RunnerHomeBackingMountpoint+"/work",
+		RunnerHomeMountpoint, []string{"noatime", "nodev", "nosuid"},
+	); err != nil {
+		return err
+	}
+	return system.Adopt(RunnerHomeMountpoint)
+}
+
+// openEncrypted converges the device to an open LUKS2 mapper and returns
+// the mapper node the rest of the ladder operates on. Anything that is not
+// already LUKS is formatted — with encryption on, plaintext must never
+// mount, and a workspace only ever carries rebuildable cache, so the right
+// response to a plaintext lineage (a generation sealed before the
+// encryption cutover) is a loud reformat and a cold build, not a wedged
+// slot.
+func (s *Server) openEncrypted(ctx context.Context, device, serial string) (string, error) {
+	system := s.cfg.System
+	luks, err := system.IsLUKS(ctx, device)
+	if err != nil {
+		return "", err
+	}
+	key, err := workspaceKey(s.cfg.Encryption)
+	if err != nil {
+		return "", err
+	}
+	defer clear(key)
+	if !luks {
+		blank, err := system.IsBlank(ctx, device)
+		if err != nil {
+			return "", err
+		}
+		if !blank {
+			s.cfg.Logger.Warn("plaintext workspace lineage under encryption; erasing and reformatting, cache rebuilds cold", "device", device, "mode", string(s.cfg.Encryption))
+		}
+		// A LUKS header over unerased blocks is not encryption: every block
+		// the new filesystem has not yet written still reads as the old
+		// plaintext. Discard the whole device first; a lineage that cannot
+		// be erased must never be sealed as ciphertext.
+		if err := system.Discard(ctx, device); err != nil {
+			if !blank {
+				return "", fmt.Errorf("cannot erase plaintext lineage: %w", err)
+			}
+			s.cfg.Logger.Warn("discard failed on a blank device; continuing", "device", device, "err", err)
+		}
+		if err := system.FormatLUKS(ctx, device, key); err != nil {
+			return "", err
+		}
+	}
+	return system.OpenLUKS(ctx, device, "pf-"+serial, key)
+}
+
+// handleQuiesce proves that every member of the selected generation is
+// mounted and flushes the filesystems before the host seals the zvols.
+func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
+	points := []guestproto.TimingPoint{guestTiming(s.cfg.Timing.Point("quiesce_received"))}
+	if len(quiesce.Mountpoints) == 0 {
+		s.quiesceFailed(errors.New("quiesce requires at least one mounted volume"), points)
+		return
+	}
+	if quiesce.Checkpoint != nil {
+		s.quiesceFailed(errors.New("process checkpoint publication is disabled"), points)
+		return
+	}
+	for _, mountpoint := range quiesce.Mountpoints {
+		if err := s.requireMounted(mountpoint); err != nil {
+			s.cfg.Logger.Error("quiesce failed", "mountpoint", mountpoint, "err", err)
+			s.quiesceFailed(err, points)
+			return
+		}
+	}
+	points = append(points, guestTiming(s.cfg.Timing.Point("quiesce_mounts_checked")))
+	points = append(points, guestTiming(s.cfg.Timing.Point("filesystem_sync_started")))
+	if err := s.cfg.System.Sync(); err != nil {
+		s.quiesceFailed(fmt.Errorf("syncing mounted filesystems: %w", err), points)
+		return
+	}
+	points = append(points, guestTiming(s.cfg.Timing.Point("filesystem_sync_completed")))
+	if err := s.send(guestproto.Message{Kind: guestproto.KindQuiesced, Quiesced: &guestproto.Quiesced{
+		Timing: points,
+	}}); err != nil {
+		s.cfg.Logger.Warn("quiesced not delivered", "err", err)
+	}
+}
+
+func (s *Server) quiesceFailed(reason error, points []guestproto.TimingPoint) {
+	s.cfg.Logger.Error("quiesce failed", "err", reason)
+	reply := guestproto.Message{Kind: guestproto.KindQuiesceFailed, QuiesceFailed: &guestproto.QuiesceFailed{
+		Reason: reason.Error(), Timing: points,
+	}}
+	if err := s.send(reply); err != nil {
+		s.cfg.Logger.Warn("quiesce-failed not delivered", "err", err)
+	}
+}
+
+func (s *Server) requireMounted(mountpoint string) error {
+	if !validMountpoint(mountpoint) {
+		return fmt.Errorf("unsafe mountpoint %q", mountpoint)
+	}
+	mounted, err := s.cfg.System.IsMounted(mountpoint)
+	if err != nil {
+		return err
+	}
+	if !mounted {
+		return fmt.Errorf("required volume is not mounted at %s", mountpoint)
+	}
+	return nil
+}

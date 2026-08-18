@@ -16,7 +16,7 @@ ruleset decide every merge:
   commits straight to main as `guardian-promotions[bot]` through the
   ruleset bypass. Never hand-roll a pin bump on a marked line.
 - **Kargo** owns only the postflight CLI release channels
-  (`src/products/postflight-cli/release/channels.yaml` plus the release
+  (`src/postflight/cli/release/channels.yaml` plus the release
   manifest's CLI lane). Never hand-roll or duplicate its promotion PRs.
 
 Renovate runs as a `guardian-imageops` CronJob every six hours using a

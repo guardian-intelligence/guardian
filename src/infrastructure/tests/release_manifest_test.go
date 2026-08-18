@@ -24,7 +24,7 @@ import (
 
 const (
 	releaseManifestRunfile = "src/infrastructure/deployments/guardian/system/release-manifest.yaml"
-	releaseChannelsFile    = "src/products/postflight-cli/release/channels.yaml"
+	releaseChannelsFile    = "src/postflight/cli/release/channels.yaml"
 	firstPartyPrefix       = "ghcr.io/guardian-intelligence/"
 )
 

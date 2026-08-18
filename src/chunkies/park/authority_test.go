@@ -12,7 +12,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/chunkies/mount"
 	"github.com/guardian-intelligence/guardian/src/games/wake-up-mythra/services/wum"
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
-	"github.com/guardian-intelligence/guardian/src/services/postflight/controlplane/pgtest"
+	"github.com/guardian-intelligence/guardian/src/postflight/controlplane/pgtest"
 )
 
 // fixedClock pins the wall clock: at wallEpoch the anchored scheduler owes
