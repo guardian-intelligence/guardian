@@ -1,4 +1,4 @@
-package main
+package gateway
 
 // Behavioral coverage for the gateway relay loop: what a connected client
 // can get through to a park, and what the gateway absorbs. The park side
@@ -19,7 +19,9 @@ import (
 	"github.com/quic-go/quic-go"
 	webtransport "github.com/quic-go/webtransport-go"
 
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/parkproxy"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/wum"
 )
 
 // fakePark accepts one authenticated proxy connection and records every
@@ -45,13 +47,13 @@ func newFakePark(t *testing.T, key []byte) *fakePark {
 				return
 			}
 			go func(c net.Conn) {
-				proxy, _, err := acceptProxy(c, key, time.Now())
+				proxy, _, err := parkproxy.Accept(c, key, time.Now())
 				if err != nil {
 					c.Close()
 					return
 				}
 				for {
-					kind, payload, err := proxy.readMessage()
+					kind, payload, err := proxy.ReadMessage()
 					if err != nil {
 						return
 					}
@@ -180,7 +182,7 @@ func (h *relayHarness) hello(t *testing.T, sess *webtransport.Session, sub, role
 
 func moveIntent(sub string, id uint64, node uint16) []byte {
 	payload := make([]byte, 10)
-	binary.LittleEndian.PutUint64(payload, dogIDFor(sub))
+	binary.LittleEndian.PutUint64(payload, wum.DogIDFor(sub))
 	binary.LittleEndian.PutUint16(payload[8:], node)
 	return wire.EncodeIntent(wire.Intent{ID: id, Kind: 4, Payload: payload})
 }
@@ -194,10 +196,10 @@ func TestRelaySplicesIntentBytesVerbatim(t *testing.T) {
 	if _, err := stream.Write(frame); err != nil {
 		t.Fatal(err)
 	}
-	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(proxyStream)) == 1 }) {
+	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(parkproxy.KindStream)) == 1 }) {
 		t.Fatalf("intent never reached the park")
 	}
-	got := h.park.received(proxyStream)[0]
+	got := h.park.received(parkproxy.KindStream)[0]
 	if string(got) != string(frame) {
 		t.Fatalf("park received %x, want the client's frame %x", got, frame)
 	}
@@ -215,8 +217,8 @@ func TestRelayPacesBurstsInsteadOfClosing(t *testing.T) {
 			t.Fatalf("write %d: %v", i, err)
 		}
 	}
-	if !waitFor(t, 15*time.Second, func() bool { return len(h.park.received(proxyStream)) == n }) {
-		t.Fatalf("park got %d of %d intents; the old limiter would have closed the session", len(h.park.received(proxyStream)), n)
+	if !waitFor(t, 15*time.Second, func() bool { return len(h.park.received(parkproxy.KindStream)) == n }) {
+		t.Fatalf("park got %d of %d intents; the old limiter would have closed the session", len(h.park.received(parkproxy.KindStream)), n)
 	}
 	if elapsed := time.Since(start); elapsed < 500*time.Millisecond {
 		t.Fatalf("burst of %d relayed in %v: the shaper did not pace", n, elapsed)
@@ -225,7 +227,7 @@ func TestRelayPacesBurstsInsteadOfClosing(t *testing.T) {
 	if _, err := stream.Write(moveIntent("burst-sub", n+1, 2)); err != nil {
 		t.Fatalf("session unusable after burst: %v", err)
 	}
-	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(proxyStream)) == n+1 }) {
+	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(parkproxy.KindStream)) == n+1 }) {
 		t.Fatal("post-burst intent never arrived")
 	}
 }
@@ -244,12 +246,12 @@ func TestRelayDropsJunkDatagrams(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(proxyDatagram)) >= 1 }) {
+	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(parkproxy.KindDatagram)) >= 1 }) {
 		t.Fatal("well-formed check never reached the park")
 	}
 	// Datagrams are unordered; wait a beat, then require the junk stayed out.
 	time.Sleep(200 * time.Millisecond)
-	for _, got := range h.park.received(proxyDatagram) {
+	for _, got := range h.park.received(parkproxy.KindDatagram) {
 		if string(got) != string(good) {
 			t.Fatalf("junk datagram %x crossed the gateway", got)
 		}
@@ -268,10 +270,10 @@ func TestRelayDropsUnknownKindsAndLivesOn(t *testing.T) {
 	if _, err := stream.Write(intent); err != nil {
 		t.Fatal(err)
 	}
-	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(proxyStream)) == 1 }) {
+	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(parkproxy.KindStream)) == 1 }) {
 		t.Fatal("intent after unknown frame never arrived — unknown kind killed the session")
 	}
-	if got := h.park.received(proxyStream)[0]; string(got) != string(intent) {
+	if got := h.park.received(parkproxy.KindStream)[0]; string(got) != string(intent) {
 		t.Fatalf("park received %x, want %x", got, intent)
 	}
 }
@@ -293,10 +295,10 @@ func TestRelayRejectsSpectatorIntents(t *testing.T) {
 		t.Fatalf("kind = %d, want reject", kind)
 	}
 	rej, err := wire.DecodeReject(payload)
-	if err != nil || rej.Intent != 21 || rej.Reason != rejectReadOnly {
+	if err != nil || rej.Intent != 21 || rej.Reason != wum.RejectReadOnly {
 		t.Fatalf("reject = %+v (err %v), want intent 21 reason read_only", rej, err)
 	}
-	if got := h.park.received(proxyStream); len(got) != 0 {
+	if got := h.park.received(parkproxy.KindStream); len(got) != 0 {
 		t.Fatalf("spectator intent reached the park: %x", got)
 	}
 }

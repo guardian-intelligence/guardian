@@ -1,4 +1,4 @@
-package main
+package parkproxy
 
 import (
 	"context"
@@ -15,7 +15,7 @@ func TestProxyRoundTrip(t *testing.T) {
 	}
 	defer listener.Close()
 
-	want := proxyOpen{Sub: "alice", Park: "park-mythra", Role: "player", Remote: "127.0.0.1:1", SinceSeq: 41, SinceTick: 90}
+	want := Open{Sub: "alice", Park: "park-mythra", Role: "player", Remote: "127.0.0.1:1", SinceSeq: 41, SinceTick: 90}
 	done := make(chan error, 1)
 	go func() {
 		conn, err := listener.Accept()
@@ -23,27 +23,27 @@ func TestProxyRoundTrip(t *testing.T) {
 			done <- err
 			return
 		}
-		proxy, got, err := acceptProxy(conn, key, time.Now())
+		proxy, got, err := Accept(conn, key, time.Now())
 		if err == nil && got != want {
 			t.Errorf("open = %+v, want %+v", got, want)
 		}
 		if err == nil {
-			kind, payload, readErr := proxy.readMessage()
+			kind, payload, readErr := proxy.ReadMessage()
 			if readErr != nil {
 				err = readErr
-			} else if kind != proxyStream || string(payload) != "hello" {
+			} else if kind != KindStream || string(payload) != "hello" {
 				t.Errorf("message = %d %q", kind, payload)
 			}
 		}
 		done <- err
 	}()
 
-	proxy, err := dialProxy(context.Background(), listener.Addr().String(), key, want)
+	proxy, err := Dial(context.Background(), listener.Addr().String(), key, want)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer proxy.Close()
-	if err := proxy.writeMessage(proxyStream, []byte("hello")); err != nil {
+	if err := proxy.WriteMessage(KindStream, []byte("hello")); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err != nil {
@@ -58,11 +58,11 @@ func TestProxyRejectsWrongKey(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := acceptProxy(right, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), time.Now())
+		_, _, err := Accept(right, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), time.Now())
 		done <- err
 	}()
-	p := &proxyConn{Conn: left}
-	if err := p.writeOpen([]byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), proxyOpen{Sub: "a", Park: "p", Role: "player"}); err != nil {
+	p := &Conn{Conn: left}
+	if err := p.writeOpen([]byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), Open{Sub: "a", Park: "p", Role: "player"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err == nil {

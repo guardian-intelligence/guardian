@@ -1,4 +1,4 @@
-package main
+package park
 
 import (
 	"bytes"
@@ -20,11 +20,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/journal"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/mount"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/parkproxy"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/wum"
 	"github.com/guardian-intelligence/guardian/src/services/telemetry"
 )
 
-func runChunkiesPark() {
+// Run is the chunkies-park process: one configured park authority behind
+// the authenticated gateway transport.
+func Run() {
 	parkName := envStr("PARK_NAME", "park-mythra")
 	internalHost := envStr("INTERNAL_HOST", "127.0.0.1")
 	parkPort := envInt("PARK_PORT", 9632)
@@ -35,7 +40,7 @@ func runChunkiesPark() {
 	if tickHz < minTickHz || tickHz > maxTickHz {
 		log.Fatalf("TICK_HZ=%d outside supported range %d..%d", tickHz, minTickHz, maxTickHz)
 	}
-	key, err := proxyKey(envStr("INTERNAL_KEY_FILE", ""))
+	key, err := parkproxy.ReadKey(envStr("INTERNAL_KEY_FILE", ""))
 	if err != nil {
 		log.Fatalf("internal key: %v", err)
 	}
@@ -50,11 +55,9 @@ func runChunkiesPark() {
 	defer traceShutdown(context.Background())
 
 	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/mythra/behavior")
-	client := &clientModule{slot: "client"}
-	client.set(defaultClientModule)
-	parkModule := &clientModule{slot: "park"}
-	parkModule.set(defaultParkModule)
-	go watchDistributedModules(behaviorDir, client, parkModule)
+	client := mount.NewModule("client", mount.DefaultClient)
+	parkModule := mount.NewModule("park", mount.DefaultPark)
+	go mount.Watch(behaviorDir, client, parkModule)
 
 	dsn, err := databaseURL()
 	if err != nil {
@@ -82,7 +85,7 @@ func runChunkiesPark() {
 	}
 
 	mods := &modules{client: client, park: parkModule}
-	registry := newParks(func() []byte { b, _ := parkModule.get(); return b }, fixtureTerrain, j, mods, timing{hz: tickHz})
+	registry := newParks(func() []byte { b, _ := parkModule.Get(); return b }, wum.FixtureTerrain, j, mods, timing{hz: tickHz})
 	authority, err := registry.get(ctx, parkName)
 	if err != nil {
 		log.Fatalf("open park: %v", err)
@@ -153,14 +156,14 @@ func runChunkiesPark() {
 }
 
 func terrainHandler(j journal.Journal, ready *atomic.Bool) http.HandlerFunc {
-	fixtureID := terrainID(fixtureTerrain)
+	fixtureID := terrainID(wum.FixtureTerrain)
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseUint(strings.TrimPrefix(r.URL.Path, "/terrain/"), 16, 64)
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
-		blob := fixtureTerrain
+		blob := wum.FixtureTerrain
 		if id != fixtureID {
 			if !ready.Load() {
 				w.WriteHeader(http.StatusServiceUnavailable)
@@ -186,18 +189,18 @@ func terrainHandler(j journal.Journal, ready *atomic.Bool) http.HandlerFunc {
 }
 
 func handleParkProxy(conn net.Conn, key []byte, park *authority, maxSessions int) {
-	proxy, open, err := acceptProxy(conn, key, time.Now())
+	proxy, open, err := parkproxy.Accept(conn, key, time.Now())
 	if err != nil {
 		return
 	}
 	defer proxy.Close()
 	if open.Park != park.name {
-		proxy.writeMessage(proxyClose, []byte("wrong park"))
+		proxy.WriteMessage(parkproxy.KindClose, []byte("wrong park"))
 		return
 	}
 	if n := sessionCount.Add(1); n > int64(maxSessions) {
 		sessionCount.Add(-1)
-		proxy.writeMessage(proxyClose, []byte("at capacity"))
+		proxy.WriteMessage(parkproxy.KindClose, []byte("at capacity"))
 		return
 	}
 	defer sessionCount.Add(-1)
@@ -205,9 +208,9 @@ func handleParkProxy(conn net.Conn, key []byte, park *authority, maxSessions int
 	done := make(chan struct{})
 	s := &session{
 		sub: open.Sub, role: open.Role, park: park, out: make(chan []byte, 256),
-		dogID: dogIDFor(open.Sub), openedAt: time.Now(),
+		dogID: wum.DogIDFor(open.Sub), openedAt: time.Now(),
 		closeFn: func(why string) {
-			proxy.writeMessage(proxyClose, []byte(why))
+			proxy.WriteMessage(parkproxy.KindClose, []byte(why))
 			proxy.Close()
 		},
 	}
@@ -215,12 +218,12 @@ func handleParkProxy(conn net.Conn, key []byte, park *authority, maxSessions int
 	select {
 	case park.attach <- attachReq{sess: s, sinceSeq: open.SinceSeq, sinceTick: open.SinceTick, done: attached}:
 	case <-park.stop:
-		proxy.writeMessage(proxyClose, []byte("park unavailable"))
+		proxy.WriteMessage(parkproxy.KindClose, []byte("park unavailable"))
 		return
 	}
 	res := <-attached
 	if res.err != nil {
-		proxy.writeMessage(proxyClose, []byte("park unavailable"))
+		proxy.WriteMessage(parkproxy.KindClose, []byte("park unavailable"))
 		return
 	}
 	defer park.detach(s)
@@ -228,7 +231,7 @@ func handleParkProxy(conn net.Conn, key []byte, park *authority, maxSessions int
 	defer stageDeparture(park, s)
 
 	go func() {
-		write := func(b []byte) bool { return proxy.writeMessage(proxyStream, b) == nil }
+		write := func(b []byte) bool { return proxy.WriteMessage(parkproxy.KindStream, b) == nil }
 		if !write(res.welcome) {
 			proxy.Close()
 			return
@@ -253,12 +256,12 @@ func handleParkProxy(conn net.Conn, key []byte, park *authority, maxSessions int
 	}()
 
 	for {
-		kind, payload, err := proxy.readMessage()
+		kind, payload, err := proxy.ReadMessage()
 		if err != nil {
 			return
 		}
 		switch kind {
-		case proxyStream:
+		case parkproxy.KindStream:
 			frameKind, framePayload, err := wire.NewReader(bytes.NewReader(payload)).Next()
 			if err != nil {
 				continue
@@ -270,11 +273,11 @@ func handleParkProxy(conn net.Conn, key []byte, park *authority, maxSessions int
 					continue
 				}
 				if s.role != "player" {
-					s.sendReject(in.ID, rejectReadOnly)
+					s.sendReject(in.ID, wum.RejectReadOnly)
 					continue
 				}
-				if !intentBoundToActor(in.Kind, in.Payload, s.dogID) {
-					s.sendReject(in.ID, rejectNotYours)
+				if !wum.IntentBoundToActor(in.Kind, in.Payload, s.dogID) {
+					s.sendReject(in.ID, wum.RejectNotYours)
 					continue
 				}
 				park.stageIntent(s, in.ID, in.Kind, in.Payload)
@@ -289,13 +292,13 @@ func handleParkProxy(conn net.Conn, key []byte, park *authority, maxSessions int
 					return
 				}
 			}
-		case proxyDatagram:
+		case parkproxy.KindDatagram:
 			if verdict, ok := checkVerdict(park, payload); ok {
-				if proxy.writeMessage(proxyDatagram, verdict) != nil {
+				if proxy.WriteMessage(parkproxy.KindDatagram, verdict) != nil {
 					return
 				}
 			}
-		case proxyClose:
+		case parkproxy.KindClose:
 			return
 		}
 	}
@@ -307,5 +310,5 @@ func stageDeparture(park *authority, s *session) {
 	}
 	var payload [8]byte
 	binary.LittleEndian.PutUint64(payload[:], s.dogID)
-	park.stageIntent(s, 0, evLeave, payload[:])
+	park.stageIntent(s, 0, wum.EvLeave, payload[:])
 }

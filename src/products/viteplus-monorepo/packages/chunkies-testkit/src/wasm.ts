@@ -34,7 +34,7 @@ function repoFile(rel: string): Uint8Array {
   );
 }
 
-const BEHAVIORS = "services/mythrad/behaviors/";
+const BEHAVIORS = "services/mythrad/mount/behaviors/";
 
 type Modules = {
   client: Uint8Array;
@@ -60,7 +60,7 @@ export function modules(): Modules {
   cached ??= {
     client: repoFile(`${BEHAVIORS}client.wasm`),
     park: repoFile(`${BEHAVIORS}park.wasm`),
-    terrain: repoFile("services/mythrad/terrain/fixture_park.bin"),
+    terrain: repoFile("services/mythrad/wum/fixture_park.bin"),
   };
   return cached;
 }

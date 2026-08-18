@@ -1,0 +1,24 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+exports_files(
+    ["fixture_park.bin"],
+    visibility = ["//src/services/mythrad/sim:__pkg__"],
+)
+
+go_library(
+    name = "wum",
+    srcs = ["wum.go"],
+    embedsrcs = ["fixture_park.bin"],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/mythrad/wum",
+    visibility = ["//src/services/mythrad:__subpackages__"],
+)
+
+go_test(
+    name = "wum_test",
+    srcs = ["conformance_test.go"],
+    embed = [":wum"],
+    deps = [
+        "//src/services/mythrad/gametest",
+        "//src/services/mythrad/mount",
+    ],
+)

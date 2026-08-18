@@ -1,0 +1,54 @@
+package wum
+
+import (
+	"encoding/binary"
+	"testing"
+
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/gametest"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/mount"
+)
+
+// The WUM park module through the game-blind conformance suite: the
+// committed artifacts, the genesis terrain, and a corpus of valid intents.
+// The suite owns the properties (determinism, snapshot completeness,
+// reject purity, system-event semantics); only the corpus and kind
+// numbers here are WUM's.
+func TestWUMGameConformance(t *testing.T) {
+	dog := func(id uint64) []byte {
+		var p [8]byte
+		binary.LittleEndian.PutUint64(p[:], id)
+		return p[:]
+	}
+	move := func(id uint64, node uint16) []byte {
+		return binary.LittleEndian.AppendUint16(dog(id), node)
+	}
+	boost := func(id uint64, on byte) []byte {
+		return append(dog(id), on)
+	}
+	alice, bob, carol := DogIDFor("alice"), DogIDFor("bob"), DogIDFor("carol")
+
+	gametest.Run(t, gametest.Game{
+		Park:    mount.DefaultPark,
+		Modules: map[string][]byte{"client": mount.DefaultClient},
+		Genesis: FixtureTerrain,
+		Corpus: []gametest.Event{
+			{Kind: EvJoin, Payload: dog(alice)},
+			{Kind: EvJoin, Payload: dog(bob)},
+			{Kind: EvJoin, Payload: dog(carol)},
+			{Kind: EvCheckIn, Payload: dog(alice)},
+			{Kind: EvCheckIn, Payload: dog(bob)},
+			{Kind: EvMoveTo, Payload: move(alice, 1290)}, // (10, 10): open grass
+			{Kind: EvMoveTo, Payload: move(bob, 1290)},
+			{Kind: EvMoveTo, Payload: move(carol, 2580)},
+			{Kind: EvBoostSet, Payload: boost(alice, 1)},
+			{Kind: EvBoostSet, Payload: boost(alice, 0)},
+			{Kind: EvLeave, Payload: dog(bob)},
+			{Kind: EvDayReset, Payload: binary.LittleEndian.AppendUint32(nil, 1)},
+		},
+		System: gametest.System{
+			RateSet:      EvRateSet,
+			ClockSkip:    EvClockSkip,
+			EpochAdvance: EvEpochAdvance,
+		},
+	})
+}

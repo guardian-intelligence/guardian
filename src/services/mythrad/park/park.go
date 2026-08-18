@@ -1,4 +1,4 @@
-package main
+package park
 
 import (
 	"bytes"
@@ -22,7 +22,9 @@ import (
 	"github.com/tetratelabs/wazero/api"
 
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/journal"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/mount"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/wum"
 )
 
 const (
@@ -337,8 +339,8 @@ type ringEntry struct {
 // modules exposes the current distribution hashes riding every verdict:
 // the client presentation module and the park module itself.
 type modules struct {
-	client *clientModule
-	park   *clientModule
+	client *mount.Module
+	park   *mount.Module
 }
 
 // authority is one park's sim authority: journal writer, validator, and
@@ -421,7 +423,7 @@ func displayHash(b []byte) string {
 // that must lead this tick's batch — the journaled boundary between the
 // old module's ticks and the new one's.
 func (a *authority) swapPrelude() []stagedIntent {
-	bytes, hash := a.mods.park.get()
+	bytes, hash := a.mods.park.Get()
 	if a.cand != nil && hash != a.candHash {
 		a.failSoak("", errors.New("superseded by a newer module"))
 	}
@@ -458,7 +460,7 @@ func (a *authority) swapPrelude() []stagedIntent {
 	var p [12]byte
 	binary.LittleEndian.PutUint32(p[:4], a.host.Epoch()+1)
 	binary.LittleEndian.PutUint64(p[4:], a.candSum)
-	return []stagedIntent{{actor: "system", kind: evEpochAdvance, payload: p[:]}}
+	return []stagedIntent{{actor: "system", kind: wum.EvEpochAdvance, payload: p[:]}}
 }
 
 // failSoak rejects the candidate. A non-empty hash pins it as bad so the
@@ -621,7 +623,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 			for host.Tick() < ev.Tick {
 				host.Step()
 			}
-			if ev.Kind == evTerrainSet && len(ev.Payload) == 12 {
+			if ev.Kind == wum.EvTerrainSet && len(ev.Payload) == 12 {
 				tid := binary.LittleEndian.Uint64(ev.Payload[4:12])
 				blob, found, err := j.TerrainBlob(ctx, tid)
 				if err != nil {
@@ -702,14 +704,14 @@ func (a *authority) rateChange(ctx context.Context, hz int) error {
 	tick, epoch := a.host.Tick(), a.host.Epoch()
 	var p [4]byte
 	binary.LittleEndian.PutUint32(p[:], uint32(hz))
-	if code := a.host.Apply(simEvent(evRateSet, p[:])); code != 0 {
+	if code := a.host.Apply(simEvent(wum.EvRateSet, p[:])); code != 0 {
 		// A module from before rates existed (mount skew during a
 		// deploy): hold the world's rate; the desired rate lands on the
 		// first reopen under a rate-capable module.
 		log.Printf("park %s: module rejected rate_set %dHz (code %d) — holding %dHz", a.name, hz, code, a.hz)
 		return nil
 	}
-	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: evRateSet, Actor: "system", Payload: p[:]}
+	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: wum.EvRateSet, Actor: "system", Payload: p[:]}
 	firstSeq, err := a.j.Append(ctx, a.id, a.lastSeq, []journal.Event{ev})
 	if err != nil {
 		// State is ahead of the journal: never serve it.
@@ -742,7 +744,7 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	tick, epoch := a.host.Tick(), a.host.Epoch()
 	var p [8]byte
 	binary.LittleEndian.PutUint64(p[:], target)
-	if code := a.host.Apply(simEvent(evClockSkip, p[:])); code != 0 {
+	if code := a.host.Apply(simEvent(wum.EvClockSkip, p[:])); code != 0 {
 		// A module from before clock_skip existed (mount skew during a
 		// deploy): anchor to this process so the schedule holds drift-free
 		// for the instance's life; the real repayment lands on the first
@@ -752,7 +754,7 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 		log.Printf("park %s: module rejected clock_skip (code %d) — process-anchored until the module lane converges", a.name, code)
 		return nil
 	}
-	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: evClockSkip, Actor: "system", Payload: p[:]}
+	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: wum.EvClockSkip, Actor: "system", Payload: p[:]}
 	firstSeq, err := a.j.Append(ctx, a.id, a.lastSeq, []journal.Event{ev})
 	if err != nil {
 		// State is ahead of the journal: never serve it.
@@ -789,25 +791,6 @@ func simEvent(kind uint16, payload []byte) []byte {
 	return out
 }
 
-// playerActionName is deliberately bounded: a client-controlled numeric
-// kind must never become unbounded metric cardinality. Keep these four
-// names aligned with packages/wum-client/src/actions.ts; unknown attempts
-// share one bucket and are still visible as rejected authority spans.
-func playerActionName(kind uint16) string {
-	switch kind {
-	case evJoin:
-		return "join"
-	case evCheckIn:
-		return "check_in"
-	case evMoveTo:
-		return "move_to"
-	case evBoostSet:
-		return "boost"
-	default:
-		return "unknown"
-	}
-}
-
 func elapsed(from, to time.Time) time.Duration {
 	if from.IsZero() || to.Before(from) {
 		return 0
@@ -825,7 +808,7 @@ func (a *authority) recordIntent(in stagedIntent, result string, reject uint32, 
 	if in.sess == nil || in.intentID == 0 || in.receivedAt.IsZero() {
 		return
 	}
-	kind := playerActionName(in.kind)
+	kind := wum.ActionName(in.kind)
 	rateHz := in.rateHz
 	if rateHz == 0 {
 		rateHz = a.hz
@@ -844,7 +827,7 @@ func (a *authority) recordIntent(in stagedIntent, result string, reject uint32, 
 		attribute.Float64("wum.authority_ms", float64(total.Microseconds())/1000),
 	}
 	if reject != 0 {
-		attrs = append(attrs, attribute.String("wum.reject_reason", rejectReasonName(reject)))
+		attrs = append(attrs, attribute.String("wum.reject_reason", wum.RejectReasonName(reject)))
 	}
 	_, span := otel.Tracer("guardian/mythrad/authority").Start(
 		context.Background(),
@@ -929,12 +912,12 @@ func (a *authority) stageRateChange(req rateChangeReq) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, in := range a.staged {
-		if in.kind == evRateSet {
+		if in.kind == wum.EvRateSet {
 			return errors.New("another tick-rate change is pending")
 		}
 	}
 	a.staged = append(a.staged, stagedIntent{
-		actor: "system", kind: evRateSet, payload: payload[:], done: req.done,
+		actor: "system", kind: wum.EvRateSet, payload: payload[:], done: req.done,
 	})
 	return nil
 }
@@ -1070,7 +1053,7 @@ func (a *authority) tickOnce() {
 		a.utcDay = day
 		var p [4]byte
 		binary.LittleEndian.PutUint32(p[:], day)
-		a.stageSystem(evDayReset, p[:])
+		a.stageSystem(wum.EvDayReset, p[:])
 	}
 
 	prelude := a.swapPrelude()
@@ -1107,11 +1090,11 @@ func (a *authority) tickOnce() {
 				}
 			}
 			log.Printf("park %s: intent rejected: actor=%s kind=%d intent=%d reason=%s(%d)",
-				a.name, in.actor, in.kind, in.intentID, rejectReasonName(code), code)
-			mIntentsRejected.WithLabelValues(rejectReasonName(code)).Inc()
+				a.name, in.actor, in.kind, in.intentID, wum.RejectReasonName(code), code)
+			mIntentsRejected.WithLabelValues(wum.RejectReasonName(code)).Inc()
 			a.recordIntent(in, "rejected", code, a.tm.now())
 			if in.done != nil {
-				in.done <- fmt.Errorf("rate_set rejected: %s (%d)", rejectReasonName(code), code)
+				in.done <- fmt.Errorf("rate_set rejected: %s (%d)", wum.RejectReasonName(code), code)
 			}
 			continue
 		}
@@ -1168,7 +1151,7 @@ func (a *authority) tickOnce() {
 		a.lastSeq = accepted[len(accepted)-1].Seq
 		a.mu.Unlock()
 		for _, in := range acceptedIntents {
-			if in.kind != evRateSet || len(in.payload) != 4 {
+			if in.kind != wum.EvRateSet || len(in.payload) != 4 {
 				continue
 			}
 			oldHz := a.hz

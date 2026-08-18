@@ -1,4 +1,4 @@
-package main
+package park
 
 import (
 	"bytes"
@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/journal"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/mount"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/wum"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/controlplane/pgtest"
 )
@@ -34,13 +36,11 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 	if err := j.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	mods := &modules{client: &clientModule{slot: "client"}, park: &clientModule{slot: "park"}}
-	mods.client.set(defaultClientModule)
-	mods.park.set(defaultParkModule)
+	mods := &modules{client: mount.NewModule("client", mount.DefaultClient), park: mount.NewModule("park", mount.DefaultPark)}
 
 	// openAuthority does not start the run loop: this test owns the host
 	// and drives tickOnce directly.
-	a, err := openAuthority(ctx, "park-test", defaultParkModule, fixtureTerrain, j, mods, fixedClock(wallEpoch))
+	a, err := openAuthority(ctx, "park-test", mount.DefaultPark, wum.FixtureTerrain, j, mods, fixedClock(wallEpoch))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,13 +51,13 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 		return p[:]
 	}
 	s := &session{sub: "alice", out: make(chan []byte, 16)}
-	a.stageIntent(s, 1, evJoin, dog(dogIDFor("alice")))
+	a.stageIntent(s, 1, wum.EvJoin, dog(wum.DogIDFor("alice")))
 	a.tickOnce()
-	a.stageIntent(s, 2, evCheckIn, dog(dogIDFor("alice")))
+	a.stageIntent(s, 2, wum.EvCheckIn, dog(wum.DogIDFor("alice")))
 	// A movement order makes the replay below exercise pathfinding and
 	// steering through wazero, not just roster bookkeeping.
-	move := append(dog(dogIDFor("alice")), 0x0A, 0x05) // node 1290 = (10, 10): open grass
-	a.stageIntent(s, 3, evMoveTo, move)
+	move := append(dog(wum.DogIDFor("alice")), 0x0A, 0x05) // node 1290 = (10, 10): open grass
+	a.stageIntent(s, 3, wum.EvMoveTo, move)
 	for i := 0; i < 100; i++ {
 		a.tickOnce()
 	}
@@ -67,7 +67,7 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 
 	// Duplicate intent ids are dropped at the door (idempotent resend).
 	before := a.lastSeq
-	a.stageIntent(s, 2, evCheckIn, dog(dogIDFor("alice")))
+	a.stageIntent(s, 2, wum.EvCheckIn, dog(wum.DogIDFor("alice")))
 	a.tickOnce()
 	if a.lastSeq != before {
 		t.Fatalf("duplicate (actor, intent_id) minted seq %d", a.lastSeq)
@@ -101,7 +101,7 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 			t.Fatalf("rate fanout frame: kind=%d err=%v", kind, err)
 		}
 		ev, err := wire.DecodeEvent(payload)
-		if err != nil || ev.Kind != evRateSet || ev.Tick != boundary {
+		if err != nil || ev.Kind != wum.EvRateSet || ev.Tick != boundary {
 			t.Fatalf("rate fanout event: %+v err=%v", ev, err)
 		}
 	default:
@@ -111,7 +111,7 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 	wantTick := a.host.Tick()
 	a.host.close()
 
-	b, err := openAuthority(ctx, "park-test", defaultParkModule, fixtureTerrain, j, mods,
+	b, err := openAuthority(ctx, "park-test", mount.DefaultPark, wum.FixtureTerrain, j, mods,
 		timing{hz: 48, now: func() time.Time { return wallEpoch }})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
@@ -141,8 +141,8 @@ func TestAuthorityClosesOnAppendConflict(t *testing.T) {
 	if err := j.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	mods := &modules{client: &clientModule{slot: "client"}, park: &clientModule{slot: "park"}}
-	a, err := openAuthority(ctx, "park-race", defaultParkModule, fixtureTerrain, j, mods, fixedClock(wallEpoch))
+	mods := &modules{client: mount.NewModule("client", mount.DefaultClient), park: mount.NewModule("park", mount.DefaultPark)}
+	a, err := openAuthority(ctx, "park-race", mount.DefaultPark, wum.FixtureTerrain, j, mods, fixedClock(wallEpoch))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,11 +150,11 @@ func TestAuthorityClosesOnAppendConflict(t *testing.T) {
 	// A rogue writer appends behind the authority's back. The authority's
 	// next batch lands on the taken seq, conflicts, and the authority
 	// closes itself rather than serve state the journal doesn't have.
-	if _, err := j.Append(ctx, a.id, 0, []journal.Event{{Tick: 0, Epoch: 1, Kind: evDayReset, Actor: "rogue", Payload: []byte{0, 0, 0, 0}}}); err != nil {
+	if _, err := j.Append(ctx, a.id, 0, []journal.Event{{Tick: 0, Epoch: 1, Kind: wum.EvDayReset, Actor: "rogue", Payload: []byte{0, 0, 0, 0}}}); err != nil {
 		t.Fatal(err)
 	}
 	s := &session{sub: "bob", out: make(chan []byte, 16)}
-	a.stageIntent(s, 1, evJoin, dog8(dogIDFor("bob")))
+	a.stageIntent(s, 1, wum.EvJoin, dog8(wum.DogIDFor("bob")))
 	a.tickOnce()
 	if !a.isClosed() {
 		t.Fatal("authority kept serving past a journal conflict (split brain)")
@@ -184,22 +184,21 @@ func TestModuleEpochSwapLane(t *testing.T) {
 	if err := j.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	mods := &modules{client: &clientModule{slot: "client"}, park: &clientModule{slot: "park"}}
-	mods.park.set(defaultParkModule)
-	a, err := openAuthority(ctx, "park-epoch", defaultParkModule, fixtureTerrain, j, mods, fixedClock(wallEpoch))
+	mods := &modules{client: mount.NewModule("client", mount.DefaultClient), park: mount.NewModule("park", mount.DefaultPark)}
+	a, err := openAuthority(ctx, "park-epoch", mount.DefaultPark, wum.FixtureTerrain, j, mods, fixedClock(wallEpoch))
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := &session{sub: "dana", out: make(chan []byte, 16)}
-	a.stageIntent(s, 1, evJoin, dog8(dogIDFor("dana")))
+	a.stageIntent(s, 1, wum.EvJoin, dog8(wum.DogIDFor("dana")))
 	a.tickOnce()
 	epochBefore := a.host.Epoch()
 
 	// A module the runtime refuses must be pinned bad, never promoted.
-	bad := append(append([]byte{}, defaultParkModule...), 0xFF)
-	mods.park.set(bad)
+	bad := append(append([]byte{}, mount.DefaultPark...), 0xFF)
+	mods.park.Set(bad)
 	a.tickOnce()
-	if a.moduleHash != displayHash(defaultParkModule) || a.cand != nil {
+	if a.moduleHash != displayHash(mount.DefaultPark) || a.cand != nil {
 		t.Fatal("invalid module bytes must not open a candidate")
 	}
 
@@ -207,8 +206,8 @@ func TestModuleEpochSwapLane(t *testing.T) {
 	// size 3, name "t", one content byte — wazero requires non-empty
 	// content) is a valid wasm suffix, so the hash flips without changing
 	// the sim.
-	variant := append(append([]byte{}, defaultParkModule...), 0x00, 0x03, 0x01, 0x74, 0x00)
-	mods.park.set(variant)
+	variant := append(append([]byte{}, mount.DefaultPark...), 0x00, 0x03, 0x01, 0x74, 0x00)
+	mods.park.Set(variant)
 	for i := 0; i < soakTicks(a.hz)+5; i++ {
 		a.tickOnce()
 	}
@@ -223,7 +222,7 @@ func TestModuleEpochSwapLane(t *testing.T) {
 	}
 
 	// The swapped host keeps serving.
-	a.stageIntent(s, 2, evCheckIn, dog8(dogIDFor("dana")))
+	a.stageIntent(s, 2, wum.EvCheckIn, dog8(wum.DogIDFor("dana")))
 	a.tickOnce()
 	wantHash := a.host.Hash()
 	wantTick := a.host.Tick()
@@ -231,7 +230,7 @@ func TestModuleEpochSwapLane(t *testing.T) {
 
 	// Reopen the park as a converged deploy would: the mount serves the
 	// new module, and the boundary snapshot must restore under it.
-	b, err := openAuthority(ctx, "park-epoch", variant, fixtureTerrain, j, mods, fixedClock(wallEpoch))
+	b, err := openAuthority(ctx, "park-epoch", variant, wum.FixtureTerrain, j, mods, fixedClock(wallEpoch))
 	if err != nil {
 		t.Fatalf("reopen after epoch swap: %v", err)
 	}
@@ -264,14 +263,14 @@ func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
 	if err := j.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	mods := &modules{client: &clientModule{slot: "client"}, park: &clientModule{slot: "park"}}
-	a, err := openAuthority(ctx, "park-refresh", defaultParkModule, fixtureTerrain, j, mods, fixedClock(wallEpoch))
+	mods := &modules{client: mount.NewModule("client", mount.DefaultClient), park: mount.NewModule("park", mount.DefaultPark)}
+	a, err := openAuthority(ctx, "park-refresh", mount.DefaultPark, wum.FixtureTerrain, j, mods, fixedClock(wallEpoch))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.host.close()
 
-	carol := dog8(dogIDFor("carol"))
+	carol := dog8(wum.DogIDFor("carol"))
 	seqAfter := func(want int64, step string) {
 		t.Helper()
 		if a.lastSeq != want {
@@ -283,27 +282,27 @@ func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
 	// is staged with intent id 0. The first tick after any open also
 	// journals the day_reset that seeds the sim's day index (seq 2).
 	s1 := &session{sub: "carol", out: make(chan []byte, 16)}
-	a.stageIntent(s1, 1, evJoin, carol)
+	a.stageIntent(s1, 1, wum.EvJoin, carol)
 	a.tickOnce()
 	seqAfter(2, "first join + day_reset")
-	a.stageIntent(s1, 0, evLeave, carol)
+	a.stageIntent(s1, 0, wum.EvLeave, carol)
 	a.tickOnce()
 	seqAfter(3, "first departure")
 
 	// Refreshed page: an intent for an absent dog is rejected (reason 3),
 	// then the client rejoins and retries under the SAME intent id.
 	s2 := &session{sub: "carol", out: make(chan []byte, 16)}
-	a.stageIntent(s2, 42, evCheckIn, carol)
+	a.stageIntent(s2, 42, wum.EvCheckIn, carol)
 	a.tickOnce()
 	seqAfter(3, "check-in while absent")
-	a.stageIntent(s2, 43, evJoin, carol)
-	a.stageIntent(s2, 42, evCheckIn, carol)
+	a.stageIntent(s2, 43, wum.EvJoin, carol)
+	a.stageIntent(s2, 42, wum.EvCheckIn, carol)
 	a.tickOnce()
 	seqAfter(5, "rejoin + retried check-in")
 
 	// Second disconnect: the departure must not be swallowed as a resend
 	// of the first one.
-	a.stageIntent(s2, 0, evLeave, carol)
+	a.stageIntent(s2, 0, wum.EvLeave, carol)
 	a.tickOnce()
 	seqAfter(6, "second departure")
 }
@@ -324,13 +323,13 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	if err := j.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	mods := &modules{client: &clientModule{slot: "client"}, park: &clientModule{slot: "park"}}
-	a, err := openAuthority(ctx, "park-anchored", defaultParkModule, fixtureTerrain, j, mods, fixedClock(wallEpoch))
+	mods := &modules{client: mount.NewModule("client", mount.DefaultClient), park: mount.NewModule("park", mount.DefaultPark)}
+	a, err := openAuthority(ctx, "park-anchored", mount.DefaultPark, wum.FixtureTerrain, j, mods, fixedClock(wallEpoch))
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := &session{sub: "erin", out: make(chan []byte, 16)}
-	a.stageIntent(s, 1, evJoin, dog8(dogIDFor("erin")))
+	a.stageIntent(s, 1, wum.EvJoin, dog8(wum.DogIDFor("erin")))
 	for i := 0; i < 5; i++ {
 		a.tickOnce()
 	}
@@ -339,7 +338,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 
 	// Short gap: stepped through, tick-exact, journal untouched.
 	short := wallEpoch.Add(10 * time.Second)
-	b, err := openAuthority(ctx, "park-anchored", defaultParkModule, fixtureTerrain, j, mods, fixedClock(short))
+	b, err := openAuthority(ctx, "park-anchored", mount.DefaultPark, wum.FixtureTerrain, j, mods, fixedClock(short))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +348,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	if b.lastSeq != seqBefore {
 		t.Fatalf("short-gap repayment journaled events: lastSeq %d, want %d", b.lastSeq, seqBefore)
 	}
-	c, err := openAuthority(ctx, "park-anchored", defaultParkModule, fixtureTerrain, j, mods, fixedClock(short))
+	c, err := openAuthority(ctx, "park-anchored", mount.DefaultPark, wum.FixtureTerrain, j, mods, fixedClock(short))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +361,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	// Long gap: one clock_skip journals, the snapshot floor moves to the
 	// jumped tick, and reopens past it restore deterministically.
 	long := wallEpoch.Add(24 * time.Hour)
-	d, err := openAuthority(ctx, "park-anchored", defaultParkModule, fixtureTerrain, j, mods, fixedClock(long))
+	d, err := openAuthority(ctx, "park-anchored", mount.DefaultPark, wum.FixtureTerrain, j, mods, fixedClock(long))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +381,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	d.host.close()
 
 	later := long.Add(10 * time.Second)
-	e, err := openAuthority(ctx, "park-anchored", defaultParkModule, fixtureTerrain, j, mods, fixedClock(later))
+	e, err := openAuthority(ctx, "park-anchored", mount.DefaultPark, wum.FixtureTerrain, j, mods, fixedClock(later))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +389,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	if got, want := e.host.Tick(), e.targetTick(later); got != want {
 		t.Fatalf("post-skip reopen at tick %d, schedule says %d", got, want)
 	}
-	f, err := openAuthority(ctx, "park-anchored", defaultParkModule, fixtureTerrain, j, mods, fixedClock(later))
+	f, err := openAuthority(ctx, "park-anchored", mount.DefaultPark, wum.FixtureTerrain, j, mods, fixedClock(later))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,13 +414,13 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	if err := j.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	mods := &modules{client: &clientModule{slot: "client"}, park: &clientModule{slot: "park"}}
-	a, err := openAuthority(ctx, "park-rated", defaultParkModule, fixtureTerrain, j, mods, fixedClock(wallEpoch))
+	mods := &modules{client: mount.NewModule("client", mount.DefaultClient), park: mount.NewModule("park", mount.DefaultPark)}
+	a, err := openAuthority(ctx, "park-rated", mount.DefaultPark, wum.FixtureTerrain, j, mods, fixedClock(wallEpoch))
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := &session{sub: "gale", out: make(chan []byte, 16)}
-	a.stageIntent(s, 1, evJoin, dog8(dogIDFor("gale")))
+	a.stageIntent(s, 1, wum.EvJoin, dog8(wum.DogIDFor("gale")))
 	for i := 0; i < 5; i++ {
 		a.tickOnce()
 	}
@@ -434,7 +433,7 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	// Reopen wanting 120Hz: repay the 10s gap under the stored 24Hz
 	// segment first, then exactly one rate_set re-anchors at that tick.
 	at120 := wallEpoch.Add(10 * time.Second)
-	b, err := openAuthority(ctx, "park-rated", defaultParkModule, fixtureTerrain, j, mods, timing{hz: 120, now: func() time.Time { return at120 }})
+	b, err := openAuthority(ctx, "park-rated", mount.DefaultPark, wum.FixtureTerrain, j, mods, timing{hz: 120, now: func() time.Time { return at120 }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +466,7 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	// first (no stall — the mapping is piecewise, not global), then one
 	// rate_set back to 24.
 	at24 := wallEpoch.Add(20 * time.Second)
-	c, err := openAuthority(ctx, "park-rated", defaultParkModule, fixtureTerrain, j, mods, timing{hz: 24, now: func() time.Time { return at24 }})
+	c, err := openAuthority(ctx, "park-rated", mount.DefaultPark, wum.FixtureTerrain, j, mods, timing{hz: 24, now: func() time.Time { return at24 }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +482,7 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 		t.Fatalf("repaid %d ticks across the 120Hz segment, want ~1200", repaid)
 	}
 	// determinism across two rate boundaries
-	d, err := openAuthority(ctx, "park-rated", defaultParkModule, fixtureTerrain, j, mods, timing{hz: 24, now: func() time.Time { return at24 }})
+	d, err := openAuthority(ctx, "park-rated", mount.DefaultPark, wum.FixtureTerrain, j, mods, timing{hz: 24, now: func() time.Time { return at24 }})
 	if err != nil {
 		t.Fatal(err)
 	}

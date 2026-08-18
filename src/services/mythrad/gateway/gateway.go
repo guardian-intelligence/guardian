@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"context"
@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,7 +25,10 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	webtransport "github.com/quic-go/webtransport-go"
 
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/mount"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/parkproxy"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/wum"
 	"github.com/guardian-intelligence/guardian/src/services/telemetry"
 )
 
@@ -51,7 +53,9 @@ func parseParkBackends(raw string) (map[string]string, error) {
 	return backends, nil
 }
 
-func runChunkiesGateway() {
+// Run is the chunkies-gateway process: public WebTransport, admission,
+// and park routing.
+func Run() {
 	wtPort := envInt("WT_PORT", 4433)
 	httpPort := envInt("HTTP_PORT", 9634)
 	metricsPort := envInt("METRICS_PORT", 9633)
@@ -62,7 +66,7 @@ func runChunkiesGateway() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	key, err := proxyKey(envStr("INTERNAL_KEY_FILE", ""))
+	key, err := parkproxy.ReadKey(envStr("INTERNAL_KEY_FILE", ""))
 	if err != nil {
 		log.Fatalf("internal key: %v", err)
 	}
@@ -76,11 +80,9 @@ func runChunkiesGateway() {
 	defer traceShutdown(context.Background())
 
 	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/mythra/behavior")
-	client := &clientModule{slot: "client"}
-	client.set(defaultClientModule)
-	parkModule := &clientModule{slot: "park"}
-	parkModule.set(defaultParkModule)
-	go watchDistributedModules(behaviorDir, client, parkModule)
+	client := mount.NewModule("client", mount.DefaultClient)
+	parkModule := mount.NewModule("park", mount.DefaultPark)
+	go mount.Watch(behaviorDir, client, parkModule)
 	assets := newAssetCatalog(envStr("ASSET_DIR", "/etc/mythra/assets"))
 
 	issuer := envStr("OIDC_ISSUER", "https://auth.wakeupmythra.com/realms/wakeupmythra.com")
@@ -179,17 +181,17 @@ func runChunkiesGateway() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		_, cw := client.get()
-		_, pw := parkModule.get()
+		_, cw := client.Get()
+		_, pw := parkModule.Get()
 		info := map[string]any{"addr": addr, "clientWasm": cw, "parkWasm": pw}
 		if hash, selfSigned := certHash(); selfSigned {
 			info["certHashB64"] = hash
 		}
 		json.NewEncoder(w).Encode(info)
 	})
-	serveModule := func(module *clientModule) http.HandlerFunc {
+	serveModule := func(module *mount.Module) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			body, hash := module.get()
+			body, hash := module.Get()
 			if len(body) == 0 {
 				http.NotFound(w, r)
 				return
@@ -258,21 +260,6 @@ func runChunkiesGateway() {
 	obs.Shutdown(shutdownCtx)
 }
 
-func watchDistributedModules(dir string, client, park *clientModule) {
-	load := func() {
-		if module, err := os.ReadFile(filepath.Join(dir, "client.wasm")); err == nil && len(module) > 8 {
-			client.set(module)
-		}
-		if module, err := os.ReadFile(filepath.Join(dir, "park.wasm")); err == nil && len(module) > 8 {
-			park.set(module)
-		}
-	}
-	load()
-	for range time.Tick(2 * time.Second) {
-		load()
-	}
-}
-
 func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 	if n := sessionCount.Add(1); n > int64(g.admission.maxSessions) {
 		sessionCount.Add(-1)
@@ -314,7 +301,7 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 		return
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	proxy, err := dialProxy(dialCtx, backend, g.key, proxyOpen{
+	proxy, err := parkproxy.Dial(dialCtx, backend, g.key, parkproxy.Open{
 		Sub: ticket.Sub, Park: ticket.Park, Role: ticket.Role,
 		Remote: sess.RemoteAddr().String(), SinceSeq: hello.SinceSeq, SinceTick: hello.SinceTick,
 	})
@@ -341,24 +328,24 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 	}
 	go func() {
 		for {
-			kind, payload, err := proxy.readMessage()
+			kind, payload, err := proxy.ReadMessage()
 			if err != nil {
 				sess.CloseWithError(4503, "park unavailable")
 				return
 			}
 			switch kind {
-			case proxyStream:
+			case parkproxy.KindStream:
 				if writeStream(payload) != nil {
 					proxy.Close()
 					return
 				}
-			case proxyDatagram:
+			case parkproxy.KindDatagram:
 				if sess.SendDatagram(payload) != nil {
 					mDgErrors.Inc()
 				} else {
 					mDgSent.Inc()
 				}
-			case proxyClose:
+			case parkproxy.KindClose:
 				sess.CloseWithError(4000, string(payload))
 				return
 			}
@@ -377,7 +364,7 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 				mDgRejected.Inc()
 				continue
 			}
-			if proxy.writeMessage(proxyDatagram, data) != nil {
+			if proxy.WriteMessage(parkproxy.KindDatagram, data) != nil {
 				return
 			}
 		}
@@ -393,7 +380,7 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 	for {
 		kind, payload, err := frames.Next()
 		if err != nil {
-			proxy.writeMessage(proxyClose, nil)
+			proxy.WriteMessage(parkproxy.KindClose, nil)
 			return
 		}
 		now := time.Now()
@@ -412,19 +399,19 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 				continue
 			}
 			if ticket.Role != "player" {
-				writeStream(wire.EncodeReject(wire.Reject{Intent: intent.ID, Reason: rejectReadOnly}))
+				writeStream(wire.EncodeReject(wire.Reject{Intent: intent.ID, Reason: wum.RejectReadOnly}))
 				continue
 			}
-			if !intentBoundToActor(intent.Kind, intent.Payload, dogIDFor(ticket.Sub)) {
-				writeStream(wire.EncodeReject(wire.Reject{Intent: intent.ID, Reason: rejectNotYours}))
+			if !wum.IntentBoundToActor(intent.Kind, intent.Payload, wum.DogIDFor(ticket.Sub)) {
+				writeStream(wire.EncodeReject(wire.Reject{Intent: intent.ID, Reason: wum.RejectNotYours}))
 				continue
 			}
-			if proxy.writeMessage(proxyStream, frames.Raw()) != nil {
+			if proxy.WriteMessage(parkproxy.KindStream, frames.Raw()) != nil {
 				return
 			}
 		case wire.KindResync:
 			if _, err := wire.DecodeResync(payload); err == nil {
-				if proxy.writeMessage(proxyStream, frames.Raw()) != nil {
+				if proxy.WriteMessage(parkproxy.KindStream, frames.Raw()) != nil {
 					return
 				}
 			}
