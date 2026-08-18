@@ -66,6 +66,22 @@ password, offline refresh cache, or write-persona token in a Cursor secret or
 environment snapshot.
 </cursor_cloud>
 
+<web_workspace>
+The pnpm workspace root is the repo root: `pnpm-workspace.yaml`, `package.json`,
+`pnpm-lock.yaml`, and the dependency catalog all live beside `go.mod` and
+`MODULE.bazel`. Workspace members are declared by glob, so a TypeScript package
+lives with the Rust and Go it belongs to rather than in a language island.
+Adding one is a glob entry plus a line in `WORKSPACE_PACKAGES` in `//BUILD.bazel`.
+
+- Use `vp` (vite-plus), never raw `pnpm` — the system pnpm strips vp-specific
+  fields out of `pnpm-lock.yaml`. If that happens, `git checkout pnpm-lock.yaml`
+  and re-run `CI=true vp install`. Reach the package manager via `vp pm` if you
+  genuinely need it.
+- Don't use `corepack`.
+- `vp install` / `vp dev` / `vp run ready` (lint + test + typecheck + build) all
+  run from the repo root.
+</web_workspace>
+
 <products>
 - Postflight - GitHub App, Blacksmith.sh but using QEMU warm pool, CRIU, on SEV-SNP hardware, ZFS for caching build artifacts and memory snapshots to create a "golden image" per repo. (In Progress)
 - "Wake Up, Mythra!" (WUM) - Web game (native mobile apps planned) online cooperative city simulation tied to real-world dog parks.

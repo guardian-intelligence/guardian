@@ -309,7 +309,7 @@ up() {
     missing=1
   }
   command -v vp >/dev/null || {
-    echo "wum-dev: vp (vite-plus) is required for the web app — install it, then run 'vp install' in src/products/viteplus-monorepo" >&2
+    echo "wum-dev: vp (vite-plus) is required for the web app — install it, then run 'vp install' at the repo root" >&2
     missing=1
   }
   [ -z "$missing" ] || exit 1
@@ -411,7 +411,7 @@ smoke() {
 
   pw_browser="$(cd "$APP" && node -e 'console.log(require("playwright").chromium.executablePath())' 2>/dev/null)" || true
   if [ -z "$pw_browser" ]; then
-    echo "wum-dev: the app's playwright package is missing — run 'vp install' in src/products/viteplus-monorepo" >&2
+    echo "wum-dev: the app's playwright package is missing — run 'vp install' at the repo root" >&2
     return 1
   fi
   if [ ! -x "$pw_browser" ]; then

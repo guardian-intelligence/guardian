@@ -30,7 +30,12 @@ export default {
       {
         // Tool tier, not shipped code: dev, perf and drill harnesses and the
         // app-local nitro build plugins log to the terminal by design.
-        files: ["apps/*/scripts/**", "apps/*/perf/**", "apps/*/e2e/**", "apps/*/*.mjs"],
+        files: [
+          "src/products/viteplus-monorepo/apps/*/scripts/**",
+          "src/products/viteplus-monorepo/apps/*/perf/**",
+          "src/products/viteplus-monorepo/apps/*/e2e/**",
+          "src/products/viteplus-monorepo/apps/*/*.mjs",
+        ],
         rules: {
           "no-console": "off",
         },
@@ -39,10 +44,10 @@ export default {
   },
   test: {
     include: [
-      "apps/**/*.test.ts",
-      "apps/**/*.test.tsx",
-      "packages/**/*.test.ts",
-      "packages/**/*.test.tsx",
+      "src/products/viteplus-monorepo/apps/**/*.test.ts",
+      "src/products/viteplus-monorepo/apps/**/*.test.tsx",
+      "src/products/viteplus-monorepo/packages/**/*.test.ts",
+      "src/products/viteplus-monorepo/packages/**/*.test.tsx",
     ],
     exclude: ["**/node_modules/**", ...buildOutputIgnorePatterns],
     environment: "node",

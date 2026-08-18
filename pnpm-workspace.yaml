@@ -1,6 +1,6 @@
 packages:
-  - apps/*
-  - packages/*
+  - src/products/viteplus-monorepo/apps/*
+  - src/products/viteplus-monorepo/packages/*
 allowBuilds:
   esbuild: true
   protobufjs: true

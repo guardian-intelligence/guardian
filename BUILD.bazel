@@ -1,4 +1,41 @@
+load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# npm_link_all_packages() below generates the //:node_modules/* targets every
+# TypeScript package in the repo depends on, so the root package must be
+# visible everywhere.
+package(default_visibility = ["//visibility:public"])
+
+# The pnpm workspace root is the repo root: pnpm resolves workspace members by
+# glob under its root, so this is what lets a TypeScript package live beside
+# the Rust and Go it belongs with instead of in a language island. Members are
+# listed once here and derived into every genrule below, so relocating a
+# package is a one-line edit rather than a sweep through this file.
+WORKSPACE_PACKAGES = [
+    "src/products/viteplus-monorepo/apps/guardianintelligence-web",
+    "src/products/viteplus-monorepo/apps/privatecut-web",
+    "src/products/viteplus-monorepo/apps/wake-up-mythra-web",
+    "src/products/viteplus-monorepo/packages/brand",
+    "src/products/viteplus-monorepo/packages/canary-journeys",
+    "src/products/viteplus-monorepo/packages/chunkies",
+    "src/products/viteplus-monorepo/packages/chunkies-testkit",
+    "src/products/viteplus-monorepo/packages/chunkies-transport-web",
+    "src/products/viteplus-monorepo/packages/postflight-checkout",
+    "src/products/viteplus-monorepo/packages/telemetry",
+    "src/products/viteplus-monorepo/packages/visual-harness",
+    "src/products/viteplus-monorepo/packages/wum-client",
+]
+
+WORKSPACE_ROOT_FILES = [
+    ".changeset/config.json",
+    ".npmrc",
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "tsconfig.base.json",
+    "tsconfig.json",
+    "vite.config.ts",
+]
 
 exports_files([
     ".aspect/config.axl",
@@ -12,7 +49,7 @@ exports_files([
     "AGENTS.md",
     "scripts/agent-cloud-maintenance.sh",
     "scripts/agent-cloud-setup.sh",
-])
+] + WORKSPACE_ROOT_FILES)
 
 # .github is part of this package (no BUILD file below it), so the workflow
 # sources reach tests from here. //src/infrastructure/tests holds the gate
@@ -20,7 +57,6 @@ exports_files([
 filegroup(
     name = "workflows",
     srcs = glob([".github/workflows/*.yml"]),
-    visibility = ["//visibility:public"],
 )
 
 # A workflow using a third-party action ref that the GitHub-side allowlist
@@ -53,4 +89,174 @@ sh_test(
     ],
     tags = ["requires-network"],
 )
+
 exports_files(["renovate.json5"])
+
+npm_link_all_packages()
+
+alias(
+    name = "format",
+    actual = ":vp_node",
+    tags = [
+        "guardian-format",
+        "guardian-format-viteplus",
+    ],
+)
+
+genrule(
+    name = "vp_node",
+    srcs = ["@rules_nodejs//nodejs:current_node_runtime"],
+    outs = ["node"],
+    cmd = """
+set -euo pipefail
+node=""
+for candidate in $(locations @rules_nodejs//nodejs:current_node_runtime); do
+  case "$$candidate" in
+    */bin/node)
+      node="$$candidate"
+      ;;
+  esac
+done
+test -n "$$node"
+install -m 0755 "$$node" "$@"
+""",
+)
+
+filegroup(
+    name = "workspace_install_inputs",
+    srcs = [
+        ".changeset/config.json",
+        ".npmrc",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+    ] + ["//%s:package_manifest" % p for p in WORKSPACE_PACKAGES] + glob(
+        [
+            ".changeset/*.md",
+            "patches/**/*",
+            "scripts/**/*",
+        ],
+        allow_empty = True,
+    ),
+)
+
+filegroup(
+    name = "workspace_sources",
+    srcs = WORKSPACE_ROOT_FILES +
+           ["//%s:sources" % p for p in WORKSPACE_PACKAGES] + glob(
+        [
+            ".changeset/*.md",
+            "patches/**/*",
+            "scripts/**/*",
+        ],
+        allow_empty = True,
+    ),
+)
+
+genrule(
+    name = "workspace_install",
+    srcs = [
+        ":workspace_install_inputs",
+        ":vp_node",
+        ":node_modules/vite-plus",
+    ],
+    outs = ["workspace_install.stamp"],
+    cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+node="$$execroot/$(location :vp_node)"
+vp=""
+for candidate in $(locations :node_modules/vite-plus); do
+  case "$$candidate" in
+    */node_modules/vite-plus)
+      candidate_abs="$$execroot/$$candidate"
+      if [ -x "$$candidate_abs/bin/vp" ]; then
+        vp="$$candidate_abs/bin/vp"
+      fi
+      ;;
+  esac
+done
+test -n "$$vp"
+export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
+export NODE_PATH="$$execroot/$(BINDIR)/node_modules$${NODE_PATH:+:$$NODE_PATH}"
+export CI=true
+printf 'viteplus install ok\\n' > "$$execroot/$@"
+""",
+    local = True,
+    # Built explicitly by label from .aspect/tasks/tidy.axl (aspect tidy) to
+    # materialize vp and node into bazel-bin for the formatter; manual keeps
+    # this non-hermetic support action out of the `//...` wildcard.
+    tags = [
+        "local",
+        "manual",
+        "no-remote",
+        "no-sandbox",
+    ],
+)
+
+genrule(
+    name = "workspace_lint",
+    srcs = [
+        ":workspace_sources",
+        ":vp_node",
+        ":node_modules",
+        ":node_modules/vite-plus",
+    ] + ["//%s:node_modules" % p for p in WORKSPACE_PACKAGES],
+    outs = ["workspace_lint.stamp"],
+    cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+node="$$execroot/$(location :vp_node)"
+vp=""
+for candidate in $(locations :node_modules/vite-plus); do
+  case "$$candidate" in
+    */node_modules/vite-plus)
+      candidate_abs="$$execroot/$$candidate"
+      if [ -x "$$candidate_abs/bin/vp" ]; then
+        vp="$$candidate_abs/bin/vp"
+      fi
+      ;;
+  esac
+done
+test -n "$$vp"
+# Lint runs on a scratch copy of the workspace sources with the Bazel-linked
+# node_modules linked in at each package level: oxlint's type-aware rules
+# resolve @types/* by directory walk-up (NODE_PATH does not apply), and
+# linting the real source tree would depend on whatever node_modules a
+# developer happens to have installed.
+work="$$(mktemp -d)"
+trap 'rm -rf "$$work"' EXIT
+for f in $(locations :workspace_sources); do
+  mkdir -p "$$work/$$(dirname "$$f")"
+  cp "$$f" "$$work/$$f"
+done
+# Each node_modules is a real directory of per-entry symlinks, not a symlink
+# to the bindir tree: vp writes its .vite task-cache into
+# <workspaceRoot>/node_modules, and a directory symlink would route those
+# writes into bazel-out, mutating this action's own declared inputs.
+link_node_modules() {
+  mkdir -p "$$2"
+  find "$$1" -mindepth 1 -maxdepth 1 -exec ln -s {} "$$2/" \\;
+}
+link_node_modules "$$execroot/$(BINDIR)/node_modules" "$$work/node_modules"
+""" + "\n".join([
+        'link_node_modules "$$execroot/$(BINDIR)/%s/node_modules" "$$work/%s/node_modules"' % (p, p)
+        for p in WORKSPACE_PACKAGES
+    ]) + """
+export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
+export NODE_PATH="$$execroot/$(BINDIR)/node_modules$${NODE_PATH:+:$$NODE_PATH}"
+export CI=true
+cd "$$work"
+"$$node" "$$vp" run -w lint
+cd "$$execroot"
+printf 'viteplus lint ok\\n' > "$@"
+""",
+    local = True,
+    tags = [
+        "local",
+        "no-remote",
+        "no-sandbox",
+    ],
+)

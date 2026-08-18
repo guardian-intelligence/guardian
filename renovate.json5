@@ -177,7 +177,7 @@
       groupName: "vite-plus (voidzero) toolchain",
       addLabels: ["viteplus-toolchain"],
       prBodyNotes: [
-        "vite-plus, its `-core` (aliased `vite`), and its `-test` (aliased `vitest`) do not share one version line: `-core` tracks the meta package, but the meta package's minor bumps can be breaking migrations (0.2.x drops the bundled `@voidzero-dev/vite-plus-test` for upstream `vitest`, so the catalog alias must be reworked, not version-bumped). Treat a grouped bump as a migration checkpoint, never an automerge. Also bump the four `@voidzero-dev+vite-plus-linux-x64-gnu@<version>/dir` binding paths hardcoded in src/products/viteplus-monorepo/**/BUILD.bazel — Renovate cannot see them and the build stays red until they match.",
+        "vite-plus, its `-core` (aliased `vite`), and its `-test` (aliased `vitest`) do not share one version line: `-core` tracks the meta package, but the meta package's minor bumps can be breaking migrations (0.2.x drops the bundled `@voidzero-dev/vite-plus-test` for upstream `vitest`, so the catalog alias must be reworked, not version-bumped). Treat a grouped bump as a migration checkpoint, never an automerge. Also bump the `@voidzero-dev+vite-plus-linux-x64-gnu@<version>/dir` binding paths hardcoded as `//:.aspect_rules_js/node_modules/...` in the web apps' BUILD.bazel files — Renovate cannot see them and the build stays red until they match.",
       ],
     },
 

@@ -1,7 +1,7 @@
 # The web workspace is pnpm/vite-plus territory; its artifact (the prerendered
 # landing page) is committed at src/aisucks/web/index.html. Keep bazel's
 # package walk out of node_modules.
-src/products/viteplus-monorepo/node_modules
+node_modules
 src/products/viteplus-monorepo/apps/guardianintelligence-web/node_modules
 src/products/viteplus-monorepo/apps/privatecut-web/node_modules
 src/products/viteplus-monorepo/apps/wake-up-mythra-web/node_modules
