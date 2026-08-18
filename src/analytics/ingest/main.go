@@ -23,7 +23,7 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
-	"github.com/guardian-intelligence/guardian/src/services/telemetry"
+	"github.com/guardian-intelligence/guardian/src/shared/go/telemetry"
 )
 
 func envOr(key, fallback string) string {

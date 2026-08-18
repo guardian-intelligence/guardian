@@ -15,7 +15,7 @@ go_library(
         "//src/chunkies/mount",
         "//src/chunkies/parkproxy",
         "//src/chunkies/codec",
-        "//src/services/telemetry",
+        "//src/shared/go/telemetry",
         "@com_github_coreos_go_oidc_v3//oidc:go_default_library",
         "@com_github_prometheus_client_golang//prometheus:go_default_library",
         "@com_github_prometheus_client_golang//prometheus/promauto:go_default_library",

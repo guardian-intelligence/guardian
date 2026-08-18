@@ -7,7 +7,7 @@ go_library(
     importpath = "github.com/guardian-intelligence/guardian/src/postflight/controlplane/pgtest",
     visibility = [
         "//src/chunkies:__subpackages__",
-        "//src/services/payments:__pkg__",
+        "//src/payments:__pkg__",
         "//src/postflight:__subpackages__",
         "//src/tools/postflight-hammer:__pkg__",
     ],

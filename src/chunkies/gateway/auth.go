@@ -20,7 +20,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
-	"github.com/guardian-intelligence/guardian/src/services/telemetry"
+	"github.com/guardian-intelligence/guardian/src/shared/go/telemetry"
 )
 
 // ticket is the admission artifact (docs/netcode.md): identity, park, and
