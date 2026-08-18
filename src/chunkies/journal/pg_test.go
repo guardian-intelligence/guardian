@@ -8,7 +8,7 @@ import (
 
 	"github.com/guardian-intelligence/guardian/src/chunkies/journal"
 	"github.com/guardian-intelligence/guardian/src/chunkies/journal/journaltest"
-	"github.com/guardian-intelligence/guardian/src/services/postflight/controlplane/pgtest"
+	"github.com/guardian-intelligence/guardian/src/postflight/controlplane/pgtest"
 )
 
 func TestPgConformance(t *testing.T) {

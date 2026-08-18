@@ -17,6 +17,6 @@ src/shared/ts/visual-harness/node_modules
 
 # The CLI crate's make path drops a cargo output tree here; keep bazel's
 # package walk out of it.
-src/products/postflight-cli/target
+src/postflight/cli/target
 src-old
 .claude/worktrees

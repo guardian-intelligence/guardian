@@ -16,7 +16,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "src/products/postflight-cli/release/channels.yaml"
+      - "src/postflight/cli/release/channels.yaml"
       - ".github/workflows/postflight-cli-release.yml"
   workflow_dispatch:
 
@@ -34,7 +34,7 @@ concurrency:
 env:
   IMAGE_REPO: ghcr.io/guardian-intelligence/postflight-cli
   CHANNELS: nightly rc stable
-  CHANNELS_FILE: src/products/postflight-cli/release/channels.yaml
+  CHANNELS_FILE: src/postflight/cli/release/channels.yaml
   TARGETS: x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin
   NATIVE_TARGET: x86_64-unknown-linux-musl
   BUILD_IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main
@@ -263,12 +263,18 @@ jobs:
             fi
 
             # The checkout is shallow at the pin commit; the sources that
-            # produced these binaries live at the build commit.
+            # produced these binaries live at the build commit. Freight built
+            # before the src/postflight/cli move still archives from the
+            # directory that revision actually has.
             git fetch --depth 1 origin "$revision"
+            src_dir="src/postflight/cli"
+            if ! git rev-parse --verify --quiet "$revision:$src_dir" >/dev/null; then
+              src_dir="src/products/postflight-cli"
+            fi
             prefix="postflight-$built-src"
             tarball="assets/$channel/$prefix.tar.gz"
             git archive --format=tar --prefix="$prefix/" \
-              -o "work/$channel/src.tar" "$revision:src/products/postflight-cli"
+              -o "work/$channel/src.tar" "$revision:$src_dir"
             git archive --format=tar --prefix="$prefix/" \
               -o "work/$channel/license.tar" "$revision" LICENSE.md
             tar -Af "work/$channel/src.tar" "work/$channel/license.tar"
@@ -287,7 +293,7 @@ jobs:
             # Shipping the installer with the release closes the chain the
             # website cannot: a caller who trusts nothing but this repository's
             # signing identity can fetch it, verify it, and run it.
-            cp src/products/postflight-cli/dist/install.sh "assets/$channel/install.sh"
+            cp src/postflight/cli/dist/install.sh "assets/$channel/install.sh"
             cosign sign-blob --yes \
               --bundle "assets/$channel/install.sh.sigstore.json" \
               "assets/$channel/install.sh"
@@ -437,7 +443,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.tap.outputs.token }}
           TAP: ${{ github.repository_owner }}/homebrew-tap
-          FORMULA: src/products/postflight-cli/dist/homebrew
+          FORMULA: src/postflight/cli/dist/homebrew
         run: |
           . meta/stable.env
 

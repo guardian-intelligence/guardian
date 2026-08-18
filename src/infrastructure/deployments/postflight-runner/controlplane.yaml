@@ -1,6 +1,6 @@
 # postflight-controlplane — the runner control plane for stage (a): GitHub
 # workflow_job webhook ingest, delivery ledger in the CNPG Postgres, PR
-# comments. Contract: src/services/postflight/controlplane/. Single replica:
+# comments. Contract: src/postflight/controlplane/. Single replica:
 # GitHub retries undelivered webhooks and the worker loop is idempotent over
 # the ledger, so a pod reschedule loses nothing.
 apiVersion: apps/v1

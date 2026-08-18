@@ -31,7 +31,7 @@ env:
     aarch64-apple-darwin:darwin-arm64
   BUILD_IDENTITY: https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-cli-image.yml@refs/heads/main
   ISSUER: https://token.actions.githubusercontent.com
-  PACKAGE_ROOT: src/products/postflight-cli/dist/npm
+  PACKAGE_ROOT: src/postflight/cli/dist/npm
 
 jobs:
   publish:

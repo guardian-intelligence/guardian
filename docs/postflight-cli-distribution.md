@@ -21,7 +21,7 @@ Four targets are built and released every time: `x86_64-unknown-linux-musl`,
 |---|---|---|---|
 | curl installer | `curl -fsSL https://guardianintelligence.org/postflight/install.sh \| sh -s -- --channel nightly` | stable (default), `--channel rc\|nightly` | live |
 | release asset | download `postflight-<target>` from the release, `cosign verify-blob`, `chmod +x` | all | live |
-| make | `make && sudo make install` in `src/products/postflight-cli` of a clone, or in an unpacked release source tarball | all | live |
+| make | `make && sudo make install` in `src/postflight/cli` of a clone, or in an unpacked release source tarball | all | live |
 | cargo | `cargo install postflight` | stable | live |
 | cargo-binstall | `cargo binstall postflight` | stable | live |
 | npm/bun | `npm i -g @guardian-intelligence/postflight` | stable | live |
@@ -390,7 +390,7 @@ finds is reported rather than removed. The exit status is non-zero when a
 binary would not go, or when nothing here was ours to remove: the thing that
 was asked for did not fully happen.
 
-Detection is in `src/products/postflight-cli/src/scope.rs`, shared with every
+Detection is in `src/postflight/cli/src/scope.rs`, shared with every
 other verb that changes an installation, and it works on the **resolved** path:
 
 | Manager | Marker | Why that marker |
@@ -474,7 +474,7 @@ revokes publish rights with nothing in the Bazel graph to catch it.
 The tap write has no such property: it authenticates by App key, not by
 filename. It is promotion glue, so it does not earn a file, and its render
 logic lives in the Bazel graph instead —
-`src/products/postflight-cli/dist/homebrew/render-formula.sh` plus
+`src/postflight/cli/dist/homebrew/render-formula.sh` plus
 `postflight.rb.tmpl`, covered by `:render_formula_test`, reachable from
 `//...`.
 
@@ -761,7 +761,7 @@ already report the version they carry.
 
 2. **Open the pin PR, editing both files in one commit.**
 
-   `src/products/postflight-cli/release/channels.yaml`:
+   `src/postflight/cli/release/channels.yaml`:
 
    ```yaml
    channels:
@@ -810,13 +810,13 @@ back.
    without one produces a pin that will not publish.
 
 2. **Bump the version to the bare number.** `0.3.0-pre` becomes `0.3.0` in
-   `src/products/postflight-cli/Cargo.toml`, in `CARGO_PKG_VERSION` in
-   `src/products/postflight-cli/BUILD.bazel`, and in the `postflight` package
-   entry of `src/products/postflight-cli/Cargo.lock`, all in one PR: cargo
+   `src/postflight/cli/Cargo.toml`, in `CARGO_PKG_VERSION` in
+   `src/postflight/cli/BUILD.bazel`, and in the `postflight` package
+   entry of `src/postflight/cli/Cargo.lock`, all in one PR: cargo
    builds from the first, the release lane ships the second, and the third is
    what `cargo publish --locked` resolves against, so a stale lock fails the
    crates.io publish after the release is already out.
-   `//src/products/postflight-cli:packaging_lockstep_test` holds the first
+   `//src/postflight/cli:packaging_lockstep_test` holds the first
    two together and to the Makefile's binary name; `aspect tidy` refreshes
    the manifest hashes `MODULE.bazel.lock` carries for the crate, which
    belong in the same commit. Nothing else carries a version to bump — the

@@ -497,7 +497,7 @@
     // ~30-day windows, so these PRs are the image re-release doorbell.
     {
       customType: "regex",
-      managerFilePatterns: ["/^src/services/postflight/image/pins\\.env$/"],
+      managerFilePatterns: ["/^src/postflight/image/pins\\.env$/"],
       matchStrings: [
         '# renovate: datasource=(?<datasource>[a-z-.]+) depName=(?<depName>[^\\s]+)\\n[A-Z_]+_VERSION="(?<currentValue>[0-9][^"]*)"',
       ],

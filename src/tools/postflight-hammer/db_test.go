@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/guardian-intelligence/guardian/src/services/postflight/controlplane/pgtest"
+	"github.com/guardian-intelligence/guardian/src/postflight/controlplane/pgtest"
 )
 
 // startMigratedDB boots a hermetic PostgreSQL and applies the control plane's

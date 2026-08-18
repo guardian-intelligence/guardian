@@ -104,8 +104,8 @@ the published release's own checksums and PUT it with an operator token:
 
 ```sh
 gh release download 'postflight-cli/v<version>' -p checksums.txt -O checksums.txt
-src/products/postflight-cli/dist/homebrew/render-formula.sh \
-  src/products/postflight-cli/dist/homebrew/postflight.rb.tmpl \
+src/postflight/cli/dist/homebrew/render-formula.sh \
+  src/postflight/cli/dist/homebrew/postflight.rb.tmpl \
   '<version>' checksums.txt > postflight.rb
 gh api -X PUT repos/guardian-intelligence/homebrew-tap/contents/Formula/postflight.rb \
   -f message="postflight <version>" -f content="$(base64 -w0 postflight.rb)"

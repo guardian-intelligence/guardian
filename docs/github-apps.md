@@ -31,9 +31,9 @@ calls the GitHub API. Each signed delivery carries its installation identity;
 that identity follows the job through token minting, scheduling, JIT runner
 configuration, reconciliation, and PR comments.
 
-- [Control-plane source](../src/services/postflight/controlplane/)
-- [Webhook handling](../src/services/postflight/controlplane/webhook.go)
-- [GitHub API client](../src/services/postflight/controlplane/github_api.go)
+- [Control-plane source](../src/postflight/controlplane/)
+- [Webhook handling](../src/postflight/controlplane/webhook.go)
+- [GitHub API client](../src/postflight/controlplane/github_api.go)
 - [Deployment](../src/infrastructure/deployments/postflight-runner/controlplane.yaml)
 - [OpenBao-backed App credentials](../src/infrastructure/deployments/postflight-runner/secrets.yaml)
 - [Product and GitHub App contract](postflight-product.md)

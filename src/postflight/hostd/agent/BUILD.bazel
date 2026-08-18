@@ -1,0 +1,45 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "agent",
+    srcs = [
+        "agent.go",
+		"capacity.go",
+		"assignment.go",
+        "checkout.go",
+        "config.go",
+        "converge.go",
+        "gc.go",
+        "pool.go",
+        "plans.go",
+        "rendezvous_trace.go",
+        "snapshot.go",
+        "sync.go",
+        "transfer.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/postflight/hostd/agent",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/postflight/hostd/checkoutbundle",
+        "//src/postflight/hostd/guestproto",
+        "//src/postflight/hostd/syncproto",
+        "//src/postflight/hostd/transfer",
+        "//src/postflight/hostd/vm",
+        "//src/postflight/hostd/zvol",
+		"//src/postflight/timing",
+    ],
+)
+
+go_test(
+    name = "agent_test",
+    srcs = [
+		"agent_test.go",
+    ],
+    embed = [":agent"],
+    deps = [
+        "//src/postflight/hostd/syncproto",
+        "//src/postflight/hostd/transfer",
+        "//src/postflight/hostd/vm",
+        "//src/postflight/hostd/zvol",
+    ],
+)

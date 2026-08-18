@@ -18,7 +18,7 @@ import (
 
 const (
 	releaseWorkflowFile = ".github/workflows/postflight-cli-release.yml"
-	installerFile       = "src/products/postflight-cli/dist/install.sh"
+	installerFile       = "src/postflight/cli/dist/install.sh"
 	installCanaryFile   = "src/infrastructure/deployments/guardian/promotion/cli-install-canary.yaml"
 )
 

@@ -19,7 +19,7 @@ import (
 	tb "github.com/tigerbeetle/tigerbeetle-go"
 
 	"github.com/guardian-intelligence/guardian/src/services/payments/paymentdb"
-	"github.com/guardian-intelligence/guardian/src/services/postflight/controlplane/pgtest"
+	"github.com/guardian-intelligence/guardian/src/postflight/controlplane/pgtest"
 )
 
 type fakeStripe struct {

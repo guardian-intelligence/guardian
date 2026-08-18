@@ -31,7 +31,7 @@ jobs:
       id-token: write
     defaults:
       run:
-        working-directory: src/products/postflight-cli
+        working-directory: src/postflight/cli
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:

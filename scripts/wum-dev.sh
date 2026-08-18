@@ -317,12 +317,12 @@ up() {
   acquire_lock
   echo "wum-dev: building Chunkies + devissuer + telemetry legs…" >&2
   bazelisk build //src/chunkies:chunkies-gateway //src/chunkies:chunkies-park //src/chunkies/devissuer \
-    //src/products/analytics/ingest @ip2asn_combined//file \
+    //src/analytics/ingest @ip2asn_combined//file \
     @multitool//tools/clickhouse-server @multitool//tools/otelcol-contrib @multitool//tools/flagd >&2
   GATEWAY="$(bazelisk cquery --output=files //src/chunkies:chunkies-gateway 2>/dev/null | head -1)"
   PARK="$(bazelisk cquery --output=files //src/chunkies:chunkies-park 2>/dev/null | head -1)"
   DEVISSUER="$(bazelisk cquery --output=files //src/chunkies/devissuer 2>/dev/null | head -1)"
-  INGEST="$(bazelisk cquery --output=files //src/products/analytics/ingest 2>/dev/null | head -1)"
+  INGEST="$(bazelisk cquery --output=files //src/analytics/ingest 2>/dev/null | head -1)"
   CLICKHOUSE="$(bazelisk cquery --output=files @multitool//tools/clickhouse-server 2>/dev/null | head -1)"
   OTELCOL="$(bazelisk cquery --output=files @multitool//tools/otelcol-contrib 2>/dev/null | head -1)"
   FLAGD="$(bazelisk cquery --output=files @multitool//tools/flagd 2>/dev/null | head -1)"

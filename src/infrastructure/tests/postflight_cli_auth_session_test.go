@@ -16,7 +16,7 @@ import (
 // is exactly the file the canary writes — so this test is the coupling.
 func TestDeeptestAuthIssuerMatchesTheCliDefault(t *testing.T) {
 	const (
-		cliMain = "src/products/postflight-cli/src/main.rs"
+		cliMain = "src/postflight/cli/src/main.rs"
 		runner  = "src/infrastructure/deployments/guardian/promotion/cli-deeptest-runner.yaml"
 	)
 
@@ -74,7 +74,7 @@ func TestDeeptestRecordsTheAuthSessionChecks(t *testing.T) {
 // ties the two requests together, so this does.
 func TestJourneyCanaryRequestsTheScopeTheCliRequests(t *testing.T) {
 	const (
-		deviceFlow = "src/products/postflight-cli/src/device.rs"
+		deviceFlow = "src/postflight/cli/src/device.rs"
 		journey    = "src/shared/ts/canary-journeys/journeys/device-flow.spec.ts"
 	)
 
