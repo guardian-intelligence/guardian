@@ -32,6 +32,11 @@ locals {
     local.public_ingress_origins[name].public_ipv4
   ]
 
+  # The node whose public IP terminates the WUM game plane (UDP 4433).
+  # ash-worker0 hosts chunkies-gateway; the IP matches its Talos declaration
+  # in guardian-mgmt/main.tf.
+  game_plane_origin_ipv4 = "206.223.228.99"
+
   k8s_api_hostname             = "k8s.${local.cloudflare_zone_name}"
   codex_cloud_k8s_api_hostname = "k8s-codex.${local.cloudflare_zone_name}"
   cloud_agent_providers        = toset(["cursor", "devin"])
@@ -374,13 +379,14 @@ resource "cloudflare_dns_record" "wakeupmythra_com_auth" {
 
 # The game plane: browsers dial WebTransport/QUIC on this name directly -
 # Cloudflare cannot proxy it - so the record is DNS-only and points at the
-# node that binds UDP 4433 (the mythrad hostNetwork pin). Multi-node game
-# fleets later mean more records here, not a proxy.
+# node that binds UDP 4433 (the chunkies-gateway hostNetwork pin on
+# ash-worker0). Multi-node game fleets later mean more records here, not a
+# proxy.
 resource "cloudflare_dns_record" "wakeupmythra_com_wt" {
   zone_id = data.cloudflare_zone.wakeupmythra_com.id
   name    = "wt.wakeupmythra.com"
   type    = "A"
-  content = local.public_ingress_origins["ash-earth"].public_ipv4
+  content = local.game_plane_origin_ipv4
   ttl     = 300
   proxied = false
   comment = "wake up mythra game plane (WebTransport, dialed direct)"
