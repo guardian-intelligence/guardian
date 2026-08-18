@@ -65,7 +65,7 @@ spec:
             - name: REQUIRE_EMAIL_VERIFIED
               value: "false"
             - name: PARK_BACKENDS
-              value: park-chunkies-canary=127.0.0.1:9632
+              value: park-mythra=127.0.0.1:9632
             - name: PARK_HTTP_URL
               value: http://127.0.0.1:9631
             - name: INTERNAL_KEY_FILE
@@ -79,7 +79,7 @@ spec:
             - name: METRICS_PORT
               value: "9633"
             - name: PUBLIC_ADDR
-              value: 206.223.228.99:4433
+              value: wt.wakeupmythra.com:4433
             - name: TLS_CERT_FILE
               value: /etc/mythra/tls/tls.crt
             - name: TLS_KEY_FILE
@@ -219,7 +219,7 @@ spec:
           image: ghcr.io/guardian-intelligence/chunkies-park:edge@sha256:ca2a2864a4cab9e9f9a94a7c3644ad83ef8ec7c976b204a38b9b21f2ece51f9e # {"$imagepolicy": "guardian-imageops:chunkies-park"}
           env:
             - name: PARK_NAME
-              value: park-chunkies-canary
+              value: park-mythra
             - name: INTERNAL_HOST
               value: 127.0.0.1
             - name: MAX_SESSIONS
