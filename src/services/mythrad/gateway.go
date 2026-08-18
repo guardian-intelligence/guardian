@@ -130,7 +130,11 @@ func runChunkiesGateway() {
 				NextProtos: []string{http3.NextProtoH3},
 			},
 			QUICConfig: &quic.Config{
-				EnableDatagrams: true, MaxIncomingStreams: 16, MaxIncomingUniStreams: 16,
+				// The protocol uses exactly one client-opened bidi stream
+				// (plus the WT session's own); uni streams are h3 plumbing
+				// (control + QPACK). 4 of each is protocol minimum plus
+				// slack, not idle attack surface.
+				EnableDatagrams: true, MaxIncomingStreams: 4, MaxIncomingUniStreams: 4,
 				InitialStreamReceiveWindow: 16 * 1024, MaxStreamReceiveWindow: 256 * 1024,
 				InitialConnectionReceiveWindow: 32 * 1024, MaxConnectionReceiveWindow: 512 * 1024,
 				MaxIdleTimeout: 60 * time.Second,
@@ -363,12 +367,27 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 	go func() {
 		for {
 			data, err := sess.ReceiveDatagram(ctx)
-			if err != nil || proxy.writeMessage(proxyDatagram, data) != nil {
+			if err != nil {
+				return
+			}
+			// The only datagram a client may send is a fixed-size hash
+			// check; everything else is dropped here so junk never
+			// reaches a park.
+			if len(data) != wire.CheckLen || data[0] != wire.DgCheck {
+				mDgRejected.Inc()
+				continue
+			}
+			if proxy.writeMessage(proxyDatagram, data) != nil {
 				return
 			}
 		}
 	}()
 
+	// Uplink shaper: a session earns 20 frames/s with a burst of 40. An
+	// empty bucket pauses the read loop until it refills — QUIC flow
+	// control conveys the pause to a bursting client — instead of closing
+	// the session. Closes are reserved for protocol violations (a framing
+	// error from the reader).
 	tokens := 40.0
 	lastRefill := time.Now()
 	for {
@@ -381,8 +400,9 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 		tokens = min(40, tokens+20*now.Sub(lastRefill).Seconds())
 		lastRefill = now
 		if tokens < 1 {
-			sess.CloseWithError(4029, "rate limited")
-			return
+			time.Sleep(time.Duration((1 - tokens) / 20 * float64(time.Second)))
+			tokens = 1
+			lastRefill = time.Now()
 		}
 		tokens--
 		switch kind {
@@ -399,15 +419,19 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 				writeStream(wire.EncodeReject(wire.Reject{Intent: intent.ID, Reason: rejectNotYours}))
 				continue
 			}
-			if proxy.writeMessage(proxyStream, wire.EncodeFrame(kind, payload)) != nil {
+			if proxy.writeMessage(proxyStream, frames.Raw()) != nil {
 				return
 			}
 		case wire.KindResync:
 			if _, err := wire.DecodeResync(payload); err == nil {
-				if proxy.writeMessage(proxyStream, wire.EncodeFrame(kind, payload)) != nil {
+				if proxy.writeMessage(proxyStream, frames.Raw()) != nil {
 					return
 				}
 			}
+		default:
+			// Unknown client kinds are forward-compat room, not errors —
+			// but silence would hide a skewed client. Count and drop.
+			mUnknownFrames.Inc()
 		}
 	}
 }

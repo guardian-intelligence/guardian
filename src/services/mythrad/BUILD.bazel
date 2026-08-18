@@ -69,6 +69,7 @@ go_test(
     srcs = [
         "auth_test.go",
         "authority_test.go",
+        "gateway_relay_test.go",
         "gametest_wum_test.go",
         "proxy_test.go",
     ],
