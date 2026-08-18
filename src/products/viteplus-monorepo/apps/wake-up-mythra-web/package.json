@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@guardian/chunkies": "workspace:*",
+    "@guardian/chunkies-transport-web": "workspace:*",
     "@guardian/telemetry": "workspace:*",
     "@guardian/wum-client": "workspace:*",
     "@openfeature/core": "catalog:",

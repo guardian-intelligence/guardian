@@ -169,9 +169,9 @@ describe("scripted transport", () => {
     // Two frames written in one call each, and one split across two — the
     // recorder must not care.
     const resync = new Uint8Array([0x09, 0x03, 0x07, 0, 0, 0, 0, 0, 0, 0]);
-    dialed.connection.sendStream(resync);
-    dialed.connection.sendStream(resync.subarray(0, 3));
-    dialed.connection.sendStream(resync.subarray(3));
+    dialed.connection.sendFrame(resync);
+    dialed.connection.sendFrame(resync.subarray(0, 3));
+    dialed.connection.sendFrame(resync.subarray(3));
     expect(t.sentFrames()).toEqual([
       { kind: "resync", value: { haveSeq: 7n } },
       { kind: "resync", value: { haveSeq: 7n } },

@@ -1,6 +1,7 @@
 export { ReplicaHost, type FrameQuads, type HostOptions } from "./host.ts";
 export {
   HostEmit,
+  type CloseReason,
   type Connection,
   type ConnectionSink,
   type Dialed,

@@ -121,7 +121,8 @@ export class ScriptedTransport implements TransportPort {
     this.#sink = sink;
     this.#live = true;
     const connection: Connection = {
-      sendStream: (b) => this.sentStream.push(b.slice()),
+      sendFrame: (b) => this.sentStream.push(b.slice()),
+      datagramBudget: () => 1200,
       sendDatagram: (b) => this.sentDatagrams.push(b.slice()),
       close: () => {
         this.closed++;

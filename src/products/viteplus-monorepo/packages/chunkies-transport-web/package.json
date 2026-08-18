@@ -1,0 +1,34 @@
+{
+  "name": "@guardian/chunkies-transport-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The browser's WebTransport as a chunkies TransportPort: dial-once lanes with an honest uplink (bounded queue, awaited writes, stall detection). Auth stays with the app; this package receives a mint closure and opaque bytes.",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "typecheck": "vp exec tsc -p tsconfig.json",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@guardian/chunkies": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

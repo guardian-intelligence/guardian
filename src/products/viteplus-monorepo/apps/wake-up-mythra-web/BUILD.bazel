@@ -37,6 +37,7 @@ genrule(
         # node_modules (react/web-vitals) reachable by directory walk-up from
         # its location in this sandbox, not just the app's.
         "//src/products/viteplus-monorepo/packages/chunkies:node_modules",
+        "//src/products/viteplus-monorepo/packages/chunkies-transport-web:node_modules",
         "//src/products/viteplus-monorepo/packages/wum-client:node_modules",
         "//src/products/viteplus-monorepo/packages/telemetry:node_modules",
         ":node_modules/typescript",
@@ -79,6 +80,7 @@ mkdir -p "$$work/node_modules"
 link_node_modules "$$app_node_modules" "$$work/apps/wake-up-mythra-web/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/telemetry/node_modules" "$$work/packages/telemetry/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/chunkies/node_modules" "$$work/packages/chunkies/node_modules"
+link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/chunkies-transport-web/node_modules" "$$work/packages/chunkies-transport-web/node_modules"
 link_node_modules "$$execroot/$(BINDIR)/src/products/viteplus-monorepo/packages/wum-client/node_modules" "$$work/packages/wum-client/node_modules"
 cd "$$work/apps/wake-up-mythra-web"
 # Mirrors package.json's own "build" script (single source of truth:
