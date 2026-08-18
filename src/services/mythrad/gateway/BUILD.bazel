@@ -4,6 +4,7 @@ go_library(
     name = "gateway",
     srcs = [
         "auth.go",
+        "directory.go",
         "gateway.go",
         "metrics.go",
         "support.go",
@@ -30,6 +31,7 @@ go_test(
     name = "gateway_test",
     srcs = [
         "auth_test.go",
+        "directory_test.go",
         "relay_test.go",
     ],
     embed = [":gateway"],
