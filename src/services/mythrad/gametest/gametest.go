@@ -17,9 +17,12 @@ import (
 	"testing"
 )
 
-// Event is one sim event: kind plus opaque payload.
+// Event is one sim event: kind, acting entity, and opaque payload. Actor
+// is meaningful for ABI v2 modules (the SimEvent envelope); v1 modules
+// carry any actor inside the payload and the field is ignored.
 type Event struct {
 	Kind    uint16
+	Actor   uint64
 	Payload []byte
 }
 
@@ -35,6 +38,8 @@ type System struct {
 // Game is everything a game owes the suite: built artifacts and two
 // opaque fixtures. Corpus events are valid inputs (recorded or listed);
 // they widen accepted-path coverage but no property depends on them.
+// Genesis may be empty only for a content-free game (ABI v2,
+// content_cap 0) — the fetch dance is skipped entirely.
 type Game struct {
 	Park    []byte            // the game state machine module
 	Modules map[string][]byte // other shipped modules: artifact gates only
@@ -52,8 +57,8 @@ var seeds = []uint64{1, 42, 0xC0FFEE}
 
 func Run(t *testing.T, g Game) {
 	t.Helper()
-	if len(g.Park) == 0 || len(g.Genesis) == 0 {
-		t.Fatal("gametest.Game needs Park module bytes and a Genesis artifact")
+	if len(g.Park) == 0 {
+		t.Fatal("gametest.Game needs Park module bytes")
 	}
 
 	t.Run("artifacts", func(t *testing.T) { runArtifacts(t, g) })
@@ -95,28 +100,29 @@ func runArtifacts(t *testing.T, g Game) {
 		t.Errorf("park imports %s — a simulation module must import nothing", imp)
 	}
 
-	names := requiredExports
-	if g.System.RateSet != 0 {
-		names = append(append([]string{}, names...), rateExports...)
-	}
-	h, err := newHost(g.Park, names)
+	h, err := newHost(g.Park)
 	if err != nil {
 		t.Fatalf("park: %v", err)
 	}
 	defer h.close()
-	for _, name := range names {
+	if h.abi == 0 {
+		t.Errorf("park: abi_version = 0")
+	}
+	for _, name := range requiredExports(h.abi, g.System) {
 		if _, ok := h.fns[name]; !ok {
 			t.Errorf("park module does not export %s", name)
 		}
 	}
-	if h.ioCap == 0 || h.terrainCap == 0 {
-		t.Errorf("park buffers: io_cap=%d terrain_cap=%d, want both nonzero", h.ioCap, h.terrainCap)
+	if h.ioCap == 0 {
+		t.Errorf("park buffers: io_cap = 0")
 	}
-	if uint32(len(g.Genesis)) > h.terrainCap {
-		t.Errorf("genesis artifact (%d bytes) exceeds terrain_cap (%d)", len(g.Genesis), h.terrainCap)
-	}
-	if v, err := h.call32("abi_version"); err != nil || v == 0 {
-		t.Errorf("park: abi_version = %d, err %v", v, err)
+	switch {
+	case len(g.Genesis) == 0 && h.contentCap != 0:
+		t.Errorf("module declares content_cap=%d but the game provides no Genesis artifact", h.contentCap)
+	case len(g.Genesis) != 0 && h.contentCap == 0:
+		t.Errorf("game provides a Genesis artifact but the module declares no content buffer")
+	case uint32(len(g.Genesis)) > h.contentCap:
+		t.Errorf("genesis artifact (%d bytes) exceeds content cap (%d)", len(g.Genesis), h.contentCap)
 	}
 }
 
@@ -132,14 +138,15 @@ func contains(list []string, want string) bool {
 // open returns a park instance on the genesis artifact at the given seed.
 func open(t *testing.T, g Game, seed uint64) *host {
 	t.Helper()
-	names := append(append([]string{}, requiredExports...), rateExports...)
-	h, err := newHost(g.Park, names)
+	h, err := newHost(g.Park)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code, err := h.setTerrain(g.Genesis); err != nil || code != 0 {
-		h.close()
-		t.Fatalf("sim_set_terrain(genesis): code=%d err=%v", code, err)
+	if len(g.Genesis) > 0 {
+		if code, err := h.setContent(g.Genesis); err != nil || code != 0 {
+			h.close()
+			t.Fatalf("stage(genesis): code=%d err=%v", code, err)
+		}
 	}
 	if code, err := h.init(seed, parkID, epoch0); err != nil || code != 0 {
 		h.close()
@@ -170,12 +177,12 @@ func drive(t *testing.T, hosts []*host, rounds [][]Event) {
 	noisy := hosts[len(hosts)-1]
 	for i, events := range rounds {
 		for j, ev := range events {
-			code0, err := hosts[0].apply(ev.Kind, ev.Payload)
+			code0, err := hosts[0].apply(ev)
 			if err != nil {
 				t.Fatalf("round %d event %d (kind %d): %v", i, j, ev.Kind, err)
 			}
 			for _, h := range hosts[1:] {
-				code, err := h.apply(ev.Kind, ev.Payload)
+				code, err := h.apply(ev)
 				if err != nil {
 					t.Fatalf("round %d event %d (kind %d): %v", i, j, ev.Kind, err)
 				}
@@ -221,7 +228,7 @@ func warm(t *testing.T, h *host, g Game, seed int64, rounds int) {
 	t.Helper()
 	for i, events := range stream(g, rand.New(rand.NewSource(seed)), rounds) {
 		for _, ev := range events {
-			if _, err := h.apply(ev.Kind, ev.Payload); err != nil {
+			if _, err := h.apply(ev); err != nil {
 				t.Fatalf("warm round %d (kind %d): %v", i, ev.Kind, err)
 			}
 		}
@@ -277,7 +284,7 @@ func runRejectPurity(t *testing.T, g Game) {
 	defer h.close()
 	warm(t, h, g, 11, 8)
 
-	fuzz := func() (uint16, []byte) {
+	fuzz := func() Event {
 		if len(g.Corpus) > 0 && rnd.Intn(2) == 0 {
 			ev := g.Corpus[rnd.Intn(len(g.Corpus))]
 			p := append([]byte{}, ev.Payload...)
@@ -286,22 +293,25 @@ func runRejectPurity(t *testing.T, g Game) {
 				p[rnd.Intn(len(p))] ^= byte(1 << rnd.Intn(8))
 			case len(p) > 0:
 				p = p[:rnd.Intn(len(p))]
+			default:
+				// A payload-free event mutates through its actor.
+				ev.Actor = rnd.Uint64()
 			}
-			return ev.Kind, p
+			return Event{Kind: ev.Kind, Actor: ev.Actor, Payload: p}
 		}
 		p := make([]byte, rnd.Intn(41))
 		rnd.Read(p)
-		return uint16(rnd.Intn(1024)), p
+		return Event{Kind: uint16(rnd.Intn(1024)), Actor: rnd.Uint64(), Payload: p}
 	}
 
 	accepted := 0
 	for i := 0; i < 512; i++ {
-		kind, payload := fuzz()
+		ev := fuzz()
 		h0, _ := h.hash()
 		t0, _ := h.tick()
-		code, err := h.apply(kind, payload)
+		code, err := h.apply(ev)
 		if err != nil {
-			t.Fatalf("fuzz %d (kind %d, %d bytes): %v", i, kind, len(payload), err)
+			t.Fatalf("fuzz %d (kind %d, %d bytes): %v", i, ev.Kind, len(ev.Payload), err)
 		}
 		if code == 0 {
 			accepted++
@@ -311,7 +321,7 @@ func runRejectPurity(t *testing.T, g Game) {
 		t1, _ := h.tick()
 		if h1 != h0 || t1 != t0 {
 			t.Fatalf("fuzz %d (kind %d): rejected with code %d but mutated state (hash %016x -> %016x, tick %d -> %d)",
-				i, kind, code, h0, h1, t0, t1)
+				i, ev.Kind, code, h0, h1, t0, t1)
 		}
 	}
 	t.Logf("fuzz: %d/512 mutations accepted", accepted)
@@ -358,21 +368,23 @@ func runRestoreGarbage(t *testing.T, g Game) {
 }
 
 func runContentIdentity(t *testing.T, g Game) {
+	if len(g.Genesis) == 0 {
+		t.Skip("content-free game")
+	}
 	h := open(t, g, seeds[0])
 	defer h.close()
-	if id, err := h.terrain(); err != nil || id != contentID(g.Genesis) {
-		t.Fatalf("sim_terrain_id = %016x, want the artifact's content id %016x (err %v)", id, contentID(g.Genesis), err)
+	if id, err := h.contentID(); err != nil || id != contentID(g.Genesis) {
+		t.Fatalf("content id = %016x, want the artifact's content id %016x (err %v)", id, contentID(g.Genesis), err)
 	}
-	names := append(append([]string{}, requiredExports...), rateExports...)
-	fresh, err := newHost(g.Park, names)
+	fresh, err := newHost(g.Park)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer fresh.close()
 	garbage := make([]byte, 64)
 	rand.New(rand.NewSource(19)).Read(garbage)
-	if code, err := fresh.setTerrain(garbage); err != nil || code == 0 {
-		t.Fatalf("sim_set_terrain accepted 64 garbage bytes (code=%d err=%v)", code, err)
+	if code, err := fresh.setContent(garbage); err != nil || code == 0 {
+		t.Fatalf("content stage accepted 64 garbage bytes (code=%d err=%v)", code, err)
 	}
 }
 
@@ -422,7 +434,7 @@ func runSystemEvents(t *testing.T, g Game) {
 			if now, err := a.tick(); err != nil || now != at+501 {
 				t.Fatalf("sim_tick = %d after clock_skip to %d and one step (err %v)", now, at+500, err)
 			}
-			if code, err := a.apply(kind, le64(at)); err != nil || code == 0 {
+			if code, err := a.apply(Event{Kind: kind, Payload: le64(at)}); err != nil || code == 0 {
 				t.Fatalf("backward clock_skip accepted (code=%d err=%v) — skips are forward only", code, err)
 			}
 		})

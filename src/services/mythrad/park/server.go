@@ -57,7 +57,7 @@ func Run() {
 	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/mythra/behavior")
 	client := mount.NewModule("client", mount.DefaultClient)
 	parkModule := mount.NewModule("park", mount.DefaultPark)
-	go mount.Watch(behaviorDir, client, parkModule)
+	go mount.Watch(behaviorDir, acceptModule, client, parkModule)
 
 	dsn, err := databaseURL()
 	if err != nil {

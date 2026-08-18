@@ -13,13 +13,59 @@ SIM_ROOT = ["//src/services/mythrad/sim:__pkg__"]
 filegroup(
     name = "sources",
     srcs = [
+        "abi/src/lib.rs",
         "core/src/lib.rs",
         "nav/src/lib.rs",
         "park/src/lib.rs",
         "terrain/fixture/main.rs",
         "terrain/src/lib.rs",
+        "toy/src/lib.rs",
     ],
     visibility = SIM_ROOT,
+)
+
+# The framework ABI: the Simulation trait and the export_simulation!
+# macro. Game-blind by construction — it must never grow a dependency on
+# any sim crate, and every game's module crate depends on it.
+rust_library(
+    name = "abi",
+    srcs = ["abi/src/lib.rs"],
+    crate_name = "chunkies_abi",
+    edition = "2024",
+    visibility = TIER_PKGS,
+)
+
+# The toy reference game: the smallest simulation exercising the whole
+# ABI, and the macro's own test vehicle. Built, never committed or
+# deployed — gametest consumes the artifact fresh from this rule.
+rust_library(
+    name = "toy_lib",
+    srcs = ["toy/src/lib.rs"],
+    crate_name = "chunkies_toy",
+    edition = "2024",
+    deps = [":abi"],
+)
+
+rust_test(
+    name = "toy_test",
+    crate = ":toy_lib",
+    edition = "2024",
+)
+
+rust_shared_library(
+    name = "toy_cdylib",
+    srcs = ["toy/src/lib.rs"],
+    crate_name = "chunkies_toy",
+    edition = "2024",
+    target_compatible_with = ["@platforms//cpu:wasm32"],
+    deps = [":abi"],
+)
+
+wasm_module(
+    name = "toy_wasm",
+    lib = ":toy_cdylib",
+    out = "toy.wasm",
+    visibility = ["//src/services/mythrad/gametest:__pkg__"],
 )
 
 rust_library(

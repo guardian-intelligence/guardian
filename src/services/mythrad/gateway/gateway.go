@@ -73,7 +73,9 @@ func Run() {
 	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/mythra/behavior")
 	client := mount.NewModule("client", mount.DefaultClient)
 	parkModule := mount.NewModule("park", mount.DefaultPark)
-	go mount.Watch(behaviorDir, client, parkModule)
+	// nil acceptance: the gateway only distributes module bytes, and the
+	// browser's boot gate is the consumer-side decision there.
+	go mount.Watch(behaviorDir, nil, client, parkModule)
 	assets := newAssetCatalog(envStr("ASSET_DIR", "/etc/mythra/assets"))
 
 	issuer := envStr("OIDC_ISSUER", "https://auth.wakeupmythra.com/realms/wakeupmythra.com")

@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "gametest",
@@ -14,4 +14,12 @@ go_library(
         "@com_github_tetratelabs_wazero//:go_default_library",
         "@com_github_tetratelabs_wazero//api:go_default_library",
     ],
+)
+
+# The suite run on the framework's own toy game — no WUM in the loop.
+go_test(
+    name = "toy_conformance_test",
+    srcs = ["toy_test.go"],
+    data = ["//src/services/mythrad/sim/shared:toy_wasm"],
+    embed = [":gametest"],
 )

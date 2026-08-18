@@ -9,11 +9,12 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
-// requiredExports is the park-module ABI surface the authority host and
-// every replica host rely on. sim_rate/sim_anchor_* are demanded only when
-// the game declares a rate_set kind (a pre-rate module runs the genesis
-// segment).
-var requiredExports = []string{
+// The ABI surface, by generation. v1 is the WUM-era terrain-named
+// surface; v2 is the chunkies-abi trait surface — content-named, rate
+// exports mandatory, and the SimEvent envelope (kind u16 | actor u64 |
+// payload) on sim_apply. Both are served until the v2 flag day retires
+// v1 support here.
+var requiredExportsV1 = []string{
 	"abi_version",
 	"io_buf", "io_cap", "terrain_buf", "terrain_cap",
 	"sim_set_terrain", "sim_init", "sim_restore", "sim_snapshot",
@@ -21,7 +22,30 @@ var requiredExports = []string{
 	"sim_terrain_id",
 }
 
-var rateExports = []string{"sim_rate", "sim_anchor_tick", "sim_anchor_ns"}
+// v1 rate exports are demanded only when the game declares a rate_set
+// kind (a pre-rate module runs the genesis segment).
+var rateExportsV1 = []string{"sim_rate", "sim_anchor_tick", "sim_anchor_ns"}
+
+var requiredExportsV2 = []string{
+	"abi_version",
+	"io_buf", "io_cap", "content_buf", "content_cap",
+	"sim_content_stage", "sim_content_id", "sim_init", "sim_restore",
+	"sim_snapshot", "sim_step", "sim_apply", "sim_hash", "sim_tick",
+	"sim_epoch", "sim_rate", "sim_anchor_tick", "sim_anchor_ns",
+}
+
+// requiredExports returns the surface a module of the given generation
+// owes, given the game's declared kinds.
+func requiredExports(abi uint32, sys System) []string {
+	if abi >= 2 {
+		return requiredExportsV2
+	}
+	names := requiredExportsV1
+	if sys.RateSet != 0 {
+		names = append(append([]string{}, names...), rateExportsV1...)
+	}
+	return names
+}
 
 // host drives one instance of a game module through the sim ABI. Every
 // call returns an error instead of panicking: in this suite a trap is a
@@ -30,13 +54,14 @@ type host struct {
 	rt         wazero.Runtime
 	mem        api.Memory
 	fns        map[string]api.Function
+	abi        uint32
 	ioPtr      uint32
 	ioCap      uint32
-	terrainPtr uint32
-	terrainCap uint32
+	contentPtr uint32
+	contentCap uint32
 }
 
-func newHost(module []byte, names []string) (*host, error) {
+func newHost(module []byte) (*host, error) {
 	ctx := context.Background()
 	rt := wazero.NewRuntime(ctx)
 	mod, err := rt.Instantiate(ctx, module)
@@ -49,17 +74,29 @@ func newHost(module []byte, names []string) (*host, error) {
 		rt.Close(ctx)
 		return nil, errors.New("module exports no memory")
 	}
-	for _, name := range names {
+	probe := append(append([]string{}, requiredExportsV1...), rateExportsV1...)
+	probe = append(probe, requiredExportsV2...)
+	for _, name := range probe {
 		if f := mod.ExportedFunction(name); f != nil {
 			h.fns[name] = f
 		}
+	}
+	v, err := h.call32("abi_version")
+	if err != nil {
+		rt.Close(ctx)
+		return nil, err
+	}
+	h.abi = v
+	contentBuf, contentCap := "terrain_buf", "terrain_cap"
+	if h.abi >= 2 {
+		contentBuf, contentCap = "content_buf", "content_cap"
 	}
 	for _, buf := range []struct {
 		ptr, cap *uint32
 		pn, cn   string
 	}{
 		{&h.ioPtr, &h.ioCap, "io_buf", "io_cap"},
-		{&h.terrainPtr, &h.terrainCap, "terrain_buf", "terrain_cap"},
+		{&h.contentPtr, &h.contentCap, contentBuf, contentCap},
 	} {
 		if _, ok := h.fns[buf.pn]; !ok {
 			continue
@@ -103,11 +140,16 @@ func (h *host) call32(name string, args ...uint64) (uint32, error) {
 	return uint32(v), err
 }
 
-func (h *host) setTerrain(blob []byte) (uint32, error) {
-	if uint32(len(blob)) > h.terrainCap || !h.mem.Write(h.terrainPtr, blob) {
-		return 0, fmt.Errorf("terrain blob (%d bytes) does not fit terrain buffer (%d)", len(blob), h.terrainCap)
+// setContent stages and adopts a content blob (v1: terrain).
+func (h *host) setContent(blob []byte) (uint32, error) {
+	if uint32(len(blob)) > h.contentCap || !h.mem.Write(h.contentPtr, blob) {
+		return 0, fmt.Errorf("content blob (%d bytes) does not fit content buffer (%d)", len(blob), h.contentCap)
 	}
-	return h.call32("sim_set_terrain", uint64(len(blob)))
+	verb := "sim_set_terrain"
+	if h.abi >= 2 {
+		verb = "sim_content_stage"
+	}
+	return h.call32(verb, uint64(len(blob)))
 }
 
 func (h *host) init(seed uint64, id int64, epoch uint32) (uint32, error) {
@@ -135,11 +177,23 @@ func (h *host) snapshot() ([]byte, error) {
 	return out, nil
 }
 
-// apply runs one event (kind u16 LE + payload) through sim_apply.
-func (h *host) apply(kind uint16, payload []byte) (uint32, error) {
-	event := make([]byte, 2+len(payload))
-	event[0], event[1] = byte(kind), byte(kind>>8)
-	copy(event[2:], payload)
+// apply runs one event through sim_apply, encoding by ABI generation:
+// v1 is kind u16 LE + payload (any actor rides in the payload); v2 is
+// the SimEvent, kind u16 | actor u64 | payload.
+func (h *host) apply(ev Event) (uint32, error) {
+	var event []byte
+	if h.abi >= 2 {
+		event = make([]byte, 10+len(ev.Payload))
+		event[0], event[1] = byte(ev.Kind), byte(ev.Kind>>8)
+		for i := 0; i < 8; i++ {
+			event[2+i] = byte(ev.Actor >> (8 * i))
+		}
+		copy(event[10:], ev.Payload)
+	} else {
+		event = make([]byte, 2+len(ev.Payload))
+		event[0], event[1] = byte(ev.Kind), byte(ev.Kind>>8)
+		copy(event[2:], ev.Payload)
+	}
 	if uint32(len(event)) > h.ioCap || !h.mem.Write(h.ioPtr, event) {
 		return 0, fmt.Errorf("event (%d bytes) does not fit io buffer (%d)", len(event), h.ioCap)
 	}
@@ -151,9 +205,16 @@ func (h *host) step() error {
 	return err
 }
 
-func (h *host) hash() (uint64, error)    { return h.call("sim_hash") }
-func (h *host) tick() (uint64, error)    { return h.call("sim_tick") }
-func (h *host) terrain() (uint64, error) { return h.call("sim_terrain_id") }
+func (h *host) hash() (uint64, error) { return h.call("sim_hash") }
+func (h *host) tick() (uint64, error) { return h.call("sim_tick") }
+
+// contentID reads the module's adopted content address.
+func (h *host) contentID() (uint64, error) {
+	if h.abi >= 2 {
+		return h.call("sim_content_id")
+	}
+	return h.call("sim_terrain_id")
+}
 
 func (h *host) epoch() (uint32, error) { return h.call32("sim_epoch") }
 func (h *host) rate() (uint32, error)  { return h.call32("sim_rate") }
