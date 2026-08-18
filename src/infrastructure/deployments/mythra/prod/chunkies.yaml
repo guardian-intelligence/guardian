@@ -224,7 +224,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: park
-          image: ghcr.io/guardian-intelligence/chunkies-park:edge@sha256:618641a0a0dfd1ad429e2c6fd6022255d3b6f6d7845891e9792bf180c298b89e # {"$imagepolicy": "guardian-imageops:chunkies-park"}
+          image: ghcr.io/guardian-intelligence/chunkies-park:edge@sha256:b3e2cced8914c887b8070cb2f757cd1a255d4e9d9a82af8eacb7faa1d83177b7 # {"$imagepolicy": "guardian-imageops:chunkies-park"}
           env:
             - name: PARK_NAME
               value: park-mythra
