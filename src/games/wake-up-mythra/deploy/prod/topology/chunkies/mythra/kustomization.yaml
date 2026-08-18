@@ -1,0 +1,14 @@
+# One chunkie instance = the framework chunkie shape + this game's patch.
+# Adding a chunkie is a sibling dir of this one (with a nameSuffix once
+# there is more than one).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../../../../../chunkies/deploy/components/chunkie
+patches:
+  - path: wum.patch.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: chunkies-park

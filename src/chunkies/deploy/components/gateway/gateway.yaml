@@ -1,0 +1,88 @@
+# The per-node gateway: public WebTransport termination and (game, chunk)
+# routing. This is the framework-owned shape — probes, ports, security
+# posture, image pin. A game's overlay supplies everything instance-shaped
+# via patch: placement (nodeSelector/tolerations), env, and volumes. Env and
+# volumes are patched wholesale rather than split because today's gateway is
+# single-game; when multi-game admission lands, the framework env moves here
+# and game patches shrink to their own vocabulary.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chunkies-gateway
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: chunkies-gateway
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: chunkies-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: chunkies-gateway
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: gateway
+        guardian.dev/otel: producer
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      priorityClassName: guardian-standard
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gateway
+          image: ghcr.io/guardian-intelligence/chunkies-gateway:edge@sha256:d6db991bed91072f6ba7a2a936689f86442a19ef9aa0627705d3289d8cd4d8e2 # {"$imagepolicy": "guardian-imageops:chunkies-gateway"}
+          ports:
+            - name: wt
+              containerPort: 4433
+              protocol: UDP
+            - name: http
+              containerPort: 9634
+              protocol: TCP
+            - name: metrics
+              containerPort: 9633
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "2"
+              memory: 1Gi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+              ephemeral-storage: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

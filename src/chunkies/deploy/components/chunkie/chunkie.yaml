@@ -1,0 +1,83 @@
+# The chunkie: one pod owning one or more chunks of a game's world (WUM
+# calls its chunks parks; today each chunkie hosts exactly one). This is the
+# framework-owned shape — probes, security posture, image pin, rollout
+# strategy. A game's instance dir supplies placement, resources, env, and
+# volumes via patch (see src/chunkies/deploy/README.md). Chunkies are
+# node-pinned by their durability story; they never canary — they roll by
+# checkpoint/restore, so maxSurge stays 0 (one journal writer per park,
+# always).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chunkies-park
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: chunkies-park
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: park
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: chunkies-park
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: chunkies-park
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: park
+        guardian.dev/otel: producer
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      priorityClassName: guardian-standard
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: park
+          image: ghcr.io/guardian-intelligence/chunkies-park:edge@sha256:b3e2cced8914c887b8070cb2f757cd1a255d4e9d9a82af8eacb7faa1d83177b7 # {"$imagepolicy": "guardian-imageops:chunkies-park"}
+          ports:
+            - name: metrics
+              containerPort: 9637
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "4"
+              memory: 4Gi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: "4"
+              memory: 4Gi
+              ephemeral-storage: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

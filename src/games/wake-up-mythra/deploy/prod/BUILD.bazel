@@ -1,6 +1,15 @@
 filegroup(
     name = "manifests",
-    srcs = glob(["*.yaml"]),
+    srcs = glob(
+        [
+            "*.yaml",
+            "topology/**/*.yaml",
+            "topology/*.conf",
+        ],
+        # JSON6902 patch lists are kustomize inputs, not manifests; the
+        # admission walkers must not try to decode them as objects.
+        exclude = ["**/*.patch.yaml"],
+    ),
     visibility = ["//visibility:public"],
 )
 

@@ -1,0 +1,78 @@
+# The park-mythra chunkie: WUM's single chunkie today, hosting the one
+# prod park. Placement, game labels, resources, env, volumes — everything
+# instance-shaped over the framework chunkie shape.
+- op: add
+  path: /metadata/labels/guardian.dev~1product
+  value: mythra
+- op: add
+  path: /metadata/labels/guardian.dev~1stage
+  value: prod
+- op: add
+  path: /spec/template/metadata/labels/guardian.dev~1product
+  value: mythra
+- op: add
+  path: /spec/template/metadata/labels/guardian.dev~1stage
+  value: prod
+- op: add
+  path: /spec/template/spec/nodeSelector
+  value:
+    kubernetes.io/hostname: ash-worker0
+- op: add
+  path: /spec/template/spec/tolerations
+  value:
+    - key: guardian.dev/dedicated
+      operator: Equal
+      value: wum
+      effect: NoSchedule
+- op: add
+  path: /spec/template/spec/containers/0/env
+  value:
+    - name: PARK_NAME
+      value: park-mythra
+    - name: INTERNAL_HOST
+      value: 127.0.0.1
+    - name: MAX_SESSIONS
+      value: "4000"
+    - name: GOMEMLIMIT
+      value: 3500MiB
+    - name: PARK_PORT
+      value: "9632"
+    - name: HTTP_PORT
+      value: "9631"
+    - name: METRICS_PORT
+      value: "9637"
+    - name: INTERNAL_KEY_FILE
+      value: /etc/chunkies/internal/password
+    - name: PG_PASSWORD_FILE
+      value: /etc/mythra/pg/mythra
+    - name: BEHAVIOR_DIR
+      value: /etc/mythra/behavior
+    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+      value: otel-collector.guardian-analytics.svc.cozy.local:4317
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts
+  value:
+    - name: behavior
+      mountPath: /etc/mythra/behavior
+      readOnly: true
+    - name: internal-key
+      mountPath: /etc/chunkies/internal
+      readOnly: true
+    - name: pg-credentials
+      mountPath: /etc/mythra/pg
+      readOnly: true
+- op: add
+  path: /spec/template/spec/volumes
+  value:
+    - name: behavior
+      configMap:
+        name: mythra-behavior
+    - name: internal-key
+      secret:
+        secretName: chunkies-internal-key
+    - name: pg-credentials
+      secret:
+        secretName: postgres-products-credentials
+        items:
+          - key: mythra
+            path: mythra

@@ -1,15 +1,26 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  # Framework shapes (src/chunkies/deploy): the gateway, plus one dir per
+  # chunkie instance under topology/chunkies/.
+  - ../../../../chunkies/deploy/components/gateway
+  - topology/chunkies/mythra
   - agent-ops.yaml
   - behavior-configmap.yaml
   - certificate.yaml
-  - chunkies.yaml
   - ingress.yaml
   - internal-keys.yaml
   - networkpolicy.yaml
   - observability.yaml
+  - services.yaml
   - web.yaml
+patches:
+  - path: gateway-wum.patch.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: chunkies-gateway
 configMapGenerator:
   - name: mythra-behavior
     namespace: tenant-guardian-prod
@@ -25,3 +36,17 @@ configMapGenerator:
         guardian.dev/stage: prod
       annotations:
         kustomize.toolkit.fluxcd.io/substitute: disabled
+  # The chunk directory: which (game, chunk) pairs exist and where their
+  # authorities listen. The gateway hot-reloads this file — park topology
+  # changes must never restart the process holding live player sessions.
+  - name: chunkies-directory
+    namespace: tenant-guardian-prod
+    files:
+      - chunks.conf=topology/directory.conf
+    options:
+      disableNameSuffixHash: true
+      labels:
+        app.kubernetes.io/name: chunkies-gateway
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/product: mythra
+        guardian.dev/stage: prod
