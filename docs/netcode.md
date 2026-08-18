@@ -19,7 +19,7 @@ At a high level the goal is to minimize player interruptions as much as possible
 
 * Worker nodes live in cluster, Talos with SecureBoot.
 * Control-plane read replica located in same AZ.
-* Unencrypted replicated LINSTOR (never writes sensitive data to disk) on fast NVMe. 
+* Unencrypted replicated LINSTOR (never writes sensitive data to disk) on fast NVMe.
 * No cloudflare (impossible, CF doesn't support UDP)
 * 120tick servers, variable at runtime to handle load spikes.
 * Reconnect Herd -- Connection acks scheduled and queued.
@@ -119,6 +119,6 @@ tracked as future work.
 
 **How does a stale-but-correct client recover?** The clock measures its
 deficit against verdict ticks: small → slew ±2%, seconds → fast-forward
-(budgeted extra steps per frame), 
+(budgeted extra steps per frame),
 One state machine, property-tested in `sim/clock`; the dev debug panel and
 the netsim proxy (`src/services/mythrad/README.md`) exist to torture it.

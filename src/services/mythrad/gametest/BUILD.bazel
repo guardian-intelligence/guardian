@@ -1,0 +1,17 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "gametest",
+    testonly = True,
+    srcs = [
+        "gametest.go",
+        "host.go",
+        "wasmscan.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/mythrad/gametest",
+    visibility = ["//src/services/mythrad:__subpackages__"],
+    deps = [
+        "@com_github_tetratelabs_wazero//:go_default_library",
+        "@com_github_tetratelabs_wazero//api:go_default_library",
+    ],
+)
