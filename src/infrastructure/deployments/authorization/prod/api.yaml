@@ -47,7 +47,7 @@ spec:
               app.kubernetes.io/name: authorization
       containers:
         - name: authorization
-          image: ghcr.io/guardian-intelligence/authorization:edge@sha256:1adc0eb1b4c3802be79b2cb6d32009cf1f6ed582d93cc41dd004cae1b92d962a # {"$imagepolicy": "guardian-imageops:authorization"}
+          image: ghcr.io/guardian-intelligence/authorization:edge@sha256:da64a6ff5027de5680e2e16053edbbb41869b54538719bfad6ac18cd5e3b9210 # {"$imagepolicy": "guardian-imageops:authorization"}
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
