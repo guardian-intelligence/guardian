@@ -4,7 +4,6 @@
 // trust-bearing field server-side (receipt time, verified client IP + tier
 // from the edge headers, UA, site from Host, skew), enforces the wire
 // contract value-level, and batch-inserts into guardian_analytics.events.
-// Design + evidence: docs/analytics-storage-design.md.
 package main
 
 import (

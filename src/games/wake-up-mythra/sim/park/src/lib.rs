@@ -1,6 +1,6 @@
 //! The park module: the complete game state machine, compiled to wasm and
 //! run identically by the server authority, every browser, and every load
-//! bot (docs/netcode.md). All state transitions live here — the hosts move
+//! bot (src/chunkies/README.md). All state transitions live here — the hosts move
 //! opaque bytes and never interpret game rules.
 //!
 //! Replication contract:

@@ -1,6 +1,6 @@
 //! Presentation smoothing: the host's, never the game's.
 //!
-//! docs/netcode.md puts render smoothing in `sim/client`, and it belongs
+//! src/chunkies/README.md puts render smoothing in `sim/client`, and it belongs
 //! there for a structural reason -- it interpolates between two
 //! authoritative ticks for display only and never feeds back into world
 //! state, so it can never influence `sim_hash`. It lived in a game's core

@@ -35,7 +35,7 @@ const (
 	// ringSeconds bounds how stale a client check (and a rejoin's fast-
 	// forward) may be. Older checks answer "unknown", which the client
 	// counts as a strike; rejoins further behind get a snapshot (the
-	// compute bound from docs/netcode.md).
+	// compute bound from src/chunkies/README.md).
 	ringSeconds = 30
 
 	// catchupBurst caps ticks repaid per scheduler wakeup, so attach
@@ -379,7 +379,7 @@ type modules struct {
 }
 
 // authority is one park's sim authority: journal writer, validator, and
-// fan-out hub (docs/netcode.md). run() is the single owner of the host.
+// fan-out hub (src/chunkies/README.md). run() is the single owner of the host.
 type authority struct {
 	name string
 	id   int64
@@ -408,7 +408,7 @@ type authority struct {
 	terrain     uint64
 	terrainBlob []byte
 
-	// The module-update lane (docs/netcode.md, module epochs): when the
+	// The module-update lane (src/chunkies/README.md, module epochs): when the
 	// behavior mount serves a park module whose hash differs from the
 	// running one, a candidate instance soaks in the dark — fed the same
 	// events, stepped in lockstep, fanning out nothing — and on a clean
@@ -1262,7 +1262,7 @@ func (a *authority) tickOnce() {
 }
 
 // handleAttach registers the subscription atomically with the live stream
-// position (docs/netcode.md: one machine, three entrances) and captures
+// position (src/chunkies/README.md: one machine, three entrances) and captures
 // the raw snapshot state; everything expensive happens later in
 // catchupLines on the session goroutine. A mid-session resync stays
 // in-stream — the snapshot must land between the events around it, so it

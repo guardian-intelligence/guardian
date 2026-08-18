@@ -1,5 +1,5 @@
 -- The park journal: ordered events are the truth, snapshots bound replay
--- time (docs/netcode.md). uint64 sim values (tick, intent_id, wh) are
+-- time (src/chunkies/README.md). uint64 sim values (tick, intent_id, wh) are
 -- stored as their two's-complement bigint image. wall_ts is observability
 -- only and is never replayed.
 CREATE TABLE park_events (

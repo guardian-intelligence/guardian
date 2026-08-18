@@ -1,5 +1,5 @@
 // Boot: who is at the keyboard, what the park is serving, and the wiring
-// that turns the two into a live session. The session core (docs/netcode.md)
+// that turns the two into a live session. The session core (src/chunkies/README.md)
 // owns the protocol — ordering, rollback, resync, prediction, check
 // cadence — so what is left here is identity, the platform errands the
 // host asks for, and the controls.

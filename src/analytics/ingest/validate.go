@@ -11,8 +11,7 @@ import (
 
 // Value-level enforcement. connect-go's JSON codec hardcodes
 // DiscardUnknown, so unknown wire fields cannot be rejected at the codec —
-// everything the schema means is enforced here (recorded in
-// docs/analytics-storage-design.md). Rejects are counted per reason and
+// everything the schema means is enforced here. Rejects are counted per reason and
 // surface in PublishResponse; schema fuzzing is a fraud signal.
 
 const (

@@ -1,5 +1,5 @@
 # chunkies wire protocol v5 + authority record golden vectors.
-# Hand-derived from the layout spec (docs/chunkies-codec.md); the three
+# Hand-derived from the layout spec; the three
 # implementations are held to these bytes, never the reverse.
 # `name = hex` must decode and re-encode byte-identically.
 # `!name = hex` must fail decode.

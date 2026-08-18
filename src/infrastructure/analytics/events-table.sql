@@ -1,5 +1,5 @@
 -- Analytics/fraud event store — bake-off winner, 17.0 B/event, 37x under
--- the JSON wire form (evidence: docs/analytics-storage-design.md; wire
+-- the JSON wire form (wire
 -- contract: src/proto/guardian/analytics/v1/events.proto). Visitor-clustered
 -- ORDER BY is what buys both the compression and the fraud/funnel query
 -- shape; time-sliced aggregates get a projection later if ever needed.

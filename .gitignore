@@ -91,3 +91,7 @@ __pycache__/
 # repo Python toolchain instead.
 /src/guardian-bench/.venv/
 /src/guardian-bench/outputs/
+
+# The payments Go binary once landed at the repo root by accident (49MB);
+# keep root build outputs out.
+/payments

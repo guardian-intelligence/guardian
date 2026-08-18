@@ -13,7 +13,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
 )
 
-// Event kinds, as the park module numbers them (docs/netcode.md). The
+// Event kinds, as the park module numbers them (src/chunkies/README.md). The
 // actor rides the SimEvent envelope; these numbers predate the framework
 // kind-range convention (0x0100+ for game kinds) and are grandfathered —
 // the journal's history is written in them.
