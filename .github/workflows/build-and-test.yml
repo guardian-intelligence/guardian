@@ -1,9 +1,3 @@
-# The repository's only CI gate: build and test the whole graph, nothing else.
-# Every check that can be a Bazel target IS one, reachable from `//...`, so
-# this workflow stays a thin harness around `bazelisk test`.
-#
-# Publishing and signing deliberately stay in their own files: a workflow path
-# is a cosign identity (see AGENTS.md in this directory).
 name: build-and-test
 
 on:
@@ -26,7 +20,6 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    # The full cold graph — no remote cache until Postflight supplies one.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -34,16 +27,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # Publishes its install dir to GITHUB_PATH, so bazelisk resolves through
-      # the repo-pinned launcher for every step below.
       - name: Bootstrap toolchain
         run: scripts/bootstrap.sh
 
-      # Bazel's disk + repository caches (the :ci config), persisted by main
-      # and restored by everyone: a PR re-executes only what its diff
-      # invalidates. Only trusted main history writes — a PR run's cache is
-      # never saved, so nothing a PR builds can feed a later main build
-      # through this path.
       - name: Restore Bazel cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -58,11 +44,6 @@ jobs:
       - name: Test
         run: bazelisk test --config=ci //...
 
-      # //src/tools:pins is tagged manual (the archive set is multi-GB and
-      # fetched lazily), so only this proves a bumped archive still fetches,
-      # unpacks, and carries the declared binary paths. Scoped to diffs that
-      # can move a pin — most PRs touch none of it. Deliberately not
-      # --config=ci: the step exists to prove a fresh fetch works.
       - name: Verify tool pins fetch and unpack
         if: github.event_name == 'pull_request'
         run: |

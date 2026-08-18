@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_clippy", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_clippy", "rust_test", "rustfmt_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 rust_binary(
@@ -49,6 +49,16 @@ rust_clippy(
     name = "clippy",
     testonly = True,
     deps = [
+        ":postflight",
+        ":postflight_test",
+    ],
+)
+
+# Same shape for formatting: drift fails `bazelisk test //...`; the fix is
+# `aspect tidy`.
+rustfmt_test(
+    name = "rustfmt_test",
+    targets = [
         ":postflight",
         ":postflight_test",
     ],
