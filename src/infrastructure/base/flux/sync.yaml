@@ -983,7 +983,10 @@ spec:
         name: guardian-source
   dependsOn:
     - name: guardian-system
-  prune: true
+  # Prune disabled ahead of the rename to guardian-company-cms: the old
+  # object must orphan its inventory (the shared product Postgres included)
+  # for the renamed Kustomization to adopt, never GC it.
+  prune: false
   wait: false
   healthChecks:
     - apiVersion: apps/v1
