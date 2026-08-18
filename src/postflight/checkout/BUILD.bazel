@@ -1,0 +1,83 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+
+npm_link_all_packages()
+
+CHECKOUT_SRCS = glob([
+    "package.json",
+    "src/**/*",
+    "test/**/*",
+    "tsconfig.json",
+    "vite.config.ts",
+    "vitest.config.ts",
+])
+
+filegroup(
+    name = "package_manifest",
+    srcs = ["package.json"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "sources",
+    srcs = CHECKOUT_SRCS,
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "pkg",
+    srcs = CHECKOUT_SRCS,
+    visibility = ["//visibility:public"],
+)
+
+genrule(
+    name = "generated_bundle",
+    srcs = [
+        ":node_modules",
+        ":node_modules/typescript",
+        ":node_modules/vite-plus",
+        ":sources",
+        # vite-plus-core resolves `vite-plus/binding` through the NODE_PATH
+        # fallback at the monorepo root, so the root link must be a declared
+        # input — without it the genrule only works when an unrelated build
+        # has already materialized root node_modules.
+        "//:node_modules/vite-plus",
+        "//:vp_node",
+        "//:workspace_sources",
+    ],
+    outs = ["generated/index.js"],
+    visibility = ["//actions/checkout:__pkg__"],
+    cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+node="$$execroot/$(location //:vp_node)"
+node_modules_root="$$execroot/$(BINDIR)/node_modules"
+package_node_modules="$$execroot/$(BINDIR)/src/postflight/checkout/node_modules"
+vp="$$package_node_modules/vite-plus/bin/vp"
+tsc="$$package_node_modules/typescript/bin/tsc"
+test -x "$$vp"
+test -f "$$tsc"
+work="$$(mktemp -d)"
+trap 'rm -rf "$$work"' EXIT
+for f in $(locations //:workspace_sources); do
+  mkdir -p "$$work/$$(dirname "$$f")"
+  cp "$$f" "$$work/$$f"
+done
+link_node_modules() {
+  mkdir -p "$$2"
+  find "$$1" -mindepth 1 -maxdepth 1 -exec ln -s {} "$$2/" \\;
+}
+link_node_modules "$$node_modules_root" "$$work/node_modules"
+link_node_modules "$$package_node_modules" "$$work/src/postflight/checkout/node_modules"
+export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
+export NODE_PATH="$$node_modules_root$${NODE_PATH:+:$$NODE_PATH}"
+export CI=true
+cd "$$work/src/postflight/checkout"
+"$$node" "$$tsc" -p tsconfig.json
+"$$node" "$$vp" test run --config vitest.config.ts
+POSTFLIGHT_ACTION_OUT_DIR="$$work/dist" "$$node" "$$vp" build
+test -s "$$work/dist/index.js"
+cp "$$work/dist/index.js" "$$execroot/$@"
+""",
+)

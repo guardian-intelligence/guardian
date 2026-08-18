@@ -11,7 +11,7 @@ description: Create or update the GitHub OAuth App used as the GitHub social pro
    `https://${HOST}/realms/guardianintelligence.org/broker/github/endpoint`.
 3. Generate `/tmp/sign-in-with-guardian-${ENV}.png` as a 512×512 PNG on
    `#0E0E0E`. Use
-   `src/products/viteplus-monorepo/apps/guardianintelligence-web/public/favicon.svg`
+   `src/company/web/public/favicon.svg`
    as the immutable mark source; preserve its exact viewBox, wings path, and
    aspect ratio. Render it 320×320, centered at `(256,176)`, without
    nonuniform scaling. Add `SIGN IN WITH GUARDIAN` centered below it in

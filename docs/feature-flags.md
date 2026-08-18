@@ -45,7 +45,7 @@ git (flags.json)
   disabled + ~10 lines of EventSource glue that bumps the evaluation
   context on an epoch event, forcing re-evaluation. The provider refreshes
   on tab-visibility for backgrounded pages. See
-  `apps/wake-up-mythra-web/src/flags/client.ts` for the reference wiring.
+  `src/games/wake-up-mythra/web/src/flags/client.ts` for the reference wiring.
   Native apps use the official OFREP providers for their platform plus the
   same `/features/events` subscription.
 

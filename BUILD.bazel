@@ -12,18 +12,18 @@ package(default_visibility = ["//visibility:public"])
 # listed once here and derived into every genrule below, so relocating a
 # package is a one-line edit rather than a sweep through this file.
 WORKSPACE_PACKAGES = [
-    "src/products/viteplus-monorepo/apps/guardianintelligence-web",
-    "src/products/viteplus-monorepo/apps/privatecut-web",
-    "src/products/viteplus-monorepo/apps/wake-up-mythra-web",
-    "src/products/viteplus-monorepo/packages/brand",
-    "src/products/viteplus-monorepo/packages/canary-journeys",
-    "src/products/viteplus-monorepo/packages/chunkies",
-    "src/products/viteplus-monorepo/packages/chunkies-testkit",
-    "src/products/viteplus-monorepo/packages/chunkies-transport-web",
-    "src/products/viteplus-monorepo/packages/postflight-checkout",
-    "src/products/viteplus-monorepo/packages/telemetry",
-    "src/products/viteplus-monorepo/packages/visual-harness",
-    "src/products/viteplus-monorepo/packages/wum-client",
+    "src/company/web",
+    "src/privatecut/web",
+    "src/games/wake-up-mythra/web",
+    "src/shared/ts/brand",
+    "src/shared/ts/canary-journeys",
+    "src/chunkies/host/ts",
+    "src/chunkies/testkit/ts",
+    "src/chunkies/transport/ts",
+    "src/postflight/checkout",
+    "src/shared/ts/telemetry",
+    "src/shared/ts/visual-harness",
+    "src/games/wake-up-mythra/client",
 ]
 
 WORKSPACE_ROOT_FILES = [

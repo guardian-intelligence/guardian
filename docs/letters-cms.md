@@ -4,7 +4,7 @@ Company-site letters live in Directus (`tenant-guardian-prod`,
 `deployments/products/prod/directus.yaml`) and nowhere else. The Studio is
 the editor; the site's SSR server fetches published letters from the
 Directus service at request time
-(`apps/guardianintelligence-web/src/content/letters.server.ts`). Content
+(`src/company/web/src/content/letters.server.ts`). Content
 never passes through git, so publishing an edit is saving it in the Studio.
 
 ## Contract
@@ -64,7 +64,7 @@ checksum annotation, PR.
 
 The one manual admin action is granting a person Studio access, because
 editor emails are personal data that stays out of the repo. From
-`src/products/viteplus-monorepo/apps/guardianintelligence-web`, against a
+`src/company/web`, against a
 port-forward with `DIRECTUS_EMAIL=admin@guardianintelligence.org
 DIRECTUS_PASSWORD=...`:
 

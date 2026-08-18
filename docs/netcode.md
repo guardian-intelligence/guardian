@@ -65,9 +65,9 @@ At a high level the goal is to minimize player interruptions as much as possible
 | `games/wake-up-mythra/services/wum` | the game's server vocabulary | kind numbers, dog-id binding, reject names, the genesis terrain — the only WUM-shaped thing the transport packages see |
 | `chunkies/journal` | durability | Postgres `park_events` / `park_snapshots` / `park_terrain`; per-park seq is dense and single-writer; `journaltest.Run` is the conformance suite |
 | `chunkies/gametest` | the game contract | the game-blind conformance suite over built artifacts: determinism, snapshot completeness, reject purity, system-event semantics; `wum` wires the committed modules through it |
-| `packages/chunkies` | the game-agnostic replica host | moves opaque bytes between wire, wasm, and screen: the session module, the replica slot, the transport, and the guarded extension/projection doors a game layer reaches its own exports through. Knows no game vocabulary; the name is a deliberate find-and-replaceable placeholder |
-| `packages/wum-client` | the game layer | WUM over the host: intent verbs, the HUD/view/terrain decodes, the glide presenter, and the isometric renderer. If TypeScript (or Go) can read a game rule, the rule is in the wrong place |
-| `apps/wake-up-mythra-web/src/game` | the surface | platform adapters (WebTransport, fetch, auth), the HUD/stats/debug DOM, and the telemetry mapping. No protocol |
+| `src/chunkies/host/ts` | the game-agnostic replica host | moves opaque bytes between wire, wasm, and screen: the session module, the replica slot, the transport, and the guarded extension/projection doors a game layer reaches its own exports through. Knows no game vocabulary; the name is a deliberate find-and-replaceable placeholder |
+| `src/games/wake-up-mythra/client` | the game layer | WUM over the host: intent verbs, the HUD/view/terrain decodes, the glide presenter, and the isometric renderer. If TypeScript (or Go) can read a game rule, the rule is in the wrong place |
+| `src/games/wake-up-mythra/web/src/game` | the surface | platform adapters (WebTransport, fetch, auth), the HUD/stats/debug DOM, and the telemetry mapping. No protocol |
 
 Not yet built, planned for the control plane:
 

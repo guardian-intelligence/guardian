@@ -58,8 +58,8 @@ only trusts it because `OIDC_ISSUER` says so.
 ## The edit loops
 
 - **Web (TypeScript/React)**: save; vite HMR applies it. The web app lives
-  in the vite-plus workspace (`src/products/viteplus-monorepo/`, see its
-  `README.md` for the workspace commands).
+  at `src/games/wake-up-mythra/web`, a member of the repo-rooted
+  vite-plus workspace (see `docs/web-workspace.md`).
 - **Sim (Rust → wasm)**: `bazelisk run //src/chunkies/sim:refresh`
   while the stack runs. The new module lands in the behavior dir, the services
   hot-swap it, and connected clients follow the same update lane a
@@ -116,7 +116,7 @@ curl -X POST 'http://127.0.0.1:14434/silence?ms=8000'
 curl -X POST 'http://127.0.0.1:14434/migrate'
 ```
 
-`apps/wake-up-mythra-web/e2e/degradation.mjs` drives a full scenario
+`src/games/wake-up-mythra/web/e2e/degradation.mjs` drives a full scenario
 headlessly and asserts the client's behavior under each impairment —
 including a deliberately RED-encoded assertion for the known
 stuck-behind-after-CPU-stall crawl that the sim/clock module will flip.

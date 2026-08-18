@@ -74,7 +74,7 @@ func EventActor(kind uint16, actor string, payload []byte) (uint64, []byte) {
 
 // ActionName is deliberately bounded: a client-controlled numeric kind
 // must never become unbounded metric cardinality. Kept aligned with
-// packages/wum-client/src/actions.ts; unknown attempts share one bucket.
+// src/games/wake-up-mythra/client/src/actions.ts; unknown attempts share one bucket.
 func ActionName(kind uint16) string {
 	switch kind {
 	case EvJoin:

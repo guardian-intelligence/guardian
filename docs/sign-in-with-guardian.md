@@ -140,7 +140,7 @@ authenticated Postflight session, sign out, and verify the local session is
 gone. Any rendered Keycloak page at any step fails the run. It does not use
 a direct grant or Keycloak admin API and it does not simulate a broker
 callback. The journey is a Playwright spec in
-`src/products/viteplus-monorepo/packages/canary-journeys/` (general canary
+`src/shared/ts/canary-journeys/` (general canary
 principles: `docs/canaries.md`); it runs as the `guardian-journey-canary`
 CronJob, treats its credentials as critical data (captures off, output
 scrubbed by known value, a honeytoken self-test on every run), and its

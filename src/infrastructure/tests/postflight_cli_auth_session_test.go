@@ -75,7 +75,7 @@ func TestDeeptestRecordsTheAuthSessionChecks(t *testing.T) {
 func TestJourneyCanaryRequestsTheScopeTheCliRequests(t *testing.T) {
 	const (
 		deviceFlow = "src/products/postflight-cli/src/device.rs"
-		journey    = "src/products/viteplus-monorepo/packages/canary-journeys/journeys/device-flow.spec.ts"
+		journey    = "src/shared/ts/canary-journeys/journeys/device-flow.spec.ts"
 	)
 
 	source := readText(t, runfilePath(deviceFlow))
