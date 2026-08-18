@@ -3,7 +3,6 @@ package park
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"testing"
 	"time"
 
@@ -12,7 +11,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/journal"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/mount"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/wum"
-	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/codec"
 	"github.com/guardian-intelligence/guardian/src/services/postflight/controlplane/pgtest"
 )
 
@@ -45,19 +44,13 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dog := func(id uint64) []byte {
-		var p [8]byte
-		binary.LittleEndian.PutUint64(p[:], id)
-		return p[:]
-	}
-	s := &session{sub: "alice", out: make(chan []byte, 16)}
-	a.stageIntent(s, 1, wum.EvJoin, dog(wum.DogIDFor("alice")))
+	s := &session{sub: "alice", dogID: wum.DogIDFor("alice"), out: make(chan []byte, 16)}
+	a.stageIntent(s, 1, wum.EvJoin, nil)
 	a.tickOnce()
-	a.stageIntent(s, 2, wum.EvCheckIn, dog(wum.DogIDFor("alice")))
+	a.stageIntent(s, 2, wum.EvCheckIn, nil)
 	// A movement order makes the replay below exercise pathfinding and
 	// steering through wazero, not just roster bookkeeping.
-	move := append(dog(wum.DogIDFor("alice")), 0x0A, 0x05) // node 1290 = (10, 10): open grass
-	a.stageIntent(s, 3, wum.EvMoveTo, move)
+	a.stageIntent(s, 3, wum.EvMoveTo, []byte{0x0A, 0x05}) // node 1290 = (10, 10): open grass
 	for i := 0; i < 100; i++ {
 		a.tickOnce()
 	}
@@ -67,7 +60,7 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 
 	// Duplicate intent ids are dropped at the door (idempotent resend).
 	before := a.lastSeq
-	a.stageIntent(s, 2, wum.EvCheckIn, dog(wum.DogIDFor("alice")))
+	a.stageIntent(s, 2, wum.EvCheckIn, nil)
 	a.tickOnce()
 	if a.lastSeq != before {
 		t.Fatalf("duplicate (actor, intent_id) minted seq %d", a.lastSeq)
@@ -96,13 +89,16 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 	}
 	select {
 	case frame := <-s.out:
-		kind, payload, err := wire.NewReader(bytes.NewReader(frame)).Next()
-		if err != nil || kind != wire.KindEvent {
+		kind, payload, err := codec.NewReader(bytes.NewReader(frame)).Next()
+		if err != nil || kind != codec.KindTick {
 			t.Fatalf("rate fanout frame: kind=%d err=%v", kind, err)
 		}
-		ev, err := wire.DecodeEvent(payload)
-		if err != nil || ev.Kind != wum.EvRateSet || ev.Tick != boundary {
-			t.Fatalf("rate fanout event: %+v err=%v", ev, err)
+		tk, recs, err := codec.DecodeTick(payload)
+		if err != nil || len(recs) != 1 || recs[0].Kind != wum.EvRateSet || tk.Tick != boundary {
+			t.Fatalf("rate fanout batch: %+v err=%v", tk, err)
+		}
+		if recs[0].Actor != 0 {
+			t.Fatalf("rate_set record: actor=%d — system events are authority-minted", recs[0].Actor)
 		}
 	default:
 		t.Fatal("connected session did not receive the live rate_set")
@@ -153,19 +149,13 @@ func TestAuthorityClosesOnAppendConflict(t *testing.T) {
 	if _, err := j.Append(ctx, a.id, 0, []journal.Event{{Tick: 0, Epoch: 1, Kind: wum.EvDayReset, Actor: "rogue", Payload: []byte{0, 0, 0, 0}}}); err != nil {
 		t.Fatal(err)
 	}
-	s := &session{sub: "bob", out: make(chan []byte, 16)}
-	a.stageIntent(s, 1, wum.EvJoin, dog8(wum.DogIDFor("bob")))
+	s := &session{sub: "bob", dogID: wum.DogIDFor("bob"), out: make(chan []byte, 16)}
+	a.stageIntent(s, 1, wum.EvJoin, nil)
 	a.tickOnce()
 	if !a.isClosed() {
 		t.Fatal("authority kept serving past a journal conflict (split brain)")
 	}
 	a.host.close()
-}
-
-func dog8(id uint64) []byte {
-	var p [8]byte
-	binary.LittleEndian.PutUint64(p[:], id)
-	return p[:]
 }
 
 // The module-update lane end to end: a new park module on the mount soaks
@@ -189,8 +179,8 @@ func TestModuleEpochSwapLane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &session{sub: "dana", out: make(chan []byte, 16)}
-	a.stageIntent(s, 1, wum.EvJoin, dog8(wum.DogIDFor("dana")))
+	s := &session{sub: "dana", dogID: wum.DogIDFor("dana"), out: make(chan []byte, 16)}
+	a.stageIntent(s, 1, wum.EvJoin, nil)
 	a.tickOnce()
 	epochBefore := a.host.Epoch()
 
@@ -222,7 +212,7 @@ func TestModuleEpochSwapLane(t *testing.T) {
 	}
 
 	// The swapped host keeps serving.
-	a.stageIntent(s, 2, wum.EvCheckIn, dog8(wum.DogIDFor("dana")))
+	a.stageIntent(s, 2, wum.EvCheckIn, nil)
 	a.tickOnce()
 	wantHash := a.host.Hash()
 	wantTick := a.host.Tick()
@@ -270,7 +260,6 @@ func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
 	}
 	defer a.host.close()
 
-	carol := dog8(wum.DogIDFor("carol"))
 	seqAfter := func(want int64, step string) {
 		t.Helper()
 		if a.lastSeq != want {
@@ -281,28 +270,28 @@ func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
 	// First page load: join, then the connection drops and the departure
 	// is staged with intent id 0. The first tick after any open also
 	// journals the day_reset that seeds the sim's day index (seq 2).
-	s1 := &session{sub: "carol", out: make(chan []byte, 16)}
-	a.stageIntent(s1, 1, wum.EvJoin, carol)
+	s1 := &session{sub: "carol", dogID: wum.DogIDFor("carol"), out: make(chan []byte, 16)}
+	a.stageIntent(s1, 1, wum.EvJoin, nil)
 	a.tickOnce()
 	seqAfter(2, "first join + day_reset")
-	a.stageIntent(s1, 0, wum.EvLeave, carol)
+	a.stageIntent(s1, 0, wum.EvLeave, nil)
 	a.tickOnce()
 	seqAfter(3, "first departure")
 
 	// Refreshed page: an intent for an absent dog is rejected (reason 3),
 	// then the client rejoins and retries under the SAME intent id.
-	s2 := &session{sub: "carol", out: make(chan []byte, 16)}
-	a.stageIntent(s2, 42, wum.EvCheckIn, carol)
+	s2 := &session{sub: "carol", dogID: wum.DogIDFor("carol"), out: make(chan []byte, 16)}
+	a.stageIntent(s2, 42, wum.EvCheckIn, nil)
 	a.tickOnce()
 	seqAfter(3, "check-in while absent")
-	a.stageIntent(s2, 43, wum.EvJoin, carol)
-	a.stageIntent(s2, 42, wum.EvCheckIn, carol)
+	a.stageIntent(s2, 43, wum.EvJoin, nil)
+	a.stageIntent(s2, 42, wum.EvCheckIn, nil)
 	a.tickOnce()
 	seqAfter(5, "rejoin + retried check-in")
 
 	// Second disconnect: the departure must not be swallowed as a resend
 	// of the first one.
-	a.stageIntent(s2, 0, wum.EvLeave, carol)
+	a.stageIntent(s2, 0, wum.EvLeave, nil)
 	a.tickOnce()
 	seqAfter(6, "second departure")
 }
@@ -328,8 +317,8 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &session{sub: "erin", out: make(chan []byte, 16)}
-	a.stageIntent(s, 1, wum.EvJoin, dog8(wum.DogIDFor("erin")))
+	s := &session{sub: "erin", dogID: wum.DogIDFor("erin"), out: make(chan []byte, 16)}
+	a.stageIntent(s, 1, wum.EvJoin, nil)
 	for i := 0; i < 5; i++ {
 		a.tickOnce()
 	}
@@ -419,8 +408,8 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &session{sub: "gale", out: make(chan []byte, 16)}
-	a.stageIntent(s, 1, wum.EvJoin, dog8(wum.DogIDFor("gale")))
+	s := &session{sub: "gale", dogID: wum.DogIDFor("gale"), out: make(chan []byte, 16)}
+	a.stageIntent(s, 1, wum.EvJoin, nil)
 	for i := 0; i < 5; i++ {
 		a.tickOnce()
 	}

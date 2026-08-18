@@ -71,7 +71,7 @@
 use core::mem;
 use mythra_sim_clock::{Clock, F_SNAPSHOT, STEP_COST_US, State};
 
-pub mod wire;
+pub use chunkies_codec as wire;
 
 /// Host requests: the core names what it needs, the host fetches it.
 pub const REQ_NEED_TERRAIN: u32 = 1;
@@ -306,6 +306,7 @@ struct Ev {
     seq: i64,
     tick: u64,
     kind: u16,
+    actor: u64,
     intent: u64,
     plen: u16,
     p: [u8; EV_PAYLOAD_CAP],
@@ -315,6 +316,7 @@ impl Ev {
     const EMPTY: Ev = Ev {
         seq: 0,
         tick: 0,
+        actor: 0,
         kind: 0,
         intent: 0,
         plen: 0,
@@ -434,6 +436,11 @@ pub trait Host {
 pub struct Session {
     clock: Clock,
     my_dog: u64,
+    // The subscription's stream identity: the lineage of the history this
+    // replica holds (a welcome naming a different one means that history
+    // no longer exists), and the datagram tag the welcome assigned.
+    lineage: u32,
+    sub: u32,
     role: u32,
     check_ms: u64,
     nonce: u32,
@@ -549,6 +556,8 @@ impl Session {
     pub const NEW: Session = Session {
         clock: Clock::NEW,
         my_dog: 0,
+        lineage: 0,
+        sub: 0,
         role: ROLE_SPECTATOR,
         check_ms: 5000,
         nonce: 0,
@@ -785,7 +794,7 @@ impl Session {
         // does not outlive the connection that carried it.
         self.presence = false;
         self.next_check_ms = now_ms + HELLO_MS;
-        let n = wire::encode_hello(&mut bufs().out, self.seq, self.tick, ticket);
+        let n = wire::encode_hello(&mut bufs().out, self.lineage, self.seq, self.tick, ticket);
         h.send_stream(&bufs().out[..n]);
         h.emit(T_CONNECTED, ticket.len() as u64, 0);
         // A join still waiting for its answer is this connection's join
@@ -796,7 +805,7 @@ impl Session {
             match self.pending_kind(EV_JOIN) {
                 Some(i) => self.resend(h, i, now_ms),
                 None => {
-                    self.send_intent(h, EV_JOIN, &self.my_dog.to_le_bytes(), now_ms);
+                    self.send_intent(h, EV_JOIN, &[], now_ms);
                 }
             }
         }
@@ -842,7 +851,7 @@ impl Session {
     fn dispatch<H: Host>(&mut self, h: &mut H, kind: u8, off: usize, len: usize, now_ms: u64) {
         match kind {
             wire::K_WELCOME => self.on_welcome(h, off, len, now_ms),
-            wire::K_EVENT => self.on_event(h, off, len, now_ms),
+            wire::K_TICK => self.on_tick(h, off, len, now_ms),
             wire::K_REJECT => self.on_reject(h, off, len, now_ms),
             wire::K_SNAPSHOT => self.on_snapshot(h, off, len, now_ms),
             _ => {}
@@ -850,12 +859,21 @@ impl Session {
     }
 
     fn on_welcome<H: Host>(&mut self, h: &mut H, off: usize, len: usize, now_ms: u64) {
-        let Some((epoch, tick, hz, role, terrain)) =
+        let Some((lineage, sub, epoch, tick, hz, role, content)) =
             wire::parse_welcome(&bufs().inbuf[off..off + len])
-                .map(|w| (w.epoch, w.tick, w.hz, w.role, w.terrain))
+                .map(|w| (w.lineage, w.sub, w.epoch, w.tick, w.hz, w.role, w.content))
         else {
             return;
         };
+        // A lineage this replica has not seen means the history it holds
+        // no longer exists: everything held is stale, and the snapshot
+        // the authority queues behind this welcome is the restore point.
+        if self.have_state && lineage != self.lineage {
+            self.queued_len = 0;
+            self.seq = -1;
+        }
+        self.lineage = lineage;
+        self.sub = sub;
         self.hz = hz.clamp(1, 1000) as u64;
         self.role = role as u32;
         // Welcome establishes the current rate. A later journaled rate_set
@@ -864,33 +882,46 @@ impl Session {
         self.clock.set_rate(self.hz);
         self.clock.sample(now_ms, now_ms, tick);
         h.emit(T_WELCOME, epoch as u64, self.hz | ((role as u64) << 32));
-        if terrain != self.terrain_id {
-            h.request(REQ_NEED_TERRAIN, terrain);
+        if content != self.terrain_id {
+            h.request(REQ_NEED_TERRAIN, content);
         }
     }
 
-    fn on_event<H: Host>(&mut self, h: &mut H, off: usize, len: usize, now_ms: u64) {
-        let mut ev = Ev::EMPTY;
-        let mut oversize = false;
-        {
-            let Some(e) = wire::parse_event(&bufs().inbuf[off..off + len]) else {
-                return;
-            };
-            if e.p.len() > EV_PAYLOAD_CAP {
-                oversize = true;
-            } else {
-                ev.seq = e.seq;
-                ev.tick = e.tick;
-                ev.kind = e.kind;
-                ev.intent = e.intent;
-                ev.plen = e.p.len() as u16;
-                ev.p[..e.p.len()].copy_from_slice(e.p);
-            }
-        }
-        if oversize {
-            self.request_resync(h, R_QUEUE_OVERFLOW, now_ms);
+    /// One authority tick's batch: records carry dense seqs from
+    /// first_seq in order, so each queues like v4's single event did.
+    fn on_tick<H: Host>(&mut self, h: &mut H, off: usize, len: usize, now_ms: u64) {
+        let Some(t) = wire::parse_tick(&bufs().inbuf[off..off + len]) else {
             return;
+        };
+        let (tick, first_seq, count) = (t.tick, t.first_seq, t.count);
+        for i in 0..count {
+            let mut ev = Ev::EMPTY;
+            {
+                // Re-walk the validated run each iteration: queueing can
+                // touch the shared buffers, so no parsed borrow survives.
+                let Some(t) = wire::parse_tick(&bufs().inbuf[off..off + len]) else {
+                    return;
+                };
+                let Some(e) = t.records().nth(i as usize) else {
+                    return;
+                };
+                if e.payload.len() > EV_PAYLOAD_CAP {
+                    self.request_resync(h, R_QUEUE_OVERFLOW, now_ms);
+                    return;
+                }
+                ev.seq = first_seq + i as i64;
+                ev.tick = tick;
+                ev.kind = e.kind;
+                ev.actor = e.actor;
+                ev.intent = e.intent;
+                ev.plen = e.payload.len() as u16;
+                ev.p[..e.payload.len()].copy_from_slice(e.payload);
+            }
+            self.queue_event(h, ev, now_ms);
         }
+    }
+
+    fn queue_event<H: Host>(&mut self, h: &mut H, ev: Ev, now_ms: u64) {
         if ev.seq <= self.seq {
             return;
         }
@@ -951,19 +982,20 @@ impl Session {
             self.auto_joined = true;
             self.last_auto_join_ms = now_ms;
             h.emit(T_AUTO_REJOIN, reason as u64, kind as u64);
-            self.send_intent(h, EV_JOIN, &self.my_dog.to_le_bytes(), now_ms);
+            self.send_intent(h, EV_JOIN, &[], now_ms);
             let p = it.p;
             self.send_intent(h, it.kind, &p[..it.plen as usize], now_ms);
         }
     }
 
     fn on_snapshot<H: Host>(&mut self, h: &mut H, off: usize, len: usize, now_ms: u64) {
-        let Some((seq, tick, wh, terrain, zlen)) =
+        let Some((lineage, seq, tick, wh, terrain, zlen)) =
             wire::parse_snapshot(&bufs().inbuf[off..off + len])
-                .map(|s| (s.seq, s.tick, s.wh, s.terrain, s.z.len()))
+                .map(|s| (s.lineage, s.seq, s.tick, s.wh, s.content, s.z.len()))
         else {
             return;
         };
+        self.lineage = lineage;
         let zoff = off + wire::SNAPSHOT_HEADER;
         let n = {
             let b = bufs();
@@ -1189,25 +1221,19 @@ impl Session {
     // ---- outbound intents ----
 
     pub fn intent_join<H: Host>(&mut self, h: &mut H, now_ms: u64) -> u64 {
-        self.send_intent(h, EV_JOIN, &self.my_dog.to_le_bytes(), now_ms)
+        self.send_intent(h, EV_JOIN, &[], now_ms)
     }
 
     pub fn intent_check_in<H: Host>(&mut self, h: &mut H, now_ms: u64) -> u64 {
-        self.send_intent(h, EV_CHECK_IN, &self.my_dog.to_le_bytes(), now_ms)
+        self.send_intent(h, EV_CHECK_IN, &[], now_ms)
     }
 
     pub fn intent_move_to<H: Host>(&mut self, h: &mut H, node: u32, now_ms: u64) -> u64 {
-        let mut p = [0u8; 10];
-        p[..8].copy_from_slice(&self.my_dog.to_le_bytes());
-        p[8..10].copy_from_slice(&(node as u16).to_le_bytes());
-        self.send_intent(h, EV_MOVE_TO, &p, now_ms)
+        self.send_intent(h, EV_MOVE_TO, &(node as u16).to_le_bytes(), now_ms)
     }
 
     pub fn intent_boost<H: Host>(&mut self, h: &mut H, on: bool, now_ms: u64) -> u64 {
-        let mut p = [0u8; 9];
-        p[..8].copy_from_slice(&self.my_dog.to_le_bytes());
-        p[8] = on as u8;
-        self.send_intent(h, EV_BOOST_SET, &p, now_ms)
+        self.send_intent(h, EV_BOOST_SET, &[on as u8], now_ms)
     }
 
     fn send_intent<H: Host>(&mut self, h: &mut H, kind: u16, payload: &[u8], now_ms: u64) -> u64 {
@@ -1241,7 +1267,7 @@ impl Session {
         if self.role == ROLE_PLAYER && !self.presence && Self::needs_presence(kind) {
             return id;
         }
-        let n = wire::encode_intent(&mut bufs().out, id, kind, payload);
+        let n = wire::encode_intent(&mut bufs().out, id, kind, self.my_dog, payload);
         h.send_stream(&bufs().out[..n]);
         bufs().intents[self.intents_len - 1].sent_conn = self.conn;
         bufs().intents[self.intents_len - 1].sent_ms = now_ms;
@@ -1392,7 +1418,7 @@ impl Session {
                     resume = resume.max(was);
                 }
                 self.queued_drop_front();
-                let code = self.apply(h, e.kind, e.payload());
+                let code = self.apply(h, e.kind, e.actor, e.payload());
                 if code != 0 {
                     self.request_resync(h, R_EVENT_REJECTED, now_ms);
                     return;
@@ -1441,12 +1467,8 @@ impl Session {
                 // Presence is the journal's to state: our dog is in the park
                 // when the journal says a join placed it, whoever's intent id
                 // that event happens to carry.
-                if e.kind == EV_JOIN && e.plen == 8 && !self.presence {
-                    let mut id = [0u8; 8];
-                    id.copy_from_slice(&e.p[..8]);
-                    if u64::from_le_bytes(id) == self.my_dog {
-                        self.confirm_presence(h, PRESENCE_JOURNAL, now_ms);
-                    }
+                if e.kind == EV_JOIN && e.actor == self.my_dog && !self.presence {
+                    self.confirm_presence(h, PRESENCE_JOURNAL, now_ms);
                 }
                 h.emit(T_EVENT_APPLIED, e.seq as u64, e.tick);
                 if e.kind == EV_EPOCH_ADVANCE && e.plen == 12 {
@@ -1573,7 +1595,7 @@ impl Session {
                     self.step_once(h);
                 }
                 h.emit(T_REPLAYED, e.seq as u64, e.tick);
-                if self.apply(h, e.kind, e.payload()) == 0 {
+                if self.apply(h, e.kind, e.actor, e.payload()) == 0 {
                     self.seq = e.seq;
                     // Replayed history moves the tick exactly where it
                     // moved it the first time: stepping from an assumed
@@ -1597,11 +1619,14 @@ impl Session {
         }
     }
 
-    fn apply<H: Host>(&mut self, h: &mut H, kind: u16, payload: &[u8]) -> u32 {
-        let mut buf = [0u8; 2 + EV_PAYLOAD_CAP];
+    /// One SimEvent through the replica: kind u16 | actor u64 | payload,
+    /// the exact bytes the authority's apply saw.
+    fn apply<H: Host>(&mut self, h: &mut H, kind: u16, actor: u64, payload: &[u8]) -> u32 {
+        let mut buf = [0u8; 10 + EV_PAYLOAD_CAP];
         buf[..2].copy_from_slice(&kind.to_le_bytes());
-        buf[2..2 + payload.len()].copy_from_slice(payload);
-        h.park_apply(&buf[..2 + payload.len()])
+        buf[2..10].copy_from_slice(&actor.to_le_bytes());
+        buf[10..10 + payload.len()].copy_from_slice(payload);
+        h.park_apply(&buf[..10 + payload.len()])
     }
 
     // ---- checks, strikes, resync ----
@@ -1610,7 +1635,7 @@ impl Session {
         let Some(wh) = self.hash_get(self.tick) else {
             return;
         };
-        let n = wire::encode_check(&mut bufs().out, self.tick, wh, now_ms);
+        let n = wire::encode_check(&mut bufs().out, self.sub, self.tick, wh, now_ms);
         h.send_datagram(&bufs().out[..n]);
         if self.checks_len == MAX_CHECKS {
             self.checks.copy_within(1..MAX_CHECKS, 0);
@@ -1650,7 +1675,7 @@ impl Session {
         self.stats[STAT_RESYNCS as usize - 1] += 1;
         h.emit(T_RESYNC_REQUESTED, reason as u64, self.seq as u64);
         h.request(REQ_RESYNC_WANTED, reason as u64);
-        let n = wire::encode_resync(&mut bufs().out, self.seq);
+        let n = wire::encode_resync(&mut bufs().out, self.lineage, self.seq);
         h.send_stream(&bufs().out[..n]);
     }
 
@@ -1766,7 +1791,7 @@ impl Session {
     /// authority dedupes by that id, so a resend can never double-apply.
     fn resend<H: Host>(&mut self, h: &mut H, i: usize, now_ms: u64) {
         let it = bufs().intents[i];
-        let n = wire::encode_intent(&mut bufs().out, it.id, it.kind, it.payload());
+        let n = wire::encode_intent(&mut bufs().out, it.id, it.kind, self.my_dog, it.payload());
         h.send_stream(&bufs().out[..n]);
         // A first wire write — an intent held until presence confirmed —
         // IS the send, and the action's latency clock starts here; a

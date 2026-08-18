@@ -44,15 +44,6 @@ struct Toy {
 
 const TOY_BYTES: usize = 18;
 
-/// The payload `intent_move_to` puts on the wire, which is also what the
-/// journal echoes back when it answers.
-fn move_payload(node: u16) -> [u8; 10] {
-    let mut p = [0u8; 10];
-    p[..8].copy_from_slice(&DOG.to_le_bytes());
-    p[8..].copy_from_slice(&node.to_le_bytes());
-    p
-}
-
 fn toy_state(tick: u64, acc: u64) -> [u8; TOY_BYTES] {
     let mut b = [0u8; TOY_BYTES];
     b[..2].copy_from_slice(b"TP");
@@ -143,7 +134,7 @@ impl Mock {
                 let (kind, off, len, _) = wire::frame_bounds(f).unwrap().unwrap();
                 (kind == wire::K_INTENT).then(|| {
                     let i = wire::parse_intent(&f[off..off + len]).unwrap();
-                    (i.id, i.kind)
+                    (i.intent, i.kind)
                 })
             })
             .collect()
@@ -199,9 +190,9 @@ impl Host for Mock {
         // The one park event that is not an edit on top of the tick it
         // lands in: it moves the tick, with no step behind it, and only
         // ever forward.
-        if kind == EV_CLOCK_SKIP && ev.len() == 10 {
+        if kind == EV_CLOCK_SKIP && ev.len() == 18 {
             let mut t = [0u8; 8];
-            t.copy_from_slice(&ev[2..10]);
+            t.copy_from_slice(&ev[10..18]);
             let to = u64::from_le_bytes(t);
             if to <= self.park.tick {
                 return ERR_TICK;
@@ -375,7 +366,7 @@ impl Rig {
         let id = bufs().intents[i].id;
         let seq = self.s.seq() + 1;
         let tick = self.s.tick();
-        self.event(seq, tick, EV_JOIN, id, &DOG.to_le_bytes());
+        self.event(seq, tick, EV_JOIN, DOG, id, &[]);
         self.pump();
         assert!(self.s.presence, "the join was not acknowledged");
     }
@@ -410,13 +401,16 @@ impl Rig {
         let n = wire::encode_welcome(
             &mut buf,
             &wire::Welcome {
+                lineage: 0,
+                generation: 0,
+                sub: 0,
                 epoch: 3,
                 seq: 0,
                 tick,
                 hz: HZ as u32,
                 role: self.role as u8,
-                terrain,
-                park: b"park-mythra",
+                content: terrain,
+                chunk: b"park-mythra",
             },
         );
         self.feed(&buf[..n]);
@@ -427,29 +421,25 @@ impl Rig {
         let n = wire::encode_snapshot(
             &mut buf,
             &wire::Snapshot {
+                lineage: 0,
                 seq,
                 tick,
                 epoch: 3,
                 wh: toy_hash(tick, acc),
-                terrain,
+                content: terrain,
                 z: &toy_state(tick, acc),
             },
         );
         self.feed(&buf[..n]);
     }
 
-    fn event(&mut self, seq: i64, tick: u64, kind: u16, intent: u64, p: &[u8]) {
-        let mut buf = [0u8; 128];
-        let n = wire::encode_event(
-            &mut buf,
-            &wire::Event {
-                seq,
-                tick,
-                kind,
-                intent,
-                p,
-            },
-        );
+    /// One journal record, delivered as a single-record tick batch (the
+    /// authority batches per tick; one record is the common case here).
+    fn event(&mut self, seq: i64, tick: u64, kind: u16, actor: u64, intent: u64, p: &[u8]) {
+        let mut run = [0u8; 96];
+        let rn = wire::put_record(&mut run, intent, kind, actor, p);
+        let mut buf = [0u8; 160];
+        let n = wire::encode_tick(&mut buf, tick, seq, 1, &run[..rn]);
         self.feed(&buf[..n]);
     }
 
@@ -467,6 +457,8 @@ impl Rig {
         let n = wire::encode_verdict(
             &mut buf,
             &wire::Verdict {
+                sub: 0,
+                lineage: 0,
                 tick,
                 now,
                 ct_ms: self.now,
@@ -485,6 +477,8 @@ impl Rig {
         let n = wire::encode_verdict(
             &mut buf,
             &wire::Verdict {
+                sub: 0,
+                lineage: 0,
                 tick,
                 now: self.s.tick(),
                 ct_ms: self.now,
@@ -512,429 +506,9 @@ impl Rig {
     }
 }
 
-// ---- codec ----
-
-mod codec {
-    use super::super::wire::*;
-
-    #[test]
-    fn varints_round_trip_at_every_boundary() {
-        let mut buf = [0u8; 8];
-        let mut cases: Vec<u64> = Vec::new();
-        for edge in [0u64, 0x3F, 0x40, 0x3FFF, 0x4000, 0x3FFF_FFFF, 0x4000_0000] {
-            cases.push(edge);
-        }
-        cases.push(VARINT_MAX);
-        for shift in 0..62 {
-            cases.push(1u64 << shift);
-            cases.push((1u64 << shift) - 1);
-        }
-        for v in cases {
-            let n = put_varint(&mut buf, v);
-            assert_eq!(n, varint_len(v), "length for {v}");
-            let (got, used) = get_varint(&buf[..n]).expect("decodes");
-            assert_eq!((got, used), (v, n), "round trip {v}");
-            // one byte short is "wait for more", never a wrong value
-            if n > 1 {
-                assert!(get_varint(&buf[..n - 1]).is_none());
-            }
-        }
-    }
-
-    #[test]
-    fn non_canonical_varint_forms_decode() {
-        // RFC 9000 permits longer-than-needed encodings; the decoder takes
-        // them, the encoder never emits them.
-        let two = [0x40u8, 0x01];
-        assert_eq!(get_varint(&two), Some((1, 2)));
-        let four = [0x80u8, 0, 0, 1];
-        assert_eq!(get_varint(&four), Some((1, 4)));
-        let eight = [0xC0u8, 0, 0, 0, 0, 0, 0, 1];
-        assert_eq!(get_varint(&eight), Some((1, 8)));
-    }
-
-    #[test]
-    fn every_frame_round_trips() {
-        let mut b = [0u8; 4096];
-        let ticket = b"a-signed-admission-ticket";
-
-        let n = encode_hello(&mut b, -1, 12_345, ticket);
-        let (k, off, len, total) = frame_bounds(&b[..n]).unwrap().unwrap();
-        assert_eq!((k, total), (K_HELLO, n));
-        let h = parse_hello(&b[off..off + len]).unwrap();
-        assert_eq!((h.proto, h.since_seq, h.since_tick), (PROTO, -1, 12_345));
-        assert_eq!(h.ticket, ticket);
-
-        for p in [&[][..], &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10][..]] {
-            let n = encode_intent(&mut b, u64::MAX, 8, p);
-            let (k, off, len, total) = frame_bounds(&b[..n]).unwrap().unwrap();
-            assert_eq!((k, total), (K_INTENT, n));
-            let i = parse_intent(&b[off..off + len]).unwrap();
-            assert_eq!((i.id, i.kind, i.p), (u64::MAX, 8, p));
-        }
-
-        let n = encode_resync(&mut b, i64::MIN);
-        let (k, off, len, _) = frame_bounds(&b[..n]).unwrap().unwrap();
-        assert_eq!(k, K_RESYNC);
-        assert_eq!(parse_resync(&b[off..off + len]), Some(i64::MIN));
-
-        let w = Welcome {
-            epoch: 7,
-            seq: 1 << 40,
-            tick: 999_999,
-            hz: 120,
-            role: 1,
-            terrain: 0xDEAD_BEEF_CAFE_F00D,
-            park: b"park-mythra",
-        };
-        let n = encode_welcome(&mut b, &w);
-        let (k, off, len, _) = frame_bounds(&b[..n]).unwrap().unwrap();
-        assert_eq!(k, K_WELCOME);
-        let g = parse_welcome(&b[off..off + len]).unwrap();
-        assert_eq!(
-            (g.epoch, g.seq, g.tick, g.hz, g.role, g.terrain, g.park),
-            (w.epoch, w.seq, w.tick, w.hz, w.role, w.terrain, w.park)
-        );
-
-        let e = Event {
-            seq: 4242,
-            tick: 1 << 40,
-            kind: 4,
-            intent: 0x0000_ABCD_0000_0001,
-            p: &[9u8; 10],
-        };
-        let n = encode_event(&mut b, &e);
-        let (k, off, len, _) = frame_bounds(&b[..n]).unwrap().unwrap();
-        assert_eq!(k, K_EVENT);
-        let g = parse_event(&b[off..off + len]).unwrap();
-        assert_eq!(
-            (g.seq, g.tick, g.kind, g.intent, g.p),
-            (e.seq, e.tick, e.kind, e.intent, e.p)
-        );
-
-        let n = encode_reject(&mut b, 77, 10);
-        let (k, off, len, _) = frame_bounds(&b[..n]).unwrap().unwrap();
-        assert_eq!(k, K_REJECT);
-        let g = parse_reject(&b[off..off + len]).unwrap();
-        assert_eq!((g.intent, g.reason), (77, 10));
-
-        // a payload past the one-byte varint boundary: the prefix grows
-        let z = [0x5Au8; 300];
-        let s = Snapshot {
-            seq: 5,
-            tick: 6,
-            epoch: 7,
-            wh: 8,
-            terrain: 9,
-            z: &z,
-        };
-        let n = encode_snapshot(&mut b, &s);
-        assert_eq!(n, 2 + 1 + SNAPSHOT_HEADER + z.len());
-        let (k, off, len, total) = frame_bounds(&b[..n]).unwrap().unwrap();
-        assert_eq!((k, total), (K_SNAPSHOT, n));
-        let g = parse_snapshot(&b[off..off + len]).unwrap();
-        assert_eq!(
-            (g.seq, g.tick, g.epoch, g.wh, g.terrain, g.z),
-            (s.seq, s.tick, s.epoch, s.wh, s.terrain, s.z)
-        );
-    }
-
-    #[test]
-    fn datagrams_round_trip() {
-        let mut b = [0u8; 64];
-        let n = encode_check(&mut b, 1 << 33, 0xFEED_FACE_1234_5678, 999);
-        assert_eq!(n, CHECK_BYTES);
-        let c = parse_check(&b[..n]).unwrap();
-        assert_eq!(
-            (c.tick, c.wh, c.ct_ms),
-            (1 << 33, 0xFEED_FACE_1234_5678, 999)
-        );
-
-        let v = Verdict {
-            tick: 42,
-            now: 43,
-            ct_ms: 44,
-            flags: VERDICT_KNOWN | VERDICT_OK,
-            cw: [0xAA, 0xBB, 0xCC, 0xDD],
-            pw: [0x00, 0x11, 0x22, 0x33],
-        };
-        let n = encode_verdict(&mut b, &v);
-        assert_eq!(n, VERDICT_BYTES);
-        let g = parse_verdict(&b[..n]).unwrap();
-        assert_eq!(
-            (g.tick, g.now, g.ct_ms, g.flags, g.cw, g.pw),
-            (v.tick, v.now, v.ct_ms, v.flags, v.cw, v.pw)
-        );
-        // length is the whole contract for an unframed datagram
-        assert!(parse_verdict(&b[..n - 1]).is_none());
-        assert!(parse_check(&b[..n]).is_none());
-    }
-
-    // The bytes the Go authority pins (scratchpad/proto4-goldens.txt); the
-    // TS host holds the same table. Three independent encoders agreeing on
-    // these is the whole cross-language contract.
-    const G_HELLO: &str = "18010400ffffffffffffffff00000000000000000300746b74";
-    const G_INTENT: &str = "1702080706050403020104000a0088776655443322110700";
-    const G_RESYNC: &str = "09039210000000000000";
-    const G_WELCOME: &str = concat!(
-        "2e1001000000070000000000000000040000000000001800000001",
-        "efcdab89674523010b7061726b2d6d7974687261"
-    );
-    const G_EVENT: &str = concat!(
-        "2511090000000000000000040000000000000300050000000000000008",
-        "008877665544332211"
-    );
-    const G_REJECT: &str = "0d12050000000000000065000000";
-    const G_SNAPSHOT: &str = concat!(
-        "2d130900000000000000000400000000000001000000efbefecacefaedfe",
-        "efcdab896745230104000000deadbeef"
-    );
-    const G_CHECK: &str = "010004000000000000efbefecacefaedfe0068e5cf8b010000";
-    const G_VERDICT: &str = "02000400000000000006040000000000000068e5cf8b010000039abcdef012345678";
-
-    fn hex(b: &[u8]) -> String {
-        b.iter().map(|x| format!("{x:02x}")).collect()
-    }
-
-    fn unhex(s: &str) -> Vec<u8> {
-        (0..s.len() / 2)
-            .map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap())
-            .collect()
-    }
-
-    // Every encoder, against the pinned bytes: the frame's declared length
-    // must equal the body actually written (the assertion that caught a
-    // four-byte encoder bug on the Go side), and the decode must return
-    // the values the vector documents.
-    fn golden_frame(golden: &str, kind: u8, n: usize, buf: &[u8]) -> Vec<u8> {
-        assert_eq!(hex(&buf[..n]), golden, "encoded bytes");
-        let bytes = unhex(golden);
-        assert_eq!(n, bytes.len());
-        let (k, off, len, total) = frame_bounds(&bytes).unwrap().unwrap();
-        assert_eq!(k, kind);
-        assert_eq!(total, bytes.len(), "declared length vs body written");
-        assert_eq!(off + len, total, "payload must fill the declared body");
-        bytes
-    }
-
-    #[test]
-    fn client_frames_match_the_pinned_goldens() {
-        let mut b = [0u8; 256];
-
-        let n = encode_hello(&mut b, -1, 0, b"tkt");
-        let bytes = golden_frame(G_HELLO, K_HELLO, n, &b);
-        let (_, off, len, _) = frame_bounds(&bytes).unwrap().unwrap();
-        let h = parse_hello(&bytes[off..off + len]).unwrap();
-        assert_eq!(
-            (h.proto, h.since_seq, h.since_tick, h.ticket),
-            (4, -1, 0, &b"tkt"[..])
-        );
-
-        let mut p = [0u8; 10];
-        p[..8].copy_from_slice(&0x1122_3344_5566_7788u64.to_le_bytes());
-        p[8..].copy_from_slice(&7u16.to_le_bytes());
-        let n = encode_intent(&mut b, 0x0102_0304_0506_0708, 4, &p);
-        let bytes = golden_frame(G_INTENT, K_INTENT, n, &b);
-        let (_, off, len, _) = frame_bounds(&bytes).unwrap().unwrap();
-        let i = parse_intent(&bytes[off..off + len]).unwrap();
-        assert_eq!((i.id, i.kind, i.p), (0x0102_0304_0506_0708, 4, &p[..]));
-
-        let n = encode_resync(&mut b, 4242);
-        let bytes = golden_frame(G_RESYNC, K_RESYNC, n, &b);
-        let (_, off, len, _) = frame_bounds(&bytes).unwrap().unwrap();
-        assert_eq!(parse_resync(&bytes[off..off + len]), Some(4242));
-    }
-
-    #[test]
-    fn server_frames_match_the_pinned_goldens() {
-        let mut b = [0u8; 256];
-
-        let w = Welcome {
-            epoch: 1,
-            seq: 7,
-            tick: 1024,
-            hz: 24,
-            role: 1,
-            terrain: 0x0123_4567_89AB_CDEF,
-            park: b"park-mythra",
-        };
-        let n = encode_welcome(&mut b, &w);
-        let bytes = golden_frame(G_WELCOME, K_WELCOME, n, &b);
-        let (_, off, len, _) = frame_bounds(&bytes).unwrap().unwrap();
-        let g = parse_welcome(&bytes[off..off + len]).unwrap();
-        assert_eq!(
-            (g.epoch, g.seq, g.tick, g.hz, g.role, g.terrain, g.park),
-            (
-                1,
-                7,
-                1024,
-                24,
-                1,
-                0x0123_4567_89AB_CDEF,
-                &b"park-mythra"[..]
-            )
-        );
-
-        let dog = 0x1122_3344_5566_7788u64.to_le_bytes();
-        let e = Event {
-            seq: 9,
-            tick: 1024,
-            kind: 3,
-            intent: 5,
-            p: &dog,
-        };
-        let n = encode_event(&mut b, &e);
-        let bytes = golden_frame(G_EVENT, K_EVENT, n, &b);
-        let (_, off, len, _) = frame_bounds(&bytes).unwrap().unwrap();
-        let g = parse_event(&bytes[off..off + len]).unwrap();
-        assert_eq!(
-            (g.seq, g.tick, g.kind, g.intent, g.p),
-            (9, 1024, 3, 5, &dog[..])
-        );
-
-        let n = encode_reject(&mut b, 5, 101);
-        let bytes = golden_frame(G_REJECT, K_REJECT, n, &b);
-        let (_, off, len, _) = frame_bounds(&bytes).unwrap().unwrap();
-        let g = parse_reject(&bytes[off..off + len]).unwrap();
-        assert_eq!((g.intent, g.reason), (5, 101));
-
-        let s = Snapshot {
-            seq: 9,
-            tick: 1024,
-            epoch: 1,
-            wh: 0xFEED_FACE_CAFE_BEEF,
-            terrain: 0x0123_4567_89AB_CDEF,
-            z: &[0xDE, 0xAD, 0xBE, 0xEF],
-        };
-        let n = encode_snapshot(&mut b, &s);
-        let bytes = golden_frame(G_SNAPSHOT, K_SNAPSHOT, n, &b);
-        let (_, off, len, _) = frame_bounds(&bytes).unwrap().unwrap();
-        let g = parse_snapshot(&bytes[off..off + len]).unwrap();
-        assert_eq!(
-            (g.seq, g.tick, g.epoch, g.wh, g.terrain, g.z),
-            (s.seq, s.tick, s.epoch, s.wh, s.terrain, s.z)
-        );
-    }
-
-    #[test]
-    fn a_park_name_longer_than_the_wire_allows_is_clamped() {
-        // The length rides in a u8: wrapping it would write a frame whose
-        // declared name length disagrees with the bytes after it.
-        let long = [b'x'; 300];
-        let mut b = [0u8; 512];
-        let n = encode_welcome(
-            &mut b,
-            &Welcome {
-                epoch: 1,
-                seq: 1,
-                tick: 1,
-                hz: 24,
-                role: 0,
-                terrain: 0,
-                park: &long,
-            },
-        );
-        let (k, off, len, total) = frame_bounds(&b[..n]).unwrap().unwrap();
-        assert_eq!((k, total), (K_WELCOME, n));
-        let w = parse_welcome(&b[off..off + len]).unwrap();
-        assert_eq!(w.park.len(), 255);
-        assert_eq!(w.park, &long[..255]);
-    }
-
-    #[test]
-    fn datagrams_match_the_pinned_goldens() {
-        let mut b = [0u8; 64];
-        let n = encode_check(&mut b, 1024, 0xFEED_FACE_CAFE_BEEF, 1_700_000_000_000);
-        assert_eq!(hex(&b[..n]), G_CHECK);
-        let c = parse_check(&unhex(G_CHECK)).unwrap();
-        assert_eq!(
-            (c.tick, c.wh, c.ct_ms),
-            (1024, 0xFEED_FACE_CAFE_BEEF, 1_700_000_000_000)
-        );
-
-        // cw/pw ride verbatim: hexing them left to right is the display
-        // string, and the ABI's u32 is the little-endian load of the same
-        // four bytes — formatting that u32 as hex would reverse it.
-        let v = Verdict {
-            tick: 1024,
-            now: 1030,
-            ct_ms: 1_700_000_000_000,
-            flags: VERDICT_KNOWN | VERDICT_OK,
-            cw: [0x9A, 0xBC, 0xDE, 0xF0],
-            pw: [0x12, 0x34, 0x56, 0x78],
-        };
-        let n = encode_verdict(&mut b, &v);
-        assert_eq!(hex(&b[..n]), G_VERDICT);
-        let g = parse_verdict(&unhex(G_VERDICT)).unwrap();
-        assert_eq!((g.cw, g.pw), (v.cw, v.pw));
-        assert_eq!(hex(&g.pw), "12345678");
-        assert_eq!(module_word(g.pw), 0x7856_3412);
-        assert_eq!(module_word(g.pw).to_le_bytes(), g.pw);
-    }
-
-    #[test]
-    fn a_body_longer_than_its_fields_declare_is_malformed() {
-        // The decode half of "declared length equals bytes written": a
-        // tolerated trailing byte would let an encoder bug on any of the
-        // three sides drift silently instead of failing at the first frame.
-        let mut b = [0u8; 256];
-        let n = encode_reject(&mut b, 5, 101);
-        let (_, off, len, _) = frame_bounds(&b[..n]).unwrap().unwrap();
-        assert!(parse_reject(&b[off..off + len]).is_some());
-        let mut fat = b[..n].to_vec();
-        fat[0] += 1; // grow the declared body by one
-        fat.push(0xFF);
-        let (_, off, len, _) = frame_bounds(&fat).unwrap().unwrap();
-        assert!(parse_reject(&fat[off..off + len]).is_none());
-
-        let n = encode_event(
-            &mut b,
-            &Event {
-                seq: 9,
-                tick: 1024,
-                kind: 3,
-                intent: 5,
-                p: &[1u8; 8],
-            },
-        );
-        let mut fat = b[..n].to_vec();
-        fat[0] += 1;
-        fat.push(0xFF);
-        let (_, off, len, _) = frame_bounds(&fat).unwrap().unwrap();
-        assert!(parse_event(&fat[off..off + len]).is_none());
-    }
-
-    #[test]
-    fn rfc_9000_a1_non_minimal_varints_decode() {
-        // The RFC's own example: 4025 is a legal two-byte encoding of 37.
-        assert_eq!(get_varint(&[0x40, 0x25]), Some((37, 2)));
-        assert_eq!(get_varint(&[0x25]), Some((37, 1)));
-        let mut b = [0u8; 8];
-        assert_eq!(put_varint(&mut b, 37), 1, "the encoder emits shortest form");
-        assert_eq!(b[0], 0x25);
-    }
-
-    #[test]
-    fn a_frame_is_invisible_until_its_last_byte_arrives() {
-        let mut b = [0u8; 512];
-        let n = encode_event(
-            &mut b,
-            &Event {
-                seq: 1,
-                tick: 2,
-                kind: 3,
-                intent: 4,
-                p: &[7u8; 200],
-            },
-        );
-        for cut in 0..n {
-            assert_eq!(frame_bounds(&b[..cut]), Ok(None), "cut at {cut}");
-        }
-        assert!(frame_bounds(&b[..n]).unwrap().is_some());
-        // a zero-length body can carry no kind byte: unreadable stream
-        assert_eq!(frame_bounds(&[0x00]), Err(()));
-    }
-}
+// The wire codec conformance suite lives with the codec: the chunkies-codec
+// crate, the Go codec package, and the TS testkit are all held to
+// //src/services/mythrad/codec/spec/vectors.txt.
 
 // ---- invariant 2: seq-dense application ----
 
@@ -945,9 +519,9 @@ fn events_apply_in_seq_order_at_their_tick() {
     r.m.clear();
     let t = r.s.tick();
     // scrambled on the wire; seq order is the law
-    r.event(103, t, 3, 0, &DOG.to_le_bytes());
-    r.event(101, t, 1, 0, &DOG.to_le_bytes());
-    r.event(102, t, 3, 0, &DOG.to_le_bytes());
+    r.event(103, t, 3, DOG, 0, &[]);
+    r.event(101, t, 1, DOG, 0, &[]);
+    r.event(102, t, 3, DOG, 0, &[]);
     r.pump();
     assert_eq!(
         r.m.emits_of(T_EVENT_APPLIED),
@@ -963,7 +537,7 @@ fn a_seq_gap_waits_for_the_missing_event() {
     r.run_to_tick(1030);
     r.m.clear();
     let t = r.s.tick();
-    r.event(102, t, 3, 0, &DOG.to_le_bytes());
+    r.event(102, t, 3, DOG, 0, &[]);
     r.pump();
     r.pump();
     assert!(
@@ -971,7 +545,7 @@ fn a_seq_gap_waits_for_the_missing_event() {
         "applied over a gap"
     );
     assert_eq!(r.s.seq(), 100);
-    r.event(101, t, 1, 0, &DOG.to_le_bytes());
+    r.event(101, t, 1, DOG, 0, &[]);
     r.pump();
     assert_eq!(r.s.seq(), 102);
 }
@@ -990,7 +564,7 @@ fn an_arriving_event_reports_the_margin_it_arrived_with() {
 
     // an event that beat the replica to its own tick: positive margin
     let ahead = r.s.tick() + 5;
-    r.event(r.s.seq() + 1, ahead, EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    r.event(r.s.seq() + 1, ahead, EV_CHECK_IN, DOG, 0, &[]);
     assert_eq!(
         r.m.emits_of(T_EVENT_ARRIVED),
         vec![(ahead, r.s.tick())],
@@ -1002,7 +576,7 @@ fn an_arriving_event_reports_the_margin_it_arrived_with() {
     r.advance(400);
     r.m.clear();
     let behind = r.s.tick() - 2;
-    r.event(r.s.seq() + 2, behind, EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    r.event(r.s.seq() + 2, behind, EV_CHECK_IN, DOG, 0, &[]);
     let (evt, here) = r.m.emits_of(T_EVENT_ARRIVED)[0];
     assert!(evt < here, "a late arrival must be visible as one");
     assert_eq!(here - evt, 2, "and by how much");
@@ -1014,7 +588,7 @@ fn a_future_event_waits_for_its_tick() {
     r.run_to_tick(1020);
     r.m.clear();
     let target = r.s.tick() + 20;
-    r.event(101, target, 1, 0, &DOG.to_le_bytes());
+    r.event(101, target, 1, DOG, 0, &[]);
     r.pump();
     assert!(r.m.emits_of(T_EVENT_APPLIED).is_empty());
     r.run_to_tick(target);
@@ -1028,14 +602,14 @@ fn a_late_event_rolls_back_through_the_ring_and_replays() {
     // stepping past 1032 and 1056 leaves those two snapshot ring entries
     r.run_to_tick(1040);
     let early = r.s.tick();
-    r.event(101, early, 1, 0, &DOG.to_le_bytes());
+    r.event(101, early, 1, DOG, 0, &[]);
     r.pump();
     assert_eq!(r.s.seq(), 101);
     r.run_to_tick(1060);
     let was = r.s.tick();
     r.m.clear();
     let late = early + 2;
-    r.event(102, late, 3, 0, &DOG.to_le_bytes());
+    r.event(102, late, 3, DOG, 0, &[]);
     r.pump();
     assert_eq!(r.m.count(Verb::Restore), 1, "one rollback");
     // The span names where it returned to, how late the event was, and how
@@ -1075,15 +649,15 @@ fn a_late_event_converges_on_the_same_world_as_an_early_one() {
         let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
         r.run_to_tick(1040);
         let a = r.s.tick();
-        r.event(101, a, 1, 0, &DOG.to_le_bytes());
+        r.event(101, a, 1, DOG, 0, &[]);
         r.pump();
         if late {
             r.run_to_tick(1060);
-            r.event(102, a + 2, 3, 0, &DOG.to_le_bytes());
+            r.event(102, a + 2, 3, DOG, 0, &[]);
             r.pump();
         } else {
             r.run_to_tick(a + 2);
-            r.event(102, a + 2, 3, 0, &DOG.to_le_bytes());
+            r.event(102, a + 2, 3, DOG, 0, &[]);
             r.pump();
             r.run_to_tick(1060);
         }
@@ -1100,12 +674,12 @@ fn a_rewind_too_deep_for_the_frame_resyncs_instead_of_half_rewinding() {
     let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
     r.run_to_tick(1040);
     let early = r.s.tick();
-    r.event(101, early, 1, 0, &DOG.to_le_bytes());
+    r.event(101, early, 1, DOG, 0, &[]);
     r.pump();
     r.run_to_tick(1060);
     let was = r.s.tick();
     r.m.clear();
-    r.event(102, early + 2, 3, 0, &DOG.to_le_bytes());
+    r.event(102, early + 2, 3, DOG, 0, &[]);
     // a budget that cannot pay for the walk back: refuse the whole repair
     r.s.pump(&mut r.m, r.now, 30);
     assert_eq!(r.s.tick(), was, "the replica rewound on a budget it lacked");
@@ -1122,11 +696,11 @@ fn the_same_rewind_goes_through_on_a_real_frame_budget() {
     let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
     r.run_to_tick(1040);
     let early = r.s.tick();
-    r.event(101, early, 1, 0, &DOG.to_le_bytes());
+    r.event(101, early, 1, DOG, 0, &[]);
     r.pump();
     r.run_to_tick(1060);
     let was = r.s.tick();
-    r.event(102, early + 2, 3, 0, &DOG.to_le_bytes());
+    r.event(102, early + 2, 3, DOG, 0, &[]);
     r.pump();
     assert_eq!((r.s.tick(), r.s.seq()), (was, 102));
     assert_eq!(r.s.stat(STAT_ROLLBACKS), 1);
@@ -1153,7 +727,7 @@ fn a_restored_world_can_absorb_a_late_event_immediately() {
         "test drifted past the first cadence snapshot"
     );
     r.m.clear();
-    r.event(501, was - 2, 1, 0, &DOG.to_le_bytes());
+    r.event(501, was - 2, 1, DOG, 0, &[]);
     r.pump();
     assert_eq!(r.s.stat(STAT_ROLLBACKS), 1, "no floor to roll back to");
     assert_eq!(
@@ -1170,7 +744,7 @@ fn an_event_older_than_the_ring_resyncs_instead() {
     let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
     r.run_to_tick(1060);
     r.m.clear();
-    r.event(101, 900, 3, 0, &DOG.to_le_bytes());
+    r.event(101, 900, 3, DOG, 0, &[]);
     r.pump();
     assert_eq!(
         r.m.emits_of(T_RESYNC_REQUESTED),
@@ -1190,7 +764,7 @@ fn the_ring_entry_is_the_state_before_the_ticks_own_events() {
     let entry = r.s.hash_get(t).expect("hash at the current tick");
     assert_eq!(entry, toy_hash(t, r.m.park.acc));
     // apply an event stamped for this very tick, without leaving it
-    r.event(101, t, 1, 0, &DOG.to_le_bytes());
+    r.event(101, t, 1, DOG, 0, &[]);
     r.pump();
     assert_eq!(r.s.tick(), t, "wall time did not move");
     assert_eq!(r.s.seq(), 101);
@@ -1322,6 +896,7 @@ fn a_connected_session_adopts_a_journaled_rate_without_resyncing() {
         boundary,
         EV_RATE_SET,
         0,
+        0,
         &48u32.to_le_bytes(),
     );
     r.pump();
@@ -1375,7 +950,7 @@ fn a_restore_clears_the_queues_and_resends_unanswered_intents() {
     // an intent the journal has not answered, and a future event queued
     let join_id = r.m.intents()[0].0;
     let id = r.s.intent_check_in(&mut r.m, r.now);
-    r.event(400, 5000, 1, 0, &DOG.to_le_bytes());
+    r.event(400, 5000, 1, DOG, 0, &[]);
     r.m.clear();
     r.snapshot(300, 4000, 11, TERRAIN);
     r.pump();
@@ -1410,11 +985,12 @@ fn a_snapshot_that_disagrees_with_its_own_hash_is_surfaced() {
     let n = wire::encode_snapshot(
         &mut buf,
         &wire::Snapshot {
+            lineage: 0,
             seq: 200,
             tick: 3000,
             epoch: 3,
             wh: 0xDEAD,
-            terrain: TERRAIN,
+            content: TERRAIN,
             z: &toy_state(3000, 5),
         },
     );
@@ -1475,7 +1051,7 @@ fn an_epoch_event_asks_for_the_module_once() {
     let mut p = [0u8; 12];
     p[..4].copy_from_slice(&4u32.to_le_bytes());
     p[4..12].copy_from_slice(&0x9999_8888_2222_2222u64.to_le_bytes());
-    r.event(101, r.s.tick(), EV_EPOCH_ADVANCE, 0, &p);
+    r.event(101, r.s.tick(), EV_EPOCH_ADVANCE, 0, 0, &p);
     r.pump();
     assert_eq!(r.m.reqs_of(REQ_NEED_MODULE), vec![PARK_B as u64]);
     assert_eq!(r.m.emits_of(T_MODULE_SWAP_WANTED), vec![(PARK_B as u64, 0)]);
@@ -1484,7 +1060,7 @@ fn an_epoch_event_asks_for_the_module_once() {
         vec![(R_MODULE_EPOCH as u64, 101)]
     );
     // a second epoch event before the swap lands must not re-ask
-    r.event(102, r.s.tick(), EV_EPOCH_ADVANCE, 0, &p);
+    r.event(102, r.s.tick(), EV_EPOCH_ADVANCE, 0, 0, &p);
     r.pump();
     assert_eq!(r.m.reqs_of(REQ_NEED_MODULE).len(), 1, "the latch held");
 }
@@ -1532,7 +1108,14 @@ fn only_an_exact_intent_id_acknowledges_a_pending_intent() {
     assert_ne!(mine, theirs);
     let before = r.s.intents_len;
     let next = r.s.seq() + 1;
-    r.event(next, r.s.tick(), EV_MOVE_TO, theirs, &move_payload(9));
+    r.event(
+        next,
+        r.s.tick(),
+        EV_MOVE_TO,
+        DOG,
+        theirs,
+        &9u16.to_le_bytes(),
+    );
     r.pump();
     assert_eq!(
         r.s.intents_len, before,
@@ -1544,7 +1127,14 @@ fn only_an_exact_intent_id_acknowledges_a_pending_intent() {
     // and the real acknowledgment still lands
     r.m.clear();
     let next = r.s.seq() + 1;
-    r.event(next, r.s.tick(), EV_MOVE_TO, mine, &move_payload(42));
+    r.event(
+        next,
+        r.s.tick(),
+        EV_MOVE_TO,
+        DOG,
+        mine,
+        &42u16.to_le_bytes(),
+    );
     r.pump();
     assert_eq!(r.s.intents_len, before - 1);
 }
@@ -1557,7 +1147,7 @@ fn an_answered_intent_reports_its_kind_and_its_latency() {
     let sent_at = r.now;
     r.advance(160);
     let next = r.s.seq() + 1;
-    r.event(next, r.s.tick(), EV_MOVE_TO, id, &move_payload(9));
+    r.event(next, r.s.tick(), EV_MOVE_TO, DOG, id, &9u16.to_le_bytes());
     r.pump_until_seq(next);
     // the moment the action became world state, as a finished fact: kind
     // (with a zero resend count in the high half) and first-wire-write to
@@ -1714,13 +1304,17 @@ fn signing_in_swaps_identity_without_reloading_the_world() {
     assert_eq!(kind, wire::K_INTENT);
     let i = wire::parse_intent(&f[off..off + len]).unwrap();
     assert_eq!(i.kind, EV_JOIN);
-    assert_eq!(i.id >> 32, NEW_NONCE as u64);
+    assert_eq!(i.intent >> 32, NEW_NONCE as u64);
     assert_eq!(
-        i.id & 0xFFFF_FFFF,
+        i.intent & 0xFFFF_FFFF,
         1,
         "the counter restarts under a fresh nonce"
     );
-    assert_eq!(i.p, &NEW_DOG.to_le_bytes()[..]);
+    assert_eq!(
+        i.actor, NEW_DOG,
+        "the actor rides the envelope, not the payload"
+    );
+    assert!(i.payload.is_empty());
 }
 
 #[test]
@@ -1729,7 +1323,7 @@ fn an_event_the_replica_refuses_is_a_resync() {
     r.run_to_tick(1030);
     r.m.reject = Some((EV_CHECK_IN, 5));
     r.m.clear();
-    r.event(101, r.s.tick(), EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    r.event(101, r.s.tick(), EV_CHECK_IN, DOG, 0, &[]);
     r.pump();
     assert_eq!(
         r.m.emits_of(T_RESYNC_REQUESTED),
@@ -1760,7 +1354,7 @@ fn every_path_that_corrects_the_world_announces_it() {
     // (2) a repair: an event late by two ticks rewinds and replays
     r.advance(200);
     let was = r.s.tick();
-    r.event(r.s.seq() + 1, was - 2, EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    r.event(r.s.seq() + 1, was - 2, EV_CHECK_IN, DOG, 0, &[]);
     let flags = r.pump();
     assert_eq!(r.s.stat(STAT_ROLLBACKS), 1, "the repair never happened");
     assert_ne!(
@@ -1794,7 +1388,7 @@ fn a_terrain_change_announces_itself_and_a_plain_edit_does_not() {
     r.confirm_join();
 
     let at = r.s.tick() + 3;
-    r.event(r.s.seq() + 1, at, EV_MOVE_TO, 0, &move_payload(9));
+    r.event(r.s.seq() + 1, at, EV_MOVE_TO, DOG, 0, &9u16.to_le_bytes());
     let flags = r.pump_until_seq(r.s.seq() + 1);
     assert_eq!(
         flags & S_CORRECTED,
@@ -1806,7 +1400,7 @@ fn a_terrain_change_announces_itself_and_a_plain_edit_does_not() {
     let mut p = [0u8; 12];
     p[..4].copy_from_slice(&7u32.to_le_bytes());
     p[4..].copy_from_slice(&TERRAIN.to_le_bytes());
-    r.event(r.s.seq() + 1, at, EV_TERRAIN_SET, 0, &p);
+    r.event(r.s.seq() + 1, at, EV_TERRAIN_SET, 0, 0, &p);
     let flags = r.pump_until_seq(r.s.seq() + 1);
     assert_ne!(
         flags & S_CORRECTED,
@@ -1829,7 +1423,14 @@ fn a_clock_skip_leaves_the_core_standing_where_the_park_does() {
     let mut r = Rig::boot(ROLE_SPECTATOR, 2000);
     let at = r.s.tick() + 3;
     let target = at + 5_000;
-    r.event(r.s.seq() + 1, at, EV_CLOCK_SKIP, 0, &target.to_le_bytes());
+    r.event(
+        r.s.seq() + 1,
+        at,
+        EV_CLOCK_SKIP,
+        0,
+        0,
+        &target.to_le_bytes(),
+    );
     r.pump_until_seq(r.s.seq() + 1);
     assert_eq!(
         r.s.tick(),
@@ -1906,11 +1507,12 @@ fn big_snapshot_frame(seq: i64, tick: u64, zlen: usize) -> Vec<u8> {
     let n = wire::encode_snapshot(
         &mut buf,
         &wire::Snapshot {
+            lineage: 0,
             seq,
             tick,
             epoch: 3,
             wh: 0,
-            terrain: TERRAIN,
+            content: TERRAIN,
             z: &z,
         },
     );
@@ -1933,11 +1535,12 @@ fn a_frame_larger_than_a_host_chunk_survives_the_chunk_boundary() {
     let n = wire::encode_snapshot(
         &mut tail,
         &wire::Snapshot {
+            lineage: 0,
             seq: 300,
             tick: 4000,
             epoch: 3,
             wh: toy_hash(4000, 9),
-            terrain: TERRAIN,
+            content: TERRAIN,
             z: &toy_state(4000, 9),
         },
     );
@@ -1960,17 +1563,17 @@ fn a_frame_larger_than_a_host_chunk_survives_the_chunk_boundary() {
 fn a_stream_too_big_to_reassemble_is_torn_down_not_resynced() {
     let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
     r.m.clear();
-    // a frame that promises far more than reassembly can ever hold
+    // A frame that promises more than the shared cap allows is a framing
+    // violation the moment its prefix is readable — the v4 era only
+    // caught this on the Go side, and the caps table closed that gap.
     let mut chunk = Vec::new();
     let mut v = [0u8; 8];
     let n = wire::put_varint(&mut v, 400_000);
     chunk.extend_from_slice(&v[..n]);
     chunk.push(wire::K_SNAPSHOT);
     chunk.resize(64 * 1024, 0);
-    for _ in 0..3 {
-        r.s.on_stream(&mut r.m, &chunk, r.now);
-    }
-    assert_eq!(r.m.reqs_of(REQ_TEARDOWN), vec![R_STREAM_OVERFLOW as u64]);
+    r.s.on_stream(&mut r.m, &chunk, r.now);
+    assert_eq!(r.m.reqs_of(REQ_TEARDOWN), vec![R_FRAMING as u64]);
     assert!(
         r.m.emits_of(T_RESYNC_REQUESTED).is_empty(),
         "a resync travels the same broken stream and can never repair it"
@@ -2100,7 +1703,7 @@ fn a_zero_budget_still_applies_what_the_journal_delivered() {
     r.advance(500);
     let t = r.s.tick();
     r.m.clear();
-    r.event(101, t, 1, 0, &DOG.to_le_bytes());
+    r.event(101, t, 1, DOG, 0, &[]);
     r.s.pump(&mut r.m, r.now, 0);
     assert_eq!(r.s.seq(), 101, "a frozen replica still owes the journal");
     assert_eq!(r.m.applies(), vec![1]);
@@ -2122,6 +1725,8 @@ fn the_clock_readouts_come_from_the_clock_being_disciplined() {
         let n = wire::encode_verdict(
             &mut buf,
             &wire::Verdict {
+                sub: 0,
+                lineage: 0,
                 tick: r.s.tick(),
                 now: r.s.tick(),
                 ct_ms: r.now.saturating_sub(120),
@@ -2243,7 +1848,7 @@ fn the_hello_carries_what_the_replica_already_holds() {
     let (kind, off, len, _) = wire::frame_bounds(f).unwrap().unwrap();
     assert_eq!(kind, wire::K_HELLO);
     let h = wire::parse_hello(&f[off..off + len]).unwrap();
-    assert_eq!(h.proto, 4);
+    assert_eq!(h.proto, 5);
     assert_eq!((h.since_seq, h.since_tick), (100, tick));
     assert_eq!(h.ticket, b"a-ticket");
     assert_eq!(r.m.frame_kinds(), vec![wire::K_HELLO, wire::K_INTENT]);
@@ -2254,17 +1859,10 @@ fn frames_split_across_reads_reassemble() {
     let mut r = Rig::boot(ROLE_SPECTATOR, 1008);
     r.run_to_tick(1030);
     r.m.clear();
+    let mut run = [0u8; 64];
+    let rn = wire::put_record(&mut run, 0, 1, DOG, &[]);
     let mut buf = [0u8; 256];
-    let n = wire::encode_event(
-        &mut buf,
-        &wire::Event {
-            seq: 101,
-            tick: r.s.tick(),
-            kind: 1,
-            intent: 0,
-            p: &DOG.to_le_bytes(),
-        },
-    );
+    let n = wire::encode_tick(&mut buf, r.s.tick(), 101, 1, &run[..rn]);
     for i in 0..n {
         r.s.on_stream(&mut r.m, &buf[i..i + 1], r.now);
     }
@@ -2279,18 +1877,11 @@ fn two_frames_in_one_read_both_land() {
     r.m.clear();
     let t = r.s.tick();
     let mut both = Vec::new();
+    let mut run = [0u8; 64];
+    let rn = wire::put_record(&mut run, 0, 1, DOG, &[]);
     let mut buf = [0u8; 256];
     for seq in [101i64, 102] {
-        let n = wire::encode_event(
-            &mut buf,
-            &wire::Event {
-                seq,
-                tick: t,
-                kind: 1,
-                intent: 0,
-                p: &DOG.to_le_bytes(),
-            },
-        );
+        let n = wire::encode_tick(&mut buf, t, seq, 1, &run[..rn]);
         both.extend_from_slice(&buf[..n]);
     }
     r.s.on_stream(&mut r.m, &both, r.now);
@@ -2376,7 +1967,7 @@ fn a_repair_leaves_floors_behind_for_the_next_one() {
     // the first repair has only the cadence entry to reach for
     r.m.clear();
     let seq = r.s.seq() + 1;
-    r.event(seq, was - 1, 3, 0, &DOG.to_le_bytes());
+    r.event(seq, was - 1, 3, DOG, 0, &[]);
     r.pump();
     let (returned, packed) = r.m.emits_of(T_ROLLBACK)[0];
     assert_eq!(packed >> 32, 1, "late by one tick");
@@ -2396,7 +1987,7 @@ fn a_repair_leaves_floors_behind_for_the_next_one() {
         let was = r.s.tick();
         r.m.clear();
         let seq = r.s.seq() + 1;
-        r.event(seq, was - 1, 3, 0, &DOG.to_le_bytes());
+        r.event(seq, was - 1, 3, DOG, 0, &[]);
         r.pump();
         let (returned, packed) = r.m.emits_of(T_ROLLBACK)[0];
         assert_eq!(returned, was);
@@ -2427,14 +2018,14 @@ fn a_journaled_skip_moves_the_clock_with_the_world() {
     }
     let skip_to = r.s.tick() + 5_000;
     let seq = r.s.seq() + 1;
-    r.event(seq, r.s.tick(), EV_CLOCK_SKIP, 0, &skip_to.to_le_bytes());
+    r.event(seq, r.s.tick(), EV_CLOCK_SKIP, 0, 0, &skip_to.to_le_bytes());
     r.pump();
     assert_eq!(r.s.tick(), skip_to, "the skip did not land");
     assert_eq!(r.s.tick(), r.m.park.tick, "the core's tick is the park's");
 
     // and the stream keeps flowing: an event stamped past the destination
     // applies on its own tick like any other
-    r.event(seq + 1, skip_to + 4, EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    r.event(seq + 1, skip_to + 4, EV_CHECK_IN, DOG, 0, &[]);
     for _ in 0..40 {
         r.now += 16;
         r.pump();
@@ -2452,15 +2043,17 @@ fn a_journaled_skip_moves_the_clock_with_the_world() {
 /// of the events stamped at it. `park.go` applies a tick's events while its
 /// park stands at that tick and rings the hash after stepping, so this is
 /// the same rule read from the other side of the wire.
-fn reference_hash(base_acc: u64, journal: &[(u64, u16, Vec<u8>)], tick: u64) -> u64 {
-    let acc = journal
-        .iter()
-        .filter(|(t, _, _)| *t < tick)
-        .fold(base_acc, |a, (_, kind, p)| {
-            let mut ev = kind.to_le_bytes().to_vec();
-            ev.extend_from_slice(p);
-            a ^ edit_of(&ev)
-        });
+fn reference_hash(base_acc: u64, journal: &[(u64, u16, u64, Vec<u8>)], tick: u64) -> u64 {
+    let acc =
+        journal
+            .iter()
+            .filter(|(t, _, _, _)| *t < tick)
+            .fold(base_acc, |a, (_, kind, actor, p)| {
+                let mut ev = kind.to_le_bytes().to_vec();
+                ev.extend_from_slice(&actor.to_le_bytes());
+                ev.extend_from_slice(p);
+                a ^ edit_of(&ev)
+            });
     toy_hash(tick, acc)
 }
 
@@ -2470,7 +2063,12 @@ fn reference_hash(base_acc: u64, journal: &[(u64, u16, Vec<u8>)], tick: u64) -> 
 /// nowhere else: the repair a frame later fixes the world, so the end state
 /// agrees and only the history disagrees — and the history is what a check
 /// datagram samples.
-fn assert_history_matches(r: &Rig, base_acc: u64, journal: &[(u64, u16, Vec<u8>)], when: &str) {
+fn assert_history_matches(
+    r: &Rig,
+    base_acc: u64,
+    journal: &[(u64, u16, u64, Vec<u8>)],
+    when: &str,
+) {
     let mut checked = 0;
     for i in 0..HASH_RING {
         let e = bufs().hashes[i];
@@ -2503,7 +2101,7 @@ fn a_replay_that_cannot_reproduce_its_history_asks_for_the_truth() {
     // check-in rather than inherit it from a newer floor
     r.advance(300);
     let at = r.s.tick();
-    r.event(r.s.seq() + 1, at, EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    r.event(r.s.seq() + 1, at, EV_CHECK_IN, DOG, 0, &[]);
     r.pump();
     r.advance(300);
 
@@ -2512,7 +2110,14 @@ fn a_replay_that_cannot_reproduce_its_history_asks_for_the_truth() {
     r.m.clear();
     let was = r.s.tick();
     assert!(was > at + 1, "the late event must land behind the present");
-    r.event(r.s.seq() + 1, at + 1, EV_MOVE_TO, 0, &move_payload(9));
+    r.event(
+        r.s.seq() + 1,
+        at + 1,
+        EV_MOVE_TO,
+        DOG,
+        0,
+        &9u16.to_le_bytes(),
+    );
     r.pump();
     assert_eq!(r.s.stat(STAT_ROLLBACKS), 1, "the repair never ran");
     assert_eq!(
@@ -2537,16 +2142,16 @@ fn one_journal_two_consumers_agree_at_every_tick() {
     // history does not, and the history is what the authority answers.
     const BASE: u64 = 7;
     let mut r = Rig::boot(ROLE_SPECTATOR, 6000);
-    let mut journal: Vec<(u64, u16, Vec<u8>)> = Vec::new();
+    let mut journal: Vec<(u64, u16, u64, Vec<u8>)> = Vec::new();
     assert_history_matches(&r, BASE, &journal, "at rest");
 
     // events that arrive before their tick: the ordinary case
     for k in 0..3u64 {
         let at = r.s.tick() + 4;
         let seq = r.s.seq() + 1;
-        let p = DOG.wrapping_add(k).to_le_bytes().to_vec();
-        r.event(seq, at, EV_CHECK_IN, 0, &p);
-        journal.push((at, EV_CHECK_IN, p));
+        let who = DOG.wrapping_add(k);
+        r.event(seq, at, EV_CHECK_IN, who, 0, &[]);
+        journal.push((at, EV_CHECK_IN, who, Vec::new()));
         r.advance(300);
         assert_history_matches(&r, BASE, &journal, "after an event that arrived early");
     }
@@ -2556,12 +2161,12 @@ fn one_journal_two_consumers_agree_at_every_tick() {
     // together
     let was = r.s.tick();
     let seq = r.s.seq();
-    let late = DOG.wrapping_add(9).to_le_bytes().to_vec();
-    let inside = move_payload(9).to_vec();
-    r.event(seq + 1, was - 3, EV_CHECK_IN, 0, &late);
-    r.event(seq + 2, was - 1, EV_MOVE_TO, 0, &inside);
-    journal.push((was - 3, EV_CHECK_IN, late));
-    journal.push((was - 1, EV_MOVE_TO, inside));
+    let late_who = DOG.wrapping_add(9);
+    let inside = 9u16.to_le_bytes().to_vec();
+    r.event(seq + 1, was - 3, EV_CHECK_IN, late_who, 0, &[]);
+    r.event(seq + 2, was - 1, EV_MOVE_TO, DOG, 0, &inside);
+    journal.push((was - 3, EV_CHECK_IN, late_who, Vec::new()));
+    journal.push((was - 1, EV_MOVE_TO, DOG, inside));
     r.pump();
     assert_history_matches(
         &r,
@@ -2586,8 +2191,8 @@ fn a_repair_applies_the_events_it_walks_back_over() {
     let seq = r.s.seq();
     // both arrive in the same delivery: one late enough to force a repair,
     // one stamped inside the ground that repair must walk back over
-    r.event(seq + 1, was - 3, EV_CHECK_IN, 0, &DOG.to_le_bytes());
-    r.event(seq + 2, was - 1, EV_MOVE_TO, 0, &move_payload(9));
+    r.event(seq + 1, was - 3, EV_CHECK_IN, DOG, 0, &[]);
+    r.event(seq + 2, was - 1, EV_MOVE_TO, DOG, 0, &9u16.to_le_bytes());
     r.pump();
     assert_eq!(r.s.seq(), seq + 2, "the second event never applied");
     assert_eq!(
@@ -2615,7 +2220,7 @@ fn a_verdict_about_history_a_repair_has_replaced_is_not_a_strike() {
     // a late event lands at the checked tick: rewind, replay, and the
     // world at that tick is no longer what the check described
     let seq = r.s.seq() + 1;
-    r.event(seq, checked, EV_CHECK_IN, 0, &DOG.to_le_bytes());
+    r.event(seq, checked, EV_CHECK_IN, DOG, 0, &[]);
     r.pump();
     assert_eq!(r.s.stat(STAT_ROLLBACKS), 1, "the repair never happened");
 

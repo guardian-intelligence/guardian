@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Emit } from "@guardian/chunkies";
-import { dogPayload, Ev, Role } from "@guardian/chunkies-testkit";
+import { dogPayload, echoPayload, Ev, Role } from "@guardian/chunkies-testkit";
 import { wumRig, type WumRig } from "./rig.ts";
 
 const TICK_MS = 1000 / 24;
@@ -304,7 +304,7 @@ describe("a player attaching to a running park", () => {
         const f = frames[forwarded]!;
         if (f.kind !== "intent") continue;
         try {
-          r.deliver([r.authority.apply(f.value.kind, f.value.p, f.value.id)]);
+          r.deliver([r.authority.apply(f.value.kind, echoPayload(f.value), f.value.intent)]);
         } catch {
           // Refused; rejects are another case's business.
         }

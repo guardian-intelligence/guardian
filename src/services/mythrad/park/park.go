@@ -23,7 +23,7 @@ import (
 
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/journal"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/mount"
-	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/codec"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/wum"
 )
 
@@ -92,7 +92,7 @@ type parkHost struct {
 // refused at instantiation — the guard that makes a behavior ConfigMap
 // converging ahead of the process image a held update instead of a
 // misinterpreted event stream.
-const hostABIEra = 1
+const hostABIEra = 2
 
 // acceptModule is the mount's acceptance gate: park-slot bytes must
 // instantiate under this host and declare its ABI era. The client slot
@@ -135,10 +135,10 @@ func newParkHost(module []byte) (*parkHost, error) {
 	h.fInit, h.fRestore, h.fSnapshot = get("sim_init"), get("sim_restore"), get("sim_snapshot")
 	h.fStep, h.fApply, h.fHash = get("sim_step"), get("sim_apply"), get("sim_hash")
 	h.fTick, h.fEpoch = get("sim_tick"), get("sim_epoch")
-	h.fSetTerrain, h.fTerrainID = get("sim_set_terrain"), get("sim_terrain_id")
+	h.fSetTerrain, h.fTerrainID = get("sim_content_stage"), get("sim_content_id")
 	h.fRate, h.fAnchorTick, h.fAnchorNs = get("sim_rate"), get("sim_anchor_tick"), get("sim_anchor_ns")
 	ioBuf, ioCap := get("io_buf"), get("io_cap")
-	terrainBuf, terrainCap := get("terrain_buf"), get("terrain_cap")
+	terrainBuf, terrainCap := get("content_buf"), get("content_cap")
 	if h.mem == nil || h.fInit == nil || h.fRestore == nil || h.fSnapshot == nil ||
 		h.fStep == nil || h.fApply == nil || h.fHash == nil || h.fTick == nil ||
 		h.fEpoch == nil || h.fSetTerrain == nil || h.fTerrainID == nil ||
@@ -323,6 +323,7 @@ func (h *parkHost) Apply(event []byte) uint32 {
 type stagedIntent struct {
 	sess       *session
 	actor      string
+	actorID    uint64
 	intentID   uint64
 	kind       uint16
 	payload    []byte
@@ -670,7 +671,8 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 					return fail(err)
 				}
 			}
-			if code := host.Apply(simEvent(ev.Kind, ev.Payload)); code != 0 {
+			actor, payload := wum.EventActor(ev.Kind, ev.Actor, ev.Payload)
+			if code := host.Apply(simEvent(ev.Kind, actor, payload)); code != 0 {
 				return fail(fmt.Errorf("replay: event seq %d rejected with code %d", ev.Seq, code))
 			}
 			a.lastSeq = ev.Seq
@@ -738,7 +740,7 @@ func (a *authority) rateChange(ctx context.Context, hz int) error {
 	tick, epoch := a.host.Tick(), a.host.Epoch()
 	var p [4]byte
 	binary.LittleEndian.PutUint32(p[:], uint32(hz))
-	if code := a.host.Apply(simEvent(wum.EvRateSet, p[:])); code != 0 {
+	if code := a.host.Apply(simEvent(wum.EvRateSet, 0, p[:])); code != 0 {
 		// A module from before rates existed (mount skew during a
 		// deploy): hold the world's rate; the desired rate lands on the
 		// first reopen under a rate-capable module.
@@ -778,7 +780,7 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	tick, epoch := a.host.Tick(), a.host.Epoch()
 	var p [8]byte
 	binary.LittleEndian.PutUint64(p[:], target)
-	if code := a.host.Apply(simEvent(wum.EvClockSkip, p[:])); code != 0 {
+	if code := a.host.Apply(simEvent(wum.EvClockSkip, 0, p[:])); code != 0 {
 		// A module from before clock_skip existed (mount skew during a
 		// deploy): anchor to this process so the schedule holds drift-free
 		// for the instance's life; the real repayment lands on the first
@@ -818,10 +820,14 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 
 // simEvent encodes an event for sim_apply: the module's own ABI (kind u16
 // then payload), which is not the wire's event frame.
-func simEvent(kind uint16, payload []byte) []byte {
-	out := make([]byte, 2+len(payload))
+// simEvent is the SimEvent encoding the module's apply receives:
+// kind u16 | actor u64 | payload — the trailing bytes of the wire
+// EventRecord, so a staged intent's bytes are what the sim validates.
+func simEvent(kind uint16, actor uint64, payload []byte) []byte {
+	out := make([]byte, 10+len(payload))
 	binary.LittleEndian.PutUint16(out, kind)
-	copy(out[2:], payload)
+	binary.LittleEndian.PutUint64(out[2:], actor)
+	copy(out[10:], payload)
 	return out
 }
 
@@ -877,6 +883,11 @@ func (a *authority) recordIntent(in stagedIntent, result string, reject uint32, 
 // here, and the original event (already fanned out) is the acknowledgment.
 func (a *authority) stageIntent(s *session, intentID uint64, kind uint16, payload []byte) {
 	receivedAt := a.tm.now()
+	if payload == nil {
+		// v5 payloads are often empty (the actor rides the envelope); the
+		// journal column is NOT NULL and a nil slice is not an encoding.
+		payload = []byte{}
+	}
 	a.mu.Lock()
 	// Intent id 0 marks connection-lifecycle intents (the departure staged
 	// on disconnect): every session of a sub uses the same id there, so
@@ -896,8 +907,8 @@ func (a *authority) stageIntent(s *session, intentID uint64, kind uint16, payloa
 		}
 	}
 	a.staged = append(a.staged, stagedIntent{
-		sess: s, actor: s.sub, intentID: intentID, kind: kind, payload: payload,
-		receivedAt: receivedAt,
+		sess: s, actor: s.sub, actorID: s.dogID, intentID: intentID, kind: kind,
+		payload: payload, receivedAt: receivedAt,
 	})
 	a.mu.Unlock()
 }
@@ -1110,7 +1121,7 @@ func (a *authority) tickOnce() {
 	tick := a.host.Tick()
 	epoch := a.host.Epoch()
 	for _, in := range staged {
-		code := a.host.Apply(simEvent(in.kind, in.payload))
+		code := a.host.Apply(simEvent(in.kind, in.actorID, in.payload))
 		if code != 0 {
 			if in.sess != nil {
 				in.sess.sendReject(in.intentID, code)
@@ -1135,7 +1146,7 @@ func (a *authority) tickOnce() {
 		// Feed the accepted event to the soaking candidate: a module that
 		// cannot replay the live journal must never be promoted.
 		if a.cand != nil {
-			ccode, cerr := a.cand.ApplyE(simEvent(in.kind, in.payload))
+			ccode, cerr := a.cand.ApplyE(simEvent(in.kind, in.actorID, in.payload))
 			if cerr != nil {
 				a.failSoak(a.candHash, fmt.Errorf("apply trap: %w", cerr))
 			} else if ccode != 0 {
@@ -1174,13 +1185,19 @@ func (a *authority) tickOnce() {
 			return
 		}
 		mEventsAppended.Add(float64(len(accepted)))
-		a.mu.Lock()
+		// One batch per tick: the run is the accepted intents' record
+		// bytes, seqs dense from the journal's first — the same bytes a
+		// client sent are the bytes every client receives.
+		var run []byte
 		for i := range accepted {
 			accepted[i].Seq = firstSeq + int64(i)
-			f := eventFrameFor(&accepted[i])
-			for s := range a.subs {
-				s.send(f)
-			}
+			run = codec.AppendEventRecord(run, accepted[i].IntentID, accepted[i].Kind,
+				acceptedIntents[i].actorID, accepted[i].Payload)
+		}
+		f := codec.EncodeTick(tick, firstSeq, uint16(len(accepted)), run)
+		a.mu.Lock()
+		for s := range a.subs {
+			s.send(f)
 		}
 		a.lastSeq = accepted[len(accepted)-1].Seq
 		a.mu.Unlock()
@@ -1261,10 +1278,14 @@ func (a *authority) handleAttach(req attachReq) attachResult {
 	// The terrain id is the only terrain fact on the wire: dimensions and
 	// schema live in the content-addressed blob every consumer fetches.
 	res := attachResult{
-		welcome: wire.EncodeWelcome(wire.Welcome{
+		// Lineage and generation are the netcode rewrite's stream
+		// identity; the Postgres-journal era has exactly one history per
+		// park, so both ride as zero until the fencing lane mints them.
+		welcome: codec.EncodeWelcome(codec.Welcome{
+			Lineage: 0, Generation: 0, Sub: 0,
 			Epoch: a.host.Epoch(), Seq: a.lastSeq, Tick: a.host.Tick(),
-			Hz: uint32(a.hz), Role: wire.RoleCode(s.role), Terrain: a.terrain,
-			Park: a.name,
+			Hz: uint32(a.hz), Role: codec.RoleCode(s.role), Content: a.terrain,
+			Chunk: a.name,
 		}),
 		seq:     a.lastSeq,
 		tick:    a.host.Tick(),
@@ -1341,16 +1362,18 @@ func snapshotFrameFor(seq int64, tick uint64, epoch uint32, wh, terrain uint64, 
 	w, _ := flate.NewWriter(&z, flate.BestCompression)
 	w.Write(state)
 	w.Close()
-	return wire.EncodeSnapshot(wire.Snapshot{
-		Seq: seq, Tick: tick, Epoch: epoch, WH: wh, Terrain: terrain, Z: z.Bytes(),
+	return codec.EncodeSnapshot(codec.Snapshot{
+		Lineage: 0, Seq: seq, Tick: tick, Epoch: epoch, WH: wh,
+		Content: terrain, Z: z.Bytes(),
 	})
 }
 
+// eventFrameFor rebuilds one journal row as a single-record tick batch
+// for catch-up, resolving the payload era on the way out.
 func eventFrameFor(ev *journal.Event) []byte {
-	return wire.EncodeEvent(wire.Event{
-		Seq: ev.Seq, Tick: ev.Tick, Kind: ev.Kind,
-		Intent: ev.IntentID, Payload: ev.Payload,
-	})
+	actor, payload := wum.EventActor(ev.Kind, ev.Actor, ev.Payload)
+	run := codec.AppendEventRecord(nil, ev.IntentID, ev.Kind, actor, payload)
+	return codec.EncodeTick(ev.Tick, ev.Seq, 1, run)
 }
 
 func (a *authority) close() {

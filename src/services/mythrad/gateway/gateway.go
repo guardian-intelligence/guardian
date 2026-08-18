@@ -26,8 +26,7 @@ import (
 
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/mount"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/parkproxy"
-	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
-	"github.com/guardian-intelligence/guardian/src/services/mythrad/wum"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/codec"
 	"github.com/guardian-intelligence/guardian/src/services/telemetry"
 )
 
@@ -249,6 +248,12 @@ func Run() {
 	obs.Shutdown(shutdownCtx)
 }
 
+// Doorman-level reject reasons live above the sim's code space.
+const (
+	rejectReadOnly = 100
+	rejectNotYours = 101
+)
+
 func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 	if n := sessionCount.Add(1); n > int64(g.admission.maxSessions) {
 		sessionCount.Add(-1)
@@ -264,15 +269,15 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 		return
 	}
 	stream.SetReadDeadline(time.Now().Add(10 * time.Second))
-	frames := wire.NewReader(stream)
+	frames := codec.NewReader(stream)
 	kind, payload, err := frames.Next()
-	if err != nil || kind != wire.KindHello {
+	if err != nil || kind != codec.KindHello {
 		mHandshakes.WithLabelValues("bad_hello").Inc()
 		sess.CloseWithError(4400, "bad hello")
 		return
 	}
-	hello, err := wire.DecodeHello(payload)
-	if err != nil || hello.Proto != wire.Proto {
+	hello, err := codec.DecodeHello(payload)
+	if err != nil || hello.Proto != codec.Proto {
 		mHandshakes.WithLabelValues("bad_hello").Inc()
 		sess.CloseWithError(4400, "bad hello")
 		return
@@ -349,7 +354,7 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 			// The only datagram a client may send is a fixed-size hash
 			// check; everything else is dropped here so junk never
 			// reaches a park.
-			if len(data) != wire.CheckLen || data[0] != wire.DgCheck {
+			if len(data) != codec.CheckLen || data[0] != codec.DgCheck {
 				mDgRejected.Inc()
 				continue
 			}
@@ -382,24 +387,27 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 		}
 		tokens--
 		switch kind {
-		case wire.KindIntent:
-			intent, err := wire.DecodeIntent(payload)
+		case codec.KindIntent:
+			rec, err := codec.DecodeIntent(payload)
 			if err != nil {
 				continue
 			}
 			if ticket.Role != "player" {
-				writeStream(wire.EncodeReject(wire.Reject{Intent: intent.ID, Reason: wum.RejectReadOnly}))
+				writeStream(codec.EncodeReject(codec.Reject{Intent: rec.Intent, Reason: rejectReadOnly}))
 				continue
 			}
-			if !wum.IntentBoundToActor(intent.Kind, intent.Payload, wum.DogIDFor(ticket.Sub)) {
-				writeStream(wire.EncodeReject(wire.Reject{Intent: intent.ID, Reason: wum.RejectNotYours}))
+			// Game-blind binding: the envelope's actor must be the
+			// authenticated subject's, for every kind — then the client's
+			// bytes travel untouched.
+			if rec.Actor != codec.ActorFor(ticket.Sub) {
+				writeStream(codec.EncodeReject(codec.Reject{Intent: rec.Intent, Reason: rejectNotYours}))
 				continue
 			}
 			if proxy.WriteMessage(parkproxy.KindStream, frames.Raw()) != nil {
 				return
 			}
-		case wire.KindResync:
-			if _, err := wire.DecodeResync(payload); err == nil {
+		case codec.KindResync:
+			if _, err := codec.DecodeResync(payload); err == nil {
 				if proxy.WriteMessage(parkproxy.KindStream, frames.Raw()) != nil {
 					return
 				}

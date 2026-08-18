@@ -15,16 +15,19 @@ import { deflateSync } from "fflate";
 import { ReplicaHost, type ClockState, type Diag, type PumpStatus } from "@guardian/chunkies";
 import {
   Role,
+  VERDICT_KNOWN,
+  VERDICT_OK,
   decodeCheck,
-  encodeEvent,
-  encodeReject,
+  encodeEventRecord,
+  encodeReject as encodeReject5,
   encodeSnapshot,
+  encodeTick,
   encodeVerdict,
   encodeWelcome,
   hex64,
   type ClientFrame,
   type RoleName,
-} from "./wire.ts";
+} from "./wire5.ts";
 import { Harness, type HarnessOptions } from "./fakes.ts";
 
 /** Repo-relative, because these artifacts are committed and the suite must use those bytes. */
@@ -92,15 +95,27 @@ export const Reject = {
 export interface ParkModule {
   readonly memory: WebAssembly.Memory;
   io_buf(): number;
-  terrain_buf(): number;
-  sim_set_terrain(len: number): number;
+  content_buf(): number;
+  sim_content_stage(len: number): number;
   sim_init(seed: bigint, parkId: bigint, epoch: number): number;
-  sim_terrain_id(): bigint;
+  sim_content_id(): bigint;
   sim_apply(len: number): number;
   sim_step(): void;
   sim_snapshot(): number;
   sim_hash(): bigint;
   sim_tick(): bigint;
+}
+
+/**
+ * The rig's v4-shaped payload for a client-authored record: actor first,
+ * then the v5 payload — what `apply`/`emit`/`frame` take. Echo tests use
+ * it to feed a heard intent back through the authority.
+ */
+export function echoPayload(rec: { actor: bigint; payload: Uint8Array }): Uint8Array {
+  const out = new Uint8Array(8 + rec.payload.length);
+  new DataView(out.buffer).setBigUint64(0, rec.actor, true);
+  out.set(rec.payload, 8);
+  return out;
 }
 
 export function dogPayload(id: bigint): Uint8Array {
@@ -109,12 +124,42 @@ export function dogPayload(id: bigint): Uint8Array {
   return p;
 }
 
+/**
+ * Splits the rig's caller convenience (v4-shaped payloads, actor first for
+ * actor-bound kinds) into the v5 SimEvent envelope. Test scripts keep
+ * saying `apply(Ev.join, dogPayload(id))`; the wire bytes minted are v5.
+ */
+function splitActor(kind: number, payload: Uint8Array): { actor: bigint; p: Uint8Array } {
+  switch (kind) {
+    case Ev.join:
+    case Ev.depart:
+    case Ev.checkIn:
+    case Ev.moveTo:
+    case Ev.boostSet: {
+      if (payload.length < 8) throw new Error(`kind ${kind} payload carries no actor`);
+      const actor = new DataView(payload.buffer, payload.byteOffset).getBigUint64(0, true);
+      return { actor, p: payload.subarray(8) };
+    }
+    default:
+      return { actor: 0n, p: payload };
+  }
+}
+
 function applyTo(park: ParkModule, kind: number, payload: Uint8Array): number {
-  const buf = new Uint8Array(2 + payload.length);
-  new DataView(buf.buffer).setUint16(0, kind, true);
-  buf.set(payload, 2);
+  const { actor, p } = splitActor(kind, payload);
+  const buf = new Uint8Array(10 + p.length);
+  const dv = new DataView(buf.buffer);
+  dv.setUint16(0, kind, true);
+  dv.setBigUint64(2, actor, true);
+  buf.set(p, 10);
   new Uint8Array(park.memory.buffer).set(buf, park.io_buf());
   return park.sim_apply(buf.length);
+}
+
+/** One v5 EventRecord from the rig's v4-shaped arguments. */
+function recordFor(kind: number, payload: Uint8Array, intent: bigint): Uint8Array {
+  const { actor, p } = splitActor(kind, payload);
+  return encodeEventRecord(intent, kind, actor, p);
 }
 
 /**
@@ -150,12 +195,12 @@ export class Authority {
     const m = modules();
     const { instance } = await WebAssembly.instantiate(m.park.slice().buffer);
     const park = instance.exports as unknown as ParkModule;
-    new Uint8Array(park.memory.buffer).set(m.terrain, park.terrain_buf());
-    const code = park.sim_set_terrain(m.terrain.length);
+    new Uint8Array(park.memory.buffer).set(m.terrain, park.content_buf());
+    const code = park.sim_content_stage(m.terrain.length);
     if (code !== 0) throw new Error(`authority terrain rejected (code ${code})`);
     const init = park.sim_init(seed, parkId, 1);
     if (init !== 0) throw new Error(`authority init failed (code ${init})`);
-    const authority = new Authority(park, m.terrain, park.sim_terrain_id());
+    const authority = new Authority(park, m.terrain, park.sim_content_id());
     authority.seedHash();
     return authority;
   }
@@ -203,13 +248,16 @@ export class Authority {
 
   welcome(role: number = Role.player): Uint8Array {
     return encodeWelcome({
+      lineage: 0,
+      generation: 0,
+      sub: 0,
       epoch: this.epoch,
       seq: this.seq,
       tick: this.tick,
       hz: this.hz,
       role,
-      terrain: this.terrainId,
-      park: this.parkName,
+      content: this.terrainId,
+      chunk: this.parkName,
     });
   }
 
@@ -228,7 +276,7 @@ export class Authority {
       );
     }
     this.seq += 1n;
-    return encodeEvent({ seq: this.seq, tick: at, kind, intent, p: payload });
+    return encodeTick(at, this.seq, [recordFor(kind, payload, intent)]);
   }
 
   /**
@@ -237,7 +285,7 @@ export class Authority {
    * built without corrupting the canonical world.
    */
   frame(seq: bigint, tick: bigint, kind: number, payload: Uint8Array, intent = 0n): Uint8Array {
-    return encodeEvent({ seq, tick, kind, intent, p: payload });
+    return encodeTick(tick, seq, [recordFor(kind, payload, intent)]);
   }
 
   snapshot(): Uint8Array {
@@ -245,11 +293,12 @@ export class Authority {
     const at = this.park.io_buf();
     const state = new Uint8Array(this.park.memory.buffer.slice(at, at + len));
     return encodeSnapshot({
+      lineage: 0,
       seq: this.seq,
       tick: this.tick,
       epoch: this.epoch,
       wh: this.hash(),
-      terrain: this.terrainId,
+      content: this.terrainId,
       z: deflateSync(state),
     });
   }
@@ -276,11 +325,12 @@ export class Authority {
     const at = this.park.io_buf();
     const state = new Uint8Array(this.park.memory.buffer.slice(at, at + len));
     return encodeSnapshot({
+      lineage: 0,
       seq: this.seq,
       tick: this.tick,
       epoch: this.epoch,
       wh: this.hash(),
-      terrain: this.terrainId,
+      content: this.terrainId,
       z: deflateSync(state, { level: 0 }),
     });
   }
@@ -291,11 +341,12 @@ export class Authority {
     const at = this.park.io_buf();
     const state = new Uint8Array(this.park.memory.buffer.slice(at, at + len));
     return encodeSnapshot({
+      lineage: 0,
       seq: this.seq,
       tick: this.tick,
       epoch: this.epoch,
       wh: this.hash() ^ 1n,
-      terrain: this.terrainId,
+      content: this.terrainId,
       z: deflateSync(state),
     });
   }
@@ -313,11 +364,12 @@ export class Authority {
     const state = new Uint8Array(this.park.memory.buffer.slice(at, at + len));
     new DataView(state.buffer).setBigUint64(52, this.terrainId ^ 0xffn, true);
     return encodeSnapshot({
+      lineage: 0,
       seq: this.seq,
       tick: this.tick,
       epoch: this.epoch,
       wh: this.hash(),
-      terrain: this.terrainId,
+      content: this.terrainId,
       z: deflateSync(state),
     });
   }
@@ -328,17 +380,18 @@ export class Authority {
     const at = this.park.io_buf();
     const state = new Uint8Array(this.park.memory.buffer.slice(at, at + len));
     return encodeSnapshot({
+      lineage: 0,
       seq: this.seq,
       tick: this.tick,
       epoch: this.epoch,
       wh: this.hash(),
-      terrain,
+      content: terrain,
       z: deflateSync(state),
     });
   }
 
   reject(intent: bigint, reason: number): Uint8Array {
-    return encodeReject({ intent, reason });
+    return encodeReject5({ intent, reason });
   }
 
   /**
@@ -355,12 +408,14 @@ export class Authority {
     const mine = this.hashAt(check.tick);
     const known = over.known ?? mine !== undefined;
     const honest = mine !== undefined && mine === check.wh;
+    const ok = over.ok ?? (known && honest);
     return encodeVerdict({
+      sub: 0,
+      lineage: 0,
       tick: check.tick,
       now: this.tick,
       ctMs: check.ctMs,
-      known,
-      ok: over.ok ?? (known && honest),
+      flags: (known ? VERDICT_KNOWN : 0) | (known && ok ? VERDICT_OK : 0),
       cw: over.cw ?? new Uint8Array(4),
       pw: over.pw ?? new Uint8Array(4),
     });
@@ -738,7 +793,7 @@ export function intentsSent(r: { harness: Harness }, kind: number): ClientFrame[
 }
 
 export function intentId(frame: ClientFrame | undefined): bigint {
-  return frame?.kind === "intent" ? frame.value.id : 0n;
+  return frame?.kind === "intent" ? frame.value.intent : 0n;
 }
 
 /**

@@ -511,3 +511,153 @@ export function decodeVerdict(b: Uint8Array): Verdict5 {
   c.done();
   return f;
 }
+
+// ---------- identity helpers (protocol-neutral, shared with the HUD) ----------
+
+/** Roles as they ride the welcome frame. */
+export const Role = {
+  spectator: 0,
+  player: 1,
+} as const;
+
+export type RoleName = keyof typeof Role;
+
+/** Renders a u64 blob/hash id the way the blob route and the HUD spell it. */
+export function hex64(v: bigint): string {
+  return BigInt.asUintN(64, v).toString(16).padStart(16, "0");
+}
+
+/** The display string for a module: the wire bytes hexed left-to-right. */
+export function moduleHex(bytes: Uint8Array): string {
+  return [...bytes].map((n) => n.toString(16).padStart(2, "0")).join("");
+}
+
+/** The u32 the session ABI wants for a module word: the little-endian load of those bytes. */
+export function moduleWord(bytes: Uint8Array): number {
+  if (bytes.length < 4) {
+    throw new RangeError(`module word: need 4 bytes, have ${bytes.length}`);
+  }
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true);
+}
+
+/** Formats a module word that came back from the ABI, by re-storing it little-endian. */
+export function moduleWordHex(word: number): string {
+  const out = new Uint8Array(4);
+  new DataView(out.buffer).setUint32(0, word >>> 0, true);
+  return moduleHex(out);
+}
+
+/** The on-wire byte length of a varint carrying `v`. */
+export function varintLen(v: number): number {
+  return encodeVarint(v).length;
+}
+
+// ---------- typed frames and the streaming decoder ----------
+
+export type ServerFrame =
+  | { kind: "welcome"; value: Welcome5 }
+  | { kind: "tick"; value: Tick5 }
+  | { kind: "reject"; value: Reject5 }
+  | { kind: "snapshot"; value: Snapshot5 };
+
+export type ClientFrame =
+  | { kind: "hello"; value: Hello5 }
+  | { kind: "intent"; value: EventRecord }
+  | { kind: "resync"; value: Resync5 };
+
+/**
+ * Decodes one frame body — `kind` byte already stripped — into a typed
+ * server frame. Unknown kinds throw: a server that speaks a kind we do
+ * not know is a version mismatch, and proto 5 is a hard cutover.
+ */
+export function decodeServerFrame(kind: number, body: Uint8Array): ServerFrame {
+  switch (kind) {
+    case Frame5.welcome:
+      return { kind: "welcome", value: decodeWelcome(body) };
+    case Frame5.tick:
+      return { kind: "tick", value: decodeTick(body) };
+    case Frame5.reject:
+      return { kind: "reject", value: decodeReject(body) };
+    case Frame5.snapshot:
+      return { kind: "snapshot", value: decodeSnapshot(body) };
+    default:
+      throw new Wire5Error(`unknown server frame kind ${kind}`);
+  }
+}
+
+/** The client-side mirror of `decodeServerFrame`, for harnesses standing in for the server. */
+export function decodeClientFrame(kind: number, body: Uint8Array): ClientFrame {
+  switch (kind) {
+    case Frame5.hello:
+      return { kind: "hello", value: decodeHello(body) };
+    case Frame5.intent:
+      return { kind: "intent", value: decodeIntent(body) };
+    case Frame5.resync:
+      return { kind: "resync", value: decodeResync(body) };
+    default:
+      throw new Wire5Error(`unknown client frame kind ${kind}`);
+  }
+}
+
+export interface RawFrame {
+  readonly kind: number;
+  readonly body: Uint8Array;
+}
+
+/**
+ * Reassembles frames from arbitrary read boundaries. `maxFrame` bounds a
+ * single frame; a length prefix beyond it is a protocol violation rather
+ * than a reason to buffer unboundedly. The default sits deliberately
+ * above the shared MAX_FRAME so harness-side tolerance never masks a
+ * producer bug — the strict cap is the session core's job.
+ */
+export class FrameDecoder {
+  #buf = new Uint8Array(0);
+  readonly #maxFrame: number;
+
+  constructor(maxFrame = 8 << 20) {
+    this.#maxFrame = maxFrame;
+  }
+
+  /** Bytes held back waiting for the rest of their frame. */
+  get buffered(): number {
+    return this.#buf.length;
+  }
+
+  /** Appends a read and returns every frame it completed, in order. */
+  push(chunk: Uint8Array): RawFrame[] {
+    if (this.#buf.length === 0) {
+      this.#buf = chunk.slice();
+    } else {
+      const merged = new Uint8Array(this.#buf.length + chunk.length);
+      merged.set(this.#buf, 0);
+      merged.set(chunk, this.#buf.length);
+      this.#buf = merged;
+    }
+    const out: RawFrame[] = [];
+    let off = 0;
+    for (;;) {
+      const header = decodeVarint(this.#buf, off);
+      if (header === null) break;
+      const bodyLen = header.value;
+      if (bodyLen === 0) throw new Wire5Error("zero-length frame");
+      if (bodyLen > this.#maxFrame) {
+        throw new Wire5Error(`frame length ${bodyLen} exceeds ${this.#maxFrame}`);
+      }
+      const end = off + header.length + bodyLen;
+      if (end > this.#buf.length) break;
+      out.push({
+        kind: this.#buf[off + header.length] ?? fail("frame: no kind byte"),
+        body: this.#buf.slice(off + header.length + 1, end),
+      });
+      off = end;
+    }
+    this.#buf = off === 0 ? this.#buf : this.#buf.slice(off);
+    return out;
+  }
+
+  /** Drops buffered bytes. Used when a connection is torn down and redialed. */
+  reset(): void {
+    this.#buf = new Uint8Array(0);
+  }
+}

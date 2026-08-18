@@ -173,6 +173,19 @@ macro_rules! export_simulation {
             with_state(|s, _| $crate::Simulation::content_stage(s, blob))
         }
 
+        /// Copies bytes into the content buffer and adopts them — the
+        /// same path a wasm host drives through content_buf +
+        /// sim_content_stage, callable safely from in-crate tests.
+        pub fn stage_content(bytes: &[u8]) -> u32 {
+            if bytes.len() > $content_cap {
+                return $crate::REJECT_ENVELOPE;
+            }
+            unsafe {
+                (&mut *(&raw mut __CHUNKIES_CONTENT))[..bytes.len()].copy_from_slice(bytes);
+            }
+            sim_content_stage(bytes.len() as u32)
+        }
+
         #[unsafe(no_mangle)]
         pub extern "C" fn sim_content_id() -> u64 {
             with_state(|s, _| $crate::Simulation::content_id(s))
@@ -254,11 +267,11 @@ macro_rules! export_simulation {
         }
 
         /// The module's only panic path: an abort the host observes as a
-        /// trap. Test builds use std's handler instead.
-        #[cfg(not(test))]
+        /// trap. Native builds (tests, tools) use std's handler instead.
+        #[cfg(target_arch = "wasm32")]
         #[panic_handler]
         fn __chunkies_panic(_: &core::panic::PanicInfo) -> ! {
-            loop {}
+            core::arch::wasm32::unreachable()
         }
     };
 }

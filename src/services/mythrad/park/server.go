@@ -3,7 +3,6 @@ package park
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
@@ -22,7 +21,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/journal"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/mount"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/parkproxy"
-	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/codec"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/wum"
 	"github.com/guardian-intelligence/guardian/src/services/telemetry"
 )
@@ -262,27 +261,29 @@ func handleParkProxy(conn net.Conn, key []byte, park *authority, maxSessions int
 		}
 		switch kind {
 		case parkproxy.KindStream:
-			frameKind, framePayload, err := wire.NewReader(bytes.NewReader(payload)).Next()
+			frameKind, framePayload, err := codec.NewReader(bytes.NewReader(payload)).Next()
 			if err != nil {
 				continue
 			}
 			switch frameKind {
-			case wire.KindIntent:
-				in, err := wire.DecodeIntent(framePayload)
+			case codec.KindIntent:
+				rec, err := codec.DecodeIntent(framePayload)
 				if err != nil {
 					continue
 				}
 				if s.role != "player" {
-					s.sendReject(in.ID, wum.RejectReadOnly)
+					s.sendReject(rec.Intent, wum.RejectReadOnly)
 					continue
 				}
-				if !wum.IntentBoundToActor(in.Kind, in.Payload, s.dogID) {
-					s.sendReject(in.ID, wum.RejectNotYours)
+				// Game-blind binding: the envelope's actor must be the
+				// authenticated session's, for every kind.
+				if rec.Actor != s.dogID {
+					s.sendReject(rec.Intent, wum.RejectNotYours)
 					continue
 				}
-				park.stageIntent(s, in.ID, in.Kind, in.Payload)
-			case wire.KindResync:
-				if _, err := wire.DecodeResync(framePayload); err != nil {
+				park.stageIntent(s, rec.Intent, rec.Kind, rec.Payload)
+			case codec.KindResync:
+				if _, err := codec.DecodeResync(framePayload); err != nil {
 					continue
 				}
 				mResyncs.Inc()
@@ -308,7 +309,5 @@ func stageDeparture(park *authority, s *session) {
 	if s.role != "player" {
 		return
 	}
-	var payload [8]byte
-	binary.LittleEndian.PutUint64(payload[:], s.dogID)
-	park.stageIntent(s, 0, wum.EvLeave, payload[:])
+	park.stageIntent(s, 0, wum.EvLeave, nil)
 }

@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import {
   chop,
   encodeVerdict,
+  VERDICT_KNOWN,
+  VERDICT_OK,
   encodeWelcome,
   Harness,
   Role,
@@ -16,13 +18,16 @@ import {
 import { decodeWelcomeEmit } from "../src/status.ts";
 
 const welcome = encodeWelcome({
+  lineage: 0,
+  generation: 0,
+  sub: 0,
   epoch: 1,
   seq: 0n,
   tick: 0n,
   hz: 24,
   role: Role.player,
-  terrain: 0xdeadbeefn,
-  park: "park-mythra",
+  content: 0xdeadbeefn,
+  chunk: "park-mythra",
 });
 
 describe("virtual clock", () => {
@@ -168,13 +173,14 @@ describe("scripted transport", () => {
     const dialed = await t.connect(s.sink);
     // Two frames written in one call each, and one split across two — the
     // recorder must not care.
-    const resync = new Uint8Array([0x09, 0x03, 0x07, 0, 0, 0, 0, 0, 0, 0]);
+    // v5 resync: body = kind + lineage u32 + haveSeq i64 (13 bytes, prefix 0x0d).
+    const resync = new Uint8Array([0x0d, 0x03, 0, 0, 0, 0, 0x07, 0, 0, 0, 0, 0, 0, 0]);
     dialed.connection.sendFrame(resync);
     dialed.connection.sendFrame(resync.subarray(0, 3));
     dialed.connection.sendFrame(resync.subarray(3));
     expect(t.sentFrames()).toEqual([
-      { kind: "resync", value: { haveSeq: 7n } },
-      { kind: "resync", value: { haveSeq: 7n } },
+      { kind: "resync", value: { lineage: 0, haveSeq: 7n } },
+      { kind: "resync", value: { lineage: 0, haveSeq: 7n } },
     ]);
   });
 
@@ -192,27 +198,30 @@ describe("scripted transport", () => {
     const t = new ScriptedTransport();
     const s = sink();
     await t.connect(s.sink);
+    const flags = VERDICT_KNOWN | VERDICT_OK;
     const later = encodeVerdict({
+      sub: 0,
+      lineage: 0,
       tick: 20n,
       now: 2n,
       ctMs: 1n,
-      known: true,
-      ok: true,
+      flags,
       cw: new Uint8Array(4),
       pw: new Uint8Array(4),
     });
     const earlier = encodeVerdict({
+      sub: 0,
+      lineage: 0,
       tick: 10n,
       now: 1n,
       ctMs: 0n,
-      known: true,
-      ok: true,
+      flags,
       cw: new Uint8Array(4),
       pw: new Uint8Array(4),
     });
     t.deliverDatagram(later);
     t.deliverDatagram(earlier);
-    expect(s.datagrams.map((d) => new DataView(d.buffer).getBigUint64(1, true))).toEqual([
+    expect(s.datagrams.map((d) => new DataView(d.buffer).getBigUint64(9, true))).toEqual([
       20n,
       10n,
     ]);

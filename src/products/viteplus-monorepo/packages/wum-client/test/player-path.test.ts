@@ -9,6 +9,7 @@ import {
   bringTheDogIn,
   DEFAULT_RTT_MS,
   dogPayload,
+  echoPayload,
   Ev,
   Reject,
   Role,
@@ -27,7 +28,7 @@ function joinFrames(r: WumRig) {
 }
 
 function idOf(frame: ClientFrame | undefined): bigint {
-  return frame?.kind === "intent" ? frame.value.id : 0n;
+  return frame?.kind === "intent" ? frame.value.intent : 0n;
 }
 
 function intentFrames(r: WumRig, kind: number) {
@@ -125,7 +126,7 @@ describe("a join is sent once", () => {
     await r.establish();
     await r.run(200);
     const join = joinFrames(r)[0];
-    const id = join!.kind === "intent" ? join!.value.id : 0n;
+    const id = join!.kind === "intent" ? join!.value.intent : 0n;
 
     r.deliver([r.authority.reject(id, Reject.present)]);
     r.deliver([r.authority.reject(id, Reject.present)]);
@@ -153,7 +154,7 @@ describe("intents that need a dog in the park wait for one", () => {
 
     // Once the journal confirms the dog, the held intent may go.
     const join = joinFrames(r)[0];
-    const id = join!.kind === "intent" ? join!.value.id : 0n;
+    const id = join!.kind === "intent" ? join!.value.intent : 0n;
     r.deliver([r.emit(Ev.join, dogPayload(0x6001n), id)]);
     expect(await r.until(() => r.state.seq === r.authority.seq, 2000)).toBe(true);
     await r.run(200);
@@ -290,7 +291,7 @@ describe("the world is corrected under the screen", () => {
         if (frame.kind !== "intent") continue;
         const intent = frame.value;
         r.harness.clock.schedule(() => {
-          const event = r.authority.apply(intent.kind, intent.p, intent.id);
+          const event = r.authority.apply(intent.kind, echoPayload(intent), intent.intent);
           r.harness.clock.schedule(() => {
             r.deliver([event]);
           }, ONE_WAY_MS);
