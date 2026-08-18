@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: gateway
-          image: ghcr.io/guardian-intelligence/chunkies-gateway:edge@sha256:f0577ce0b43f954bfed75cd3ba00f5c3fe7a794c01bfa7a357e4329b849fcaf2 # {"$imagepolicy": "guardian-imageops:chunkies-gateway"}
+          image: ghcr.io/guardian-intelligence/chunkies-gateway:edge@sha256:221f5aa17d1802b8fa8881b6e89915dc765e1d04010907f0d48eeae08202e6f8 # {"$imagepolicy": "guardian-imageops:chunkies-gateway"}
           env:
             - name: MAX_SESSIONS
               value: "4000"
@@ -224,7 +224,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: park
-          image: ghcr.io/guardian-intelligence/chunkies-park:edge@sha256:f71cddd54ad2abafb1f4c08efc62acc2ec83c88c8a4a3cf0d77edddff7a1dcea # {"$imagepolicy": "guardian-imageops:chunkies-park"}
+          image: ghcr.io/guardian-intelligence/chunkies-park:edge@sha256:2121b2597699f539fed34f052e50f07ec748ea3f84cebb1ec915474ea7c8c122 # {"$imagepolicy": "guardian-imageops:chunkies-park"}
           env:
             - name: PARK_NAME
               value: park-mythra
