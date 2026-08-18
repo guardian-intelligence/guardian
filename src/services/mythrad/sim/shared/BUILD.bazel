@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_shared_library", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_shared_library", "rust_test", "rustfmt_test")
 load("//src/services/mythrad/sim:wasm.bzl", "wasm_module")
 
 # Shared tier: everything here runs byte-identically under wazero on the
@@ -169,4 +169,23 @@ wasm_module(
     lib = ":park_cdylib",
     out = "park.wasm",
     visibility = SIM_ROOT,
+)
+
+# Formatting drift fails `bazelisk test //...`; the fix is `aspect tidy`.
+rustfmt_test(
+    name = "rustfmt_test",
+    targets = [
+        ":abi",
+        ":core",
+        ":core_test",
+        ":fixture_gen",
+        ":nav",
+        ":nav_test",
+        ":park_lib",
+        ":park_test",
+        ":terrain",
+        ":terrain_test",
+        ":toy_lib",
+        ":toy_test",
+    ],
 )

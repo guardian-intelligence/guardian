@@ -59,6 +59,25 @@ filegroup(
     srcs = glob([".github/workflows/*.yml"]),
 )
 
+# Root-level prose/config files plus the AXL tasks, in the scope of the
+# tools/format/text trailing-whitespace pass. Consumed as runfiles by
+# //src/infrastructure/tests:tests (TestTextFormatConformance).
+filegroup(
+    name = "text_sources",
+    srcs = glob(
+        [
+            "*.bazel",
+            "*.json",
+            "*.md",
+            "*.yaml",
+            "*.yml",
+            ".aspect/**/*.axl",
+        ],
+        allow_empty = True,
+    ),
+    visibility = ["//src/infrastructure/tests:__pkg__"],
+)
+
 # A workflow using a third-party action ref that the GitHub-side allowlist
 # does not carry dies post-merge as a startup_failure: no jobs, no logs, no
 # page. This holds every `uses:` ref to .github/actions-allowlist.json (the
@@ -250,8 +269,9 @@ export NODE_PATH="$$execroot/$(BINDIR)/node_modules$${NODE_PATH:+:$$NODE_PATH}"
 export CI=true
 cd "$$work"
 "$$node" "$$vp" run -w lint
+"$$node" "$$vp" fmt . --check
 cd "$$execroot"
-printf 'viteplus lint ok\\n' > "$@"
+printf 'viteplus lint+fmt ok\\n' > "$@"
 """,
     local = True,
     tags = [

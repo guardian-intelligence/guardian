@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_shared_library", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_shared_library", "rust_test", "rustfmt_test")
 load("//src/services/mythrad/sim:wasm.bzl", "wasm_module")
 
 SIM_ROOT = ["//src/services/mythrad/sim:__pkg__"]
@@ -124,4 +124,19 @@ wasm_module(
     lib = ":client_cdylib",
     out = "client.wasm",
     visibility = SIM_ROOT,
+)
+
+# Formatting drift fails `bazelisk test //...`; the fix is `aspect tidy`.
+rustfmt_test(
+    name = "rustfmt_test",
+    targets = [
+        ":clock",
+        ":clock_test",
+        ":codec",
+        ":codec_test",
+        ":goldens_gen",
+        ":session",
+        ":session_test",
+        ":tablegen",
+    ],
 )
