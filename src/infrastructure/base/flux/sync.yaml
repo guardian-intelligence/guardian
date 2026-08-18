@@ -1215,7 +1215,7 @@ metadata:
 spec:
   interval: 10m
   retryInterval: 1m
-  path: ./src/infrastructure/deployments/mythra/prod
+  path: ./src/games/wake-up-mythra/deploy/prod
   sourceRef:
     kind: ${GUARDIAN_SOURCE_KIND:=GitRepository}
     name: ${GUARDIAN_SOURCE_NAME:=guardian}

@@ -9,7 +9,7 @@ import "testing"
 // privilege tiers joined so a chart or RBAC edit cannot silently turn journal
 // observation into shared-products database administration.
 func TestMythraAgentOperationCapabilities(t *testing.T) {
-	path := runfilePath("src/infrastructure/deployments/mythra/prod/agent-ops.yaml")
+	path := runfilePath("src/games/wake-up-mythra/deploy/prod/agent-ops.yaml")
 	docs := yamlDocs(t, path)
 
 	for _, name := range []string{"guardian-mythra-observer", "guardian-mythra-operator"} {

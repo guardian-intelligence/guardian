@@ -1,5 +1,7 @@
 # The single writer for first-party workload pins: one automation covering
-# the whole deployments tree, so coupled markers always move in one commit.
+# every manifest tree under src (infrastructure deployments and the
+# per-game deploy trees alike), so coupled markers always move in one
+# commit.
 # Pushes straight to main as guardian-promotions[bot] (ruleset bypass; the
 # push-time conformance gate is the admission policy's digest-pinning rule
 # plus Flagger where a Canary exists). Setters write the policy's latestRef
@@ -31,5 +33,5 @@ spec:
     push:
       branch: main
   update:
-    path: ./src/infrastructure/deployments
+    path: ./src
     strategy: Setters

@@ -57,7 +57,7 @@ func TestCloudAgentDeliveryReadBoundary(t *testing.T) {
 		}
 	}
 
-	mythraPath := runfilePath("src/infrastructure/deployments/mythra/prod/agent-ops.yaml")
+	mythraPath := runfilePath("src/games/wake-up-mythra/deploy/prod/agent-ops.yaml")
 	mythraDocs := yamlDocs(t, mythraPath)
 	mythraMinter := findDoc(t, mythraDocs, "RoleBinding", "guardian-mythra-token-minter")
 	cursorCanMintMythra := false

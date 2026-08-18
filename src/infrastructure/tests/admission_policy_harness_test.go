@@ -2,7 +2,8 @@ package tests
 
 // Generic interpreter for the repo's admission policies (see
 // docs/admission-doctrine.md). Every ValidatingAdmissionPolicy and
-// MutatingAdmissionPolicy rendered anywhere in base/ or deployments/ is
+// MutatingAdmissionPolicy rendered anywhere in the manifest trees
+// (imageset.ManifestTrees) is
 // compiled with the apiserver's own compiler, evaluated against every
 // rendered manifest its bindings match, and exercised by declarative
 // fixtures under fixtures/admission/. Policies are authored once, in YAML;
@@ -18,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/guardian-intelligence/guardian/src/infrastructure/imageset"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,7 +62,7 @@ func loadPolicyUniverse(t *testing.T) *policyUniverse {
 
 	u := &policyUniverse{params: map[string]map[string]string{}}
 	root := repoRootFromRunfiles(t)
-	for _, dir := range []string{"src/infrastructure/base", "src/infrastructure/deployments"} {
+	for _, dir := range imageset.ManifestTrees {
 		walkYAMLFiles(t, filepath.Join(root, dir), func(path string, docs []map[string]interface{}) {
 			for _, doc := range docs {
 				u.absorb(t, path, doc)

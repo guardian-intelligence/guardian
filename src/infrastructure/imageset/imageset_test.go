@@ -74,13 +74,20 @@ func writeTree(t *testing.T, root string, files map[string]string) {
 	}
 }
 
-// baseTree gives every fixture a non-empty second tree so CollectRendered's
-// per-tree emptiness check does not trip.
+// baseTree gives every fixture a non-empty copy of each manifest tree the
+// fixture itself does not populate, so CollectRendered's missing-tree and
+// per-tree emptiness checks do not trip. Derived from ManifestTrees so a
+// new tree cannot break the fixtures.
 func baseTree() map[string]string {
-	return map[string]string{
-		"src/infrastructure/base/anchor.yaml": `image: docker.io/library/redis@sha256:9999999999999999999999999999999999999999999999999999999999999999
-`,
+	files := map[string]string{}
+	for _, tree := range ManifestTrees {
+		if tree == "src/infrastructure/deployments" {
+			continue
+		}
+		files[tree+"/anchor.yaml"] = `image: docker.io/library/redis@sha256:9999999999999999999999999999999999999999999999999999999999999999
+`
 	}
+	return files
 }
 
 func collectFromFixture(t *testing.T, files map[string]string) ([]RenderedRef, error) {
@@ -164,10 +171,10 @@ spec:
 		}
 	}
 	// Templated and placeholder scalars, the digest-less OCIRepository, and
-	// the watch-only ImageRepository are excluded; the base-tree anchor adds
+	// the watch-only ImageRepository are excluded; each baseTree anchor adds
 	// one.
-	if len(refs) != 5 {
-		t.Fatalf("CollectRendered() = %d refs, want 5: %v", len(refs), got)
+	if want := 4 + len(baseTree()); len(refs) != want {
+		t.Fatalf("CollectRendered() = %d refs, want %d: %v", len(refs), want, got)
 	}
 }
 
@@ -249,8 +256,8 @@ version: 0.1.0
 	if err != nil {
 		t.Fatalf("CollectRendered() error = %v (chart dirs must be skipped whole)", err)
 	}
-	if len(refs) != 2 {
-		t.Fatalf("CollectRendered() = %d refs, want 2 (chart dir excluded)", len(refs))
+	if want := 1 + len(baseTree()); len(refs) != want {
+		t.Fatalf("CollectRendered() = %d refs, want %d (chart dir excluded)", len(refs), want)
 	}
 }
 
