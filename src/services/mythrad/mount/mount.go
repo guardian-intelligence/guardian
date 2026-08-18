@@ -27,6 +27,9 @@ var DefaultPark []byte
 var mInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "mythra_behavior_script", Help: "1 for the currently loaded module hash per slot."}, []string{"slot", "hash"})
 
+var mRefused = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "mythra_behavior_refused_total", Help: "Mounted module bytes refused by the process's acceptance gate."}, []string{"slot"})
+
 // Module tracks a distributed module's bytes plus content hash.
 type Module struct {
 	mu    sync.Mutex
@@ -63,14 +66,38 @@ func (m *Module) Get() ([]byte, string) {
 
 // Watch polls the mounted behavior dir; ConfigMap edits land on the mount
 // within ~a minute of Flux applying them, with no pod restart.
-func Watch(dir string, client, park *Module) {
+//
+// accept, when non-nil, gates every new byte content before it becomes the
+// slot's module — the process's defense against a mount that converged
+// ahead of the process image (a refused module keeps the current one
+// serving, counted by mythra_behavior_refused_total). A nil accept takes
+// everything: right for a process that only distributes bytes and never
+// runs them, since the consumer's own boot gate decides there.
+func Watch(dir string, accept func(slot string, module []byte) error, client, park *Module) {
+	tried := map[string]string{}
+	loadSlot := func(slot string, m *Module) {
+		module, err := os.ReadFile(filepath.Join(dir, slot+".wasm"))
+		if err != nil || len(module) <= 8 {
+			return
+		}
+		sum := sha256.Sum256(module)
+		hash := hex.EncodeToString(sum[:4])
+		if tried[slot] == hash {
+			return
+		}
+		tried[slot] = hash
+		if accept != nil {
+			if err := accept(slot, module); err != nil {
+				log.Printf("%s module %s refused: %v", slot, hash, err)
+				mRefused.WithLabelValues(slot).Inc()
+				return
+			}
+		}
+		m.Set(module)
+	}
 	load := func() {
-		if module, err := os.ReadFile(filepath.Join(dir, "client.wasm")); err == nil && len(module) > 8 {
-			client.Set(module)
-		}
-		if module, err := os.ReadFile(filepath.Join(dir, "park.wasm")); err == nil && len(module) > 8 {
-			park.Set(module)
-		}
+		loadSlot("client", client)
+		loadSlot("park", park)
 	}
 	load()
 	for range time.Tick(2 * time.Second) {

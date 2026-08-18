@@ -88,6 +88,28 @@ type parkHost struct {
 	fRate, fAnchorTick, fAnchorNs api.Function
 }
 
+// hostABIEra is the sim ABI generation this host speaks. Any other era is
+// refused at instantiation — the guard that makes a behavior ConfigMap
+// converging ahead of the process image a held update instead of a
+// misinterpreted event stream.
+const hostABIEra = 1
+
+// acceptModule is the mount's acceptance gate: park-slot bytes must
+// instantiate under this host and declare its ABI era. The client slot
+// passes through — this process only distributes those bytes, and the
+// browser's own boot gate decides there.
+func acceptModule(slot string, module []byte) error {
+	if slot != "park" {
+		return nil
+	}
+	h, err := newParkHost(module)
+	if err != nil {
+		return err
+	}
+	h.close()
+	return nil
+}
+
 func newParkHost(module []byte) (*parkHost, error) {
 	ctx := context.Background()
 	rt := wazero.NewRuntime(ctx)
@@ -98,6 +120,18 @@ func newParkHost(module []byte) (*parkHost, error) {
 	}
 	h := &parkHost{rt: rt, mem: mod.Memory()}
 	get := func(name string) api.Function { return mod.ExportedFunction(name) }
+	fABI := get("abi_version")
+	if fABI == nil {
+		rt.Close(ctx)
+		return nil, errors.New("park module does not declare abi_version")
+	}
+	if vs, err := fABI.Call(ctx); err != nil || len(vs) == 0 {
+		rt.Close(ctx)
+		return nil, fmt.Errorf("park module abi_version: %v", err)
+	} else if era := uint32(vs[0]); era != hostABIEra {
+		rt.Close(ctx)
+		return nil, fmt.Errorf("park module declares ABI era %d, this host speaks %d", era, hostABIEra)
+	}
 	h.fInit, h.fRestore, h.fSnapshot = get("sim_init"), get("sim_restore"), get("sim_snapshot")
 	h.fStep, h.fApply, h.fHash = get("sim_step"), get("sim_apply"), get("sim_hash")
 	h.fTick, h.fEpoch = get("sim_tick"), get("sim_epoch")
