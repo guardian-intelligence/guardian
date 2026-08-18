@@ -11,7 +11,8 @@ test, and format the repo (fast with cache), and `aspect --help` /
 `aspect <task> --help` to view development tasks and their options.
 
 Deeper reading: `AGENTS.md` (conventions and the durable command surface), the
-web frontend dev loop in `src/products/viteplus-monorepo/README.md`, the
+web frontend dev loop in `src/products/viteplus-monorepo/README.md` (the
+pnpm workspace root itself is the repo root), the
 runbooks in `src/infrastructure/runbooks/`, and the design docs in `docs/`.
 
 ## Authenticating to the Cluster

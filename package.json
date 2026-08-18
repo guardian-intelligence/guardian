@@ -9,7 +9,7 @@
     "changeset:version": "changeset version",
     "dev": "vp run @guardian/guardianintelligence-web#dev",
     "generate": "vp run -r generate",
-    "format": "vp fmt . --write",
+    "format": "vp fmt src/products/viteplus-monorepo vite.config.ts scripts/check-release-hygiene.ts --write",
     "check": "vp check",
     "lint": "vp lint",
     "typecheck": "vp run -r typecheck && vp run -w typecheck:scripts",

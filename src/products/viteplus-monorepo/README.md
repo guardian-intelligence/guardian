@@ -1,7 +1,10 @@
 # viteplus-monorepo
 
 The Guardian web frontend — TanStack Start (SSR on nitro), bundled with
-vite-plus. `node_modules` is pinned by `pnpm-lock.yaml`.
+vite-plus. These apps and packages are members of the repo-rooted pnpm
+workspace; `pnpm-workspace.yaml`, `package.json`, the catalog, and
+`pnpm-lock.yaml` live at the repo root, and every command below runs from
+there.
 
 ## Dev loop
 

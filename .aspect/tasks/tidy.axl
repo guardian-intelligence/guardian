@@ -51,13 +51,18 @@ def _contains(items, needle):
     return False
 
 def _label_package(label):
+    """Package part of a label, or None if the label is not parseable.
+
+    The root package is a legitimate answer (empty string): the pnpm workspace
+    root is the repo root, so //:format is where the viteplus formatter lives.
+    """
     without_repo = label
     if without_repo.startswith("@@"):
         parts = without_repo.split("//", 1)
         if len(parts) == 2:
             without_repo = "//" + parts[1]
     if not without_repo.startswith("//"):
-        return ""
+        return None
     body = without_repo[2:]
     colon = body.find(":")
     if colon == -1:
@@ -66,9 +71,13 @@ def _label_package(label):
 
 def _run_viteplus(ctx, target):
     pkg = _label_package(target)
-    if pkg == "":
-        ctx.std.io.stderr.write("ERROR: viteplus formatter target must be in a package: " + target + "\n")
+    if pkg == None:
+        ctx.std.io.stderr.write("ERROR: unparseable viteplus formatter target: " + target + "\n")
         return 1
+
+    # pkg is "" for the root package; the path helpers below then resolve to the
+    # workspace root itself, which is exactly where the pnpm workspace lives.
+    pkg_parts = [pkg] if pkg != "" else []
     rc = checked_spawn(
         ctx,
         "bazelisk",
@@ -78,18 +87,18 @@ def _run_viteplus(ctx, target):
     )
     if rc != 0:
         return rc
-    node = ws_path(ctx, "bazel-bin", pkg, "node")
-    vp = ws_path(ctx, "bazel-bin", pkg, "node_modules/vite-plus/bin/vp")
+    node = ws_path(ctx, *(["bazel-bin"] + pkg_parts + ["node"]))
+    vp = ws_path(ctx, *(["bazel-bin"] + pkg_parts + ["node_modules/vite-plus/bin/vp"]))
     return checked_spawn(
         ctx,
         node,
         [vp, "run", "-w", "format"],
-        cwd = ws_path(ctx, pkg),
+        cwd = ws_path(ctx, *pkg_parts),
         env = {
             "CI": "true",
             "NODE_OPTIONS": "--preserve-symlinks-main",
-            "NODE_PATH": ws_path(ctx, "bazel-bin", pkg, "node_modules"),
-            "PATH": ws_path(ctx, "bazel-bin", pkg) + ":" + DEFAULT_PROCESS_PATH,
+            "NODE_PATH": ws_path(ctx, *(["bazel-bin"] + pkg_parts + ["node_modules"])),
+            "PATH": ws_path(ctx, *(["bazel-bin"] + pkg_parts)) + ":" + DEFAULT_PROCESS_PATH,
         },
         label = target + " package format",
     )

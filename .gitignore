@@ -28,6 +28,9 @@
 /src-old/**/.output/
 
 # Active web workspace dependency/build output is produced by Bazel/rules_js.
+# The pnpm workspace root is the repo root, so its install tree lands here.
+/node_modules/
+/.pnpm-store/
 /src/products/viteplus-monorepo/**/node_modules/
 /src/products/viteplus-monorepo/apps/guardianintelligence-web/node_modules/
 /src/products/*/render/node_modules/

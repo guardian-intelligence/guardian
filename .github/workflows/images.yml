@@ -24,6 +24,14 @@ on:
       - "src/infrastructure/cmd/tofu_runner/**"
       - "src/products/analytics/**"
       - "src/products/viteplus-monorepo/**"
+      # The pnpm workspace root moved to the repo root; a lockfile or
+      # catalog change still has to rebuild every web image.
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - "patches/**"
+      - "tsconfig.base.json"
+      - "vite.config.ts"
       - "src/proto/**"
       - "go.mod"
       - "go.sum"
@@ -67,7 +75,7 @@ jobs:
             [alert-relay]='^src/services/alerting/'
             [analytics-ingest]='^src/products/analytics/|^src/proto/'
             [authorization]='^src/services/authorization/|^src/proto/guardian/authorization/|^src/proto/gen/go/guardian/authorization/'
-            [canary-journeys]='^src/products/viteplus-monorepo/packages/canary-journeys/|^src/products/viteplus-monorepo/pnpm-(lock|workspace)\.yaml$'
+            [canary-journeys]='^src/products/viteplus-monorepo/packages/canary-journeys/|^(pnpm-(lock|workspace)\.yaml|package\.json|vite\.config\.ts)$'
             [chunkies-gateway]='^src/services/mythrad/'
             [chunkies-park]='^src/services/mythrad/'
             [payments]='^src/services/payments/'
@@ -78,7 +86,7 @@ jobs:
             [company-site]='^src/products/viteplus-monorepo/'
             [privatecut-web]='^src/products/viteplus-monorepo/'
             [wake-up-mythra-web]='^src/products/viteplus-monorepo/'
-            [visual-harness]='^src/products/viteplus-monorepo/packages/visual-harness/|^src/products/viteplus-monorepo/pnpm-(lock|workspace)\.yaml$'
+            [visual-harness]='^src/products/viteplus-monorepo/packages/visual-harness/|^(pnpm-(lock|workspace)\.yaml|package\.json|vite\.config\.ts)$'
           )
           declare -A push_target=(
             [alert-relay]='//src/services/alerting/relay:push'
