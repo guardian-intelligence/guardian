@@ -1238,9 +1238,5 @@ spec:
       namespace: tenant-guardian-prod
     - apiVersion: apps/v1
       kind: Deployment
-      name: mythrad
-      namespace: tenant-guardian-prod
-    - apiVersion: apps/v1
-      kind: Deployment
       name: wake-up-mythra-web
       namespace: tenant-guardian-prod
