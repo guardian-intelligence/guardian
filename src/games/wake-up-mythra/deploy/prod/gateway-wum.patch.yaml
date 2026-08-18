@@ -1,0 +1,114 @@
+# WUM's instance patch over the framework gateway shape
+# (src/chunkies/deploy/components/gateway): placement, game labels, and the
+# full env/volume sets. Wholesale env/volume ownership is deliberate while
+# the gateway is single-game — see the component header.
+- op: add
+  path: /metadata/labels/guardian.dev~1product
+  value: mythra
+- op: add
+  path: /metadata/labels/guardian.dev~1stage
+  value: prod
+- op: add
+  path: /spec/template/metadata/labels/guardian.dev~1product
+  value: mythra
+- op: add
+  path: /spec/template/metadata/labels/guardian.dev~1stage
+  value: prod
+- op: add
+  path: /spec/template/spec/nodeSelector
+  value:
+    kubernetes.io/hostname: ash-worker0
+- op: add
+  path: /spec/template/spec/tolerations
+  value:
+    - key: guardian.dev/dedicated
+      operator: Equal
+      value: wum
+      effect: NoSchedule
+- op: add
+  path: /spec/template/spec/containers/0/env
+  value:
+    - name: MAX_SESSIONS
+      value: "4000"
+    - name: GOMEMLIMIT
+      value: 800MiB
+    - name: OIDC_ISSUER
+      value: https://auth.wakeupmythra.com/realms/wakeupmythra.com
+    - name: OIDC_JWKS_URL
+      value: http://keycloak.tenant-guardian-prod.svc/realms/wakeupmythra.com/protocol/openid-connect/certs
+    - name: OIDC_CLIENT_IDS
+      value: wake-up-mythra
+    - name: REQUIRE_EMAIL_VERIFIED
+      value: "false"
+    - name: GAME
+      value: wum
+    - name: CHUNK_DIRECTORY_FILE
+      value: /etc/chunkies/directory/chunks.conf
+    - name: PARK_HTTP_URL
+      value: http://127.0.0.1:9631
+    - name: INTERNAL_KEY_FILE
+      value: /etc/chunkies/internal/password
+    - name: TICKET_KEY_FILE
+      value: /etc/chunkies/ticket/password
+    - name: WT_PORT
+      value: "4433"
+    - name: HTTP_PORT
+      value: "9634"
+    - name: METRICS_PORT
+      value: "9633"
+    - name: PUBLIC_ADDR
+      value: wt.wakeupmythra.com:4433
+    - name: TLS_CERT_FILE
+      value: /etc/mythra/tls/tls.crt
+    - name: TLS_KEY_FILE
+      value: /etc/mythra/tls/tls.key
+    - name: ALLOWED_ORIGINS
+      value: https://wakeupmythra.com
+    - name: BEHAVIOR_DIR
+      value: /etc/mythra/behavior
+    - name: ASSET_DIR
+      value: /etc/mythra/assets
+    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+      value: otel-collector.guardian-analytics.svc.cozy.local:4317
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts
+  value:
+    - name: behavior
+      mountPath: /etc/mythra/behavior
+      readOnly: true
+    - name: assets
+      mountPath: /etc/mythra/assets
+      readOnly: true
+    - name: wt-tls
+      mountPath: /etc/mythra/tls
+      readOnly: true
+    - name: internal-key
+      mountPath: /etc/chunkies/internal
+      readOnly: true
+    - name: ticket-key
+      mountPath: /etc/chunkies/ticket
+      readOnly: true
+    - name: chunk-directory
+      mountPath: /etc/chunkies/directory
+      readOnly: true
+- op: add
+  path: /spec/template/spec/volumes
+  value:
+    - name: behavior
+      configMap:
+        name: mythra-behavior
+    - name: assets
+      configMap:
+        name: mythra-assets
+    - name: wt-tls
+      secret:
+        secretName: mythra-wt-tls
+    - name: internal-key
+      secret:
+        secretName: chunkies-internal-key
+    - name: chunk-directory
+      configMap:
+        name: chunkies-directory
+    - name: ticket-key
+      secret:
+        secretName: chunkies-ticket-key

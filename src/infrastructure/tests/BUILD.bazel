@@ -100,6 +100,8 @@ go_test(
         "//src/infrastructure/deployments/postflight-runner:manifests",
         "//src/infrastructure/deployments/privatecut/prod:manifests",
         "//src/infrastructure/deployments/payments/prod:manifests",
+        "//src/chunkies/deploy/components/chunkie:manifests",
+        "//src/chunkies/deploy/components/gateway:manifests",
         "//src/games/wake-up-mythra/deploy/prod:manifests",
         "//src/infrastructure/deployments/products/prod:manifests",
         "//src/infrastructure/deployments/guardian/tofu:manifests",
