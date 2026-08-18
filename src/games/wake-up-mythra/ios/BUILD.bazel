@@ -1,0 +1,30 @@
+# Hello-world iOS app: proves the Bazel-native iOS toolchain end to end
+# (rules_apple + rules_swift, both pinned as root deps at the versions the
+# module graph already selects). Building an .ipa needs Xcode, so every
+# target here is tags = ["manual"]: excluded from //... expansion, which is
+# what keeps Linux CI green — the package still loads everywhere.
+#
+# On a Mac with Xcode installed:
+#   bazelisk build //src/games/wake-up-mythra/ios:HelloWUM
+load("@rules_apple//apple:ios.bzl", "ios_application")
+load("@rules_swift//swift:swift.bzl", "swift_library")
+
+swift_library(
+    name = "hello_sources",
+    srcs = ["Sources/HelloWUMApp.swift"],
+    module_name = "HelloWUM",
+    tags = ["manual"],
+)
+
+ios_application(
+    name = "HelloWUM",
+    bundle_id = "com.wakeupmythra.hello",
+    families = [
+        "iphone",
+        "ipad",
+    ],
+    infoplists = ["Info.plist"],
+    minimum_os_version = "17.0",
+    tags = ["manual"],
+    deps = [":hello_sources"],
+)

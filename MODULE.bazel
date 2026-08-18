@@ -48,6 +48,14 @@ python.toolchain(
 )
 use_repo(python, "python_3_12_12")
 
+# iOS toolchain for the native game apps. Both are already in the module
+# graph transitively (protobuf pulls them in) at exactly these versions, so
+# declaring them as root deps changes nothing in resolution — it only makes
+# the //src/games/*/ios packages' loads first-party. Building an .ipa still
+# needs a macOS host with Xcode; every iOS target is tags = ["manual"].
+bazel_dep(name = "rules_apple", version = "4.1.0")
+bazel_dep(name = "rules_swift", version = "3.1.2")
+
 include("//src/postflight/cli:rust.MODULE.bazel")
 include("//src/tools/oathtool:oathtool.MODULE.bazel")
 include("//src/tools/postgres:postgres.MODULE.bazel")
