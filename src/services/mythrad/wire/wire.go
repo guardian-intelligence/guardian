@@ -138,7 +138,8 @@ func EncodeFrame(kind byte, payload []byte) []byte {
 // Reader decodes the frame stream. Payloads are freshly allocated:
 // intents outlive the read, staged for a tick boundary and journaled.
 type Reader struct {
-	r *bufio.Reader
+	r   *bufio.Reader
+	raw []byte
 }
 
 func NewReader(r io.Reader) *Reader {
@@ -157,11 +158,23 @@ func (fr *Reader) Next() (byte, []byte, error) {
 	case n > MaxFrameLen:
 		return 0, nil, ErrFrameTooLarge
 	}
-	body := make([]byte, n)
+	// One allocation holds the whole frame (canonical varint + body) so a
+	// relay can forward Raw() without re-framing.
+	prefix := VarintLen(n)
+	buf := AppendVarint(make([]byte, 0, prefix+int(n)), n)
+	body := buf[prefix : prefix+int(n)]
 	if _, err := io.ReadFull(fr.r, body); err != nil {
 		return 0, nil, err
 	}
+	fr.raw = buf[:prefix+int(n)]
 	return body[0], body[1:], nil
+}
+
+// Raw returns the last frame Next decoded, framed and ready to forward
+// verbatim (the length prefix is re-encoded canonically). The slice is
+// only valid until the next call to Next.
+func (fr *Reader) Raw() []byte {
+	return fr.raw
 }
 
 // ---------- payload cursor ----------

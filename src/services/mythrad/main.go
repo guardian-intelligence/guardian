@@ -99,6 +99,10 @@ var (
 		Name: "mythra_datagrams_sent_total", Help: "Datagrams sent."})
 	mDgErrors = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "mythra_datagram_errors_total", Help: "SendDatagram failures."})
+	mDgRejected = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_datagrams_rejected_total", Help: "Client datagrams dropped at the gateway (not a well-formed check)."})
+	mUnknownFrames = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_unknown_frames_total", Help: "Client stream frames of unknown kind dropped at the gateway."})
 	mDrops = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "mythra_fanout_dropped_total", Help: "Sessions closed for stream backlog."})
 	mBehaviorInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
