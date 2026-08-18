@@ -10,6 +10,13 @@ common --repo_env=GOPROXY=https://proxy.golang.org,direct
 # fail the build rather than scroll past as warnings.
 build --@rules_rust//rust/settings:clippy_flags=-Dwarnings
 
+# Every worktree runs its own Bazel server with a private output base, so
+# without a shared cache a fresh worktree re-executes the entire repo. The
+# disk cache is content-addressed and safe for concurrent servers; sharing it
+# means a new worktree only executes what its diff invalidates. GC bounds it.
+common --disk_cache=~/.cache/bazel-disk
+common --experimental_disk_cache_gc_max_size=50G
+
 # CI persists this root across runs via actions/cache (build.yml): action
 # outputs and fetched external archives survive the ephemeral runner, so a
 # PR build re-executes only what its diff invalidates. GC bounds what a main
