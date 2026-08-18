@@ -2,7 +2,7 @@
 
 Status: plan of record (2026-08). The wasm behavior stack and update ladder
 described here are live at wakeupmythra.com; the architecture invariants,
-netcode, and persistence plane are specified in docs/netcode.md and landing
+netcode, and persistence plane are specified in src/chunkies/README.md and landing
 now; everything in [Gaps and sequencing](#gaps-and-sequencing) is not.
 
 ## Work backwards from the surfaces
@@ -97,7 +97,7 @@ Resources:
 Core loop: dogs at the park stack Energy; scheduled events offer wake-up
 progress and require dogs physically present to win. Gameplay is occasional
 management choices, not twitch input — this shapes the netcode: events at
-human decision rate, not state at tick rate (docs/netcode.md).
+human decision rate, not state at tick rate (src/chunkies/README.md).
 
 Social events broadcast live to all clients in the park with a tight SLA —
 "Andy added BimBim to Charsiu's pack" must land while it is still relevant
@@ -146,7 +146,7 @@ sim ticks at 24Hz.
    WKWebView — they share the stack). File the Feedback, track betas. The
    native app with its own QUIC stack is the hedge, not a WKWebView wrapper.
 2. **Email verification** — the customer realm has no SMTP configured and
-   `verifyEmail` is off; the spectator/player OIDC gate (docs/netcode.md)
+   `verifyEmail` is off; the spectator/player OIDC gate (src/chunkies/README.md)
    enforces `email_verified` only once the realm can issue it. Adding SMTP
    to the realm JSON is the unblocking work.
 3. **MoR selection** — TBD; keep the entitlements interface provider-neutral.

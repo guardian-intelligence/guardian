@@ -214,7 +214,7 @@ describe("invariant 2: seq-dense application", () => {
 describe("invariant 2/7: rollback", () => {
   it("a late event inside the ring rolls back, applies, and does NOT resync", async () => {
     // A resync costs a full snapshot; the ring exists so that mere
-    // lateness never pays that price (docs/netcode.md invariant 2).
+    // lateness never pays that price (src/chunkies/README.md invariant 2).
     const r = await rig();
     await r.establish();
     await r.run(RING_WARMUP_MS);

@@ -8,8 +8,7 @@
 // only what the server cannot observe; visitor identity rides the HMAC
 // correlation cookie, and receipt time, IP, UA, geo, ASN and trust tier are
 // server-derived — they have no wire fields at all. Shape follows the
-// pattern shared by Segment/PostHog/Plausible and the OTel event model;
-// rationale and storage schema: docs/analytics-storage-design.md.
+// pattern shared by Segment/PostHog/Plausible and the OTel event model.
 //
 // Structural limits are enforced declaratively by protovalidate
 // (buf.validate); the name registry, props JSON shape, and web-vital

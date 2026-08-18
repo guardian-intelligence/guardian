@@ -23,7 +23,7 @@ import (
 	"github.com/guardian-intelligence/guardian/src/services/telemetry"
 )
 
-// ticket is the admission artifact (docs/netcode.md): identity, park, and
+// ticket is the admission artifact (src/chunkies/README.md): identity, park, and
 // role in one HMAC-signed blob the QUIC hello presents. Minted only by
 // POST /session behind OIDC; checked statelessly by every hello.
 type ticket struct {

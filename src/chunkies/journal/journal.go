@@ -1,5 +1,5 @@
 // Package journal is the durable truth of every dog park: an ordered,
-// per-park event log plus periodic state snapshots (docs/netcode.md).
+// per-park event log plus periodic state snapshots (src/chunkies/README.md).
 // Restore, replay, rejoin, spectating, and time-travel debugging all read
 // the same log this package writes.
 //

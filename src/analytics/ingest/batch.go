@@ -10,8 +10,8 @@ import (
 // batcher buffers accepted rows and flushes them to ClickHouse on a size or
 // age trigger. Fresh time-ordered parts settle ~2.2x larger than merged
 // ones, so tiny per-request inserts are the one thing this pipeline must
-// never do (docs/analytics-storage-design.md); at guardian's traffic the
-// age trigger dominates and produces one part per interval.
+// never do; at guardian's traffic the age trigger dominates and produces
+// one part per interval.
 //
 // Loss semantics are best-effort by design: if ClickHouse stays unreachable
 // past the buffer cap the oldest rows drop and the drop is logged — same
