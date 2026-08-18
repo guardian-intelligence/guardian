@@ -349,7 +349,7 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 			},
 		},
 		{
-			APIPath: "kv/data/guardian/guardian-mgmt/guardian-products/promotion/github-app",
+			APIPath: "kv/data/guardian/guardian-mgmt/guardian-postflight/promotion/github-app",
 			Data: map[string]string{
 				"githubAppPrivateKey": githubAppKey,
 			},

@@ -486,43 +486,43 @@ spec:
                   }
                 }
 
-                request "write_reader_policy_guardian_products" {
+                request "write_reader_policy_guardian_postflight" {
                   operation = "update"
-                  path = "sys/policies/acl/guardian-reader-guardian-products"
+                  path = "sys/policies/acl/guardian-reader-guardian-postflight"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-products/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-products/*\" {\n  capabilities = [\"read\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-postflight/*\" {\n  capabilities = [\"read\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-postflight/*\" {\n  capabilities = [\"read\"]\n}\n"
                   }
                 }
 
-                request "write_reader_role_guardian_products" {
+                request "write_reader_role_guardian_postflight" {
                   operation = "update"
-                  path = "auth/kubernetes/role/guardian-reader-guardian-products"
+                  path = "auth/kubernetes/role/guardian-reader-guardian-postflight"
                   data = {
                     bound_service_account_names = ["secrets-reader"]
-                    bound_service_account_namespaces = ["guardian-products"]
+                    bound_service_account_namespaces = ["guardian-postflight"]
                     audience = "openbao"
-                    token_policies = ["guardian-reader-guardian-products"]
+                    token_policies = ["guardian-reader-guardian-postflight"]
                     token_ttl = "3600"
                     token_max_ttl = "3600"
                   }
                 }
 
-                request "write_writer_policy_guardian_products" {
+                request "write_writer_policy_guardian_postflight" {
                   operation = "update"
-                  path = "sys/policies/acl/guardian-writer-guardian-products"
+                  path = "sys/policies/acl/guardian-writer-guardian-postflight"
                   data = {
-                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-products/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-products/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
+                    policy = "path \"kv/data/guardian/guardian-mgmt/guardian-postflight/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n\npath \"kv/metadata/guardian/guardian-mgmt/guardian-postflight/*\" {\n  capabilities = [\"create\", \"update\"]\n}\n"
                   }
                 }
 
-                request "write_writer_role_guardian_products" {
+                request "write_writer_role_guardian_postflight" {
                   operation = "update"
-                  path = "auth/kubernetes/role/guardian-writer-guardian-products"
+                  path = "auth/kubernetes/role/guardian-writer-guardian-postflight"
                   data = {
                     bound_service_account_names = ["secrets-writer"]
-                    bound_service_account_namespaces = ["guardian-products"]
+                    bound_service_account_namespaces = ["guardian-postflight"]
                     audience = "openbao"
-                    token_policies = ["guardian-writer-guardian-products"]
+                    token_policies = ["guardian-writer-guardian-postflight"]
                     token_ttl = "600"
                     token_max_ttl = "600"
                   }
