@@ -15,7 +15,8 @@ import {
   bringTheDogIn,
   decodeCheck,
   dogPayload,
-  encodeEvent,
+  encodeEventRecord,
+  encodeTick,
   epochAdvancePayload,
   Ev,
   intentId,
@@ -651,7 +652,7 @@ describe("invariant 8: intents and their answers", () => {
     await r.run(100);
     const sent = r.harness.transport.sentFrames();
     const join = sent.find((f) => f.kind === "intent" && f.value.kind === Ev.join);
-    const id = join!.kind === "intent" ? join!.value.id : 0n;
+    const id = join!.kind === "intent" ? join!.value.intent : 0n;
     r.deliver([r.emit(Ev.join, dogPayload(0x777n), id)]);
     expect(await r.until(() => r.state.seq === r.authority.seq)).toBe(true);
     expect(r.state.present).toBe(true);
@@ -665,7 +666,7 @@ describe("invariant 8: intents and their answers", () => {
     const join = r.harness.transport
       .sentFrames()
       .find((f) => f.kind === "intent" && f.value.kind === Ev.join);
-    const id = join!.kind === "intent" ? join!.value.id : 0n;
+    const id = join!.kind === "intent" ? join!.value.intent : 0n;
     // "Already present" answering a join IS the joined state.
     r.deliver([r.authority.reject(id, Reject.present)]);
     await r.run(200);
@@ -841,7 +842,10 @@ describe("network abuse", () => {
     expect(r.harness.transport.closed).toBeGreaterThan(0);
     expect(
       r.harness.emitted.some(
-        (e) => e.code === HostEmit.teardown && e.a === BigInt(ResyncReason.streamOverflow),
+        // With the caps table shared, a declared over-cap frame is a framing
+        // violation the moment its prefix is readable — earlier than the
+        // v4-era buffer-overflow path, same teardown.
+        (e) => e.code === HostEmit.teardown && e.a === BigInt(ResyncReason.framing),
       ),
     ).toBe(true);
     expect(await r.until(() => r.harness.transport.dials > dials, 8000, 25)).toBe(true);
@@ -885,13 +889,9 @@ describe("network abuse", () => {
     const r = await rig();
     await r.establish();
     const resyncsBefore = r.state.resyncs;
-    const oversize = encodeEvent({
-      seq: r.state.seq + 1n,
-      tick: r.state.tick,
-      kind: Ev.join,
-      intent: 0n,
-      p: new Uint8Array(65),
-    });
+    const oversize = encodeTick(r.state.tick, r.state.seq + 1n, [
+      encodeEventRecord(0n, Ev.join, 0x1n, new Uint8Array(65)),
+    ]);
     r.deliver([oversize]);
     expect(await r.until(() => r.state.resyncs > resyncsBefore, 500)).toBe(true);
     const resync = r.harness.emitted.filter((e) => e.code === Emit.resyncRequested).at(-1);
@@ -1021,9 +1021,7 @@ describe("connection lifecycle", () => {
       .filter((f) => f.kind === "intent" && f.value.kind === Ev.join);
     expect(joins.length).toBeGreaterThan(0);
     const last = joins.at(-1)!;
-    expect(last.kind === "intent" && new DataView(last.value.p.buffer).getBigUint64(0, true)).toBe(
-      0x999n,
-    );
+    expect(last.kind === "intent" && last.value.actor).toBe(0x999n);
   });
 });
 

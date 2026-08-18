@@ -12,7 +12,7 @@ import type {
   Ports,
   TransportPort,
 } from "@guardian/chunkies";
-import { FrameDecoder, decodeClientFrame, type ClientFrame } from "./wire.ts";
+import { FrameDecoder, decodeClientFrame, type ClientFrame } from "./wire5.ts";
 
 /** A clock that only moves when the test says so, plus the timers hanging off it. */
 export class VirtualClock {

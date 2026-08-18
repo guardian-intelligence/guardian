@@ -188,7 +188,10 @@ impl Host for Wasm {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn abi_version() -> u32 {
-    1
+    // Generation 2: the v5 wire era. The replica pair and this session
+    // module flip together; a host holding the other generation refuses
+    // the boot rather than discovering the skew per frame.
+    2
 }
 
 #[unsafe(no_mangle)]

@@ -6,7 +6,7 @@
 //! the wasm artifacts; refreshed by the same target.
 
 use mythra_sim_park as park;
-use mythra_sim_session::wire::{self, Event, Snapshot, Verdict, Welcome};
+use mythra_sim_session::wire::{self, Snapshot, Verdict, Welcome};
 use mythra_sim_session::{Host, ROLE_SPECTATOR, Session};
 use mythra_sim_terrain::{BYTES_PER_CELL, Builder, HEADER, SWIM};
 
@@ -36,8 +36,9 @@ fn i64at(b: &[u8], at: usize) -> i64 {
 
 // ---- the park under golden state -----------------------------------------
 
-fn park_apply(kind: u16, payload: &[u8]) -> u32 {
+fn park_apply(kind: u16, actor: u64, payload: &[u8]) -> u32 {
     let mut ev = kind.to_le_bytes().to_vec();
+    ev.extend_from_slice(&actor.to_le_bytes());
     ev.extend_from_slice(payload);
     unsafe {
         std::ptr::copy_nonoverlapping(ev.as_ptr(), park::io_buf(), ev.len());
@@ -58,18 +59,13 @@ fn park_io(len: usize) -> Vec<u8> {
 fn setup_park() {
     let mut buf = vec![0u8; HEADER + 144 * BYTES_PER_CELL];
     let blob = Builder::new(&mut buf, 12, 12).finish();
-    unsafe {
-        std::ptr::copy_nonoverlapping(blob.as_ptr(), park::terrain_buf(), blob.len());
-    }
-    assert_eq!(park::sim_set_terrain(blob.len() as u32), 0);
+    assert_eq!(park::stage_content(blob), 0);
     assert_eq!(park::sim_init(3, 42, 1), 0);
-    assert_eq!(park_apply(park::EV_JOIN, &8u64.to_le_bytes()), 0);
-    assert_eq!(park_apply(park::EV_JOIN, &9u64.to_le_bytes()), 0);
-    assert_eq!(park_apply(park::EV_DAY_RESET, &4u32.to_le_bytes()), 0);
-    assert_eq!(park_apply(park::EV_CHECK_IN, &8u64.to_le_bytes()), 0);
-    let mut boost = 8u64.to_le_bytes().to_vec();
-    boost.push(1);
-    assert_eq!(park_apply(park::EV_BOOST_SET, &boost), 0);
+    assert_eq!(park_apply(park::EV_JOIN, 8, &[]), 0);
+    assert_eq!(park_apply(park::EV_JOIN, 9, &[]), 0);
+    assert_eq!(park_apply(park::EV_DAY_RESET, 0, &4u32.to_le_bytes()), 0);
+    assert_eq!(park_apply(park::EV_CHECK_IN, 8, &[]), 0);
+    assert_eq!(park_apply(park::EV_BOOST_SET, 8, &[1]), 0);
 }
 
 fn hud_golden() -> String {
@@ -227,13 +223,16 @@ fn diag_golden() -> String {
     let n = wire::encode_welcome(
         &mut frame,
         &Welcome {
+            lineage: 0,
+            generation: 0,
+            sub: 0,
             epoch: 3,
             seq: 40,
             tick: 960,
             hz: 24,
             role: 0,
-            terrain: TERRAIN_ID,
-            park: b"golden",
+            content: TERRAIN_ID,
+            chunk: b"golden",
         },
     );
     session.on_stream(toy, &frame[..n], t0);
@@ -241,11 +240,12 @@ fn diag_golden() -> String {
     let n = wire::encode_snapshot(
         &mut frame,
         &Snapshot {
+            lineage: 0,
             seq: 40,
             tick: 960,
             epoch: 3,
             wh: toy_hash(960),
-            terrain: TERRAIN_ID,
+            content: TERRAIN_ID,
             z: &960u64.to_le_bytes(),
         },
     );
@@ -265,17 +265,11 @@ fn diag_golden() -> String {
         flags = session.pump(toy, t, 8_000);
         if !events_sent && toy.tick >= 975 {
             events_sent = true;
-            for (seq, kind) in [(41i64, 3u16), (42, 8)] {
-                let n = wire::encode_event(
-                    &mut frame,
-                    &Event {
-                        seq,
-                        tick: auth(t) + (seq - 40) as u64,
-                        kind,
-                        intent: 0,
-                        p: &8u64.to_le_bytes(),
-                    },
-                );
+            for (seq, kind, p) in [(41i64, 3u16, &[][..]), (42, 8, &[1u8][..])] {
+                let mut run = [0u8; 64];
+                let rn = wire::put_record(&mut run, 0, kind, 8, p);
+                let n =
+                    wire::encode_tick(&mut frame, auth(t) + (seq - 40) as u64, seq, 1, &run[..rn]);
                 session.on_stream(toy, &frame[..n], t);
             }
         }
@@ -286,6 +280,8 @@ fn diag_golden() -> String {
             let n = wire::encode_verdict(
                 &mut frame,
                 &Verdict {
+                    sub: 0,
+                    lineage: 0,
                     tick: check.tick,
                     now: auth(minted),
                     ct_ms: check.ct_ms,

@@ -11,6 +11,7 @@ go_library(
     embedsrcs = ["fixture_park.bin"],
     importpath = "github.com/guardian-intelligence/guardian/src/services/mythrad/wum",
     visibility = ["//src/services/mythrad:__subpackages__"],
+    deps = ["//src/services/mythrad/codec"],
 )
 
 go_test(

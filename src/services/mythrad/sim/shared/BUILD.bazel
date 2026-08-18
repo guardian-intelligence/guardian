@@ -137,6 +137,7 @@ rust_library(
     edition = "2024",
     visibility = TIER_PKGS,
     deps = [
+        ":abi",
         ":core",
         ":nav",
         ":terrain",
@@ -156,6 +157,7 @@ rust_shared_library(
     edition = "2024",
     target_compatible_with = ["@platforms//cpu:wasm32"],
     deps = [
+        ":abi",
         ":core",
         ":nav",
         ":terrain",

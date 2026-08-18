@@ -820,11 +820,11 @@ function refuseAbiVersion(name: string, got: number): void {
 }
 
 function loadBlobInto(replica: ReplicaExports, blob: Uint8Array, hex: string): void {
-  if (blob.length > replica.terrain_cap()) {
+  if (blob.length > replica.content_cap()) {
     throw new Error(`blob ${hex} is ${blob.length}B, over the module cap`);
   }
-  new Uint8Array(replica.memory.buffer).set(blob, replica.terrain_buf());
-  const code = replica.sim_set_terrain(blob.length);
+  new Uint8Array(replica.memory.buffer).set(blob, replica.content_buf());
+  const code = replica.sim_content_stage(blob.length);
   if (code !== 0) throw new Error(`blob ${hex} rejected (code ${code})`);
 }
 

@@ -6,7 +6,6 @@ SIM_ROOT = ["//src/services/mythrad/sim:__pkg__"]
 SESSION_SRCS = [
     "session/src/lib.rs",
     "session/src/tests.rs",
-    "session/src/wire.rs",
 ]
 
 filegroup(
@@ -61,7 +60,10 @@ rust_library(
     crate_name = "mythra_sim_session",
     crate_root = "session/src/lib.rs",
     edition = "2024",
-    deps = [":clock"],
+    deps = [
+        ":clock",
+        ":codec",
+    ],
 )
 
 rust_test(

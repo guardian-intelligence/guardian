@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/codec"
 )
 
 // session is one attached replica: the park side of a gateway-relayed
@@ -34,7 +34,7 @@ func (s *session) send(msg []byte) {
 }
 
 func (s *session) sendReject(intentID uint64, reason uint32) {
-	s.send(wire.EncodeReject(wire.Reject{Intent: intentID, Reason: reason}))
+	s.send(codec.EncodeReject(codec.Reject{Intent: intentID, Reason: reason}))
 }
 
 func (s *session) closeSession(why string) {
@@ -48,7 +48,7 @@ func (s *session) closeSession(why string) {
 }
 
 func checkVerdict(park *authority, data []byte) ([]byte, bool) {
-	chk, err := wire.DecodeCheck(data)
+	chk, err := codec.DecodeCheck(data)
 	if err != nil {
 		return nil, false
 	}
@@ -56,17 +56,17 @@ func checkVerdict(park *authority, data []byte) ([]byte, bool) {
 	_, cw := park.mods.client.Get()
 	_, pw := park.mods.park.Get()
 	result := "unknown"
-	v := wire.Verdict{Tick: chk.Tick, Now: now, CTMS: chk.CTMS,
-		CW: wire.ModuleWord(cw), PW: wire.ModuleWord(pw)}
+	v := codec.Verdict{Sub: chk.Sub, Lineage: 0, Tick: chk.Tick, Now: now, CTMS: chk.CTMS,
+		CW: codec.ModuleWord(cw), PW: codec.ModuleWord(pw)}
 	if ok != nil {
-		v.Flags = wire.VerdictKnown
+		v.Flags = codec.VerdictKnown
 		if *ok {
-			v.Flags |= wire.VerdictOK
+			v.Flags |= codec.VerdictOK
 			result = "ok"
 		} else {
 			result = "mismatch"
 		}
 	}
 	mChecks.WithLabelValues(result).Inc()
-	return wire.EncodeVerdict(v), true
+	return codec.EncodeVerdict(v), true
 }

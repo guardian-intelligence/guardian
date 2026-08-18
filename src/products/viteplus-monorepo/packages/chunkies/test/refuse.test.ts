@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  echoPayload,
   bringTheDogIn,
   DEFAULT_RTT_MS,
   dogPayload,
@@ -52,7 +53,7 @@ describe("a repair that replays a refusable event", () => {
         if (f.kind !== "intent") continue;
         const intent = f.value;
         r.harness.clock.schedule(() => {
-          const ev = r.authority.apply(intent.kind, intent.p, intent.id);
+          const ev = r.authority.apply(intent.kind, echoPayload(intent), intent.intent);
           r.harness.clock.schedule(() => {
             r.deliver([ev]);
           }, ONE_WAY_MS);

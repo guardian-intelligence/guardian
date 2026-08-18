@@ -653,6 +653,19 @@ func HexWord(word uint32) string {
 	return hex.EncodeToString(b[:])
 }
 
+// ActorFor derives the protocol's actor id from an authenticated subject:
+// FNV-1a 64 of its bytes. Part of the wire contract, not a game rule —
+// the gateway checks every intent envelope against it, and a game's own
+// name for the result (WUM's dog id) is an alias of this value.
+func ActorFor(sub string) uint64 {
+	h := uint64(0xCBF29CE484222325)
+	for _, b := range []byte(sub) {
+		h ^= uint64(b)
+		h *= 0x00000100000001B3
+	}
+	return h
+}
+
 func RoleCode(role string) uint8 {
 	if role == "player" {
 		return RolePlayer

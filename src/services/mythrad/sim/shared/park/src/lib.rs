@@ -91,15 +91,10 @@
 //!   (0xFFFF = none); flags bit 0 = standing on a deck, bit 1 = boosting.
 #![cfg_attr(not(test), no_std)]
 
+use chunkies_abi::Simulation;
 use mythra_sim_core::det_rand;
 use mythra_sim_nav as nav;
 use mythra_sim_terrain::{BLOCK, MAX_BLOB, NONE, Node, SWIM, Terrain};
-
-#[cfg(target_arch = "wasm32")]
-#[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
-    core::arch::wasm32::unreachable()
-}
 
 pub const MAX_DOGS: usize = 2048;
 const IO_CAP: usize = 64 * 1024;
@@ -196,144 +191,126 @@ struct Park {
     anchor_ns: u64,
     n: usize,
     dogs: [Dog; MAX_DOGS],
+    // The adopted world content: a parsed view of the staged blob (a pure
+    // derivation of it, never hashed or snapshotted — terrain_schema and
+    // terrain_id above are the state), plus the pathfinding scratch.
+    terrain: Option<Terrain<'static>>,
+    scratch: nav::Scratch,
 }
 
-static mut PARK: Park = Park {
-    epoch: 0,
-    park_id: 0,
-    seed: 0,
-    tick: 0,
-    day: 0,
-    energy: 0,
-    terrain_schema: 0,
-    terrain_id: 0,
-    rate_hz: GENESIS_HZ,
-    anchor_tick: 0,
-    anchor_ns: 0,
-    n: 0,
-    dogs: [EMPTY_DOG; MAX_DOGS],
-};
-
-static mut IO: [u8; IO_CAP] = [0; IO_CAP];
-static mut TERRAIN_BLOB: [u8; MAX_BLOB] = [0; MAX_BLOB];
-static mut TERRAIN: Option<Terrain<'static>> = None;
-static mut SCRATCH: nav::Scratch = nav::Scratch::NEW;
-
-fn park() -> &'static mut Park {
-    unsafe { &mut *(&raw mut PARK) }
-}
-
-fn io() -> &'static mut [u8; IO_CAP] {
-    unsafe { &mut *(&raw mut IO) }
-}
-
-fn terrain() -> Option<Terrain<'static>> {
-    unsafe { *(&raw const TERRAIN) }
-}
-
-fn scratch() -> &'static mut nav::Scratch {
-    unsafe { &mut *(&raw mut SCRATCH) }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn abi_version() -> u32 {
-    1
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn io_buf() -> *mut u8 {
-    &raw mut IO as *mut u8
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn io_cap() -> u32 {
-    IO_CAP as u32
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn terrain_buf() -> *mut u8 {
-    &raw mut TERRAIN_BLOB as *mut u8
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn terrain_cap() -> u32 {
-    MAX_BLOB as u32
-}
-
-/// Parses and adopts the blob the host wrote into the terrain buffer.
-/// Writing that buffer invalidates any previously loaded terrain, so on a
-/// parse failure no terrain is loaded — the host must succeed here before
-/// touching any other entry point.
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_set_terrain(len: u32) -> u32 {
-    unsafe { *(&raw mut TERRAIN) = None };
-    let len = len as usize;
-    if len > MAX_BLOB {
-        return ERR_ENCODING;
-    }
-    let blob: &'static [u8] =
-        unsafe { core::slice::from_raw_parts(&raw const TERRAIN_BLOB as *const u8, len) };
-    match Terrain::parse(blob) {
-        Ok(t) => {
-            unsafe { *(&raw mut TERRAIN) = Some(t) };
-            OK
-        }
-        Err(code) => code,
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_init(seed: u64, park_id: u64, epoch: u32) -> u32 {
-    let Some(t) = terrain() else {
-        return ERR_TERRAIN;
-    };
-    let p = park();
-    *p = Park {
-        epoch,
-        park_id,
-        seed,
+impl Simulation for Park {
+    const NEW: Park = Park {
+        epoch: 0,
+        park_id: 0,
+        seed: 0,
         tick: 0,
         day: 0,
         energy: 0,
-        terrain_schema: t.schema,
-        terrain_id: t.id,
+        terrain_schema: 0,
+        terrain_id: 0,
         rate_hz: GENESIS_HZ,
         anchor_tick: 0,
         anchor_ns: 0,
         n: 0,
         dogs: [EMPTY_DOG; MAX_DOGS],
+        terrain: None,
+        scratch: nav::Scratch::NEW,
     };
-    OK
+
+    fn init(&mut self, seed: u64, park_id: u64, epoch: u32) -> u32 {
+        // Field-by-field: the struct carries the nav scratch, so a
+        // whole-value temporary would not fit any reasonable stack.
+        let Some(t) = self.terrain else {
+            return ERR_TERRAIN;
+        };
+        self.epoch = epoch;
+        self.park_id = park_id;
+        self.seed = seed;
+        self.tick = 0;
+        self.day = 0;
+        self.energy = 0;
+        self.terrain_schema = t.schema;
+        self.terrain_id = t.id;
+        self.rate_hz = GENESIS_HZ;
+        self.anchor_tick = 0;
+        self.anchor_ns = 0;
+        self.n = 0;
+        self.dogs = [EMPTY_DOG; MAX_DOGS];
+        OK
+    }
+
+    fn apply(&mut self, kind: u16, actor: u64, payload: &[u8]) -> u32 {
+        apply_event(self, kind, actor, payload)
+    }
+
+    fn step(&mut self) {
+        step_world(self)
+    }
+
+    fn hash(&self) -> u64 {
+        hash_world(self)
+    }
+
+    fn snapshot(&self, dst: &mut [u8]) -> usize {
+        snapshot_world(self, dst)
+    }
+
+    fn restore(&mut self, src: &[u8]) -> u32 {
+        restore_world(self, src)
+    }
+
+    fn tick(&self) -> u64 {
+        self.tick
+    }
+
+    fn epoch(&self) -> u32 {
+        self.epoch
+    }
+
+    fn rate(&self) -> u32 {
+        self.rate_hz
+    }
+
+    fn anchor_tick(&self) -> u64 {
+        self.anchor_tick
+    }
+
+    fn anchor_ns(&self) -> u64 {
+        self.anchor_ns
+    }
+
+    /// Parses and adopts the staged blob. Staging invalidates any
+    /// previously adopted terrain, so on a parse failure no terrain is
+    /// loaded — the host must succeed here before any other entry point.
+    fn content_stage(&mut self, blob: &'static [u8]) -> u32 {
+        self.terrain = None;
+        match Terrain::parse(blob) {
+            Ok(t) => {
+                self.terrain = Some(t);
+                OK
+            }
+            Err(code) => code,
+        }
+    }
+
+    fn content_id(&self) -> u64 {
+        self.terrain_id
+    }
+}
+
+chunkies_abi::export_simulation!(type = Park, io_cap = IO_CAP, content_cap = MAX_BLOB);
+
+/// Presentation projections, never hashed — WUM extension exports beyond
+/// the framework ABI, reached by hosts through the guarded projection
+/// door. Hand-authored, but through the macro's safe accessor: no unsafe.
+#[unsafe(no_mangle)]
+pub extern "C" fn sim_view() -> u32 {
+    with_state(|p, io| view_world(p, io))
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sim_tick() -> u64 {
-    park().tick
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_epoch() -> u32 {
-    park().epoch
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_terrain_id() -> u64 {
-    park().terrain_id
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_rate() -> u32 {
-    park().rate_hz
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_anchor_tick() -> u64 {
-    park().anchor_tick
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_anchor_ns() -> u64 {
-    park().anchor_ns
+pub extern "C" fn sim_hud(self_id: u64) -> u32 {
+    with_state(|p, io| hud_world(p, self_id, io))
 }
 
 fn node_of(t: &Terrain, d: &Dog) -> Node {
@@ -362,13 +339,15 @@ fn animation_frame(p: &Park) -> u8 {
 /// construction. Terrain identity is re-checked so a host that violated
 /// the load contract freezes movement instead of computing on the wrong
 /// world (the hash oracle will surface it).
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_step() {
-    let p = park();
-    if let Some(t) = terrain() {
+fn step_world(p: &mut Park) {
+    if let Some(t) = p.terrain {
         if t.id == p.terrain_id {
-            for i in 0..p.n {
-                step_dog(p, &t, i);
+            let (seed, tick, rate_hz, anchor_tick) = (p.seed, p.tick, p.rate_hz, p.anchor_tick);
+            let Park {
+                dogs, scratch, n, ..
+            } = p;
+            for d in &mut dogs[..*n] {
+                step_dog(seed, tick, rate_hz, anchor_tick, &t, scratch, d);
             }
         }
     }
@@ -426,17 +405,23 @@ fn patrol_target(t: &Terrain, s: &mut nav::Scratch, from: Node) -> Node {
     best
 }
 
-fn step_dog(p: &mut Park, t: &Terrain, i: usize) {
-    let (seed, tick, rate_hz) = (p.seed, p.tick, p.rate_hz);
-    let segment_tick = tick - p.anchor_tick;
-    let d = &mut p.dogs[i];
+fn step_dog(
+    seed: u64,
+    tick: u64,
+    rate_hz: u32,
+    anchor_tick: u64,
+    t: &Terrain,
+    scratch: &mut nav::Scratch,
+    d: &mut Dog,
+) {
+    let segment_tick = tick - anchor_tick;
     if d.target == NONE.0 {
         // a held boost turns idleness into the bridge patrol; an explicit
         // move order (target already set) always wins, and releasing the
         // button just stops re-arming the next leg
         if d.flags & FLAG_BOOST != 0 {
             let here = node_of(t, d);
-            let pt = patrol_target(t, scratch(), here);
+            let pt = patrol_target(t, scratch, here);
             if pt != NONE {
                 d.target = pt.0;
                 d.waypoint = NONE.0;
@@ -468,7 +453,7 @@ fn step_dog(p: &mut Park, t: &Terrain, i: usize) {
             d.target = NONE.0;
             return;
         }
-        let wp = nav::first_waypoint(t, scratch(), here, Node(d.target));
+        let wp = nav::first_waypoint(t, scratch, here, Node(d.target));
         if wp == NONE {
             d.target = NONE.0;
             return;
@@ -510,25 +495,20 @@ fn step_dog(p: &mut Park, t: &Terrain, i: usize) {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_apply(len: u32) -> u32 {
-    let len = len as usize;
-    if len > IO_CAP || len < 2 {
-        return ERR_ENCODING;
-    }
-    let (kind, body) = {
-        let buf = &io()[..len];
-        (u16::from_le_bytes([buf[0], buf[1]]), 2usize)
-    };
+/// One event against the world. The actor arrives in the SimEvent
+/// envelope (the macro's split); actor-bound kinds read it as the dog id
+/// and their payloads carry only the verb's own arguments. System events
+/// are authority-minted and must carry actor 0.
+fn apply_event(p: &mut Park, kind: u16, actor: u64, payload: &[u8]) -> u32 {
     match kind {
         EV_JOIN => {
-            let Some(id) = read_u64_exact(body, len) else {
+            if !payload.is_empty() || actor == 0 {
                 return ERR_ENCODING;
-            };
-            let Some(t) = terrain() else {
+            }
+            let id = actor;
+            let Some(t) = p.terrain else {
                 return ERR_TERRAIN;
             };
-            let p = park();
             if find(p, id).is_some() {
                 return ERR_PRESENT;
             }
@@ -553,11 +533,10 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             OK
         }
         EV_LEAVE => {
-            let Some(id) = read_u64_exact(body, len) else {
+            if !payload.is_empty() || actor == 0 {
                 return ERR_ENCODING;
-            };
-            let p = park();
-            let Some(i) = find(p, id) else {
+            }
+            let Some(i) = find(p, actor) else {
                 return ERR_ABSENT;
             };
             p.dogs.copy_within(i + 1..p.n, i);
@@ -566,12 +545,11 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             OK
         }
         EV_CHECK_IN => {
-            let Some(id) = read_u64_exact(body, len) else {
+            if !payload.is_empty() || actor == 0 {
                 return ERR_ENCODING;
-            };
-            let p = park();
+            }
             let day = p.day;
-            let Some(i) = find(p, id) else {
+            let Some(i) = find(p, actor) else {
                 return ERR_ABSENT;
             };
             if p.dogs[i].checked_in_day == day {
@@ -583,22 +561,17 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             OK
         }
         EV_MOVE_TO => {
-            if len != body + 10 {
+            if payload.len() != 2 || actor == 0 {
                 return ERR_ENCODING;
             }
-            let buf = &io()[..len];
-            let mut b8 = [0u8; 8];
-            b8.copy_from_slice(&buf[body..body + 8]);
-            let id = u64::from_le_bytes(b8);
-            let node = Node(u16::from_le_bytes([buf[body + 8], buf[body + 9]]));
-            let Some(t) = terrain() else {
+            let node = Node(u16::from_le_bytes([payload[0], payload[1]]));
+            let Some(t) = p.terrain else {
                 return ERR_TERRAIN;
             };
             if !t.exists(node) {
                 return ERR_TARGET;
             }
-            let p = park();
-            let Some(i) = find(p, id) else {
+            let Some(i) = find(p, actor) else {
                 return ERR_ABSENT;
             };
             p.dogs[i].target = node.0;
@@ -606,20 +579,14 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             OK
         }
         EV_BOOST_SET => {
-            if len != body + 9 {
+            if payload.len() != 1 || actor == 0 {
                 return ERR_ENCODING;
             }
-            let (id, on) = {
-                let buf = &io()[..len];
-                let mut b8 = [0u8; 8];
-                b8.copy_from_slice(&buf[body..body + 8]);
-                (u64::from_le_bytes(b8), buf[body + 8])
-            };
+            let on = payload[0];
             if on > 1 {
                 return ERR_ENCODING;
             }
-            let p = park();
-            let Some(i) = find(p, id) else {
+            let Some(i) = find(p, actor) else {
                 return ERR_ABSENT;
             };
             let cur = p.dogs[i].flags & FLAG_BOOST != 0;
@@ -632,17 +599,16 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             OK
         }
         EV_DAY_RESET => {
-            let Some(day) = read_u32_exact(body, len) else {
+            let Some(day) = read_u32_exact(payload, actor) else {
                 return ERR_ENCODING;
             };
-            park().day = day;
+            p.day = day;
             OK
         }
         EV_CLOCK_SKIP => {
-            let Some(to) = read_u64_exact(body, len) else {
+            let Some(to) = read_u64_exact(payload, actor) else {
                 return ERR_ENCODING;
             };
-            let p = park();
             if to <= p.tick {
                 return ERR_TICK;
             }
@@ -650,13 +616,12 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             OK
         }
         EV_RATE_SET => {
-            let Some(hz) = read_u32_exact(body, len) else {
+            let Some(hz) = read_u32_exact(payload, actor) else {
                 return ERR_ENCODING;
             };
             if !(MIN_HZ..=MAX_HZ).contains(&hz) {
                 return ERR_ENCODING;
             }
-            let p = park();
             if hz == p.rate_hz {
                 return ERR_NOOP;
             }
@@ -671,14 +636,10 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             OK
         }
         EV_EPOCH_ADVANCE => {
-            if len != body + 12 {
+            if payload.len() != 12 || actor != 0 {
                 return ERR_ENCODING;
             }
-            let epoch = {
-                let buf = &io()[..len];
-                u32::from_le_bytes([buf[body], buf[body + 1], buf[body + 2], buf[body + 3]])
-            };
-            let p = park();
+            let epoch = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
             if epoch <= p.epoch {
                 return ERR_EPOCH;
             }
@@ -686,28 +647,26 @@ pub extern "C" fn sim_apply(len: u32) -> u32 {
             OK
         }
         EV_TERRAIN_SET => {
-            if len != body + 12 {
+            if payload.len() != 12 || actor != 0 {
                 return ERR_ENCODING;
             }
             let (schema, tid) = {
-                let buf = &io()[..len];
                 let mut b8 = [0u8; 8];
-                b8.copy_from_slice(&buf[body + 4..body + 12]);
+                b8.copy_from_slice(&payload[4..12]);
                 (
-                    u32::from_le_bytes([buf[body], buf[body + 1], buf[body + 2], buf[body + 3]]),
+                    u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]),
                     u64::from_le_bytes(b8),
                 )
             };
             // The host fetches and loads the blob before feeding the
             // event (the same choreography as module epochs); adopting an
             // identity the loaded blob doesn't carry would fork the world.
-            let Some(t) = terrain() else {
+            let Some(t) = p.terrain else {
                 return ERR_TERRAIN;
             };
             if t.schema != schema || t.id != tid {
                 return ERR_TERRAIN;
             }
-            let p = park();
             p.terrain_schema = schema;
             p.terrain_id = tid;
             for i in 0..p.n {
@@ -755,23 +714,23 @@ fn spawn_cell(t: &Terrain, seed: u64, tick: u64, id: u64) -> Node {
     t.nearest_ground(t.idx(t.w as i32 / 2, t.h as i32 / 2))
 }
 
-fn read_u64_exact(at: usize, len: usize) -> Option<u64> {
-    if len != at + 8 {
+// System-event scalar payloads: exact length, and authority-minted only
+// (actor 0) — a client cannot smuggle a system verb through the envelope.
+fn read_u64_exact(payload: &[u8], actor: u64) -> Option<u64> {
+    if payload.len() != 8 || actor != 0 {
         return None;
     }
-    let buf = &io()[..len];
     let mut b = [0u8; 8];
-    b.copy_from_slice(&buf[at..at + 8]);
+    b.copy_from_slice(payload);
     Some(u64::from_le_bytes(b))
 }
 
-fn read_u32_exact(at: usize, len: usize) -> Option<u32> {
-    if len != at + 4 {
+fn read_u32_exact(payload: &[u8], actor: u64) -> Option<u32> {
+    if payload.len() != 4 || actor != 0 {
         return None;
     }
-    let buf = &io()[..len];
     let mut b = [0u8; 4];
-    b.copy_from_slice(&buf[at..at + 4]);
+    b.copy_from_slice(payload);
     Some(u32::from_le_bytes(b))
 }
 
@@ -788,12 +747,12 @@ fn insert(p: &mut Park, d: Dog) {
     p.n += 1;
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_snapshot() -> u32 {
-    let p = park();
+fn snapshot_world(p: &Park, buf: &mut [u8]) -> usize {
     let n = p.n;
     let total = HEADER3 + n * DOG_REC;
-    let buf = io();
+    if buf.len() < total {
+        return 0;
+    }
     buf[0..4].copy_from_slice(&MAGIC3.to_le_bytes());
     buf[4..8].copy_from_slice(&p.epoch.to_le_bytes());
     buf[8..16].copy_from_slice(&p.park_id.to_le_bytes());
@@ -820,19 +779,17 @@ pub extern "C" fn sim_snapshot() -> u32 {
         buf[at + 29] = 0;
         at += DOG_REC;
     }
-    total as u32
+    total
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_restore(len: u32) -> u32 {
-    let len = len as usize;
-    if len < HEADER || len > IO_CAP {
+fn restore_world(p: &mut Park, buf: &[u8]) -> u32 {
+    let len = buf.len();
+    if len < HEADER {
         return 1;
     }
-    let Some(t) = terrain() else {
+    let Some(t) = p.terrain else {
         return 4;
     };
-    let buf = io();
     // MYP2 is the stored pre-rate era: same layout, no rate segment, and
     // its worlds ran at the genesis rate with the genesis anchor.
     let header = match u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) {
@@ -912,7 +869,6 @@ pub extern "C" fn sim_restore(len: u32) -> u32 {
         *slot = d;
         at += DOG_REC;
     }
-    let p = park();
     p.epoch = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
     b8.copy_from_slice(&buf[8..16]);
     p.park_id = u64::from_le_bytes(b8);
@@ -951,9 +907,7 @@ pub extern "C" fn sim_restore(len: u32) -> u32 {
 /// the world, is a comparison bug — no state difference and no timing
 /// difference can produce it, because the tick is inside the hash and two
 /// replicas at different ticks disagree about every check, not some.
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_hash() -> u64 {
-    let p = park();
+fn hash_world(p: &Park) -> u64 {
     let mut h = Fnv::new();
     h.u32(MAGIC);
     h.u32(p.epoch);
@@ -991,12 +945,9 @@ pub extern "C" fn sim_hash() -> u64 {
 /// swimming, bit2 moving, bit3 boosting), facing u8 (octant, 0=E
 /// clockwise), anim u8, pad u8. Facing and animation are derived here so
 /// every renderer shows the same dog doing the same thing.
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_view() -> u32 {
-    let p = park();
-    let t = terrain();
+fn view_world(p: &Park, buf: &mut [u8]) -> u32 {
+    let t = p.terrain;
     let n = p.n;
-    let buf = io();
     buf[0..4].copy_from_slice(&(n as u32).to_le_bytes());
     let mut at = 4;
     for d in &p.dogs[..n] {
@@ -1043,11 +994,8 @@ pub extern "C" fn sim_view() -> u32 {
 /// them. 28 bytes to io — version u16 (=1), present u8, checked_in_today
 /// u8, day u32, dog_count u32, park_energy u64, self_energy u32, self_flags
 /// u8 (bit 1 = boosting), pad [3]u8.
-#[unsafe(no_mangle)]
-pub extern "C" fn sim_hud(self_id: u64) -> u32 {
-    let p = park();
+fn hud_world(p: &Park, self_id: u64, buf: &mut [u8]) -> u32 {
     let me = find(p, self_id).map(|i| p.dogs[i]);
-    let buf = io();
     buf[0..2].copy_from_slice(&1u16.to_le_bytes());
     buf[2] = me.is_some() as u8;
     buf[3] = me.is_some_and(|d| d.checked_in_day == p.day) as u8;
@@ -1136,10 +1084,18 @@ mod tests {
         b.finish().to_vec()
     }
 
+    // The macro's statics, reached directly: these tests exercise the
+    // exact single-instance shape the wasm module has.
+    fn park() -> &'static mut Park {
+        unsafe { &mut *(&raw mut __CHUNKIES_STATE) }
+    }
+
+    fn io() -> &'static mut [u8; IO_CAP] {
+        unsafe { &mut *(&raw mut __CHUNKIES_IO) }
+    }
+
     fn load_terrain(blob: &[u8]) {
-        let buf = unsafe { &mut *(&raw mut TERRAIN_BLOB) };
-        buf[..blob.len()].copy_from_slice(blob);
-        assert_eq!(sim_set_terrain(blob.len() as u32), OK);
+        assert_eq!(stage_content(blob), OK);
     }
 
     fn setup(seed: u64) -> MutexGuard<'static, ()> {
@@ -1149,27 +1105,31 @@ mod tests {
         g
     }
 
-    fn ev(kind: u16, payload: &[u8]) -> u32 {
+    /// One event through the real sim_apply entry: SimEvent = kind u16 |
+    /// actor u64 | payload.
+    fn ev_as(kind: u16, actor: u64, payload: &[u8]) -> u32 {
         let buf = io();
         buf[0..2].copy_from_slice(&kind.to_le_bytes());
-        buf[2..2 + payload.len()].copy_from_slice(payload);
-        sim_apply((2 + payload.len()) as u32)
+        buf[2..10].copy_from_slice(&actor.to_le_bytes());
+        buf[10..10 + payload.len()].copy_from_slice(payload);
+        sim_apply((10 + payload.len()) as u32)
+    }
+
+    /// A system event: authority-minted, actor 0.
+    fn ev(kind: u16, payload: &[u8]) -> u32 {
+        ev_as(kind, 0, payload)
     }
 
     fn ev_id(kind: u16, id: u64) -> u32 {
-        ev(kind, &id.to_le_bytes())
+        ev_as(kind, id, &[])
     }
 
     fn ev_move(id: u64, node: u16) -> u32 {
-        let mut p = id.to_le_bytes().to_vec();
-        p.extend_from_slice(&node.to_le_bytes());
-        ev(EV_MOVE_TO, &p)
+        ev_as(EV_MOVE_TO, id, &node.to_le_bytes())
     }
 
     fn ev_boost(id: u64, on: u8) -> u32 {
-        let mut p = id.to_le_bytes().to_vec();
-        p.push(on);
-        ev(EV_BOOST_SET, &p)
+        ev_as(EV_BOOST_SET, id, &[on])
     }
 
     fn snapshot_vec() -> Vec<u8> {
@@ -1841,7 +1801,7 @@ mod tests {
         assert_ne!(t2.class(t2.idx(d.x >> 16, d.y >> 16)), BLOCK);
         assert!(t2.in_bounds(d.x >> 16, d.y >> 16));
         assert_eq!(d.target, NONE.0);
-        assert_eq!(sim_terrain_id(), blob_id(&blob2));
+        assert_eq!(sim_content_id(), blob_id(&blob2));
         // hash reflects the new world identity
         let h = sim_hash();
         assert_ne!(h, 0);
@@ -1896,7 +1856,7 @@ mod tests {
     #[test]
     fn init_and_apply_require_terrain() {
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        unsafe { *(&raw mut TERRAIN) = None };
+        park().terrain = None;
         assert_eq!(sim_init(1, 1, 1), ERR_TERRAIN);
         load_terrain(&park_blob());
         assert_eq!(sim_init(1, 1, 1), OK);

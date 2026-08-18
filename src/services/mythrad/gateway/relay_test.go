@@ -22,7 +22,7 @@ import (
 	webtransport "github.com/quic-go/webtransport-go"
 
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/parkproxy"
-	"github.com/guardian-intelligence/guardian/src/services/mythrad/wire"
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/codec"
 	"github.com/guardian-intelligence/guardian/src/services/mythrad/wum"
 )
 
@@ -179,7 +179,7 @@ func (h *relayHarness) hello(t *testing.T, sess *webtransport.Session, sub, role
 		t.Fatal(err)
 	}
 	raw := h.tickets.mint(ticket{Sub: sub, Park: h.chunk, Role: role, Exp: time.Now().Add(time.Minute).Unix()})
-	frame := wire.EncodeHello(wire.Hello{Proto: wire.Proto, SinceSeq: -1, Ticket: raw})
+	frame := codec.EncodeHello(codec.Hello{Proto: codec.Proto, SinceSeq: -1, Ticket: raw})
 	if _, err := stream.Write(frame); err != nil {
 		t.Fatal(err)
 	}
@@ -187,10 +187,7 @@ func (h *relayHarness) hello(t *testing.T, sess *webtransport.Session, sub, role
 }
 
 func moveIntent(sub string, id uint64, node uint16) []byte {
-	payload := make([]byte, 10)
-	binary.LittleEndian.PutUint64(payload, wum.DogIDFor(sub))
-	binary.LittleEndian.PutUint16(payload[8:], node)
-	return wire.EncodeIntent(wire.Intent{ID: id, Kind: 4, Payload: payload})
+	return codec.EncodeIntent(id, 4, wum.DogIDFor(sub), binary.LittleEndian.AppendUint16(nil, node))
 }
 
 func TestRelaySplicesIntentBytesVerbatim(t *testing.T) {
@@ -243,10 +240,10 @@ func TestRelayDropsJunkDatagrams(t *testing.T) {
 	sess := h.dial(t)
 	h.hello(t, sess, "dg-sub", "player")
 
-	junkShort := make([]byte, wire.CheckLen-1)
-	junkKind := make([]byte, wire.CheckLen)
+	junkShort := make([]byte, codec.CheckLen-1)
+	junkKind := make([]byte, codec.CheckLen)
 	junkKind[0] = 0x7f
-	good := wire.EncodeCheck(wire.Check{Tick: 9, WH: 1, CTMS: 5})
+	good := codec.EncodeCheck(codec.Check{Tick: 9, WH: 1, CTMS: 5})
 	for _, dg := range [][]byte{junkShort, junkKind, good} {
 		if err := sess.SendDatagram(dg); err != nil {
 			t.Fatal(err)
@@ -269,7 +266,7 @@ func TestRelayDropsUnknownKindsAndLivesOn(t *testing.T) {
 	sess := h.dial(t)
 	stream := h.hello(t, sess, "kind-sub", "player")
 
-	if _, err := stream.Write(wire.EncodeFrame(0x33, []byte("mystery"))); err != nil {
+	if _, err := stream.Write(codec.EncodeFrame(0x33, []byte("mystery"))); err != nil {
 		t.Fatal(err)
 	}
 	intent := moveIntent("kind-sub", 11, 3)
@@ -292,15 +289,15 @@ func TestRelayRejectsSpectatorIntents(t *testing.T) {
 	if _, err := stream.Write(moveIntent("watcher", 21, 9)); err != nil {
 		t.Fatal(err)
 	}
-	frames := wire.NewReader(stream)
+	frames := codec.NewReader(stream)
 	kind, payload, err := frames.Next()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != wire.KindReject {
+	if kind != codec.KindReject {
 		t.Fatalf("kind = %d, want reject", kind)
 	}
-	rej, err := wire.DecodeReject(payload)
+	rej, err := codec.DecodeReject(payload)
 	if err != nil || rej.Intent != 21 || rej.Reason != wum.RejectReadOnly {
 		t.Fatalf("reject = %+v (err %v), want intent 21 reason read_only", rej, err)
 	}
@@ -318,7 +315,7 @@ func TestRelayRoutesChunksAddedAtRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := h.tickets.mint(ticket{Sub: "late-sub", Park: "park-late", Role: "player", Exp: time.Now().Add(time.Minute).Unix()})
-	if _, err := stream.Write(wire.EncodeHello(wire.Hello{Proto: wire.Proto, SinceSeq: -1, Ticket: raw})); err != nil {
+	if _, err := stream.Write(codec.EncodeHello(codec.Hello{Proto: codec.Proto, SinceSeq: -1, Ticket: raw})); err != nil {
 		t.Fatal(err)
 	}
 	if !waitFor(t, 5*time.Second, func() bool {

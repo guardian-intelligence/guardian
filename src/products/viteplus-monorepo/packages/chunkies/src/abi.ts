@@ -25,7 +25,12 @@
  * re-typing must, so a mismatched pair refuses to boot instead of
  * throwing mid-frame.
  */
-export const ABI_VERSION = 1;
+// Generation 2: the v5 wire era. The replica generalizes terrain to
+// content (a game may opt out entirely with content_cap() === 0), and
+// sim_apply consumes the SimEvent envelope (kind u16 | actor u64 |
+// payload). Both modules flip together; a host holding the other
+// generation refuses the boot rather than discovering the skew per frame.
+export const ABI_VERSION = 2;
 
 /** The replica module's framework exports, as the host uses them. */
 export interface ReplicaExports {
@@ -33,10 +38,10 @@ export interface ReplicaExports {
   abi_version(): number;
   io_buf(): number;
   io_cap(): number;
-  terrain_buf(): number;
-  terrain_cap(): number;
-  /** Adopts the blob already written into `terrain_buf`. 0 on success. */
-  sim_set_terrain(len: number): number;
+  content_buf(): number;
+  content_cap(): number;
+  /** Adopts the blob already written into `content_buf`. 0 on success. */
+  sim_content_stage(len: number): number;
   /**
    * Creates a fresh world on the loaded blob. The host never calls
    * this — a client's world only ever arrives as a snapshot — but it is
@@ -44,7 +49,7 @@ export interface ReplicaExports {
    */
   sim_init(seed: bigint, worldId: bigint, epoch: number): number;
   /** The id of the blob currently loaded, as the wire and the blob route spell it. */
-  sim_terrain_id(): bigint;
+  sim_content_id(): bigint;
   /** Applies the event bytes in `io_buf` (leading kind u16). 0 on success. */
   sim_apply(len: number): number;
   sim_step(): void;
@@ -181,11 +186,11 @@ export const REPLICA_EXPORTS = [
   "abi_version",
   "io_buf",
   "io_cap",
-  "terrain_buf",
-  "terrain_cap",
-  "sim_set_terrain",
+  "content_buf",
+  "content_cap",
+  "sim_content_stage",
   "sim_init",
-  "sim_terrain_id",
+  "sim_content_id",
   "sim_apply",
   "sim_step",
   "sim_snapshot",

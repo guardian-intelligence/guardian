@@ -16,7 +16,7 @@ go_library(
         "//src/services/mythrad/journal",
         "//src/services/mythrad/mount",
         "//src/services/mythrad/parkproxy",
-        "//src/services/mythrad/wire",
+        "//src/services/mythrad/codec",
         "//src/services/mythrad/wum",
         "//src/services/telemetry",
         "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
@@ -43,7 +43,7 @@ go_test(
     deps = [
         "//src/services/mythrad/journal",
         "//src/services/mythrad/mount",
-        "//src/services/mythrad/wire",
+        "//src/services/mythrad/codec",
         "//src/services/mythrad/wum",
         "//src/services/postflight/controlplane/pgtest",
         "@com_github_jackc_pgx_v5//pgxpool:go_default_library",

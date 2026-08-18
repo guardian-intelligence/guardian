@@ -5,16 +5,17 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  Frame5,
   FrameDecoder,
-  ServerFrameKind,
-  WireError,
+  Role,
+  Wire5Error,
   decodeServerFrame,
-  encodeEvent,
+  encodeEventRecord,
   encodeReject,
   encodeSnapshot,
+  encodeTick,
   encodeWelcome,
   varintLen,
-  Role,
 } from "@guardian/chunkies-testkit";
 
 function concat(parts: Uint8Array[]): Uint8Array {
@@ -28,40 +29,40 @@ function concat(parts: Uint8Array[]): Uint8Array {
 }
 
 const welcome = encodeWelcome({
+  lineage: 0,
+  generation: 0,
+  sub: 0,
   epoch: 3,
   seq: 10n,
   tick: 240n,
   hz: 24,
   role: Role.player,
-  terrain: 0xdeadbeefn,
-  park: "park-mythra",
+  content: 0xdeadbeefn,
+  chunk: "park-mythra",
 });
 const events = [1, 2, 3].map((n) =>
-  encodeEvent({
-    seq: BigInt(10 + n),
-    tick: BigInt(240 + n),
-    kind: 4,
-    intent: BigInt(n),
-    p: new Uint8Array(n).fill(n),
-  }),
+  encodeTick(BigInt(240 + n), BigInt(10 + n), [
+    encodeEventRecord(BigInt(n), 4, 0x9601n, new Uint8Array(n).fill(n)),
+  ]),
 );
 // Long enough to force a two-byte length prefix and to span several reads.
 const snapshot = encodeSnapshot({
+  lineage: 0,
   seq: 20n,
   tick: 300n,
   epoch: 3,
   wh: 1n,
-  terrain: 0xdeadbeefn,
+  content: 0xdeadbeefn,
   z: new Uint8Array(5000).map((_, i) => i & 0xff),
 });
 const stream = concat([welcome, ...events, snapshot, encodeReject({ intent: 9n, reason: 2 })]);
 const expectedKinds = [
-  ServerFrameKind.welcome,
-  ServerFrameKind.event,
-  ServerFrameKind.event,
-  ServerFrameKind.event,
-  ServerFrameKind.snapshot,
-  ServerFrameKind.reject,
+  Frame5.welcome,
+  Frame5.tick,
+  Frame5.tick,
+  Frame5.tick,
+  Frame5.snapshot,
+  Frame5.reject,
 ];
 
 describe("FrameDecoder", () => {
@@ -70,7 +71,7 @@ describe("FrameDecoder", () => {
     expect(frames.map((f) => f.kind)).toEqual(expectedKinds);
     expect(decodeServerFrame(frames[0]!.kind, frames[0]!.body)).toMatchObject({
       kind: "welcome",
-      value: { park: "park-mythra" },
+      value: { chunk: "park-mythra" },
     });
   });
 
@@ -100,7 +101,7 @@ describe("FrameDecoder", () => {
     expect(d.buffered).toBe(1);
     const frames = d.push(snapshot.subarray(1));
     expect(frames).toHaveLength(1);
-    expect(frames[0]!.kind).toBe(ServerFrameKind.snapshot);
+    expect(frames[0]!.kind).toBe(Frame5.snapshot);
     expect(decodeServerFrame(frames[0]!.kind, frames[0]!.body)).toMatchObject({
       kind: "snapshot",
       value: { seq: 20n, tick: 300n },
@@ -126,7 +127,7 @@ describe("FrameDecoder", () => {
     const got = [];
     for (const byte of stream) got.push(...d.push(Uint8Array.of(byte)));
     expect(got.map((f) => f.kind)).toEqual(expectedKinds);
-    expect(got[4]!.body.length).toBe(5040);
+    expect(got[4]!.body.length).toBe(5044);
   });
 
   it("holds a partial frame and completes it on the next read", () => {
@@ -146,7 +147,7 @@ describe("FrameDecoder", () => {
     scratch.fill(0);
     const frames = d.push(welcome.subarray(4));
     expect(frames).toHaveLength(1);
-    expect(frames[0]!.kind).toBe(ServerFrameKind.welcome);
+    expect(frames[0]!.kind).toBe(Frame5.welcome);
   });
 
   it("hands back frame bodies that outlive later reads", () => {
@@ -181,11 +182,12 @@ describe("FrameDecoder", () => {
     const worstCase = 40 + ioCap + Math.ceil(ioCap / 65535) * 5 + 16;
     const d = new FrameDecoder();
     const frame = encodeSnapshot({
+      lineage: 0,
       seq: 1n,
       tick: 1n,
       epoch: 1,
       wh: 1n,
-      terrain: 1n,
+      content: 1n,
       z: new Uint8Array(ioCap),
     });
     expect(frame.length).toBeLessThan(worstCase);
@@ -193,7 +195,7 @@ describe("FrameDecoder", () => {
   });
 
   it("rejects a zero-length frame", () => {
-    expect(() => new FrameDecoder().push(Uint8Array.of(0x00))).toThrow(WireError);
+    expect(() => new FrameDecoder().push(Uint8Array.of(0x00))).toThrow(Wire5Error);
   });
 
   it("drops buffered bytes on reset, as a redial must", () => {

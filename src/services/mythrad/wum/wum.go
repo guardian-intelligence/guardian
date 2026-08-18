@@ -8,13 +8,15 @@ package wum
 import (
 	"encoding/binary"
 	_ "embed"
-	"hash/fnv"
 	"strconv"
+
+	"github.com/guardian-intelligence/guardian/src/services/mythrad/codec"
 )
 
-// Event kinds, as the park module numbers them (docs/netcode.md). Kinds
-// whose payload begins with the actor's dog id are authorization-checked
-// at ingress.
+// Event kinds, as the park module numbers them (docs/netcode.md). The
+// actor rides the SimEvent envelope; these numbers predate the framework
+// kind-range convention (0x0100+ for game kinds) and are grandfathered —
+// the journal's history is written in them.
 const (
 	EvJoin         = 1
 	EvLeave        = 2
@@ -41,22 +43,32 @@ const (
 //go:embed fixture_park.bin
 var FixtureTerrain []byte
 
-// DogIDFor derives the actor's dog id: the binding between OIDC subject
-// and sim entity. Sessions may only submit intents about their own dog.
+// DogIDFor is WUM's name for the protocol's actor id: the binding between
+// OIDC subject and sim entity. Sessions may only act as their own dog,
+// which the gateway enforces game-blind against the intent envelope.
 func DogIDFor(sub string) uint64 {
-	f := fnv.New64a()
-	f.Write([]byte(sub))
-	return f.Sum64()
+	return codec.ActorFor(sub)
 }
 
-// IntentBoundToActor reports whether the payload's leading dog id matches
-// the session's own dog for kinds that carry one.
-func IntentBoundToActor(kind uint16, payload []byte, dogID uint64) bool {
+// EventActor resolves a journal event to its SimEvent form across the two
+// payload eras. Rows written before the v5 flag day carried the dog id as
+// a payload prefix on actor kinds; rows written after carry the v5
+// payload and name the subject in the actor column. The eras are
+// distinguished by payload length, which the two encodings never share
+// for any kind. This shim dies with the Postgres journal.
+func EventActor(kind uint16, actor string, payload []byte) (uint64, []byte) {
+	oldLen := map[uint16]int{EvJoin: 8, EvLeave: 8, EvCheckIn: 8, EvMoveTo: 10, EvBoostSet: 9}
 	switch kind {
 	case EvJoin, EvLeave, EvCheckIn, EvMoveTo, EvBoostSet:
-		return len(payload) >= 8 && binary.LittleEndian.Uint64(payload) == dogID
+		if len(payload) == oldLen[kind] {
+			return binary.LittleEndian.Uint64(payload[:8]), payload[8:]
+		}
+		if actor == "" || actor == "system" {
+			return 0, payload
+		}
+		return DogIDFor(actor), payload
 	default:
-		return false // system kinds never arrive from sessions
+		return 0, payload
 	}
 }
 
