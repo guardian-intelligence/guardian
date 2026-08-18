@@ -9,7 +9,7 @@ metadata:
   name: mythra-assets
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: mythrad
+    app.kubernetes.io/name: chunkies
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: mythra
     guardian.dev/stage: prod

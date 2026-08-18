@@ -51,13 +51,6 @@ go_library(
 )
 
 go_binary(
-    name = "mythrad",
-    embed = [":mythrad_lib"],
-    pure = "on",
-    visibility = ["//visibility:public"],
-)
-
-go_binary(
     name = "chunkies-gateway",
     embed = [":mythrad_lib"],
     pure = "on",
@@ -91,49 +84,6 @@ go_test(
         "//src/services/postflight/controlplane/pgtest",
         "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
     ],
-)
-
-pkg_tar(
-    name = "mythrad_layer",
-    files = {
-        ":mythrad": "app/mythrad",
-    },
-    modes = {
-        "app/mythrad": "0755",
-    },
-)
-
-oci_image(
-    name = "image",
-    annotations = {
-        "org.opencontainers.image.description": "Wake Up Mythra game service: journaled deterministic simulation over WebTransport",
-        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
-        "org.opencontainers.image.title": "guardian-mythrad",
-    },
-    architecture = "amd64",
-    os = "linux",
-    entrypoint = ["/app/mythrad"],
-    exposed_ports = [
-        "4433/udp",
-        "9090/tcp",
-    ],
-    tars = [":mythrad_layer"],
-    visibility = ["//visibility:public"],
-)
-
-oci_load(
-    name = "load",
-    image = ":image",
-    repo_tags = ["guardian/mythrad:dev"],
-)
-
-# Pushed by CI (.github/workflows/images.yml) on merges to main.
-oci_push(
-    name = "push",
-    image = ":image",
-    remote_tags = ["edge"],
-    repository = "ghcr.io/guardian-intelligence/mythrad",
-    visibility = ["//visibility:public"],
 )
 
 pkg_tar(
