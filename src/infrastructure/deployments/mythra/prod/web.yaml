@@ -54,7 +54,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web
-          image: ghcr.io/guardian-intelligence/wake-up-mythra-web:edge@sha256:7dceb5d17474682614b93f794ab35d7386c647bc638669cf0d6d345b2c987209 # {"$imagepolicy": "guardian-imageops:wake-up-mythra-web"}
+          image: ghcr.io/guardian-intelligence/wake-up-mythra-web:edge@sha256:7445221b47867b726883a25be0b2c00ee016827af9e9894104d79ca9a058c579 # {"$imagepolicy": "guardian-imageops:wake-up-mythra-web"}
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -73,7 +73,7 @@ spec:
             # onto every event as the release, so any event names the exact
             # deployment that served it.
             - name: GUARDIAN_IMAGE
-              value: ghcr.io/guardian-intelligence/wake-up-mythra-web:edge@sha256:7dceb5d17474682614b93f794ab35d7386c647bc638669cf0d6d345b2c987209 # {"$imagepolicy": "guardian-imageops:wake-up-mythra-web"}
+              value: ghcr.io/guardian-intelligence/wake-up-mythra-web:edge@sha256:7445221b47867b726883a25be0b2c00ee016827af9e9894104d79ca9a058c579 # {"$imagepolicy": "guardian-imageops:wake-up-mythra-web"}
           readinessProbe:
             httpGet:
               path: /healthz
