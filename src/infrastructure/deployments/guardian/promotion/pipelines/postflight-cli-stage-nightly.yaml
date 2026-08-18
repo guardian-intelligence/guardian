@@ -6,7 +6,7 @@ apiVersion: kargo.akuity.io/v1alpha1
 kind: Stage
 metadata:
   name: postflight-cli-nightly
-  namespace: guardian-products
+  namespace: guardian-postflight
   annotations:
     kustomize.toolkit.fluxcd.io/substitute: disabled
 spec:

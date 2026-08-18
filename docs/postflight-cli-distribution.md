@@ -171,7 +171,7 @@ artifact it pins.
 **nightly** is automatic but not immediate. Kargo's own auto-promotion fires
 the moment Freight is discovered, which would make the word "nightly" a lie,
 so the `postflight-cli-nightly` Stage carries no promotion policy and a
-CronJob in `guardian-products` creates the Promotion CR once a day instead.
+CronJob in `guardian-postflight` creates the Promotion CR once a day instead.
 Promotion itself stays entirely Kargo's: the job composes the Stage's
 promotion template inline (Kargo's webhook does not copy template steps into
 directly-created Promotions) and the controller pushes the pin-bump commit

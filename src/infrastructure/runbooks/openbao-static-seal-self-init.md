@@ -198,7 +198,7 @@ Almost every secret change is the routine path. Reinit is rare.
   yet.
 
 The scoped namespaces that already exist (no reinit needed to write into them):
-`external-dns`, `guardian-products`, `guardian-imageops`,
+`external-dns`, `guardian-postflight`, `guardian-imageops`,
 `guardian-analytics`, `postflight-runner`, `tenant-root`, `tenant-guardian`,
 and `tenant-guardian-prod`. The `operator/` subtree is the
 exception: custody reference material the importer writes but no standing

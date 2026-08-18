@@ -4,7 +4,7 @@
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Project
 metadata:
-  name: guardian-products
+  name: guardian-postflight
 ---
 # The postflight CLI artifact: binaries-in-an-OCI-image, not a runnable
 # container. Its stages advance channel pins rather than cluster manifests;
@@ -14,7 +14,7 @@ apiVersion: kargo.akuity.io/v1alpha1
 kind: Warehouse
 metadata:
   name: postflight-cli
-  namespace: guardian-products
+  namespace: guardian-postflight
 spec:
   interval: 1m0s
   subscriptions:

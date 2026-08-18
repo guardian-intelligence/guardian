@@ -5,7 +5,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: guardian-products
+  name: guardian-postflight
   labels:
     kargo.akuity.io/project: "true"
     app.kubernetes.io/part-of: guardian

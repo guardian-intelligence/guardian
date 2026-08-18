@@ -120,7 +120,7 @@ func TestImportPlan(t *testing.T) {
 	if admins.Data["platform-admin"] != "admin-pass" || admins.Data["platform-agent"] != "agent-pass" {
 		t.Fatalf("platform-admins data = %#v", admins.Data)
 	}
-	productsPromotion, ok := byPath["kv/data/guardian/guardian-mgmt/guardian-products/promotion/github-app"]
+	productsPromotion, ok := byPath["kv/data/guardian/guardian-mgmt/guardian-postflight/promotion/github-app"]
 	if !ok {
 		t.Fatal("products promotion write missing")
 	}

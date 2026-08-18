@@ -15,13 +15,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: cli-nightly-promoter
-  namespace: guardian-products
+  namespace: guardian-postflight
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: cli-nightly-promoter
-  namespace: guardian-products
+  namespace: guardian-postflight
 rules:
   - apiGroups: ["kargo.akuity.io"]
     resources: ["freights"]
@@ -39,7 +39,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: cli-nightly-promoter
-  namespace: guardian-products
+  namespace: guardian-postflight
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -47,13 +47,13 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: cli-nightly-promoter
-    namespace: guardian-products
+    namespace: guardian-postflight
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cli-nightly-promoter
-  namespace: guardian-products
+  namespace: guardian-postflight
   annotations:
     # The script's shell variables must reach the pod verbatim, not be
     # blanked by Flux's envsubst pass.
@@ -63,7 +63,7 @@ data:
     #!/bin/bash
     set -u
     VMINSERT=http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/import/prometheus
-    NS=guardian-products
+    NS=guardian-postflight
     STAGE=postflight-cli-nightly
     WAREHOUSE=postflight-cli
     # A Freight qualifies once it has existed this long; the deep-test verdict
@@ -172,7 +172,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: cli-nightly-promoter
-  namespace: guardian-products
+  namespace: guardian-postflight
   labels:
     app.kubernetes.io/name: cli-nightly-promoter
     app.kubernetes.io/part-of: guardian
@@ -228,7 +228,7 @@ apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
   name: cli-nightly-promoter
-  namespace: guardian-products
+  namespace: guardian-postflight
   labels:
     app.kubernetes.io/name: cli-nightly-promoter
     app.kubernetes.io/part-of: guardian
@@ -280,7 +280,7 @@ spec:
   ingress:
     - fromEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: guardian-products
+            k8s:io.kubernetes.pod.namespace: guardian-postflight
             k8s:app.kubernetes.io/name: cli-nightly-promoter
       toPorts:
         - ports:
@@ -291,7 +291,7 @@ apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMRule
 metadata:
   name: cli-nightly-promoter
-  namespace: guardian-products
+  namespace: guardian-postflight
   labels:
     app.kubernetes.io/name: cli-nightly-promoter
     app.kubernetes.io/part-of: guardian
@@ -309,7 +309,7 @@ spec:
           expr: >-
             absent_over_time(guardian_cli_nightly_promoter_heartbeat[2h])
             and on() (time() - max(kube_cronjob_status_last_schedule_time{
-              namespace="guardian-products", cronjob="cli-nightly-promoter"}) > 1800)
+              namespace="guardian-postflight", cronjob="cli-nightly-promoter"}) > 1800)
           labels:
             severity: warning
             guardian_component: cli-release-train
@@ -319,4 +319,4 @@ spec:
               The channel promoter ticks every 15 minutes and heartbeats even
               on its no-op paths; two silent hours mean the CLI channel is no
               longer advancing. Check the newest cli-nightly-promoter Job logs
-              in guardian-products and Kargo's postflight-cli-nightly stage.
+              in guardian-postflight and Kargo's postflight-cli-nightly stage.
