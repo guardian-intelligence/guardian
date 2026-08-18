@@ -21,7 +21,6 @@ OPERATOR = "guardian-mythra-operator"
 CONSOLE = "mythra-journal-console-0"
 WORKLOADS = {
     "gateway": {"app": "chunkies-gateway", "container": "gateway", "deployment": "chunkies-gateway"},
-    "legacy": {"app": "mythrad", "container": "mythrad", "deployment": "mythrad"},
     "park": {"app": "chunkies-park", "container": "park", "deployment": "chunkies-park"},
 }
 
@@ -147,7 +146,7 @@ def _observer_exec(ctx, command):
 
 def _workload(ctx):
     if ctx.args.leg not in WORKLOADS:
-        ctx.std.io.stderr.write("ERROR: --leg must be gateway, park, or legacy\n")
+        ctx.std.io.stderr.write("ERROR: --leg must be gateway or park\n")
         return None
     return WORKLOADS[ctx.args.leg]
 
@@ -162,7 +161,6 @@ def _status_impl(ctx):
             "-n",
             NAMESPACE,
             "get",
-            "deployment/mythrad",
             "deployment/chunkies-gateway",
             "deployment/chunkies-park",
             "statefulset/mythra-journal-console",
@@ -182,7 +180,7 @@ def _status_impl(ctx):
             "get",
             "pods",
             "-l",
-            "app.kubernetes.io/name in (mythrad,chunkies-gateway,chunkies-park)",
+            "app.kubernetes.io/name in (chunkies-gateway,chunkies-park)",
             "-o",
             "wide",
         ]),
@@ -372,7 +370,7 @@ logs = task(
     summary = "Read live game component logs using the standing read persona.",
     args = _common_args({
         "follow": args.boolean(default = False, description = "Follow the log stream."),
-        "leg": args.string(default = "legacy", description = "Component to read (gateway|park|legacy)."),
+        "leg": args.string(default = "gateway", description = "Component to read (gateway|park)."),
         "previous": args.boolean(default = False, description = "Read the previous container instance."),
         "since": args.string(default = "30m", description = "Only return logs newer than this relative duration; empty means all available logs."),
         "tail": args.string(default = "200", description = "Maximum lines to return; empty uses kubectl's default."),
@@ -455,7 +453,7 @@ restart = task(
     group = ["mythra"],
     summary = "Recycle one live game component with a 15-minute operator capability and wait for its Git-declared Deployment to recover.",
     args = _common_args({
-        "leg": args.string(default = "legacy", description = "Component to restart (gateway|park|legacy)."),
+        "leg": args.string(default = "gateway", description = "Component to restart (gateway|park)."),
         "wait_timeout": args.string(default = "5m", description = "Timeout for old-pod deletion and Deployment recovery."),
     }),
 )

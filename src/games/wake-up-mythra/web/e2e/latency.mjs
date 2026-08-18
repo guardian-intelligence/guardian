@@ -1,5 +1,5 @@
 // One connected-client tick-rate drill for the local stack. The player
-// exercises actions at 24Hz, asks mythrad's development-only control to
+// exercises actions at 24Hz, asks the gateway's development-only control to
 // journal a 48Hz rate_set, observes the event through the client core, and
 // exercises the same actions again without navigating or reconnecting.
 // The shell wrapper joins these client wire->apply facts to authority spans
