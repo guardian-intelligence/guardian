@@ -29,6 +29,10 @@ kind: Postgres
 metadata:
   name: products
   namespace: tenant-guardian-prod
+  annotations:
+    # The database and its backup lineage outlive any Kustomization rename
+    # or tree move; Flux must never garbage-collect them.
+    kustomize.toolkit.fluxcd.io/prune: disabled
 spec:
   replicas: 3
   size: 10Gi
@@ -88,6 +92,8 @@ apiVersion: backups.cozystack.io/v1alpha1
 kind: Plan
 metadata:
   name: products-postgres-nightly
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
   namespace: tenant-guardian-prod
 spec:
   applicationRef:
