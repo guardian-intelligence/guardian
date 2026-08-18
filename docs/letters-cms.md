@@ -1,7 +1,7 @@
 # Letters CMS (Directus)
 
 Company-site letters live in Directus (`tenant-guardian-prod`,
-`deployments/products/prod/directus.yaml`) and nowhere else. The Studio is
+`src/company/deploy/cms/directus.yaml`) and nowhere else. The Studio is
 the editor; the site's SSR server fetches published letters from the
 Directus service at request time
 (`src/company/web/src/content/letters.server.ts`). Content
@@ -57,7 +57,7 @@ DIRECTUS_TOKEN=... DIRECTUS_INCLUDE_DRAFTS=true npx pnpm run dev
 
 Directus application config (the letters collection, field metadata, the
 anonymous read grant) is code: the `directus-provisioner` Job
-(`deployments/products/prod/directus-provisioner.yaml`) reconciles it
+(`src/company/deploy/cms/directus-provisioner.yaml`) reconciles it
 through the admin API on every config change, with the credential mounted
 by the cluster — the realm-reconciler pattern. Change the script, bump its
 checksum annotation, PR.

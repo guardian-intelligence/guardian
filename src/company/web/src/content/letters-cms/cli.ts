@@ -4,7 +4,7 @@
 //
 // Everything else about Directus (collection, fields, the anonymous read
 // grant the site depends on) is reconciled from git by the
-// directus-provisioner Job (deployments/products/prod/directus-provisioner.yaml).
+// directus-provisioner Job (src/company/deploy/cms/directus-provisioner.yaml).
 // Editors stay a manual admin action because their emails are personal data
 // that does not belong in the repo. Idempotent — safe to re-run.
 //
