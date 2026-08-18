@@ -1,0 +1,71 @@
+# The product apex router. The game plane (/session, /wt-info, /behavior,
+# /assets, /terrain) is served by chunkies-gateway; everything else is the
+# web app. The WebTransport dial itself never crosses this Ingress — it goes
+# direct to wt.wakeupmythra.com:4433 (UDP, unproxiable).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mythra-apex
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: chunkies-gateway
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: mythra
+    guardian.dev/stage: prod
+  annotations:
+    nginx.ingress.kubernetes.io/auth-tls-secret: tenant-guardian-prod/cloudflare-origin-pull-ca
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+    nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  ingressClassName: tenant-root
+  tls:
+    - hosts:
+        - wakeupmythra.com
+      secretName: mythra-origin-tls
+  rules:
+    - host: wakeupmythra.com
+      http:
+        paths:
+          - path: /session
+            pathType: Prefix
+            backend:
+              service:
+                name: chunkies-gateway
+                port:
+                  number: 80
+          - path: /wt-info
+            pathType: Prefix
+            backend:
+              service:
+                name: chunkies-gateway
+                port:
+                  number: 80
+          - path: /behavior
+            pathType: Prefix
+            backend:
+              service:
+                name: chunkies-gateway
+                port:
+                  number: 80
+          - path: /assets
+            pathType: Prefix
+            backend:
+              service:
+                name: chunkies-gateway
+                port:
+                  number: 80
+          - path: /terrain
+            pathType: Prefix
+            backend:
+              service:
+                name: chunkies-gateway
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wake-up-mythra-web
+                port:
+                  number: 80

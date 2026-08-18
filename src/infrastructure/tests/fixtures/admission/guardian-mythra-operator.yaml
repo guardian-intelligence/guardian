@@ -1,8 +1,26 @@
 # The derived operator is the immediate-recovery role: it may recycle only a
-# real, labeled mythrad pod. The Deployment recreates the Git-declared revision.
+# real, labeled chunkies game pod. The Deployment recreates the Git-declared
+# revision.
 policy: guardian-mythra-operator
 cases:
-  - name: restart a mythrad Deployment pod
+  - name: restart a chunkies-park Deployment pod
+    operation: DELETE
+    resource: {group: "", version: v1, resource: pods}
+    objectName: chunkies-park-59b449c48f-h84js
+    object:
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: chunkies-park-59b449c48f-h84js
+        namespace: tenant-guardian-prod
+        labels:
+          app.kubernetes.io/name: chunkies-park
+          guardian.dev/product: mythra
+    user:
+      username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-operator
+      groups: ["system:serviceaccounts", "system:authenticated"]
+    expect: allow
+  - name: the retired mythrad name is no longer restartable
     operation: DELETE
     resource: {group: "", version: v1, resource: pods}
     objectName: mythrad-59b449c48f-h84js
@@ -18,7 +36,7 @@ cases:
     user:
       username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-operator
       groups: ["system:serviceaccounts", "system:authenticated"]
-    expect: allow
+    expect: deny
   - name: delete a mythrad-shaped unlabeled pod
     operation: DELETE
     resource: {group: "", version: v1, resource: pods}

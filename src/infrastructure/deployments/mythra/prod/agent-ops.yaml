@@ -220,8 +220,6 @@ spec:
         oldObject != null && has(oldObject.metadata.labels) &&
         "app.kubernetes.io/name" in oldObject.metadata.labels &&
         (
-          request.name.startsWith("mythrad-") &&
-          oldObject.metadata.labels["app.kubernetes.io/name"] == "mythrad" ||
           request.name.startsWith("chunkies-gateway-") &&
           oldObject.metadata.labels["app.kubernetes.io/name"] == "chunkies-gateway" ||
           request.name.startsWith("chunkies-park-") &&

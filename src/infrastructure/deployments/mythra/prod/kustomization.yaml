@@ -5,7 +5,7 @@ resources:
   - behavior-configmap.yaml
   - certificate.yaml
   - chunkies.yaml
-  - deployment.yaml
+  - ingress.yaml
   - internal-keys.yaml
   - networkpolicy.yaml
   - observability.yaml

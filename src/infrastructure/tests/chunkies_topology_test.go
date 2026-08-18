@@ -44,9 +44,9 @@ func TestChunkiesDedicatedParkTopology(t *testing.T) {
 
 	manifest := readText(t, path)
 	assertTextContains(t, manifest, "PARK_BACKENDS", path)
-	assertTextContains(t, manifest, "value: park-chunkies-canary=127.0.0.1:9632", path)
-	assertTextContains(t, manifest, "name: PARK_NAME\n              value: park-chunkies-canary", path)
-	assertTextContains(t, manifest, "name: PUBLIC_ADDR\n              value: 206.223.228.99:4433", path)
+	assertTextContains(t, manifest, "value: park-mythra=127.0.0.1:9632", path)
+	assertTextContains(t, manifest, "name: PARK_NAME\n              value: park-mythra", path)
+	assertTextContains(t, manifest, "name: PUBLIC_ADDR\n              value: wt.wakeupmythra.com:4433", path)
 	assertTextContains(t, manifest, "name: INTERNAL_HOST\n              value: 127.0.0.1", path)
 	assertTextContains(t, manifest, `{"$imagepolicy": "guardian-imageops:chunkies-gateway"}`, path)
 	assertTextContains(t, manifest, `{"$imagepolicy": "guardian-imageops:chunkies-park"}`, path)
