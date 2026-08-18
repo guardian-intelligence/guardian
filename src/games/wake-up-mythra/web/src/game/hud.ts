@@ -9,7 +9,7 @@ import type { GameState, WumGame } from "@guardian/wum-client";
 import * as v from "valibot";
 
 // Sim reject codes 1-9 and doorman codes 100-101 (rejectReasonName in
-// mythrad session.go is the server-side mirror).
+// the chunkies session package is the server-side mirror).
 const REJECT_TEXT = {
   1: "the park couldn't read that intent",
   2: "your dog is already in the park",

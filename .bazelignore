@@ -1,6 +1,5 @@
-# The web workspace is pnpm/vite-plus territory; its artifact (the prerendered
-# landing page) is committed at src/aisucks/web/index.html. Keep bazel's
-# package walk out of node_modules.
+# The web workspace is pnpm/vite-plus territory. Keep bazel's package walk
+# out of node_modules.
 node_modules
 src/chunkies/host/ts/node_modules
 src/chunkies/testkit/ts/node_modules
@@ -18,5 +17,4 @@ src/shared/ts/visual-harness/node_modules
 # The CLI crate's make path drops a cargo output tree here; keep bazel's
 # package walk out of it.
 src/postflight/cli/target
-src-old
 .claude/worktrees
