@@ -1,0 +1,50 @@
+load("@aspect_bazel_lib//lib:diff_test.bzl", "diff_test")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "codec",
+    srcs = [
+        "codec.go",
+        "records.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/services/mythrad/codec",
+    visibility = ["//src/services/mythrad:__subpackages__"],
+)
+
+go_test(
+    name = "codec_test",
+    srcs = [
+        "records_test.go",
+        "spec_test.go",
+    ],
+    embed = [":codec"],
+    embedsrcs = [
+        "spec/caps.txt",
+        "spec/vectors.txt",
+    ],
+)
+
+# The spec files are the protocol; the Rust and TS implementations consume
+# them through this filegroup and the testkit lockstep below.
+filegroup(
+    name = "spec",
+    srcs = [
+        "spec/caps.txt",
+        "spec/vectors.txt",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# The TS testkit runs outside Bazel, so it holds committed copies of the
+# spec; this pins them byte-identical to the originals.
+diff_test(
+    name = "testkit_vectors_lockstep_test",
+    file1 = "spec/vectors.txt",
+    file2 = "//src/products/viteplus-monorepo/packages/chunkies-testkit:goldens/vectors.txt",
+)
+
+diff_test(
+    name = "testkit_caps_lockstep_test",
+    file1 = "spec/caps.txt",
+    file2 = "//src/products/viteplus-monorepo/packages/chunkies-testkit:goldens/caps.txt",
+)

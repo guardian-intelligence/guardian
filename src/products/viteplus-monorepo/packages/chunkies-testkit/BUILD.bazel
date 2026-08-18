@@ -8,6 +8,14 @@ exports_files(
     visibility = ["//src/services/mythrad/sim:__pkg__"],
 )
 
+exports_files(
+    [
+        "goldens/caps.txt",
+        "goldens/vectors.txt",
+    ],
+    visibility = ["//src/services/mythrad/codec:__pkg__"],
+)
+
 CHUNKIES_TESTKIT_SRCS = glob([
     "goldens/**/*",
     "package.json",

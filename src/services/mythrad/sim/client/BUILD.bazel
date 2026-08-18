@@ -20,6 +20,28 @@ filegroup(
     visibility = SIM_ROOT,
 )
 
+# The wire codec, v5. Game-blind by construction: it must never grow a
+# dependency on any sim crate. Conformance is against the shared spec in
+# //src/services/mythrad/codec:spec, compiled in so the three language
+# implementations cannot drift apart.
+rust_library(
+    name = "codec",
+    srcs = [
+        "codec/src/lib.rs",
+        "codec/src/tests.rs",
+    ],
+    crate_name = "chunkies_codec",
+    crate_root = "codec/src/lib.rs",
+    edition = "2024",
+)
+
+rust_test(
+    name = "codec_test",
+    compile_data = ["//src/services/mythrad/codec:spec"],
+    crate = ":codec",
+    edition = "2024",
+)
+
 rust_library(
     name = "clock",
     srcs = ["clock/src/lib.rs"],

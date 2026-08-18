@@ -1,0 +1,7 @@
+# chunkies wire protocol v5 shared caps. Every implementation asserts its
+# compiled constants equal these values; divergence is a build failure, not
+# a production surprise (the v4 era shipped a Go-only frame cap).
+PROTO=5
+MAX_FRAME=131072
+DG_MAX=1200
+WAL_MAX_RECORD=1048576
