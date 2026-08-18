@@ -2,12 +2,12 @@ load("@aspect_bazel_lib//lib:write_source_files.bzl", "write_source_files")
 
 # GitHub resolves this action straight from the git tree, so dist/index.js
 # must be a committed file. `bazel run :bundle` regenerates it from the
-# TypeScript in //src/products/viteplus-monorepo/packages/postflight-checkout;
+# TypeScript in //src/postflight/checkout;
 # the generated :bundle_test fails the gate whenever the two drift.
 write_source_files(
     name = "bundle",
     files = {
-        "dist/index.js": "//src/products/viteplus-monorepo/packages/postflight-checkout:generated_bundle",
+        "dist/index.js": "//src/postflight/checkout:generated_bundle",
     },
     visibility = ["//visibility:public"],
 )

@@ -34,7 +34,7 @@ each carries its reasoning so future work can judge the exceptions.
    by known value at the source, and sanitize exports at pipeline choke points
    with industry-standard tooling.
 
-Journey code lives in `src/products/viteplus-monorepo/packages/canary-journeys/`.
+Journey code lives in `src/shared/ts/canary-journeys/`.
 The Sign in with Guardian canary contract is in
 [sign-in-with-guardian.md](sign-in-with-guardian.md); the postflight CLI's
 pre-promotion deep test and post-release install matrix are in

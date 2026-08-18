@@ -41,11 +41,11 @@ filegroup(
 diff_test(
     name = "testkit_vectors_lockstep_test",
     file1 = "spec/vectors.txt",
-    file2 = "//src/products/viteplus-monorepo/packages/chunkies-testkit:goldens/vectors.txt",
+    file2 = "//src/chunkies/testkit/ts:goldens/vectors.txt",
 )
 
 diff_test(
     name = "testkit_caps_lockstep_test",
     file1 = "spec/caps.txt",
-    file2 = "//src/products/viteplus-monorepo/packages/chunkies-testkit:goldens/caps.txt",
+    file2 = "//src/chunkies/testkit/ts:goldens/caps.txt",
 )

@@ -1,5 +1,5 @@
 {
-  "name": "@guardian/viteplus-monorepo",
+  "name": "@guardian/workspace",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "changeset:version": "changeset version",
     "dev": "vp run @guardian/guardianintelligence-web#dev",
     "generate": "vp run -r generate",
-    "format": "vp fmt src/products/viteplus-monorepo vite.config.ts scripts/check-release-hygiene.ts --write",
+    "format": "vp fmt src/chunkies/host/ts src/chunkies/testkit/ts src/chunkies/transport/ts src/company/web src/games/wake-up-mythra/client src/games/wake-up-mythra/web src/postflight/checkout src/privatecut/web src/shared/ts/brand src/shared/ts/canary-journeys src/shared/ts/telemetry src/shared/ts/visual-harness vite.config.ts scripts/check-release-hygiene.ts --write",
     "check": "vp check",
     "lint": "vp lint",
     "typecheck": "vp run -r typecheck && vp run -w typecheck:scripts",

@@ -9,7 +9,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-APP="$ROOT/src/products/viteplus-monorepo/apps/wake-up-mythra-web"
+APP="$ROOT/src/games/wake-up-mythra/web"
 RUN_DIR="$ROOT/.guardian/dev/wum"
 ISSUER_PORT="${WUM_DEV_ISSUER_PORT:-9635}"
 PG_PORT="${WUM_DEV_PG_PORT:-55432}"

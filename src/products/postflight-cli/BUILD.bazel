@@ -116,11 +116,11 @@ sh_test(
     srcs = ["installer_lockstep_test.sh"],
     args = [
         "$(location dist/install.sh)",
-        "$(location //src/products/viteplus-monorepo/apps/guardianintelligence-web:public/postflight/install.sh)",
+        "$(location //src/company/web:public/postflight/install.sh)",
     ],
     data = [
         "dist/install.sh",
-        "//src/products/viteplus-monorepo/apps/guardianintelligence-web:public/postflight/install.sh",
+        "//src/company/web:public/postflight/install.sh",
     ],
 )
 

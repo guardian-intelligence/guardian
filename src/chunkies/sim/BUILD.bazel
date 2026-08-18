@@ -79,13 +79,13 @@ diff_test(
 diff_test(
     name = "telemetry_table_current_test",
     file1 = "//src/chunkies/sim/client:telemetry_gen_ts",
-    file2 = "//src/products/viteplus-monorepo/packages/chunkies:src/telemetry.gen.ts",
+    file2 = "//src/chunkies/host/ts:src/telemetry.gen.ts",
 )
 
 diff_test(
     name = "goldens_current_test",
     file1 = "//src/chunkies/sim/client:goldens_json",
-    file2 = "//src/products/viteplus-monorepo/packages/chunkies-testkit:goldens/records.json",
+    file2 = "//src/chunkies/testkit/ts:goldens/records.json",
 )
 
 diff_test(

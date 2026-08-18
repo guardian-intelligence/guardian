@@ -42,6 +42,6 @@ data:
               description: >-
                 The journey canary's redaction self-test leaked the raw
                 honeytoken marker into VictoriaLogs. The redact-by-known-value
-                registry in packages/canary-journeys is not scrubbing output;
+                registry in src/shared/ts/canary-journeys is not scrubbing output;
                 real credentials take the same path. Fix the scrubber before
                 trusting any canary log emitted since the first hit.

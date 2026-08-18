@@ -183,17 +183,17 @@ importers:
         specifier: 'catalog:'
         version: 0.2.6(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(vite@8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.8.3))(yaml@2.8.3)
 
-  src/products/viteplus-monorepo/apps/guardianintelligence-web:
+  src/company/web:
     dependencies:
       '@chenglou/pretext':
         specifier: 'catalog:'
         version: 0.0.8
       '@guardian/brand':
         specifier: workspace:*
-        version: link:../../packages/brand
+        version: link:../../shared/ts/brand
       '@guardian/telemetry':
         specifier: workspace:*
-        version: link:../../packages/telemetry
+        version: link:../../shared/ts/telemetry
       '@opentelemetry/api':
         specifier: 'catalog:'
         version: 1.9.1
@@ -277,14 +277,14 @@ importers:
         specifier: 'catalog:'
         version: 2.0.1
 
-  src/products/viteplus-monorepo/apps/privatecut-web:
+  src/privatecut/web:
     dependencies:
       '@guardian/brand':
         specifier: workspace:*
-        version: link:../../packages/brand
+        version: link:../../shared/ts/brand
       '@guardian/telemetry':
         specifier: workspace:*
-        version: link:../../packages/telemetry
+        version: link:../../shared/ts/telemetry
       '@opentelemetry/api':
         specifier: 'catalog:'
         version: 1.9.1
@@ -353,20 +353,20 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.6(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3))
 
-  src/products/viteplus-monorepo/apps/wake-up-mythra-web:
+  src/games/wake-up-mythra/web:
     dependencies:
       '@guardian/chunkies':
         specifier: workspace:*
-        version: link:../../packages/chunkies
+        version: link:../../../chunkies/host/ts
       '@guardian/chunkies-transport-web':
         specifier: workspace:*
-        version: link:../../packages/chunkies-transport-web
+        version: link:../../../chunkies/transport/ts
       '@guardian/telemetry':
         specifier: workspace:*
-        version: link:../../packages/telemetry
+        version: link:../../../shared/ts/telemetry
       '@guardian/wum-client':
         specifier: workspace:*
-        version: link:../../packages/wum-client
+        version: link:../client
       '@openfeature/core':
         specifier: 'catalog:'
         version: 1.12.0
@@ -426,7 +426,7 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.6(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3))
 
-  src/products/viteplus-monorepo/packages/brand:
+  src/shared/ts/brand:
     devDependencies:
       '@types/react':
         specifier: 'catalog:'
@@ -447,7 +447,7 @@ importers:
         specifier: 'catalog:'
         version: 0.2.6(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(vite@8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.8.3))(yaml@2.8.3)
 
-  src/products/viteplus-monorepo/packages/canary-journeys:
+  src/shared/ts/canary-journeys:
     dependencies:
       '@playwright/test':
         specifier: 'catalog:'
@@ -469,7 +469,7 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.6(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3))
 
-  src/products/viteplus-monorepo/packages/chunkies:
+  src/chunkies/host/ts:
     dependencies:
       fflate:
         specifier: 'catalog:'
@@ -477,7 +477,7 @@ importers:
     devDependencies:
       '@guardian/chunkies-testkit':
         specifier: workspace:*
-        version: link:../chunkies-testkit
+        version: link:../../testkit/ts
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.1
@@ -494,11 +494,11 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.6(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3))
 
-  src/products/viteplus-monorepo/packages/chunkies-testkit:
+  src/chunkies/testkit/ts:
     dependencies:
       '@guardian/chunkies':
         specifier: workspace:*
-        version: link:../chunkies
+        version: link:../../host/ts
       fflate:
         specifier: 'catalog:'
         version: 0.8.2
@@ -516,11 +516,11 @@ importers:
         specifier: 'catalog:'
         version: 0.2.6(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@voidzero-dev/vite-plus-core@0.2.6(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3))(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3)
 
-  src/products/viteplus-monorepo/packages/chunkies-transport-web:
+  src/chunkies/transport/ts:
     dependencies:
       '@guardian/chunkies':
         specifier: workspace:*
-        version: link:../chunkies
+        version: link:../../host/ts
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -538,7 +538,7 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.6(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3))
 
-  src/products/viteplus-monorepo/packages/postflight-checkout:
+  src/postflight/checkout:
     dependencies:
       '@actions/core':
         specifier: 'catalog:'
@@ -563,7 +563,7 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.6(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3))
 
-  src/products/viteplus-monorepo/packages/telemetry:
+  src/shared/ts/telemetry:
     dependencies:
       web-vitals:
         specifier: 'catalog:'
@@ -594,7 +594,7 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.6(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3))
 
-  src/products/viteplus-monorepo/packages/visual-harness:
+  src/shared/ts/visual-harness:
     dependencies:
       '@playwright/test':
         specifier: 'catalog:'
@@ -619,15 +619,15 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/browser-preview@4.1.10)(@voidzero-dev/vite-plus-core@0.2.6(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(typescript@6.0.3)(yaml@2.8.3))
 
-  src/products/viteplus-monorepo/packages/wum-client:
+  src/games/wake-up-mythra/client:
     dependencies:
       '@guardian/chunkies':
         specifier: workspace:*
-        version: link:../chunkies
+        version: link:../../../chunkies/host/ts
     devDependencies:
       '@guardian/chunkies-testkit':
         specifier: workspace:*
-        version: link:../chunkies-testkit
+        version: link:../../../chunkies/testkit/ts
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.1

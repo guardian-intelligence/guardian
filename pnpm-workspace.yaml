@@ -1,6 +1,16 @@
 packages:
-  - src/products/viteplus-monorepo/apps/*
-  - src/products/viteplus-monorepo/packages/*
+  - src/chunkies/host/ts
+  - src/chunkies/testkit/ts
+  - src/chunkies/transport/ts
+  - src/company/web
+  - src/games/wake-up-mythra/client
+  - src/games/wake-up-mythra/web
+  - src/postflight/checkout
+  - src/privatecut/web
+  - src/shared/ts/brand
+  - src/shared/ts/canary-journeys
+  - src/shared/ts/telemetry
+  - src/shared/ts/visual-harness
 allowBuilds:
   esbuild: true
   protobufjs: true
