@@ -406,7 +406,7 @@ export class ReplicaHost {
       park_hash: () => this.#replica?.sim_hash() ?? 0n,
       park_tick: () => this.#replica?.sim_tick() ?? 0n,
       send_stream: (ptr, len) => {
-        this.#conn?.sendStream(this.#fromSession(ptr, len));
+        this.#conn?.sendFrame(this.#fromSession(ptr, len));
       },
       send_datagram: (ptr, len) => {
         this.#conn?.sendDatagram(this.#fromSession(ptr, len));

@@ -1,0 +1,28 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+
+npm_link_all_packages()
+
+CHUNKIES_TRANSPORT_WEB_SRCS = glob([
+    "package.json",
+    "src/**/*",
+    "tsconfig.json",
+])
+
+filegroup(
+    name = "package_manifest",
+    srcs = ["package.json"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "sources",
+    srcs = CHUNKIES_TRANSPORT_WEB_SRCS,
+    visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "pkg",
+    srcs = CHUNKIES_TRANSPORT_WEB_SRCS,
+    visibility = ["//visibility:public"],
+)

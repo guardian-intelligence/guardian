@@ -8,12 +8,36 @@
 // is the app's business; the host sees the ticket as opaque bytes handed
 // back from `connect()`.
 
+/**
+ * Why the sending half of a connection died, for telemetry. A transport
+ * that can tell the difference passes it; the host redials regardless.
+ */
+export type CloseReason =
+  /** The peer closed, the path idled out, or close() was called. */
+  | "transport"
+  /** An uplink write failed outright. */
+  | "write-error"
+  /** An uplink write hung past the stall deadline: the path is dead in a
+   * way `closed` may never report. */
+  | "stall";
+
 /** A live connection to the authority. Every method is fire-and-forget. */
 export interface Connection {
-  /** Writes one whole frame to the bidirectional stream. */
-  sendStream(bytes: Uint8Array): void;
-  /** Writes one datagram. Loss is expected and unreported. */
+  /**
+   * Sends one whole frame on the bidirectional stream. Callers hand the
+   * transport a private copy: the bytes may be queued and written later.
+   */
+  sendFrame(bytes: Uint8Array): void;
+  /**
+   * Sends one datagram. Loss is expected and unreported; a payload over
+   * `datagramBudget()` is dropped without error by contract.
+   */
   sendDatagram(bytes: Uint8Array): void;
+  /**
+   * The negotiated maximum datagram payload, in bytes. Anything the
+   * session composes for the datagram lane must fit inside it.
+   */
+  datagramBudget(): number;
   /** Tears the connection down. Idempotent. */
   close(): void;
 }
@@ -25,7 +49,7 @@ export interface ConnectionSink {
   /** One datagram, whole. */
   onDatagram(bytes: Uint8Array): void;
   /** The connection is gone. Called exactly once per successful connect. */
-  onClosed(): void;
+  onClosed(reason?: CloseReason): void;
 }
 
 /**
