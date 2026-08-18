@@ -1,0 +1,25 @@
+load("@rules_go//go:def.bzl", "go_library")
+load("//src/chunkies:defs.bzl", "GAME_FACING")
+
+exports_files(
+    [
+        "behaviors/client.wasm",
+        "behaviors/park.wasm",
+    ],
+    visibility = ["//src/chunkies/sim:__pkg__"],
+)
+
+go_library(
+    name = "mount",
+    srcs = ["mount.go"],
+    embedsrcs = [
+        "behaviors/client.wasm",
+        "behaviors/park.wasm",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/chunkies/mount",
+    visibility = GAME_FACING,
+    deps = [
+        "@com_github_prometheus_client_golang//prometheus:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus/promauto:go_default_library",
+    ],
+)

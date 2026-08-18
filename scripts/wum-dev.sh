@@ -247,7 +247,7 @@ EOF
     ;;
   park)
     STARTED="park $STARTED"
-    mkdir -p "$ROOT/src/services/mythrad/assets"
+    mkdir -p "$ROOT/src/chunkies/assets"
     park_database_url="$(scripts/wum-dev-db.sh url)"
     DATABASE_URL="$park_database_url" \
       PARK_NAME=park-mythra \
@@ -255,7 +255,7 @@ EOF
       HTTP_PORT="$PARK_HTTP_PORT" \
       METRICS_PORT="$PARK_METRICS_PORT" \
       INTERNAL_KEY_FILE="$RUN_DIR/internal.key" \
-      BEHAVIOR_DIR="$ROOT/src/services/mythrad/behaviors" \
+      BEHAVIOR_DIR="$ROOT/src/chunkies/behaviors" \
       TICK_HZ="$DEV_TICK_HZ" \
       WUM_DEV_LIVE_TICK_RATE=true \
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://127.0.0.1:${OTLP_GRPC_PORT}" \
@@ -267,8 +267,8 @@ EOF
     STARTED="gateway $STARTED"
     printf 'wum park-mythra 127.0.0.1:%s\n' "$PARK_PORT" >"$RUN_DIR/chunks.conf"
     OIDC_ISSUER="$ISSUER" \
-      BEHAVIOR_DIR="$ROOT/src/services/mythrad/behaviors" \
-      ASSET_DIR="$ROOT/src/services/mythrad/assets" \
+      BEHAVIOR_DIR="$ROOT/src/chunkies/behaviors" \
+      ASSET_DIR="$ROOT/src/chunkies/assets" \
       PUBLIC_ADDR="${WUM_DEV_PUBLIC_ADDR:-127.0.0.1:${GATEWAY_WT_PORT}}" \
       HTTP_PORT="$GATEWAY_HTTP_PORT" \
       METRICS_PORT="$GATEWAY_METRICS_PORT" \
@@ -316,12 +316,12 @@ up() {
 
   acquire_lock
   echo "wum-dev: building Chunkies + devissuer + telemetry legs…" >&2
-  bazelisk build //src/services/mythrad:chunkies-gateway //src/services/mythrad:chunkies-park //src/services/mythrad/devissuer \
+  bazelisk build //src/chunkies:chunkies-gateway //src/chunkies:chunkies-park //src/chunkies/devissuer \
     //src/products/analytics/ingest @ip2asn_combined//file \
     @multitool//tools/clickhouse-server @multitool//tools/otelcol-contrib @multitool//tools/flagd >&2
-  GATEWAY="$(bazelisk cquery --output=files //src/services/mythrad:chunkies-gateway 2>/dev/null | head -1)"
-  PARK="$(bazelisk cquery --output=files //src/services/mythrad:chunkies-park 2>/dev/null | head -1)"
-  DEVISSUER="$(bazelisk cquery --output=files //src/services/mythrad/devissuer 2>/dev/null | head -1)"
+  GATEWAY="$(bazelisk cquery --output=files //src/chunkies:chunkies-gateway 2>/dev/null | head -1)"
+  PARK="$(bazelisk cquery --output=files //src/chunkies:chunkies-park 2>/dev/null | head -1)"
+  DEVISSUER="$(bazelisk cquery --output=files //src/chunkies/devissuer 2>/dev/null | head -1)"
   INGEST="$(bazelisk cquery --output=files //src/products/analytics/ingest 2>/dev/null | head -1)"
   CLICKHOUSE="$(bazelisk cquery --output=files @multitool//tools/clickhouse-server 2>/dev/null | head -1)"
   OTELCOL="$(bazelisk cquery --output=files @multitool//tools/otelcol-contrib 2>/dev/null | head -1)"

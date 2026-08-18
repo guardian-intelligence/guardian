@@ -7,7 +7,7 @@
 // rest of this package: production TS never sees wire bytes (the Rust
 // session core owns them). It exists so harnesses can mint and read v5
 // frames, held to the shared golden vectors in
-// src/services/mythrad/codec/spec/vectors.txt (mirrored into this
+// src/chunkies/codec/spec/vectors.txt (mirrored into this
 // package's goldens/ under Bazel lockstep). The vectors are the spec;
 // the implementations are not.
 //

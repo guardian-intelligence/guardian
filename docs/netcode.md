@@ -51,20 +51,20 @@ At a high level the goal is to minimize player interruptions as much as possible
 
 | Where | What | Owns |
 |---|---|---|
-| `sim/park` (wasm, no_std) | the game rules | all state, validation (`sim_apply` rejects without mutating), hashing, snapshots |
-| `sim/nav` | deterministic A* | pathing, `path_cost`; movement is state (position, waypoint, target — all hashed), never a cache |
-| `sim/clock` (wasm, no_std) | client tick discipline | Acquiring → Locked (±2% slew) → FastForward (big deficits) → SnapshotRequired (beyond the ring). No floats, no host clocks — the host feeds it times and executes its step-count directives |
-| `chunkies-codec` (the spec at `src/services/mythrad/codec/spec/`, with Rust/Go/TS implementations) | the wire protocol, v5 | the golden vectors and caps table are the protocol; the three implementations are held to them. One shared unit, the EventRecord (`intent \| elen \| kind \| actor \| payload`): the same bytes are the client's intent envelope, the per-tick batch element, and (planned) the write-ahead record element, so an accepted intent is never re-encoded between arrival, fan-out, and disk |
-| `sim/session` (wasm, no_std) | the replica session | seq-dense event ordering over tick batches, snapshot ring + rollback, resync/strike policy, intent identity + resend, and the own-intent prediction overlay over two host-held park slots (journal replica / presented). Time and transport are inputs; the host executes its verbs |
-| `sim/shared/abi` | the game↔host contract | the `Simulation` trait and `export_simulation!`: a game crate carries no unsafe and no extern surface, cannot misdeclare the ABI, and opts out of the content-fetch dance entirely with a zero content cap. The toy reference game (`sim/shared/toy`) is the macro's proof and the conformance vehicle |
-| `sim/client` (wasm) | presentation + the session ABI | render smoothing; re-exports the clock and the session. Never feeds back into world state |
-| `mythrad/gateway` | public transport | WebTransport, OIDC-ticket admission, uplink shaping, actor binding at ingress, and park routing |
-| `mythrad/park` | the authority | the anchored tick schedule, event stamping, journal append, hash ring, snapshot cadence, module swaps, fan-out, and the gateway-facing park boundary |
-| `mythrad/parkproxy` | internal transport | the authenticated, HMAC-fenced gateway↔park framing |
-| `mythrad/mount` | module delivery | the behavior mount: hot-reloaded client/park wasm slots and the committed defaults |
-| `mythrad/wum` | the game's server vocabulary | kind numbers, dog-id binding, reject names, the genesis terrain — the only WUM-shaped thing the transport packages see |
-| `mythrad/journal` | durability | Postgres `park_events` / `park_snapshots` / `park_terrain`; per-park seq is dense and single-writer; `journaltest.Run` is the conformance suite |
-| `mythrad/gametest` | the game contract | the game-blind conformance suite over built artifacts: determinism, snapshot completeness, reject purity, system-event semantics; `wum` wires the committed modules through it |
+| `games/wake-up-mythra/sim/park` (wasm, no_std) | the game rules | all state, validation (`sim_apply` rejects without mutating), hashing, snapshots |
+| `games/wake-up-mythra/sim/nav` | deterministic A* | pathing, `path_cost`; movement is state (position, waypoint, target — all hashed), never a cache |
+| `chunkies/sim/client/clock` (wasm, no_std) | client tick discipline | Acquiring → Locked (±2% slew) → FastForward (big deficits) → SnapshotRequired (beyond the ring). No floats, no host clocks — the host feeds it times and executes its step-count directives |
+| `chunkies-codec` (the spec at `src/chunkies/codec/spec/`, with Rust/Go/TS implementations) | the wire protocol, v5 | the golden vectors and caps table are the protocol; the three implementations are held to them. One shared unit, the EventRecord (`intent \| elen \| kind \| actor \| payload`): the same bytes are the client's intent envelope, the per-tick batch element, and (planned) the write-ahead record element, so an accepted intent is never re-encoded between arrival, fan-out, and disk |
+| `chunkies/sim/client/session` (wasm, no_std) | the replica session | seq-dense event ordering over tick batches, snapshot ring + rollback, resync/strike policy, intent identity + resend, and the own-intent prediction overlay over two host-held park slots (journal replica / presented). Time and transport are inputs; the host executes its verbs |
+| `chunkies/sim/shared/abi` | the game↔host contract | the `Simulation` trait and `export_simulation!`: a game crate carries no unsafe and no extern surface, cannot misdeclare the ABI, and opts out of the content-fetch dance entirely with a zero content cap. The toy reference game (`chunkies/sim/shared/toy`) is the macro's proof and the conformance vehicle |
+| `chunkies/sim/client` (wasm) | presentation + the session ABI | render smoothing; re-exports the clock and the session. Never feeds back into world state |
+| `chunkies/gateway` | public transport | WebTransport, OIDC-ticket admission, uplink shaping, actor binding at ingress, and park routing |
+| `chunkies/park` | the authority | the anchored tick schedule, event stamping, journal append, hash ring, snapshot cadence, module swaps, fan-out, and the gateway-facing park boundary |
+| `chunkies/parkproxy` | internal transport | the authenticated, HMAC-fenced gateway↔park framing |
+| `chunkies/mount` | module delivery | the behavior mount: hot-reloaded client/park wasm slots and the committed defaults |
+| `games/wake-up-mythra/services/wum` | the game's server vocabulary | kind numbers, dog-id binding, reject names, the genesis terrain — the only WUM-shaped thing the transport packages see |
+| `chunkies/journal` | durability | Postgres `park_events` / `park_snapshots` / `park_terrain`; per-park seq is dense and single-writer; `journaltest.Run` is the conformance suite |
+| `chunkies/gametest` | the game contract | the game-blind conformance suite over built artifacts: determinism, snapshot completeness, reject purity, system-event semantics; `wum` wires the committed modules through it |
 | `packages/chunkies` | the game-agnostic replica host | moves opaque bytes between wire, wasm, and screen: the session module, the replica slot, the transport, and the guarded extension/projection doors a game layer reaches its own exports through. Knows no game vocabulary; the name is a deliberate find-and-replaceable placeholder |
 | `packages/wum-client` | the game layer | WUM over the host: intent verbs, the HUD/view/terrain decodes, the glide presenter, and the isometric renderer. If TypeScript (or Go) can read a game rule, the rule is in the wrong place |
 | `apps/wake-up-mythra-web/src/game` | the surface | platform adapters (WebTransport, fetch, auth), the HUD/stats/debug DOM, and the telemetry mapping. No protocol |
@@ -126,4 +126,4 @@ tracked as future work.
 deficit against verdict ticks: small → slew ±2%, seconds → fast-forward
 (budgeted extra steps per frame),
 One state machine, property-tested in `sim/clock`; the dev debug panel and
-the netsim proxy (`src/services/mythrad/README.md`) exist to torture it.
+the netsim proxy (`src/chunkies/README.md`) exist to torture it.

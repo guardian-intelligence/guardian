@@ -1,0 +1,14 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "parkproxy",
+    srcs = ["proxy.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/chunkies/parkproxy",
+    visibility = ["//src/chunkies:__subpackages__"],
+)
+
+go_test(
+    name = "parkproxy_test",
+    srcs = ["proxy_test.go"],
+    embed = [":parkproxy"],
+)

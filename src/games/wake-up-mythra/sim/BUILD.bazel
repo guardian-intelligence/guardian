@@ -1,0 +1,148 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_shared_library", "rust_test", "rustfmt_test")
+load("//src/chunkies/sim:wasm.bzl", "wasm_module")
+
+# The Wake Up Mythra world simulation. Everything here is the game's: the
+# rules, the terrain format, the pathfinder, and the fixed-point core they
+# share. Game logic belongs in these crates and nowhere else -- if Go or
+# TypeScript can read a rule, the rule is in the wrong place.
+#
+# The dependency direction is one-way: this game depends on chunkies (the
+# ABI it exports through), and chunkies depends on nothing here.
+
+# The framework's sim hub owns the built-artifact refresh and the fixed-point
+# gate, and needs to see this game's wasm, fixture, and sources.
+CHUNKIES_SIM = ["//src/chunkies/sim:__pkg__"]
+
+# Legacy: //src/chunkies/sim/client's goldens_gen instantiates this game's
+# park to emit record-layout goldens. It is the last framework->game edge in
+# Rust and is slated for removal; do not add to this list.
+LEGACY_GOLDENS_GEN = ["//src/chunkies/sim/client:__pkg__"]
+
+filegroup(
+    name = "sources",
+    srcs = [
+        "core/src/lib.rs",
+        "nav/src/lib.rs",
+        "park/src/lib.rs",
+        "terrain/fixture/main.rs",
+        "terrain/src/lib.rs",
+    ],
+    visibility = CHUNKIES_SIM,
+)
+
+rust_library(
+    name = "core",
+    srcs = ["core/src/lib.rs"],
+    crate_name = "mythra_sim_core",
+    edition = "2024",
+)
+
+rust_test(
+    name = "core_test",
+    crate = ":core",
+    edition = "2024",
+)
+
+rust_library(
+    name = "terrain",
+    srcs = ["terrain/src/lib.rs"],
+    crate_name = "mythra_sim_terrain",
+    edition = "2024",
+    visibility = LEGACY_GOLDENS_GEN,
+    deps = [":core"],
+)
+
+rust_test(
+    name = "terrain_test",
+    crate = ":terrain",
+    edition = "2024",
+)
+
+rust_library(
+    name = "nav",
+    srcs = ["nav/src/lib.rs"],
+    crate_name = "mythra_sim_nav",
+    edition = "2024",
+    deps = [
+        ":core",
+        ":terrain",
+    ],
+)
+
+rust_test(
+    name = "nav_test",
+    crate = ":nav",
+    edition = "2024",
+)
+
+rust_binary(
+    name = "fixture_gen",
+    srcs = ["terrain/fixture/main.rs"],
+    edition = "2024",
+    deps = [":terrain"],
+)
+
+genrule(
+    name = "fixture_park",
+    outs = ["fixture_park.bin"],
+    cmd = "$(location :fixture_gen) $@",
+    tools = [":fixture_gen"],
+    visibility = CHUNKIES_SIM,
+)
+
+rust_library(
+    name = "park_lib",
+    srcs = ["park/src/lib.rs"],
+    crate_name = "mythra_sim_park",
+    edition = "2024",
+    visibility = LEGACY_GOLDENS_GEN,
+    deps = [
+        ":core",
+        ":nav",
+        ":terrain",
+        "//src/chunkies/sim/shared:abi",
+    ],
+)
+
+rust_test(
+    name = "park_test",
+    crate = ":park_lib",
+    edition = "2024",
+)
+
+rust_shared_library(
+    name = "park_cdylib",
+    srcs = ["park/src/lib.rs"],
+    crate_name = "mythra_sim_park",
+    edition = "2024",
+    target_compatible_with = ["@platforms//cpu:wasm32"],
+    deps = [
+        ":core",
+        ":nav",
+        ":terrain",
+        "//src/chunkies/sim/shared:abi",
+    ],
+)
+
+wasm_module(
+    name = "park_wasm",
+    lib = ":park_cdylib",
+    out = "park.wasm",
+    visibility = CHUNKIES_SIM,
+)
+
+# Formatting drift fails `bazelisk test //...`; the fix is `aspect tidy`.
+rustfmt_test(
+    name = "rustfmt_test",
+    targets = [
+        ":core",
+        ":core_test",
+        ":fixture_gen",
+        ":nav",
+        ":nav_test",
+        ":park_lib",
+        ":park_test",
+        ":terrain",
+        ":terrain_test",
+    ],
+)

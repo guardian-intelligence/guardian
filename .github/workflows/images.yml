@@ -20,7 +20,7 @@ on:
       - "src/services/payments/**"
       - "src/services/postflight/**"
       - "src/services/feature-flags-notify/**"
-      - "src/services/mythrad/**"
+      - "src/chunkies/**"
       - "src/infrastructure/cmd/tofu_runner/**"
       - "src/products/analytics/**"
       - "src/products/viteplus-monorepo/**"
@@ -76,8 +76,8 @@ jobs:
             [analytics-ingest]='^src/products/analytics/|^src/proto/'
             [authorization]='^src/services/authorization/|^src/proto/guardian/authorization/|^src/proto/gen/go/guardian/authorization/'
             [canary-journeys]='^src/products/viteplus-monorepo/packages/canary-journeys/|^(pnpm-(lock|workspace)\.yaml|package\.json|vite\.config\.ts)$'
-            [chunkies-gateway]='^src/services/mythrad/'
-            [chunkies-park]='^src/services/mythrad/'
+            [chunkies-gateway]='^src/chunkies/|^src/games/'
+            [chunkies-park]='^src/chunkies/|^src/games/'
             [payments]='^src/services/payments/'
             [payments-canary]='^src/services/payments/'
             [postflight-controlplane]='^src/services/postflight/'
@@ -93,8 +93,8 @@ jobs:
             [analytics-ingest]='//src/products/analytics/ingest:push'
             [authorization]='//src/services/authorization:push'
             [canary-journeys]='//src/products/viteplus-monorepo/packages/canary-journeys:push'
-            [chunkies-gateway]='//src/services/mythrad:chunkies_gateway_push'
-            [chunkies-park]='//src/services/mythrad:chunkies_park_push'
+            [chunkies-gateway]='//src/chunkies:chunkies_gateway_push'
+            [chunkies-park]='//src/chunkies:chunkies_park_push'
             [payments]='//src/services/payments:push'
             [payments-canary]='//src/services/payments/canary:push'
             [postflight-controlplane]='//src/services/postflight/controlplane:push'

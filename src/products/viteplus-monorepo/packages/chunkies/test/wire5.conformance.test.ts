@@ -1,5 +1,5 @@
 // The v5 codec held to the shared spec: every vector in
-// src/services/mythrad/codec/spec/vectors.txt (read here through the
+// src/chunkies/codec/spec/vectors.txt (read here through the
 // Bazel-lockstepped copy in the testkit's goldens) must be reproduced
 // byte-identically from the fixture message and must decode cleanly;
 // every !vector must fail decode. The Go and Rust suites run the same
