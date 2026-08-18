@@ -80,6 +80,7 @@ go_test(
     srcs = [
         "auth_test.go",
         "authority_test.go",
+        "gametest_wum_test.go",
         "proxy_test.go",
         "wasm_gate_test.go",
     ],
@@ -90,6 +91,7 @@ go_test(
     embed = [":mythrad_lib"],
     env = {"PGTEST_INITDB": "$(rootpath //src/tools/postgres:initdb)"},
     deps = [
+        "//src/services/mythrad/gametest",
         "//src/services/mythrad/journal",
         "//src/services/postflight/controlplane/pgtest",
         "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
