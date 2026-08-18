@@ -11,7 +11,7 @@ metadata:
   name: mythra-acme-dns
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: mythrad
+    app.kubernetes.io/name: chunkies
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: mythra
     guardian.dev/stage: prod
@@ -36,7 +36,7 @@ metadata:
   name: mythra-acme
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: mythrad
+    app.kubernetes.io/name: chunkies
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: mythra
     guardian.dev/stage: prod
@@ -59,7 +59,7 @@ metadata:
   name: mythra-origin
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: mythrad
+    app.kubernetes.io/name: chunkies
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: mythra
     guardian.dev/stage: prod
@@ -90,7 +90,7 @@ metadata:
   name: mythra-wt
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: mythrad
+    app.kubernetes.io/name: chunkies
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: mythra
     guardian.dev/stage: prod

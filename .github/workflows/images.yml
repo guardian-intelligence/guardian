@@ -60,7 +60,7 @@ jobs:
         id: classify
         run: |
           names=(alert-relay analytics-ingest authorization canary-journeys
-            chunkies-gateway chunkies-park feature-flags-notify mythrad payments payments-canary
+            chunkies-gateway chunkies-park feature-flags-notify payments payments-canary
             postflight-controlplane tofu-runner company-site privatecut-web
             visual-harness wake-up-mythra-web)
           declare -A watch=(
@@ -74,7 +74,6 @@ jobs:
             [payments-canary]='^src/services/payments/'
             [postflight-controlplane]='^src/services/postflight/'
             [feature-flags-notify]='^src/services/feature-flags-notify/'
-            [mythrad]='^src/services/mythrad/'
             [tofu-runner]='^src/infrastructure/cmd/tofu_runner/'
             [company-site]='^src/products/viteplus-monorepo/'
             [privatecut-web]='^src/products/viteplus-monorepo/'
@@ -92,14 +91,13 @@ jobs:
             [payments-canary]='//src/services/payments/canary:push'
             [postflight-controlplane]='//src/services/postflight/controlplane:push'
             [feature-flags-notify]='//src/services/feature-flags-notify:push'
-            [mythrad]='//src/services/mythrad:push'
             [tofu-runner]='//src/infrastructure/cmd/tofu_runner:push'
             [company-site]='//src/products/viteplus-monorepo/apps/guardianintelligence-web/site:push'
             [privatecut-web]='//src/products/viteplus-monorepo/apps/privatecut-web/site:push'
             [wake-up-mythra-web]='//src/products/viteplus-monorepo/apps/wake-up-mythra-web/site:push'
             [visual-harness]='//src/products/viteplus-monorepo/packages/visual-harness:push'
           )
-          go_images=' alert-relay analytics-ingest authorization chunkies-gateway chunkies-park feature-flags-notify mythrad payments payments-canary postflight-controlplane tofu-runner '
+          go_images=' alert-relay analytics-ingest authorization chunkies-gateway chunkies-park feature-flags-notify payments payments-canary postflight-controlplane tofu-runner '
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'
 
           all=false changed=""

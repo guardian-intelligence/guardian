@@ -10,7 +10,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	_ "embed"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -20,25 +19,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
-	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/http3"
-	webtransport "github.com/quic-go/webtransport-go"
-
-	"github.com/guardian-intelligence/guardian/src/services/mythrad/journal"
-	"github.com/guardian-intelligence/guardian/src/services/telemetry"
 )
 
 //go:embed behaviors/client.wasm
@@ -392,293 +380,12 @@ func devTickRateHandler(registry *parks, allowedParks map[string]bool) http.Hand
 	}
 }
 
-func runMythrad() {
-	wtPort := envInt("WT_PORT", 4433)
-	httpPort := envInt("HTTP_PORT", 9634)
-	metricsPort := envInt("METRICS_PORT", 9633)
-	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/mythra/behavior")
-	assetDir := envStr("ASSET_DIR", "/etc/mythra/assets")
-	publicAddr := envStr("PUBLIC_ADDR", "") // "host:port" advertised to clients
-	allowedOrigins := envStr("ALLOWED_ORIGINS", "")
-	maxSessions := envInt("MAX_SESSIONS", 4000)
-	// The desired startup tick rate: parks whose journaled rate differs
-	// converge to it via a dark-phase rate_set on their next open. A local
-	// drill can subsequently journal a live boundary for connected clients.
-	tickHz := envInt("TICK_HZ", 24)
-	if tickHz < minTickHz || tickHz > maxTickHz {
-		log.Fatalf("TICK_HZ=%d outside supported range %d..%d", tickHz, minTickHz, maxTickHz)
-	}
-	issuer := envStr("OIDC_ISSUER", "https://auth.wakeupmythra.com/realms/wakeupmythra.com")
-	jwksURL := envStr("OIDC_JWKS_URL", "")
-	clientIDs := envStr("OIDC_CLIENT_IDS", "wake-up-mythra")
-	requireEmail := envStr("REQUIRE_EMAIL_VERIFIED", "false") == "true"
-	// Parks are a fixed registry: /session refuses names outside it, so an
-	// authority (wazero runtime, goroutine, journal rows) only ever opens
-	// for a park an operator declared.
-	allowedParks := map[string]bool{}
-	for _, p := range strings.Split(envStr("PARKS", "park-mythra"), ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			allowedParks[p] = true
-		}
-	}
-
-	sans := []net.IP{net.ParseIP("127.0.0.1")}
-	if host, _, err := net.SplitHostPort(publicAddr); err == nil {
-		if ip := net.ParseIP(host); ip != nil {
-			sans = append(sans, ip)
-		}
-	}
-	if addrs, err := net.InterfaceAddrs(); err == nil {
-		for _, a := range addrs {
-			if ipn, ok := a.(*net.IPNet); ok && !ipn.IP.IsLoopback() && ipn.IP.To4() != nil {
-				sans = append(sans, ipn.IP)
-			}
-		}
-	}
-	rc := newRotatingCert(sans)
-	fc := newFileCert(envStr("TLS_CERT_FILE", ""), envStr("TLS_KEY_FILE", ""))
-
-	client := &clientModule{slot: "client"}
-	client.set(defaultClientModule)
-	parkMod := &clientModule{slot: "park"}
-	parkMod.set(defaultParkModule)
-	go watchDistributedModules(behaviorDir, client, parkMod)
-
-	assets := newAssetCatalog(assetDir)
-
-	// The journal comes up lazily: pool creation is offline, the schema
-	// migration retries in the background, and hellos are refused with
-	// "park unavailable" until the truth store is writable.
-	dsn, err := databaseURL()
-	if err != nil {
-		log.Fatalf("journal database: %v", err)
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		log.Fatalf("journal pool: %v", err)
-	}
-	j := journal.NewPg(pool)
-	var journalReady atomic.Bool
-	go func() {
-		for {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			err := j.Migrate(ctx)
-			cancel()
-			if err == nil {
-				journalReady.Store(true)
-				log.Print("journal ready")
-				return
-			}
-			log.Printf("journal not ready (retrying in 5s): %v", err)
-			time.Sleep(5 * time.Second)
-		}
-	}()
-
-	traceShutdown, err := telemetry.Init(context.Background(), "mythrad",
-		os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"))
-	if err != nil {
-		log.Fatalf("tracing: %v", err)
-	}
-	defer traceShutdown(context.Background())
-
-	mods := &modules{client: client, park: parkMod}
-	registry := newParks(func() []byte { b, _ := parkMod.get(); return b }, fixtureTerrain, j, mods, timing{hz: tickHz})
-	tickets, err := newTicketMint(os.Getenv("TICKET_KEY_FILE"))
-	if err != nil {
-		log.Fatalf("ticket key: %v", err)
-	}
-	handlers := &gameHandlers{
-		parks: registry, tickets: tickets, maxSessions: maxSessions,
-		allowedParks: allowedParks, anonMints: newAnonLimiter(),
-	}
-	gate := newOIDCGate(issuer, jwksURL, clientIDs, requireEmail)
-
-	wtMux := http.NewServeMux()
-	wt := webtransport.Server{
-		H3: &http3.Server{
-			Addr: fmt.Sprintf(":%d", wtPort),
-			TLSConfig: &tls.Config{
-				GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-					if c := fc.get(); c != nil {
-						return c, nil
-					}
-					c, _ := rc.get()
-					return &c, nil
-				},
-				NextProtos: []string{http3.NextProtoH3},
-			},
-			// Sessions carry an event log at human action rate plus tiny
-			// datagrams: small flow-control windows bound per-session
-			// buffer memory so the session cap, not buffer growth, is the
-			// memory envelope. Snapshots stream fine through the maximums.
-			QUICConfig: &quic.Config{
-				EnableDatagrams:                true,
-				MaxIncomingStreams:             16,
-				MaxIncomingUniStreams:          16,
-				InitialStreamReceiveWindow:     16 * 1024,
-				MaxStreamReceiveWindow:         256 * 1024,
-				InitialConnectionReceiveWindow: 32 * 1024,
-				MaxConnectionReceiveWindow:     512 * 1024,
-				MaxIdleTimeout:                 60 * time.Second,
-			},
-			Handler:         wtMux,
-			EnableDatagrams: true,
-		},
-		CheckOrigin: func(r *http.Request) bool {
-			o := r.Header.Get("Origin")
-			if o == "" || allowedOrigins == "" {
-				return true
-			}
-			for _, a := range strings.Split(allowedOrigins, ",") {
-				if o == strings.TrimSpace(a) {
-					return true
-				}
-			}
-			return false
-		},
-	}
-	wtMux.HandleFunc("/wt", func(w http.ResponseWriter, r *http.Request) {
-		if !journalReady.Load() {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		sess, err := wt.Upgrade(w, r)
-		if err != nil {
-			mHandshakes.WithLabelValues("upgrade_failed").Inc()
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		go handlers.handleSession(sess)
-	})
-
-	// Ticket mint, game modules, and content-addressed assets ride the
-	// Cloudflare-proxied ingress; only the QUIC dial goes direct to
-	// PUBLIC_ADDR, pinned by the hash from /session while self-signed.
-	certHash := func() (string, bool) {
-		if fc.loaded() {
-			return "", false
-		}
-		_, hash := rc.get()
-		return base64.StdEncoding.EncodeToString(hash[:]), true
-	}
-	pageMux := http.NewServeMux()
-	pageMux.HandleFunc("/session", handlers.handleSessionMint(gate, publicAddr, certHash))
-	if os.Getenv("WUM_DEV_LIVE_TICK_RATE") == "true" {
-		pageMux.HandleFunc("/dev/tick-rate", devTickRateHandler(registry, allowedParks))
-		log.Print("development live tick-rate control enabled at POST /dev/tick-rate")
-	}
-	pageMux.HandleFunc("/wt-info", func(w http.ResponseWriter, r *http.Request) {
-		addr := publicAddr
-		if addr == "" {
-			addr = "127.0.0.1:" + strconv.Itoa(wtPort)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		_, cw := client.get()
-		_, pw := parkMod.get()
-		info := map[string]any{"addr": addr, "clientWasm": cw, "parkWasm": pw}
-		if hash, selfSigned := certHash(); selfSigned {
-			info["certHashB64"] = hash
-		}
-		json.NewEncoder(w).Encode(info)
-	})
-	serveModule := func(mod *clientModule) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			module, hash := mod.get()
-			if len(module) == 0 {
-				http.NotFound(w, r)
-				return
-			}
-			w.Header().Set("Content-Type", "application/wasm")
-			w.Header().Set("ETag", `"`+hash+`"`)
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			w.Write(module)
-		}
-	}
-	pageMux.HandleFunc("/behavior/client.wasm", serveModule(client))
-	pageMux.HandleFunc("/behavior/park.wasm", serveModule(parkMod))
-	// Terrain artifacts are immutable per URL: the embedded fixture serves
-	// from memory, everything else from the journal's content store.
-	fixtureID := terrainID(fixtureTerrain)
-	pageMux.HandleFunc("/terrain/", func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseUint(strings.TrimPrefix(r.URL.Path, "/terrain/"), 16, 64)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		blob := fixtureTerrain
-		if id != fixtureID {
-			if !journalReady.Load() {
-				w.WriteHeader(http.StatusServiceUnavailable)
-				return
-			}
-			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-			defer cancel()
-			var found bool
-			blob, found, err = j.TerrainBlob(ctx, id)
-			if err != nil {
-				// transient store trouble is not "this terrain does not
-				// exist" — a 404 would poison immutable caches
-				w.WriteHeader(http.StatusServiceUnavailable)
-				return
-			}
-			if !found {
-				http.NotFound(w, r)
-				return
-			}
-		}
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		w.Write(blob)
-	})
-	pageMux.HandleFunc("/assets/", func(w http.ResponseWriter, r *http.Request) {
-		ref := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/assets/"), ".svg")
-		body, ok := assets.get(ref)
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "image/svg+xml")
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		w.Write(body)
-	})
-
-	obsMux := http.NewServeMux()
-	obsMux.Handle("/metrics", promhttp.Handler())
-	obsMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
-	obsMux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		if !journalReady.Load() {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		w.WriteHeader(200)
-	})
-
-	log.Printf("mythrad: wt=:%d http=:%d metrics=:%d public=%s issuer=%s", wtPort, httpPort, metricsPort, publicAddr, issuer)
-	go func() { log.Fatal(wt.ListenAndServe()) }()
-	go func() {
-		// /wt-info is polled by external monitors that send no traceparent;
-		// real page boots always do (the fetch wrapper stamps one).
-		handler := telemetry.Middleware(pageMux, telemetry.WithTraceparentOnly("/wt-info"))
-		log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", httpPort), handler))
-	}()
-	go func() { log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", metricsPort), obsMux)) }()
-
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
-	<-sig
-	log.Print("SIGTERM: closing sessions (clients rejoin the replacement by journal catch-up)")
-	wt.Close()
-}
-
 func main() {
 	switch filepath.Base(os.Args[0]) {
 	case "chunkies-gateway":
 		runChunkiesGateway()
 	case "chunkies-park":
 		runChunkiesPark()
-	case "mythrad":
-		runMythrad()
 	default:
 		log.Fatalf("unknown executable %q", filepath.Base(os.Args[0]))
 	}
