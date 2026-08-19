@@ -1,10 +1,10 @@
-// Package journal is the durable truth of every dog park: an ordered,
-// per-park event log plus periodic state snapshots (src/chunkies/README.md).
+// Package journal is the durable truth of every dog chunk: an ordered,
+// per-chunk event log plus periodic state snapshots (src/chunkies/README.md).
 // Restore, replay, rejoin, spectating, and time-travel debugging all read
 // the same log this package writes.
 //
 // The contract lives in this interface, not in Postgres. Any backend must
-// pass journaltest.Run: per-park seqs are dense, gap-free, monotonic, and
+// pass journaltest.Run: per-chunk seqs are dense, gap-free, monotonic, and
 // assigned at append; a split-brain second writer conflicts instead of
 // interleaving; payloads and snapshot state are opaque bytes end to end.
 package journal
@@ -36,7 +36,7 @@ type Event struct {
 }
 
 // Snapshot is a canonical sim state blob at a journal position: replaying
-// events with Seq > s.Seq on top of State must reproduce the live park.
+// events with Seq > s.Seq on top of State must reproduce the live chunk.
 // TerrainID names the terrain artifact the state was captured on; the sim
 // refuses to restore against any other, so the host must load that blob
 // first.
@@ -51,7 +51,7 @@ type Snapshot struct {
 
 // ErrConflict reports a lost single-writer race: the log has moved past
 // afterSeq, so another writer exists (or this caller is stale). The caller
-// is not the park's authority anymore; it must not retry blindly.
+// is not the chunk's authority anymore; it must not retry blindly.
 var ErrConflict = errors.New("journal: append conflict (second writer?)")
 
 type Journal interface {
@@ -60,15 +60,15 @@ type Journal interface {
 	// log position — the single-writer enforcement: if the log has moved,
 	// the append fails with ErrConflict instead of interleaving. Either
 	// every event lands or none do.
-	Append(ctx context.Context, parkID int64, afterSeq int64, events []Event) (int64, error)
+	Append(ctx context.Context, chunkID int64, afterSeq int64, events []Event) (int64, error)
 	// Read streams events with Seq >= fromSeq in seq order.
-	Read(ctx context.Context, parkID int64, fromSeq int64, fn func(Event) error) error
-	PutSnapshot(ctx context.Context, parkID int64, s Snapshot) error
+	Read(ctx context.Context, chunkID int64, fromSeq int64, fn func(Event) error) error
+	PutSnapshot(ctx context.Context, chunkID int64, s Snapshot) error
 	// LatestSnapshot returns the highest-seq snapshot, if any exists.
-	LatestSnapshot(ctx context.Context, parkID int64) (Snapshot, bool, error)
+	LatestSnapshot(ctx context.Context, chunkID int64) (Snapshot, bool, error)
 	// PutTerrain stores a terrain artifact under its content identity.
 	// Blobs are immutable per id: re-putting an existing id is a no-op, so
-	// ten thousand parks born from one fixture share one row.
+	// ten thousand chunks born from one fixture share one row.
 	PutTerrain(ctx context.Context, terrainID uint64, schema uint32, blob []byte) error
 	// TerrainBlob fetches a terrain artifact by content identity.
 	TerrainBlob(ctx context.Context, terrainID uint64) ([]byte, bool, error)
@@ -145,7 +145,7 @@ func (p *Pg) Migrate(ctx context.Context) error {
 	return nil
 }
 
-func (p *Pg) Append(ctx context.Context, parkID int64, afterSeq int64, events []Event) (int64, error) {
+func (p *Pg) Append(ctx context.Context, chunkID int64, afterSeq int64, events []Event) (int64, error) {
 	if len(events) == 0 {
 		return 0, errors.New("journal: empty append")
 	}
@@ -160,7 +160,7 @@ func (p *Pg) Append(ctx context.Context, parkID int64, afterSeq int64, events []
 			`INSERT INTO park_events
 			   (park_id, seq, tick, epoch, kind, actor, intent_id, payload)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-			parkID, afterSeq+1+int64(i), int64(ev.Tick), int32(ev.Epoch),
+			chunkID, afterSeq+1+int64(i), int64(ev.Tick), int32(ev.Epoch),
 			int16(ev.Kind), ev.Actor, int64(ev.IntentID), ev.Payload)
 	}
 	if err := tx.SendBatch(ctx, batch).Close(); err != nil {
@@ -178,7 +178,7 @@ func (p *Pg) Append(ctx context.Context, parkID int64, afterSeq int64, events []
 	if err := tx.QueryRow(ctx,
 		`SELECT $2 = 0 OR EXISTS (
 		   SELECT 1 FROM park_events WHERE park_id = $1 AND seq = $2
-		 )`, parkID, afterSeq,
+		 )`, chunkID, afterSeq,
 	).Scan(&prior); err != nil {
 		return 0, err
 	}
@@ -191,13 +191,13 @@ func (p *Pg) Append(ctx context.Context, parkID int64, afterSeq int64, events []
 	return afterSeq + 1, nil
 }
 
-func (p *Pg) Read(ctx context.Context, parkID int64, fromSeq int64, fn func(Event) error) error {
+func (p *Pg) Read(ctx context.Context, chunkID int64, fromSeq int64, fn func(Event) error) error {
 	rows, err := p.pool.Query(ctx,
 		`SELECT seq, tick, epoch, kind, actor, intent_id, payload
 		   FROM park_events
 		  WHERE park_id = $1 AND seq >= $2
 		  ORDER BY seq`,
-		parkID, fromSeq)
+		chunkID, fromSeq)
 	if err != nil {
 		return err
 	}
@@ -218,16 +218,16 @@ func (p *Pg) Read(ctx context.Context, parkID int64, fromSeq int64, fn func(Even
 	return rows.Err()
 }
 
-func (p *Pg) PutSnapshot(ctx context.Context, parkID int64, s Snapshot) error {
+func (p *Pg) PutSnapshot(ctx context.Context, chunkID int64, s Snapshot) error {
 	_, err := p.pool.Exec(ctx,
 		`INSERT INTO park_snapshots (park_id, seq, tick, epoch, wh, terrain_id, state)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 ON CONFLICT (park_id, seq) DO NOTHING`,
-		parkID, s.Seq, int64(s.Tick), int32(s.Epoch), int64(s.WH), int64(s.TerrainID), s.State)
+		chunkID, s.Seq, int64(s.Tick), int32(s.Epoch), int64(s.WH), int64(s.TerrainID), s.State)
 	return err
 }
 
-func (p *Pg) LatestSnapshot(ctx context.Context, parkID int64) (Snapshot, bool, error) {
+func (p *Pg) LatestSnapshot(ctx context.Context, chunkID int64) (Snapshot, bool, error) {
 	var s Snapshot
 	var tick, wh, terrainID int64
 	var epoch int32
@@ -237,7 +237,7 @@ func (p *Pg) LatestSnapshot(ctx context.Context, parkID int64) (Snapshot, bool, 
 		  WHERE park_id = $1
 		  ORDER BY seq DESC
 		  LIMIT 1`,
-		parkID,
+		chunkID,
 	).Scan(&s.Seq, &tick, &epoch, &wh, &terrainID, &s.State)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Snapshot{}, false, nil

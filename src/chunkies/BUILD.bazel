@@ -1,28 +1,22 @@
-load("@rules_go//go:def.bzl", "go_binary", "go_library")
+load("@rules_go//go:def.bzl", "go_binary")
 load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
-go_library(
-    name = "chunkies_lib",
-    srcs = ["main.go"],
-    importpath = "github.com/guardian-intelligence/guardian/src/chunkies",
-    visibility = ["//visibility:private"],
-    deps = [
-        "//src/chunkies/gateway",
-        "//src/chunkies/park",
-    ],
-)
+# Two processes, two binaries, two images. Nothing is argv-dispatched from
+# a shared binary: a change to runtime code must not change the gateway
+# image's bytes (or vice versa), so image automation rolls exactly the
+# component that updated. Codec changes roll both — correctly.
 
 go_binary(
     name = "chunkies-gateway",
-    embed = [":chunkies_lib"],
+    embed = ["//src/chunkies/cmd/chunkies-gateway:chunkies-gateway_lib"],
     pure = "on",
     visibility = ["//visibility:public"],
 )
 
 go_binary(
-    name = "chunkies-park",
-    embed = [":chunkies_lib"],
+    name = "chunkies-chunkie",
+    embed = ["//src/chunkies/cmd/chunkies-chunkie:chunkies-chunkie_lib"],
     pure = "on",
     visibility = ["//visibility:public"],
 )
@@ -40,7 +34,7 @@ pkg_tar(
 oci_image(
     name = "chunkies_gateway_image",
     annotations = {
-        "org.opencontainers.image.description": "Wake Up Mythra WebTransport session gateway",
+        "org.opencontainers.image.description": "Chunkies WebTransport session gateway",
         "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
         "org.opencontainers.image.title": "chunkies-gateway",
     },
@@ -70,38 +64,38 @@ oci_push(
 )
 
 pkg_tar(
-    name = "chunkies_park_layer",
+    name = "chunkies_chunkie_layer",
     files = {
-        ":chunkies-park": "app/chunkies-park",
+        ":chunkies-chunkie": "app/chunkies-chunkie",
     },
     modes = {
-        "app/chunkies-park": "0755",
+        "app/chunkies-chunkie": "0755",
     },
 )
 
 oci_image(
-    name = "chunkies_park_image",
+    name = "chunkies_chunkie_image",
     annotations = {
-        "org.opencontainers.image.description": "Wake Up Mythra single-park simulation authority",
+        "org.opencontainers.image.description": "Chunkies server runtime: this pod's chunk authorities",
         "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
-        "org.opencontainers.image.title": "chunkies-park",
+        "org.opencontainers.image.title": "chunkies-chunkie",
     },
     architecture = "amd64",
     os = "linux",
-    entrypoint = ["/app/chunkies-park"],
+    entrypoint = ["/app/chunkies-chunkie"],
     exposed_ports = [
         "9631/tcp",
         "9632/tcp",
         "9637/tcp",
     ],
-    tars = [":chunkies_park_layer"],
+    tars = [":chunkies_chunkie_layer"],
     visibility = ["//visibility:public"],
 )
 
 oci_push(
-    name = "chunkies_park_push",
-    image = ":chunkies_park_image",
+    name = "chunkies_chunkie_push",
+    image = ":chunkies_chunkie_image",
     remote_tags = ["edge"],
-    repository = "ghcr.io/guardian-intelligence/chunkies-park",
+    repository = "ghcr.io/guardian-intelligence/chunkies-chunkie",
     visibility = ["//visibility:public"],
 )

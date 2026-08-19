@@ -51,7 +51,7 @@ leg_command_pattern() {
   flagd) echo "flagd" ;;
   ingest) echo "analytics/ingest" ;;
   devissuer) echo "devissuer" ;;
-  park) echo "chunkies-park" ;;
+  park) echo "chunkies-chunkie" ;;
   gateway) echo "chunkies-gateway" ;;
   web) echo "vp dev" ;;
   esac
@@ -250,8 +250,8 @@ EOF
     mkdir -p "$ROOT/src/chunkies/assets"
     park_database_url="$(scripts/wum-dev-db.sh url)"
     DATABASE_URL="$park_database_url" \
-      PARK_NAME=park-mythra \
-      PARK_PORT="$PARK_PORT" \
+      CHUNK_NAME=park-mythra \
+      TRUNK_PORT="$PARK_PORT" \
       HTTP_PORT="$PARK_HTTP_PORT" \
       METRICS_PORT="$PARK_METRICS_PORT" \
       INTERNAL_KEY_FILE="$RUN_DIR/internal.key" \
@@ -279,7 +279,7 @@ EOF
       METRICS_PORT="$GATEWAY_METRICS_PORT" \
       WT_PORT="$GATEWAY_WT_PORT" \
       CHUNK_DIRECTORY_FILE="$RUN_DIR/chunks.conf" \
-      PARK_HTTP_URL="http://127.0.0.1:${PARK_HTTP_PORT}" \
+      CHUNKIE_HTTP_URL="http://127.0.0.1:${PARK_HTTP_PORT}" \
       INTERNAL_KEY_FILE="$RUN_DIR/internal.key" \
       CHUNKIES_DEV_LIVE_TICK_RATE=true \
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://127.0.0.1:${OTLP_GRPC_PORT}" \
@@ -321,11 +321,11 @@ up() {
 
   acquire_lock
   echo "wum-dev: building Chunkies + devissuer + telemetry legs…" >&2
-  bazelisk build //src/chunkies:chunkies-gateway //src/chunkies:chunkies-park //src/chunkies/devissuer \
+  bazelisk build //src/chunkies:chunkies-gateway //src/chunkies:chunkies-chunkie //src/chunkies/devissuer \
     //src/analytics/ingest @ip2asn_combined//file \
     @multitool//tools/clickhouse-server @multitool//tools/otelcol-contrib @multitool//tools/flagd >&2
   GATEWAY="$(bazelisk cquery --output=files //src/chunkies:chunkies-gateway 2>/dev/null | head -1)"
-  PARK="$(bazelisk cquery --output=files //src/chunkies:chunkies-park 2>/dev/null | head -1)"
+  PARK="$(bazelisk cquery --output=files //src/chunkies:chunkies-chunkie 2>/dev/null | head -1)"
   DEVISSUER="$(bazelisk cquery --output=files //src/chunkies/devissuer 2>/dev/null | head -1)"
   INGEST="$(bazelisk cquery --output=files //src/analytics/ingest 2>/dev/null | head -1)"
   CLICKHOUSE="$(bazelisk cquery --output=files @multitool//tools/clickhouse-server 2>/dev/null | head -1)"

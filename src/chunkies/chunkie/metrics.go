@@ -1,4 +1,4 @@
-package park
+package chunkie
 
 import (
 	"sync/atomic"
@@ -17,12 +17,12 @@ var (
 	})
 	mTickLag = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "chunkies_tick_lag_seconds",
-		Help: "How far the park runs behind its wall-clock tick schedule. Steady state sits inside one tick; sustained growth means the sim cannot keep up; strongly negative means the wall clock stepped backward.",
-	}, []string{"park"})
+		Help: "How far the chunk runs behind its wall-clock tick schedule. Steady state sits inside one tick; sustained growth means the sim cannot keep up; strongly negative means the wall clock stepped backward.",
+	}, []string{"chunk"})
 	mClockSkips = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "chunkies_clock_skips_total", Help: "clock_skip events journaled to repay authority downtime."})
 	mRateChanges = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "chunkies_rate_changes_total", Help: "rate_set events journaled to converge a park to the deployment's tick rate."})
+		Name: "chunkies_rate_changes_total", Help: "rate_set events journaled to converge a chunk to the deployment's tick rate."})
 	mAppendDur = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "chunkies_journal_append_seconds",
 		Help:    "Tick-batched journal append commit time (the Append call alone).",
@@ -38,8 +38,8 @@ var (
 		Help:    "Player intent time from server receipt through validation and durable append to fan-out (or rejection), by bounded action kind and result.",
 		Buckets: []float64{.0005, .001, .0025, .005, .0075, .01, .015, .02, .03, .0417, .06, .1, .25, .5},
 	}, []string{"kind", "result"})
-	mParks = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "chunkies_parks_open", Help: "Open park authorities."})
+	mChunks = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "chunkies_chunks_open", Help: "Open chunk authorities."})
 	mEventsAppended = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "chunkies_journal_events_total", Help: "Events appended to the journal."})
 	mAppendErrors = promauto.NewCounter(prometheus.CounterOpts{
@@ -61,5 +61,5 @@ var (
 	mInboundDropped = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "chunkies_inbound_dropped_total", Help: "Uplink frames shed because a session's intent drain was stalled."})
 	mEpochSwaps = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "chunkies_epoch_swaps_total", Help: "Park module epoch-swap lane outcomes."}, []string{"result"})
+		Name: "chunkies_epoch_swaps_total", Help: "Chunk module epoch-swap lane outcomes."}, []string{"result"})
 )

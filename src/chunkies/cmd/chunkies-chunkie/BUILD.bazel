@@ -1,0 +1,9 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "chunkies-chunkie_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/chunkies/cmd/chunkies-chunkie",
+    visibility = ["//src/chunkies:__pkg__"],
+    deps = ["//src/chunkies/chunkie"],
+)

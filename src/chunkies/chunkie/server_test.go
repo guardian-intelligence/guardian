@@ -1,6 +1,6 @@
-package park
+package chunkie
 
-// The park's side of the multiplexed transport against a real running
+// The chunk's side of the multiplexed transport against a real running
 // authority: sessions share one authenticated connection, each gets its
 // own welcome, fan-out routes by session, and one session's close leaves
 // its neighbors attached.
@@ -15,25 +15,25 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/guardian-intelligence/guardian/src/chunkies/journal"
-	"github.com/guardian-intelligence/guardian/src/chunkies/parkproxy"
+	"github.com/guardian-intelligence/guardian/src/chunkies/trunk"
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
 	"github.com/guardian-intelligence/guardian/src/postflight/controlplane/pgtest"
 )
 
 // nextFrame reads session events until one carries a stream frame of the
 // wanted codec kind.
-func nextFrame(t *testing.T, s *parkproxy.Session, want byte) []byte {
+func nextFrame(t *testing.T, s *trunk.Session, want byte) []byte {
 	t.Helper()
 	deadline := time.After(10 * time.Second)
 	for {
 		select {
 		case ev := <-s.Events():
-			if ev.Kind != parkproxy.KindStream {
+			if ev.Kind != trunk.KindStream {
 				continue
 			}
 			kind, payload, err := codec.NewReader(bytes.NewReader(ev.Payload)).Next()
 			if err != nil {
-				t.Fatalf("bad frame from park: %v", err)
+				t.Fatalf("bad frame from chunk: %v", err)
 			}
 			if kind == want {
 				return payload
@@ -47,7 +47,7 @@ func nextFrame(t *testing.T, s *parkproxy.Session, want byte) []byte {
 	}
 }
 
-func TestParkConnMultiplexesSessions(t *testing.T) {
+func TestTrunkConnMultiplexesSessions(t *testing.T) {
 	ctx := context.Background()
 	pgPool, err := pgxpool.New(ctx, pgtest.Start(t))
 	if err != nil {
@@ -59,7 +59,7 @@ func TestParkConnMultiplexesSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	mods := toyMods(toyModule(t))
-	registry := newParks(func() []byte { b, _ := mods.park.Get(); return b }, nil, toyVocab(), j, mods, timing{hz: 24})
+	registry := newChunks(func() []byte { b, _ := mods.sim.Get(); return b }, nil, toyVocab(), j, mods, timing{hz: 24})
 	authority, err := registry.get(ctx, "park-test")
 	if err != nil {
 		t.Fatal(err)
@@ -78,39 +78,39 @@ func TestParkConnMultiplexesSessions(t *testing.T) {
 			if err != nil {
 				return
 			}
-			go handleParkConn(conn, key, authority, 16)
+			go handleTrunkConn(conn, key, authority, 16)
 		}
 	}()
 
-	pool := parkproxy.NewPool(key, parkproxy.Hooks{})
+	pool := trunk.NewPool(key, trunk.Hooks{})
 	openCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	alice, err := pool.Open(openCtx, l.Addr().String(), parkproxy.Open{Sub: "alice", Park: "park-test", Role: "player", SinceSeq: -1})
+	alice, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Sub: "alice", Chunk: "park-test", Role: "player", SinceSeq: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	bob, err := pool.Open(openCtx, l.Addr().String(), parkproxy.Open{Sub: "bob", Park: "park-test", Role: "spectator", SinceSeq: -1})
+	bob, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Sub: "bob", Chunk: "park-test", Role: "spectator", SinceSeq: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Both sessions attach through one connection and get their own
 	// welcome.
-	for _, s := range []*parkproxy.Session{alice, bob} {
+	for _, s := range []*trunk.Session{alice, bob} {
 		if _, err := codec.DecodeWelcome(nextFrame(t, s, codec.KindWelcome)); err != nil {
 			t.Fatalf("welcome: %v", err)
 		}
 	}
 
-	// A session opened for the wrong park — or with an open the park can't
+	// A session opened for the wrong chunk — or with an open the chunk can't
 	// accept (the version-skew shape) — is refused without disturbing the
 	// connection's live sessions.
 	for _, tc := range []struct {
-		open   parkproxy.Open
+		open   trunk.Open
 		reason string
 	}{
-		{parkproxy.Open{Sub: "carol", Park: "park-elsewhere", Role: "player", SinceSeq: -1}, "wrong park"},
-		{parkproxy.Open{Sub: "carol", Park: "park-test", Role: "admin", SinceSeq: -1}, "bad open"},
+		{trunk.Open{Sub: "carol", Chunk: "park-elsewhere", Role: "player", SinceSeq: -1}, "wrong chunk"},
+		{trunk.Open{Sub: "carol", Chunk: "park-test", Role: "admin", SinceSeq: -1}, "bad open"},
 	} {
 		refused, err := pool.Open(openCtx, l.Addr().String(), tc.open)
 		if err != nil {
@@ -130,7 +130,7 @@ func TestParkConnMultiplexesSessions(t *testing.T) {
 	// each addressed by its own id. Batches may also carry system events
 	// (the real-clock authority repays downtime at open), so look for the
 	// record rather than assuming it travels alone.
-	tickWith := func(s *parkproxy.Session, kind uint16, actor uint64) {
+	tickWith := func(s *trunk.Session, kind uint16, actor uint64) {
 		t.Helper()
 		for {
 			_, records, err := codec.DecodeTick(nextFrame(t, s, codec.KindTick))
@@ -147,7 +147,7 @@ func TestParkConnMultiplexesSessions(t *testing.T) {
 	if err := alice.SendStream(codec.EncodeIntent(1, kJoin, codec.ActorFor("alice"), nil)); err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range []*parkproxy.Session{alice, bob} {
+	for _, s := range []*trunk.Session{alice, bob} {
 		tickWith(s, kJoin, codec.ActorFor("alice"))
 	}
 

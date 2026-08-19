@@ -23,12 +23,12 @@ import (
 	"github.com/guardian-intelligence/guardian/src/shared/go/telemetry"
 )
 
-// ticket is the admission artifact (src/chunkies/README.md): identity, park, and
+// ticket is the admission artifact (src/chunkies/README.md): identity, chunk, and
 // role in one HMAC-signed blob the QUIC hello presents. Minted only by
 // POST /session behind OIDC; checked statelessly by every hello.
 type ticket struct {
 	Sub  string `json:"sub"`
-	Park string `json:"park"`
+	Chunk string `json:"chunk"`
 	Role string `json:"role"`
 	Exp  int64  `json:"exp"`
 }
@@ -238,7 +238,7 @@ func clientIP(r *http.Request) string {
 // handleSessionMint is POST /session: identity in, admission ticket out.
 // Two doors: an OIDC bearer mints a player (or spectator) for the account
 // it names, and a bare ?spectate&device=<uuid> mints an anonymous
-// spectator — the acquisition funnel. Parks are a fixed registry, not a
+// spectator — the acquisition funnel. Chunks are a fixed registry, not a
 // request-path side effect: an unknown name never opens an authority. The
 // email_verified requirement is config-gated until every broker asserts it.
 func (h *gameHandlers) handleSessionMint(gate *oidcGate, publicAddr string, certHash func() (string, bool)) http.HandlerFunc {
@@ -247,13 +247,13 @@ func (h *gameHandlers) handleSessionMint(gate *oidcGate, publicAddr string, cert
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
 			return
 		}
-		park := r.URL.Query().Get("park")
-		if park == "" {
-			park = h.defaultChunk
+		chunk := r.URL.Query().Get("chunk")
+		if chunk == "" {
+			chunk = h.defaultChunk
 		}
-		if !h.directory.allowed(h.game, park) {
+		if !h.directory.allowed(h.game, chunk) {
 			mMints.WithLabelValues("unknown_park").Inc()
-			http.Error(w, "unknown park", http.StatusNotFound)
+			http.Error(w, "unknown chunk", http.StatusNotFound)
 			return
 		}
 		role := "player"
@@ -304,20 +304,20 @@ func (h *gameHandlers) handleSessionMint(gate *oidcGate, publicAddr string, cert
 		}
 
 		tk := h.tickets.mint(ticket{
-			Sub: sub, Park: park, Role: role,
+			Sub: sub, Chunk: chunk, Role: role,
 			Exp: time.Now().Add(60 * time.Second).Unix(),
 		})
 		// The mint is where a browser's quoted trace id meets a game
 		// identity: this line and the span attributes are the join between
 		// a client rpc trace and everything the session does afterwards.
 		telemetry.SpanAttrs(r.Context(), map[string]string{
-			"chunkies.sub": sub, "chunkies.chunk": park, "chunkies.role": role,
+			"chunkies.sub": sub, "chunkies.chunk": chunk, "chunkies.role": role,
 		})
 		if tid := telemetry.TraceIDFrom(r.Context()); tid != "" {
-			log.Printf("session minted: sub=%s park=%s role=%s trace_id=%s", sub, park, role, tid)
+			log.Printf("session minted: sub=%s chunk=%s role=%s trace_id=%s", sub, chunk, role, tid)
 		}
 		resp := map[string]any{
-			"ticket": tk, "endpoint": publicAddr, "park": park, "role": role,
+			"ticket": tk, "endpoint": publicAddr, "chunk": chunk, "role": role,
 		}
 		if hash, selfSigned := certHash(); selfSigned {
 			resp["certHashB64"] = hash

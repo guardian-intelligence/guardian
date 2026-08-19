@@ -3,18 +3,18 @@
 # revision.
 policy: guardian-mythra-operator
 cases:
-  - name: restart a chunkies-park Deployment pod
+  - name: restart a chunkies-chunkie Deployment pod
     operation: DELETE
     resource: {group: "", version: v1, resource: pods}
-    objectName: chunkies-park-59b449c48f-h84js
+    objectName: chunkies-chunkie-59b449c48f-h84js
     object:
       apiVersion: v1
       kind: Pod
       metadata:
-        name: chunkies-park-59b449c48f-h84js
+        name: chunkies-chunkie-59b449c48f-h84js
         namespace: tenant-guardian-prod
         labels:
-          app.kubernetes.io/name: chunkies-park
+          app.kubernetes.io/name: chunkies-chunkie
           guardian.dev/product: mythra
     user:
       username: system:serviceaccount:tenant-guardian-prod:guardian-mythra-operator

@@ -604,7 +604,7 @@ await page.waitForFunction(
 const info = await modules();
 console.log(
   `signed in as ${PLAYER}; playing ${LEGS.length} legs of ${CYCLES} cycles` +
-    ` x ${RUNS} run(s) against park ${info.parkWasm} / client ${info.clientWasm}` +
+    ` x ${RUNS} run(s) against park ${info.simWasm} / client ${info.clientWasm}` +
     (CANDIDATE ? ` (candidate ${CANDIDATE})` : " (no candidate pinned — leads only)"),
 );
 

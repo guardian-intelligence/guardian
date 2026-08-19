@@ -67,7 +67,7 @@ wasm_module(
     out = "toy.wasm",
     visibility = [
         "//src/chunkies/gametest:__pkg__",
-        "//src/chunkies/park:__pkg__",
+        "//src/chunkies/chunkie:__pkg__",
     ],
 )
 

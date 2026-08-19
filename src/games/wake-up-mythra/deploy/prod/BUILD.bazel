@@ -20,7 +20,7 @@ filegroup(
 exports_files(
     [
         "behavior/client.wasm",
-        "behavior/park.wasm",
+        "behavior/sim.wasm",
     ],
     visibility = ["//src/chunkies/sim:__pkg__"],
 )

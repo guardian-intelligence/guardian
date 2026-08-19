@@ -1,11 +1,11 @@
 // Package parkproxy is the authenticated internal transport between the
-// gateway and a park backend. One TCP connection carries every session for
+// gateway and a chunk backend. One TCP connection carries every session for
 // its (gateway, backend) pair: the HMAC handshake happens once per
 // connection, sessions open and close as multiplexed control messages, and
 // a single ping probes the backend's liveness for all of them. That makes
 // re-attaching a session to a different backend a control message rather
 // than a redial — the seam cross-chunk transfer needs.
-package parkproxy
+package trunk
 
 import (
 	"context"
@@ -51,11 +51,11 @@ var errSessionClosed = errors.New("proxy session closed")
 // tell routine lifecycle from failure in their ConnDown hook.
 var ErrIdle = errors.New("idle")
 
-// Open carries one session's identity to the park. It rides the
+// Open carries one session's identity to the chunk. It rides the
 // authenticated connection, so it needs no signature of its own.
 type Open struct {
 	Sub       string
-	Park      string
+	Chunk      string
 	Role      string
 	Remote    string
 	SinceSeq  int64
@@ -251,7 +251,7 @@ func encodeOpen(open Open) ([]byte, error) {
 	b = binary.LittleEndian.AppendUint64(b, uint64(open.SinceSeq))
 	b = binary.LittleEndian.AppendUint64(b, open.SinceTick)
 	var err error
-	for _, s := range []string{open.Sub, open.Park, open.Role, open.Remote} {
+	for _, s := range []string{open.Sub, open.Chunk, open.Role, open.Remote} {
 		b, err = appendProxyString(b, s)
 		if err != nil {
 			return nil, err
@@ -269,14 +269,14 @@ func DecodeOpen(payload []byte) (Open, error) {
 		SinceTick: binary.LittleEndian.Uint64(payload[8:]),
 	}
 	at := 16
-	for _, field := range []*string{&open.Sub, &open.Park, &open.Role, &open.Remote} {
+	for _, field := range []*string{&open.Sub, &open.Chunk, &open.Role, &open.Remote} {
 		s, err := takeProxyString(payload, &at)
 		if err != nil {
 			return Open{}, err
 		}
 		*field = s
 	}
-	if at != len(payload) || open.Sub == "" || open.Park == "" || (open.Role != "player" && open.Role != "spectator") {
+	if at != len(payload) || open.Sub == "" || open.Chunk == "" || (open.Role != "player" && open.Role != "spectator") {
 		return Open{}, errors.New("bad proxy open")
 	}
 	return open, nil
@@ -482,7 +482,7 @@ func (m *muxConn) readLoop() {
 			select {
 			case s.events <- Event{Kind: msg.Kind, Payload: msg.Payload}:
 			default:
-				// A session that can't drain park fan-out is closed rather
+				// A session that can't drain chunk fan-out is closed rather
 				// than allowed to stall every other session's demux.
 				s.terminate("relay backlog", false, true)
 			}
@@ -538,7 +538,7 @@ func (m *muxConn) kill(err error) {
 		}
 		m.mu.Unlock()
 		for _, s := range sessions {
-			s.terminate("park unavailable", false, false)
+			s.terminate("chunk unavailable", false, false)
 		}
 		// A goroutine because kill can run under a caller already holding
 		// the pool entry's lock (a failed open).
@@ -550,13 +550,13 @@ func (m *muxConn) kill(err error) {
 }
 
 // Event is one message delivered to a session: a stream frame or a
-// datagram from the park.
+// datagram from the chunk.
 type Event struct {
 	Kind    byte
 	Payload []byte
 }
 
-// Session is the gateway's handle on one multiplexed park session — an
+// Session is the gateway's handle on one multiplexed chunk session — an
 // attachment object whose lifetime is independent of the connection
 // carrying it.
 type Session struct {
@@ -575,7 +575,7 @@ type Session struct {
 func (s *Session) Events() <-chan Event  { return s.events }
 func (s *Session) Done() <-chan struct{} { return s.done }
 
-// CloseReason reports why the session ended and whether the park said so;
+// CloseReason reports why the session ended and whether the chunk said so;
 // a park-stated reason is meant for the client, anything else is the
 // transport's own failure. Valid once Done is closed.
 func (s *Session) CloseReason() (string, bool) { return s.reason, s.fromPark }
@@ -598,7 +598,7 @@ func (s *Session) send(kind byte, b []byte) error {
 	return nil
 }
 
-// Close ends the session and tells the park; the shared connection lives
+// Close ends the session and tells the chunk; the shared connection lives
 // on for its other sessions.
 func (s *Session) Close(reason string) { s.terminate(reason, false, true) }
 

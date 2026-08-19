@@ -34,14 +34,14 @@ type Event struct {
 // Genesis may be empty only for a content-free game (ABI v2,
 // content_cap 0) — the fetch dance is skipped entirely.
 type Game struct {
-	Park    []byte            // the game state machine module
+	Sim     []byte            // the game state machine module
 	Modules map[string][]byte // other shipped modules: artifact gates only
 	Genesis []byte            // genesis content artifact
 	Corpus  []Event
 }
 
 const (
-	parkID = int64(0x67616D65)
+	chunkID = int64(0x67616D65)
 	epoch0 = uint32(1)
 )
 
@@ -49,8 +49,8 @@ var seeds = []uint64{1, 42, 0xC0FFEE}
 
 func Run(t *testing.T, g Game) {
 	t.Helper()
-	if len(g.Park) == 0 {
-		t.Fatal("gametest.Game needs Park module bytes")
+	if len(g.Sim) == 0 {
+		t.Fatal("gametest.Game needs Chunk module bytes")
 	}
 
 	t.Run("artifacts", func(t *testing.T) { runArtifacts(t, g) })
@@ -81,32 +81,32 @@ func runArtifacts(t *testing.T, g Game) {
 
 	// The simulation module carries the full contract: importing nothing
 	// is what makes clocks, entropy, and the network unreachable.
-	if err := scanFloatDecls(g.Park); err != nil {
-		t.Errorf("park: %v", err)
+	if err := scanFloatDecls(g.Sim); err != nil {
+		t.Errorf("chunk: %v", err)
 	}
-	imports, err := scanImports(g.Park)
+	imports, err := scanImports(g.Sim)
 	if err != nil {
-		t.Errorf("park: %v", err)
+		t.Errorf("chunk: %v", err)
 	}
 	for _, imp := range imports {
-		t.Errorf("park imports %s — a simulation module must import nothing", imp)
+		t.Errorf("chunk imports %s — a simulation module must import nothing", imp)
 	}
 
-	h, err := newHost(g.Park)
+	h, err := newHost(g.Sim)
 	if err != nil {
-		t.Fatalf("park: %v", err)
+		t.Fatalf("chunk: %v", err)
 	}
 	defer h.close()
 	if h.abi == 0 {
-		t.Errorf("park: abi_version = 0")
+		t.Errorf("chunk: abi_version = 0")
 	}
 	for _, name := range requiredExports(h.abi) {
 		if _, ok := h.fns[name]; !ok {
-			t.Errorf("park module does not export %s", name)
+			t.Errorf("sim module does not export %s", name)
 		}
 	}
 	if h.ioCap == 0 {
-		t.Errorf("park buffers: io_cap = 0")
+		t.Errorf("chunk buffers: io_cap = 0")
 	}
 	switch {
 	case len(g.Genesis) == 0 && h.contentCap != 0:
@@ -127,10 +127,10 @@ func contains(list []string, want string) bool {
 	return false
 }
 
-// open returns a park instance on the genesis artifact at the given seed.
+// open returns a chunk instance on the genesis artifact at the given seed.
 func open(t *testing.T, g Game, seed uint64) *host {
 	t.Helper()
-	h, err := newHost(g.Park)
+	h, err := newHost(g.Sim)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func open(t *testing.T, g Game, seed uint64) *host {
 			t.Fatalf("stage(genesis): code=%d err=%v", code, err)
 		}
 	}
-	if code, err := h.init(seed, parkID, epoch0); err != nil || code != 0 {
+	if code, err := h.init(seed, chunkID, epoch0); err != nil || code != 0 {
 		h.close()
 		t.Fatalf("sim_init: code=%d err=%v", code, err)
 	}
@@ -368,7 +368,7 @@ func runContentIdentity(t *testing.T, g Game) {
 	if id, err := h.contentID(); err != nil || id != contentID(g.Genesis) {
 		t.Fatalf("content id = %016x, want the artifact's content id %016x (err %v)", id, contentID(g.Genesis), err)
 	}
-	fresh, err := newHost(g.Park)
+	fresh, err := newHost(g.Sim)
 	if err != nil {
 		t.Fatal(err)
 	}

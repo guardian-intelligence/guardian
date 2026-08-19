@@ -2,7 +2,7 @@ package gateway
 
 // The chunk directory: which (game, chunk) pairs exist and where their
 // authorities listen. One live view feeds both ticket minting and session
-// routing, replacing the boot-time PARK_BACKENDS env — park churn must
+// routing, replacing the boot-time PARK_BACKENDS env — chunk churn must
 // never require restarting the process that holds every player's QUIC
 // session. The file is expected to be a mounted ConfigMap; the watcher
 // polls it the same way module distribution polls the behavior dir.

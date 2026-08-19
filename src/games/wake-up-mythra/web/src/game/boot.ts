@@ -38,7 +38,7 @@ const DEFAULT_PARK = "park-mythra";
 const CHECK_SECONDS_FLAG = "netcode-check-seconds";
 const DEFAULT_CHECK_SECONDS = 5;
 
-const WtInfo = v.object({ parkWasm: v.string(), clientWasm: v.string() });
+const WtInfo = v.object({ simWasm: v.string(), clientWasm: v.string() });
 
 const FNV_OFFSET = 0xcbf29ce484222325n;
 const FNV_PRIME = 0x100000001b3n;
@@ -136,7 +136,7 @@ async function run(hud: Hud): Promise<void> {
         },
       }),
       fetchModule: async (slot, ref) => {
-        const kind = slot === "session" ? "client" : "park";
+        const kind = slot === "session" ? "client" : "sim";
         const r = await fetch(`/behavior/${kind}.wasm?v=${ref ?? Date.now()}`);
         if (!r.ok) throw new Error(`/behavior/${kind}.wasm ${r.status}`);
         return r.arrayBuffer();
@@ -158,7 +158,7 @@ async function run(hud: Hud): Promise<void> {
       checkMs: Math.round(
         OpenFeature.getClient().getNumberValue(CHECK_SECONDS_FLAG, DEFAULT_CHECK_SECONDS) * 1000,
       ),
-      moduleRefs: { session: info.clientWasm, replica: info.parkWasm },
+      moduleRefs: { session: info.clientWasm, replica: info.simWasm },
       telemetry: (code, a, b) => {
         telemetry.emit(code, a, b);
         debug?.onEmit(code, a, b);

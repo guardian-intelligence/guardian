@@ -70,7 +70,7 @@ jobs:
         id: classify
         run: |
           names=(alert-relay analytics-ingest authorization canary-journeys
-            chunkies-gateway chunkies-park feature-flags-notify payments payments-canary
+            chunkies-gateway chunkies-chunkie feature-flags-notify payments payments-canary
             postflight-controlplane tofu-runner company-site privatecut-web
             visual-harness wake-up-mythra-web)
           declare -A watch=(
@@ -79,7 +79,7 @@ jobs:
             [authorization]='^src/authorization/|^src/proto/guardian/authorization/|^src/proto/gen/go/guardian/authorization/'
             [canary-journeys]='^src/shared/ts/canary-journeys/|^(pnpm-(lock|workspace)\.yaml|package\.json|vite\.config\.ts)$'
             [chunkies-gateway]='^src/chunkies/|^src/games/'
-            [chunkies-park]='^src/chunkies/|^src/games/'
+            [chunkies-chunkie]='^src/chunkies/|^src/games/'
             [payments]='^src/payments/'
             [payments-canary]='^src/payments/'
             [postflight-controlplane]='^src/postflight/(controlplane|canaryloop|hostd/syncproto)/'
@@ -96,7 +96,7 @@ jobs:
             [authorization]='//src/authorization:push'
             [canary-journeys]='//src/shared/ts/canary-journeys:push'
             [chunkies-gateway]='//src/chunkies:chunkies_gateway_push'
-            [chunkies-park]='//src/chunkies:chunkies_park_push'
+            [chunkies-chunkie]='//src/chunkies:chunkies_chunkie_push'
             [payments]='//src/payments:push'
             [payments-canary]='//src/payments/canary:push'
             [postflight-controlplane]='//src/postflight/controlplane:push'
@@ -107,7 +107,7 @@ jobs:
             [wake-up-mythra-web]='//src/games/wake-up-mythra/web/site:push'
             [visual-harness]='//src/shared/ts/visual-harness:push'
           )
-          go_images=' alert-relay analytics-ingest authorization chunkies-gateway chunkies-park feature-flags-notify payments payments-canary postflight-controlplane tofu-runner '
+          go_images=' alert-relay analytics-ingest authorization chunkies-gateway chunkies-chunkie feature-flags-notify payments payments-canary postflight-controlplane tofu-runner '
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'
 
           all=false changed=""

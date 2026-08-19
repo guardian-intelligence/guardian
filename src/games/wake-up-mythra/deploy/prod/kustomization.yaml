@@ -26,7 +26,7 @@ configMapGenerator:
     namespace: tenant-guardian-prod
     files:
       - behavior/client.wasm
-      - behavior/park.wasm
+      - behavior/sim.wasm
       - behavior/game.conf
       - behavior/genesis.bin
     options:

@@ -20,7 +20,7 @@ func TestWUMGameConformance(t *testing.T) {
 	alice, bob, carol := DogIDFor("alice"), DogIDFor("bob"), DogIDFor("carol")
 
 	gametest.Run(t, gametest.Game{
-		Park:    mount.DefaultPark,
+		Sim:     mount.DefaultSim,
 		Modules: map[string][]byte{"client": mount.DefaultClient},
 		Genesis: FixtureTerrain,
 		Corpus: []gametest.Event{

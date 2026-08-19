@@ -28,7 +28,7 @@ func TestToyGameConformance(t *testing.T) {
 	}
 
 	Run(t, Game{
-		Park: module,
+		Sim: module,
 		Corpus: []Event{
 			{Kind: kJoin, Actor: 0xA11CE},
 			{Kind: kJoin, Actor: 0xB0B},

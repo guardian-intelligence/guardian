@@ -32,7 +32,7 @@ The legs:
 | flagd | 127.0.0.1:8016 (OFREP), :8013/:8014 | serves the committed prod flag set; hot-reloads on file edit |
 | analytics ingest | 127.0.0.1:9636 | the real event Publish service, batching into the analytics db |
 | dev OIDC issuer | 127.0.0.1:9635/realms/dev | Keycloak-shaped; signs any subject; the gateway validates it through the production `oidcGate` path |
-| chunkies-park | 127.0.0.1:9632 (sessions), :9631 (HTTP), :9637 (metrics) | one park authority and its journal |
+| chunkies-chunkie | 127.0.0.1:9632 (sessions), :9631 (HTTP), :9637 (metrics) | one park authority and its journal |
 | chunkies-gateway | 127.0.0.1:9634 (HTTP), :4433 (WebTransport), :9633 (metrics) | admission, public transport, static content, and the authenticated park proxy |
 | web app | http://127.0.0.1:4254 | vite dev server proxying game requests to chunkies-gateway and events to ingest |
 

@@ -21,8 +21,8 @@ import (
 //go:embed behaviors/client.wasm
 var DefaultClient []byte
 
-//go:embed behaviors/park.wasm
-var DefaultPark []byte
+//go:embed behaviors/sim.wasm
+var DefaultSim []byte
 
 var mInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "chunkies_behavior_script", Help: "1 for the currently loaded module hash per slot."}, []string{"slot", "hash"})
@@ -73,7 +73,7 @@ func (m *Module) Get() ([]byte, string) {
 // serving, counted by chunkies_behavior_refused_total). A nil accept takes
 // everything: right for a process that only distributes bytes and never
 // runs them, since the consumer's own boot gate decides there.
-func Watch(dir string, accept func(slot string, module []byte) error, client, park *Module) {
+func Watch(dir string, accept func(slot string, module []byte) error, client, chunk *Module) {
 	tried := map[string]string{}
 	loadSlot := func(slot string, m *Module) {
 		module, err := os.ReadFile(filepath.Join(dir, slot+".wasm"))
@@ -97,7 +97,7 @@ func Watch(dir string, accept func(slot string, module []byte) error, client, pa
 	}
 	load := func() {
 		loadSlot("client", client)
-		loadSlot("park", park)
+		loadSlot("sim", chunk)
 	}
 	load()
 	for range time.Tick(2 * time.Second) {

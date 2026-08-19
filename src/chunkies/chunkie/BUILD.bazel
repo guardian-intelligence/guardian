@@ -1,22 +1,22 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
-    name = "park",
+    name = "chunkie",
     srcs = [
         "config.go",
         "metrics.go",
-        "park.go",
+        "chunkie.go",
         "server.go",
         "session.go",
         "terrain.go",
         "vocab.go",
     ],
-    importpath = "github.com/guardian-intelligence/guardian/src/chunkies/park",
+    importpath = "github.com/guardian-intelligence/guardian/src/chunkies/chunkie",
     visibility = ["//src/chunkies:__subpackages__"],
     deps = [
         "//src/chunkies/journal",
         "//src/chunkies/mount",
-        "//src/chunkies/parkproxy",
+        "//src/chunkies/trunk",
         "//src/chunkies/codec",
         "//src/shared/go/telemetry",
         "@com_github_jackc_pgx_v5//pgxpool:go_default_library",
@@ -32,7 +32,7 @@ go_library(
 )
 
 go_test(
-    name = "park_test",
+    name = "chunkie_test",
     srcs = [
         "authority_test.go",
         "server_test.go",
@@ -42,12 +42,12 @@ go_test(
         "//src/tools/postgres:dist",
         "//src/tools/postgres:initdb",
     ],
-    embed = [":park"],
+    embed = [":chunkie"],
     env = {"PGTEST_INITDB": "$(rootpath //src/tools/postgres:initdb)"},
     deps = [
         "//src/chunkies/journal",
         "//src/chunkies/mount",
-        "//src/chunkies/parkproxy",
+        "//src/chunkies/trunk",
         "//src/chunkies/codec",
         "//src/postflight/controlplane/pgtest",
         "@com_github_jackc_pgx_v5//pgxpool:go_default_library",

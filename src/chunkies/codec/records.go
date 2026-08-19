@@ -208,7 +208,7 @@ type Checkpoint struct {
 	Epoch      uint32
 	WH         uint64
 	Content    uint64
-	// CW and PW are the full sha256 of the client and chunk module pair
+	// CW and PW are the full sha256 of the client and sim module pair
 	// the world was running — recovery must resume with the same rules.
 	CW    [32]byte
 	PW    [32]byte

@@ -1,4 +1,4 @@
-package park
+package chunkie
 
 import (
 	"bytes"
@@ -48,7 +48,7 @@ func move(d int32) []byte {
 }
 
 func toyMods(module []byte) *modules {
-	return &modules{client: mount.NewModule("client", mount.DefaultClient), park: mount.NewModule("park", module)}
+	return &modules{client: mount.NewModule("client", mount.DefaultClient), sim: mount.NewModule("sim", module)}
 }
 
 // fixedClock pins the wall clock: at wallEpoch the anchored scheduler owes
@@ -152,14 +152,14 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 		b.host.Step()
 	}
 	if got := b.host.Hash(); got != wantHash {
-		t.Fatalf("replayed park hash %016x, want %016x — journal does not reproduce the world", got, wantHash)
+		t.Fatalf("replayed chunk hash %016x, want %016x — journal does not reproduce the world", got, wantHash)
 	}
 	if b.hz != 48 {
 		t.Fatalf("reopened rate = %dHz, want journaled 48Hz", b.hz)
 	}
 }
 
-// A second writer for the same park must conflict, not interleave: the
+// A second writer for the same chunk must conflict, not interleave: the
 // authority closes itself instead of serving state ahead of the journal.
 func TestAuthorityClosesOnAppendConflict(t *testing.T) {
 	ctx := context.Background()
@@ -193,7 +193,7 @@ func TestAuthorityClosesOnAppendConflict(t *testing.T) {
 	a.host.close()
 }
 
-// The module-update lane end to end: a new park module on the mount soaks
+// The module-update lane end to end: a new sim module on the mount soaks
 // in the dark, commits as a journaled epoch_advance with a boundary
 // snapshot hashed by the NEW module, the authority keeps serving on the
 // swapped host, and a reopen under the converged module restores from the
@@ -222,7 +222,7 @@ func TestModuleEpochSwapLane(t *testing.T) {
 
 	// A module the runtime refuses must be pinned bad, never promoted.
 	bad := append(append([]byte{}, module...), 0xFF)
-	mods.park.Set(bad)
+	mods.sim.Set(bad)
 	a.tickOnce()
 	if a.moduleHash != displayHash(module) || a.cand != nil {
 		t.Fatal("invalid module bytes must not open a candidate")
@@ -233,7 +233,7 @@ func TestModuleEpochSwapLane(t *testing.T) {
 	// content) is a valid wasm suffix, so the hash flips without changing
 	// the sim.
 	variant := append(append([]byte{}, module...), 0x00, 0x03, 0x01, 0x74, 0x00)
-	mods.park.Set(variant)
+	mods.sim.Set(variant)
 	for i := 0; i < soakTicks(a.hz)+5; i++ {
 		a.tickOnce()
 	}
@@ -254,7 +254,7 @@ func TestModuleEpochSwapLane(t *testing.T) {
 	wantTick := a.host.Tick()
 	a.host.close()
 
-	// Reopen the park as a converged deploy would: the mount serves the
+	// Reopen the chunk as a converged deploy would: the mount serves the
 	// new module, and the boundary snapshot must restore under it.
 	b, err := openAuthority(ctx, "park-epoch", variant, nil, toyVocab(), j, mods, fixedClock(wallEpoch))
 	if err != nil {
@@ -277,7 +277,7 @@ func TestModuleEpochSwapLane(t *testing.T) {
 // must not occupy the idempotency window — the corrected resend under the
 // same id has to reach the sim. Both were violated by the dedup window
 // spanning reconnects, which is what stranded refreshed players outside
-// the park with an absent reject on every intent.
+// the chunk with an absent reject on every intent.
 func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, pgtest.Start(t))
@@ -332,7 +332,7 @@ func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
 	seqAfter(6, "second departure")
 }
 
-// The anchored schedule end to end: a reopened park lands exactly on the
+// The anchored schedule end to end: a reopened chunk lands exactly on the
 // tick the wall clock defines. A short gap is stepped through in the dark
 // (the world keeps living, nothing journals); a long gap journals one
 // clock_skip and re-floors the snapshot; both repayments are
@@ -430,7 +430,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 
 // The rate lane end to end: the deployment's desired rate converges the
 // world via one journaled rate_set in the dark, the schedule re-anchors
-// piecewise (so lowering the rate later never stalls the park), and
+// piecewise (so lowering the rate later never stalls the chunk), and
 // reopens across rate boundaries stay deterministic.
 func TestReopenConvergesToDesiredRate(t *testing.T) {
 	ctx := context.Background()

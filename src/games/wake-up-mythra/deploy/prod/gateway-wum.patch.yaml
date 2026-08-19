@@ -46,7 +46,7 @@
       value: park-mythra
     - name: CHUNK_DIRECTORY_FILE
       value: /etc/chunkies/directory/chunks.conf
-    - name: PARK_HTTP_URL
+    - name: CHUNKIE_HTTP_URL
       value: http://127.0.0.1:9631
     - name: INTERNAL_KEY_FILE
       value: /etc/chunkies/internal/password

@@ -4,7 +4,7 @@ load("//src/chunkies:defs.bzl", "GAME_FACING")
 exports_files(
     [
         "behaviors/client.wasm",
-        "behaviors/park.wasm",
+        "behaviors/sim.wasm",
     ],
     visibility = ["//src/chunkies/sim:__pkg__"],
 )
@@ -14,7 +14,7 @@ go_library(
     srcs = ["mount.go"],
     embedsrcs = [
         "behaviors/client.wasm",
-        "behaviors/park.wasm",
+        "behaviors/sim.wasm",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/chunkies/mount",
     visibility = GAME_FACING,

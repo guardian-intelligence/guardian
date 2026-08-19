@@ -37,7 +37,8 @@ export function createTransport(options: TransportOptions): TransportPort {
     mint: async () => {
       const creds = await options.credentials();
       anon = creds.token === null;
-      const q = new URLSearchParams({ park: options.park });
+      // The gateway speaks framework vocabulary: WUM's park is its chunk.
+      const q = new URLSearchParams({ chunk: options.park });
       const headers: Record<string, string> = {};
       if (anon) {
         q.set("spectate", "1");

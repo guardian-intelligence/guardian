@@ -1,4 +1,4 @@
-package park
+package chunkie
 
 // The game vocabulary: everything the authority host needs to know about
 // a game that is not carried by the module artifacts themselves. It is

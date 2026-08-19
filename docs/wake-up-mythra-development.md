@@ -125,7 +125,7 @@ sim ticks at 24Hz.
 | Artifact | Status | Notes |
 |---|---|---|
 | `chunkies-gateway` | live | OIDC admission, WebTransport sessions, public HTTP, and routing to parks |
-| `chunkies-park` | live | one park authority per pod: simulation, journal, snapshots, and fan-out |
+| `chunkies-chunkie` | live | one park authority per pod: simulation, journal, snapshots, and fan-out |
 | Control plane | planned | Authentication (Guardian customer identity realm; Game Center / Play Games bridging), entitlements (SpiceDB-backed, purchase-source-neutral), billing normalization (IAP / Play / MoR / Steam → ledger), friends/social graph, dog-park registry (geo metadata + manual petition queue), feature-flag service (OpenFeature control plane with streaming subscriptions) |
 | Data plane | planned | Persistent game state, distinct from the in-memory world sim: economy ledgers (TigerBeetle), check-in service (geo attestation, 5-minute sessions, presence-bonus windows), pack membership + inventory + mood scheduler, event feed fanout (the p99 ≤ 2s SLA), month-cycle orchestrator (22/6 clock, prize distribution, Fur grants, reset) |
 

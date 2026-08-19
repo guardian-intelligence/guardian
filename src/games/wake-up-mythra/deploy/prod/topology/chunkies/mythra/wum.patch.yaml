@@ -27,7 +27,7 @@
 - op: add
   path: /spec/template/spec/containers/0/env
   value:
-    - name: PARK_NAME
+    - name: CHUNK_NAME
       value: park-mythra
     - name: INTERNAL_HOST
       value: 127.0.0.1
@@ -35,7 +35,7 @@
       value: "4000"
     - name: GOMEMLIMIT
       value: 3500MiB
-    - name: PARK_PORT
+    - name: TRUNK_PORT
       value: "9632"
     - name: HTTP_PORT
       value: "9631"

@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
-	"github.com/guardian-intelligence/guardian/src/chunkies/parkproxy"
+	"github.com/guardian-intelligence/guardian/src/chunkies/trunk"
 )
 
 var sessionCount atomic.Int64
@@ -28,26 +28,26 @@ var (
 		Name: "chunkies_datagrams_rejected_total", Help: "Client datagrams dropped at the gateway (not a well-formed check)."})
 	mUnknownFrames = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "chunkies_unknown_frames_total", Help: "Client stream frames of unknown kind dropped at the gateway."})
-	mParkConns = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "chunkies_park_conns", Help: "Live multiplexed gateway-to-park connections."})
-	mParkConnFailures = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "chunkies_park_conn_failures_total", Help: "Gateway-to-park connection failures."}, []string{"stage"})
+	mTrunkConns = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "chunkies_trunk_conns", Help: "Live multiplexed gateway-to-chunk connections."})
+	mTrunkConnFailures = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "chunkies_trunk_conn_failures_total", Help: "Gateway-to-chunk connection failures."}, []string{"stage"})
 )
 
-func newParkPool(key []byte) *parkproxy.Pool {
-	return parkproxy.NewPool(key, parkproxy.Hooks{
-		ConnUp: func(string) { mParkConns.Inc() },
+func newTrunkPool(key []byte) *trunk.Pool {
+	return trunk.NewPool(key, trunk.Hooks{
+		ConnUp: func(string) { mTrunkConns.Inc() },
 		ConnDown: func(addr string, err error) {
-			mParkConns.Dec()
+			mTrunkConns.Dec()
 			// An idle reap is routine lifecycle; counting it as failure
 			// would bake noise into anything alerting on this counter.
-			if errors.Is(err, parkproxy.ErrIdle) {
+			if errors.Is(err, trunk.ErrIdle) {
 				return
 			}
-			mParkConnFailures.WithLabelValues("run").Inc()
-			log.Printf("park conn %s down: %v", addr, err)
+			mTrunkConnFailures.WithLabelValues("run").Inc()
+			log.Printf("chunk conn %s down: %v", addr, err)
 		},
-		DialError: func(addr string) { mParkConnFailures.WithLabelValues("dial").Inc() },
+		DialError: func(addr string) { mTrunkConnFailures.WithLabelValues("dial").Inc() },
 	})
 }
 

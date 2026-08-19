@@ -44,17 +44,17 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: chunkies-park-metrics
+  name: chunkies-chunkie-metrics
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: chunkies-park
+    app.kubernetes.io/name: chunkies-chunkie
     app.kubernetes.io/component: metrics
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: mythra
     guardian.dev/stage: prod
 spec:
   selector:
-    app.kubernetes.io/name: chunkies-park
+    app.kubernetes.io/name: chunkies-chunkie
   ports:
     - name: metrics
       port: 9637

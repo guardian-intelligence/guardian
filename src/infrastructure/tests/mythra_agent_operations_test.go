@@ -59,7 +59,7 @@ func TestMythraAgentOperationCapabilities(t *testing.T) {
 		t.Fatalf("guardian-mythra-operator validations = %d, want 1", len(validations))
 	}
 	operatorExpression := stringValue(mapValue(validations[0])["expression"])
-	for _, name := range []string{"chunkies-gateway", "chunkies-park"} {
+	for _, name := range []string{"chunkies-gateway", "chunkies-chunkie"} {
 		assertTextContains(t, operatorExpression, `request.name.startsWith("`+name+`-")`, "guardian-mythra-operator admission expression")
 		assertTextContains(t, operatorExpression, `oldObject.metadata.labels["app.kubernetes.io/name"] == "`+name+`"`, "guardian-mythra-operator admission expression")
 	}

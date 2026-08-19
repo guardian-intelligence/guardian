@@ -4,17 +4,17 @@
 # strategy. A game's instance dir supplies placement, resources, env, and
 # volumes via patch (see src/chunkies/deploy/README.md). Chunkies are
 # node-pinned by their durability story; they never canary — they roll by
-# checkpoint/restore, so maxSurge stays 0 (one journal writer per park,
+# checkpoint/restore, so maxSurge stays 0 (one journal writer per chunk,
 # always).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: chunkies-park
+  name: chunkies-chunkie
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: chunkies-park
+    app.kubernetes.io/name: chunkies-chunkie
     app.kubernetes.io/part-of: guardian
-    app.kubernetes.io/component: park
+    app.kubernetes.io/component: chunkie
 spec:
   replicas: 1
   revisionHistoryLimit: 3
@@ -25,13 +25,13 @@ spec:
       maxUnavailable: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: chunkies-park
+      app.kubernetes.io/name: chunkies-chunkie
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: chunkies-park
+        app.kubernetes.io/name: chunkies-chunkie
         app.kubernetes.io/part-of: guardian
-        app.kubernetes.io/component: park
+        app.kubernetes.io/component: chunkie
         guardian.dev/otel: producer
     spec:
       automountServiceAccountToken: false
@@ -46,8 +46,8 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: park
-          image: ghcr.io/guardian-intelligence/chunkies-park:edge@sha256:8e1aa1402549dfcf06243faadedc1c1e18f320d5d289bf5f4f3e0a14d0aba172 # {"$imagepolicy": "guardian-imageops:chunkies-park"}
+        - name: chunkie
+          image: ghcr.io/guardian-intelligence/chunkies-chunkie:edge@sha256:f039e42834c45b9a7a86772052447207c5d2336af43113627232a783d67f4c5f # {"$imagepolicy": "guardian-imageops:chunkies-chunkie"}
           ports:
             - name: metrics
               containerPort: 9637
