@@ -8,13 +8,29 @@ import (
 // A segment is replayable from any clean state, and every way a crash can
 // shear its tail must read as torn, never as corrupt or as success.
 func TestSegmentReplayAndTornTails(t *testing.T) {
-	seg := EncodeSegmentHeader(SegmentHeader{Version: 1, Lineage: 7, Generation: 3, FirstTick: 100})
-	body := AppendTickRecord(nil, 100, 0, 1, 2, fxRun(), fxWH)
-	body = AppendWatermark(body, 180)
-	body = AppendTickRecord(body, 200, 2, 1, 1, fxRec1(), fxWH+1)
+	seg := EncodeSegmentHeader(SegmentHeader{
+		Version: SegmentVersion, Generation: 3, Ordinal: 0,
+		Chunks: []SegmentChunk{
+			{Name: "park-a", Lineage: 7, Epoch: 1, FirstTick: 100},
+			{Name: "park-b", Lineage: 9, Epoch: 1, FirstTick: 150},
+		},
+	})
+	body := AppendTickRecord(nil, 0, 100, 0, 2, fxRun(), fxWH)
+	body = AppendWatermark(body, 1, 180)
+	body = AppendTickRecord(body, 0, 200, 2, 1, fxRec1(), fxWH+1)
 
-	if _, err := DecodeSegmentHeader(seg); err != nil {
-		t.Fatalf("segment header: %v", err)
+	if h, hn, herr := DecodeSegmentHeader(seg); herr != nil || hn != len(seg) {
+		t.Fatalf("segment header: n=%d err=%v", hn, herr)
+	} else if len(h.Chunks) != 2 || h.Chunks[1] != (SegmentChunk{Name: "park-b", Lineage: 9, Epoch: 1, FirstTick: 150}) {
+		t.Fatalf("chunk table round trip: %+v", h.Chunks)
+	}
+	// A header with any byte flipped is corrupt, never misread.
+	for i := range seg {
+		bad := append([]byte{}, seg...)
+		bad[i] ^= 0x01
+		if _, _, err := DecodeSegmentHeader(bad); err != ErrCorrupt {
+			t.Fatalf("header byte %d flipped: err = %v, want corrupt", i, err)
+		}
 	}
 
 	// Full replay: three records then a clean end.
@@ -37,13 +53,16 @@ func TestSegmentReplayAndTornTails(t *testing.T) {
 	if got[0].Count != 2 || !bytes.Equal(got[0].Records, fxRun()) || got[2].WH != fxWH+1 {
 		t.Fatalf("replayed records disagree with what was appended")
 	}
+	if got[0].Chunk != 0 || got[1].Chunk != 1 || got[2].Chunk != 0 {
+		t.Fatalf("chunk indexes did not round trip: %+v", got)
+	}
 	if got[1].Tick != 180 {
 		t.Fatalf("watermark tick = %d", got[1].Tick)
 	}
 
 	// Every truncation point inside the final record is a torn tail. The
 	// boundary before it replays the first two records then reports End.
-	lastStart := len(body) - (len(AppendTickRecord(nil, 200, 2, 1, 1, fxRec1(), fxWH+1)))
+	lastStart := len(body) - (len(AppendTickRecord(nil, 0, 200, 2, 1, fxRec1(), fxWH+1)))
 	for cut := lastStart + 1; cut < len(body); cut++ {
 		rest := body[:cut]
 		var err error
@@ -128,7 +147,7 @@ func TestVerbatimRunSharedByTickAndWAL(t *testing.T) {
 	run = AppendEventRecord(run, SystemIntent, fxSysKind, 0, []byte{0x0A, 0x0B, 0x0C, 0x0D})
 
 	wire := EncodeTick(fxTick, fxSeq, 2, run)
-	wal := AppendTickRecord(nil, fxTick, fxSeq, fxEpoch, 2, run, fxWH)
+	wal := AppendTickRecord(nil, fxChunk, fxTick, fxSeq, 2, run, fxWH)
 	if !bytes.Contains(wire, payload) || !bytes.Contains(wal, payload) {
 		t.Fatal("intent bytes were not carried verbatim")
 	}

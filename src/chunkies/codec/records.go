@@ -1,14 +1,24 @@
-// The authority's durable record formats: the node-local write-ahead
+// The chunkie's durable record formats: the node-local write-ahead
 // segment and the checkpoint manifest. These share the wire's EventRecord
 // so a tick's accepted intent bytes land on disk verbatim; everything the
-// authority knows and the client does not (epoch, world hash, identity,
-// the dedup window) rides in the wrappers, never inside the shared record.
+// authority knows and the client does not (world hash, identity, the
+// dedup window) rides in the wrappers, never inside the shared record.
 //
-// Segment layout: a SegmentHeader, then records framed
-// `rlen u32 | rtype u8 | body | crc32c u32` where rlen counts rtype+body
-// and the checksum covers the same. Readers distinguish a torn tail (the
-// expected artifact of a crash mid-append: truncate and continue) from
-// corruption (refuse the segment, recover from a checkpoint).
+// One segment file interleaves every chunk a chunkie hosts: the header's
+// chunk table names them, and each record carries its chunk's table index
+// so one group commit covers the whole pod. Records are framed
+// `rlen u32 | rtype u8 | chunk u16 | body | crc32c u32` where rlen counts
+// rtype+chunk+body and the checksum covers the same. The frame fields are
+// the host's; a tick record's body is exactly what the simulation side
+// produces for a tick, so a future in-module tick runner can emit it
+// verbatim. Readers distinguish a torn tail (the expected artifact of a
+// crash mid-append: truncate and continue) from corruption (refuse the
+// segment, recover from a checkpoint).
+//
+// Epoch appears per chunk in the segment header, never per record: module
+// promotion is a checkpoint barrier (drain the log, verify a checkpoint
+// under the new module pair, only then announce), so a segment can never
+// span an epoch advance and replay always runs under exactly one pair.
 package codec
 
 import (
@@ -32,46 +42,101 @@ var (
 
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)
 
-// MaxRecordLen bounds one segment record (rtype plus body); caps.txt is
-// the source of truth. A record is one tick's accepted events — far
-// smaller in practice.
+// MaxRecordLen bounds one segment record (rtype plus chunk plus body);
+// caps.txt is the source of truth. A record is one tick's accepted events
+// — far smaller in practice.
 const MaxRecordLen = 1 << 20
+
+// MaxSegmentChunks bounds a segment's chunk table; caps.txt is the source
+// of truth. A chunk steps on one core, so the bound is far past any pod.
+const MaxSegmentChunks = 4096
 
 const segmentMagic = "CHKW"
 
-// SegmentHeaderLen is the fixed byte length of an encoded SegmentHeader.
-const SegmentHeaderLen = 22
+// SegmentVersion is the current segment layout. There is no cross-version
+// reader: no prod segment predates v2.
+const SegmentVersion = 2
 
-// SegmentHeader opens a write-ahead segment file. Lineage and Generation
-// stamp every segment so a fenced-out authority's leftovers are
-// recognizable, and FirstTick orders segments without parsing them.
+// SegmentChunk is one chunk's row in a segment's chunk table. A chunk's
+// index in the table is the index its records carry. Lineage stamps the
+// history the records extend (a chunk rewinds alone, so lineage is
+// per-chunk); Epoch is the module era the whole segment ran under, a
+// cross-check on the checkpoint-barrier rule; FirstTick is the first tick
+// this segment may hold for the chunk, bounding replay against a fenced
+// writer's leftovers.
+type SegmentChunk struct {
+	Name      string
+	Lineage   uint32
+	Epoch     uint32
+	FirstTick uint64
+}
+
+// SegmentHeader opens a write-ahead segment file. Generation stamps every
+// segment so a fenced-out chunkie's leftovers are recognizable; Ordinal
+// orders segments within a generation without parsing their records.
 type SegmentHeader struct {
 	Version    uint16
-	Lineage    uint32
 	Generation uint32
-	FirstTick  uint64
+	Ordinal    uint32
+	Chunks     []SegmentChunk
 }
 
 func EncodeSegmentHeader(h SegmentHeader) []byte {
-	b := make([]byte, 0, SegmentHeaderLen)
-	b = append(b, segmentMagic...)
+	b := []byte(segmentMagic)
 	b = binary.LittleEndian.AppendUint16(b, h.Version)
-	b = binary.LittleEndian.AppendUint32(b, h.Lineage)
 	b = binary.LittleEndian.AppendUint32(b, h.Generation)
-	return binary.LittleEndian.AppendUint64(b, h.FirstTick)
+	b = binary.LittleEndian.AppendUint32(b, h.Ordinal)
+	b = binary.LittleEndian.AppendUint16(b, uint16(len(h.Chunks)))
+	for _, ch := range h.Chunks {
+		name := ch.Name
+		if len(name) > 255 {
+			name = name[:255]
+		}
+		b = append(b, byte(len(name)))
+		b = append(b, name...)
+		b = binary.LittleEndian.AppendUint32(b, ch.Lineage)
+		b = binary.LittleEndian.AppendUint32(b, ch.Epoch)
+		b = binary.LittleEndian.AppendUint64(b, ch.FirstTick)
+	}
+	return binary.LittleEndian.AppendUint32(b, crc32.Checksum(b, castagnoli))
 }
 
-func DecodeSegmentHeader(b []byte) (SegmentHeader, error) {
-	if len(b) < SegmentHeaderLen || string(b[:4]) != segmentMagic {
-		return SegmentHeader{}, ErrCorrupt
+// DecodeSegmentHeader decodes the header at the front of b, returning it
+// and the bytes consumed. The header carries its own checksum: a torn or
+// flipped header is ErrCorrupt — recovery for the whole segment falls to
+// checkpoints, since without the chunk table no record is attributable.
+func DecodeSegmentHeader(b []byte) (SegmentHeader, int, error) {
+	if len(b) < 16 || string(b[:4]) != segmentMagic {
+		return SegmentHeader{}, 0, ErrCorrupt
 	}
-	c := cursor{b: b[4:SegmentHeaderLen]}
-	return SegmentHeader{
+	c := cursor{b: b[4:]}
+	h := SegmentHeader{
 		Version:    c.u16(),
-		Lineage:    c.u32(),
 		Generation: c.u32(),
-		FirstTick:  c.u64(),
-	}, nil
+		Ordinal:    c.u32(),
+	}
+	n := int(c.u16())
+	if c.bad || n > MaxSegmentChunks {
+		return SegmentHeader{}, 0, ErrCorrupt
+	}
+	h.Chunks = make([]SegmentChunk, n)
+	for i := range h.Chunks {
+		h.Chunks[i] = SegmentChunk{
+			Name:      string(c.bytes(int(c.u8()))),
+			Lineage:   c.u32(),
+			Epoch:     c.u32(),
+			FirstTick: c.u64(),
+		}
+	}
+	sum := c.u32()
+	if c.bad {
+		return SegmentHeader{}, 0, ErrCorrupt
+	}
+	consumed := len(b) - len(c.b)
+	if crc32.Checksum(b[:consumed-4], castagnoli) != sum {
+		return SegmentHeader{}, 0, ErrCorrupt
+	}
+	return h, consumed, nil
 }
 
 // Record types.
@@ -80,48 +145,52 @@ const (
 	RecordWatermark = 2
 )
 
-// Record is one decoded segment record. For RecordTick, the tick batch
-// fields and record run are set; for RecordWatermark only Tick is (the
-// tick the idle authority had reached at the group-commit boundary).
+// Record is one decoded segment record. Chunk indexes the segment
+// header's chunk table. For RecordTick, the tick batch fields and record
+// run are set; for RecordWatermark only Tick is (the tick the idle chunk
+// had reached at the group-commit boundary).
 type Record struct {
 	Type     uint8
+	Chunk    uint16
 	Tick     uint64
 	FirstSeq int64
-	Epoch    uint32
 	Count    uint16
 	// Records is the encoded EventRecord run, verbatim wire bytes.
 	Records []byte
 	WH      uint64
 }
 
-func appendRecord(b []byte, rtype uint8, body func([]byte) []byte) []byte {
+func appendRecord(b []byte, rtype uint8, chunk uint16, body func([]byte) []byte) []byte {
 	at := len(b)
 	b = append(b, 0, 0, 0, 0) // rlen backfilled below
 	b = append(b, rtype)
+	b = binary.LittleEndian.AppendUint16(b, chunk)
 	b = body(b)
 	inner := b[at+4:]
 	binary.LittleEndian.PutUint32(b[at:at+4], uint32(len(inner)))
 	return binary.LittleEndian.AppendUint32(b, crc32.Checksum(inner, castagnoli))
 }
 
-// AppendTickRecord appends one tick's batch: the same record run the tick
-// frame carries, wrapped with what recovery needs — epoch and the
-// resulting world hash, verified against every replayed record.
-func AppendTickRecord(b []byte, tick uint64, firstSeq int64, epoch uint32, count uint16, records []byte, wh uint64) []byte {
-	return appendRecord(b, RecordTick, func(b []byte) []byte {
+// AppendTickRecord appends one tick's batch for one chunk: the same
+// record run the tick frame carries, wrapped with what recovery needs —
+// the resulting world hash, verified against every replayed record. The
+// body past the chunk index (tick through hash) is the simulation side's
+// output for the tick, laid out so a future in-module tick runner can
+// produce those bytes verbatim.
+func AppendTickRecord(b []byte, chunk uint16, tick uint64, firstSeq int64, count uint16, records []byte, wh uint64) []byte {
+	return appendRecord(b, RecordTick, chunk, func(b []byte) []byte {
 		b = binary.LittleEndian.AppendUint64(b, tick)
 		b = binary.LittleEndian.AppendUint64(b, uint64(firstSeq))
-		b = binary.LittleEndian.AppendUint32(b, epoch)
 		b = binary.LittleEndian.AppendUint16(b, count)
 		b = append(b, records...)
 		return binary.LittleEndian.AppendUint64(b, wh)
 	})
 }
 
-// AppendWatermark appends the tick an idle authority had reached, bounding
+// AppendWatermark appends the tick an idle chunk had reached, bounding
 // replay work without recording anything else.
-func AppendWatermark(b []byte, tick uint64) []byte {
-	return appendRecord(b, RecordWatermark, func(b []byte) []byte {
+func AppendWatermark(b []byte, chunk uint16, tick uint64) []byte {
+	return appendRecord(b, RecordWatermark, chunk, func(b []byte) []byte {
 		return binary.LittleEndian.AppendUint64(b, tick)
 	})
 }
@@ -153,13 +222,15 @@ func ReadRecord(b []byte) (Record, int, error) {
 	if crc32.Checksum(inner, castagnoli) != binary.LittleEndian.Uint32(b[4+rlen:total]) {
 		return Record{}, 0, ErrCorrupt
 	}
-	rec := Record{Type: inner[0]}
-	c := cursor{b: inner[1:]}
+	if rlen < 3 {
+		return Record{}, 0, ErrCorrupt
+	}
+	rec := Record{Type: inner[0], Chunk: binary.LittleEndian.Uint16(inner[1:3])}
+	c := cursor{b: inner[3:]}
 	switch rec.Type {
 	case RecordTick:
 		rec.Tick = c.u64()
 		rec.FirstSeq = c.i64()
-		rec.Epoch = c.u32()
 		rec.Count = c.u16()
 		if c.bad || len(c.b) < 8 {
 			return Record{}, 0, ErrCorrupt

@@ -166,7 +166,7 @@ describe("wire5 conformance", () => {
       const trimmed = line.trim();
       if (trimmed === "" || trimmed.startsWith("#")) continue;
       const [name, val] = trimmed.split("=");
-      if (name === "WAL_MAX_RECORD") continue; // Go-only, with the records
+      if (name === "WAL_MAX_RECORD" || name === "WAL_MAX_CHUNKS") continue; // Go-only, with the records
       expect(mine, name).toHaveProperty(name);
       expect(mine[name], name).toBe(Number(val));
       seen += 1;
