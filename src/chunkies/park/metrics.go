@@ -58,6 +58,8 @@ var (
 		Name: "mythra_catchup_total", Help: "Catch-up material served, by kind."}, []string{"kind"})
 	mDrops = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "mythra_fanout_dropped_total", Help: "Sessions closed for stream backlog."})
+	mInboundDropped = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mythra_inbound_dropped_total", Help: "Uplink frames shed because a session's intent drain was stalled."})
 	mEpochSwaps = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "mythra_epoch_swaps_total", Help: "Park module epoch-swap lane outcomes."}, []string{"result"})
 )

@@ -34,7 +34,7 @@ type chunkiesGateway struct {
 	admission *gameHandlers
 	directory *chunkDirectory
 	game      string
-	key       []byte
+	parks     *parkproxy.Pool
 }
 
 // Run is the chunkies-gateway process: public WebTransport, admission,
@@ -87,7 +87,7 @@ func Run() {
 		tickets: tickets, maxSessions: maxSessions, directory: directory, game: game,
 		anonMints: newAnonLimiter(),
 	}
-	gateway := &chunkiesGateway{admission: admission, directory: directory, game: game, key: key}
+	gateway := &chunkiesGateway{admission: admission, directory: directory, game: game, parks: newParkPool(key)}
 
 	sans := []net.IP{net.ParseIP("127.0.0.1")}
 	if host, _, err := net.SplitHostPort(publicAddr); err == nil {
@@ -295,7 +295,7 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 		return
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	proxy, err := parkproxy.Dial(dialCtx, backend, g.key, parkproxy.Open{
+	park, err := g.parks.Open(dialCtx, backend, parkproxy.Open{
 		Sub: ticket.Sub, Park: ticket.Park, Role: ticket.Role,
 		Remote: sess.RemoteAddr().String(), SinceSeq: hello.SinceSeq, SinceTick: hello.SinceTick,
 	})
@@ -305,7 +305,7 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 		sess.CloseWithError(4503, "park unavailable")
 		return
 	}
-	defer proxy.Close()
+	defer park.Close("bye")
 	defer sess.CloseWithError(4000, "bye")
 	stream.SetReadDeadline(time.Time{})
 	mHandshakes.WithLabelValues("ok").Inc()
@@ -321,26 +321,48 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 		return err
 	}
 	go func() {
-		for {
-			kind, payload, err := proxy.ReadMessage()
-			if err != nil {
-				sess.CloseWithError(4503, "park unavailable")
-				return
-			}
-			switch kind {
+		relay := func(ev parkproxy.Event) bool {
+			switch ev.Kind {
 			case parkproxy.KindStream:
-				if writeStream(payload) != nil {
-					proxy.Close()
-					return
+				if writeStream(ev.Payload) != nil {
+					park.Close("client stalled")
+					return false
 				}
 			case parkproxy.KindDatagram:
-				if sess.SendDatagram(payload) != nil {
+				if sess.SendDatagram(ev.Payload) != nil {
 					mDgErrors.Inc()
 				} else {
 					mDgSent.Inc()
 				}
-			case parkproxy.KindClose:
-				sess.CloseWithError(4000, string(payload))
+			}
+			return true
+		}
+		for {
+			select {
+			case ev := <-park.Events():
+				if !relay(ev) {
+					return
+				}
+			case <-park.Done():
+				// Flush frames the park sent ahead of its close (a final
+				// reject or goodbye) before closing the client.
+				for drained := false; !drained; {
+					select {
+					case ev := <-park.Events():
+						if !relay(ev) {
+							return
+						}
+					default:
+						drained = true
+					}
+				}
+				// A park-stated reason is meant for the client; a transport
+				// failure is not the client's fault and reads as outage.
+				if reason, fromPark := park.CloseReason(); fromPark {
+					sess.CloseWithError(4000, reason)
+				} else {
+					sess.CloseWithError(4503, "park unavailable")
+				}
 				return
 			}
 		}
@@ -358,7 +380,7 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 				mDgRejected.Inc()
 				continue
 			}
-			if proxy.WriteMessage(parkproxy.KindDatagram, data) != nil {
+			if park.SendDatagram(data) != nil {
 				return
 			}
 		}
@@ -374,7 +396,7 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 	for {
 		kind, payload, err := frames.Next()
 		if err != nil {
-			proxy.WriteMessage(parkproxy.KindClose, nil)
+			park.Close("client gone")
 			return
 		}
 		now := time.Now()
@@ -403,12 +425,12 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 				writeStream(codec.EncodeReject(codec.Reject{Intent: rec.Intent, Reason: rejectNotYours}))
 				continue
 			}
-			if proxy.WriteMessage(parkproxy.KindStream, frames.Raw()) != nil {
+			if park.SendStream(frames.Raw()) != nil {
 				return
 			}
 		case codec.KindResync:
 			if _, err := codec.DecodeResync(payload); err == nil {
-				if proxy.WriteMessage(parkproxy.KindStream, frames.Raw()) != nil {
+				if park.SendStream(frames.Raw()) != nil {
 					return
 				}
 			}

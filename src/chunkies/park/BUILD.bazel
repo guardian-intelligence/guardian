@@ -33,7 +33,10 @@ go_library(
 
 go_test(
     name = "park_test",
-    srcs = ["authority_test.go"],
+    srcs = [
+        "authority_test.go",
+        "server_test.go",
+    ],
     data = [
         "//src/tools/postgres:dist",
         "//src/tools/postgres:initdb",
@@ -43,6 +46,7 @@ go_test(
     deps = [
         "//src/chunkies/journal",
         "//src/chunkies/mount",
+        "//src/chunkies/parkproxy",
         "//src/chunkies/codec",
         "//src/games/wake-up-mythra/services/wum",
         "//src/postflight/controlplane/pgtest",
