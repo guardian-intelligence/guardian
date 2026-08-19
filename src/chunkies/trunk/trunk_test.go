@@ -1,7 +1,8 @@
 package trunk
 
 // Behavioral coverage for the multiplexed transport: how many TCP
-// connections sessions cost, what failure tears down, and what stays up.
+// connections attachments cost, what failure tears down, and what stays
+// up.
 
 import (
 	"context"
@@ -124,7 +125,7 @@ func openTwo(t *testing.T, p *Pool, addr string) (*Attachment, *Attachment) {
 	return s1, s2
 }
 
-func TestMuxSharesOneConnAcrossSessions(t *testing.T) {
+func TestMuxSharesOneConnAcrossAttachments(t *testing.T) {
 	chunk := newFakeChunkieServer(t, func(c *Conn, m Msg) {
 		c.WriteStream(m.SID, []byte("welcome"))
 	})
@@ -134,13 +135,13 @@ func TestMuxSharesOneConnAcrossSessions(t *testing.T) {
 	if !waitFor(t, 5*time.Second, func() bool { return len(chunk.received(KindOpen)) == 2 }) {
 		t.Fatalf("opens = %d, want 2", len(chunk.received(KindOpen)))
 	}
-	// Two sessions, one TCP connection, one handshake.
+	// Two attachments, one TCP connection, one handshake.
 	if got := chunk.accepted.Load(); got != 1 {
-		t.Fatalf("sessions cost %d connections, want 1", got)
+		t.Fatalf("attachments cost %d connections, want 1", got)
 	}
 	opens := chunk.received(KindOpen)
 	if opens[0].SID == opens[1].SID {
-		t.Fatalf("both sessions share sid %d", opens[0].SID)
+		t.Fatalf("both attachments share sid %d", opens[0].SID)
 	}
 	o1, err := DecodeOpen(opens[0].Payload)
 	if err != nil || o1.Game != "wum" || o1.Sub != "alice" || o1.Chunk != "park-test" || o1.Role != "player" || o1.SinceSeq != -1 {
@@ -151,15 +152,15 @@ func TestMuxSharesOneConnAcrossSessions(t *testing.T) {
 		t.Fatalf("open 2 = %+v (err %v)", o2, err)
 	}
 
-	// Each session's welcome landed on its own event queue.
+	// Each attachment's welcome landed on its own event queue.
 	for i, s := range []*Attachment{s1, s2} {
 		select {
 		case ev := <-s.Events():
 			if ev.Kind != KindStream || string(ev.Payload) != "welcome" {
-				t.Fatalf("session %d event = %d %q", i+1, ev.Kind, ev.Payload)
+				t.Fatalf("attachment %d event = %d %q", i+1, ev.Kind, ev.Payload)
 			}
 		case <-time.After(5 * time.Second):
-			t.Fatalf("session %d never got its welcome", i+1)
+			t.Fatalf("attachment %d never got its welcome", i+1)
 		}
 	}
 
@@ -175,7 +176,7 @@ func TestMuxSharesOneConnAcrossSessions(t *testing.T) {
 	}
 }
 
-func TestMuxChunkCloseEndsOneSessionOnly(t *testing.T) {
+func TestMuxChunkCloseEndsOneAttachmentOnly(t *testing.T) {
 	chunk := newFakeChunkieServer(t, nil)
 	pool := NewPool(testKey, Hooks{})
 	s1, s2 := openTwo(t, pool, chunk.addr())
@@ -190,13 +191,13 @@ func TestMuxChunkCloseEndsOneSessionOnly(t *testing.T) {
 			t.Fatalf("close = %q fromChunk=%v, want chunk-stated wrong chunk", reason, fromChunk)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("chunk close never reached the session")
+		t.Fatal("chunk close never reached the attachment")
 	}
 
-	// The surviving session still works both ways.
+	// The surviving attachment still works both ways.
 	select {
 	case <-s1.Done():
-		t.Fatal("closing one session killed its neighbor")
+		t.Fatal("closing one attachment killed its neighbor")
 	default:
 	}
 	chunk.conn(0).WriteStream(s1.sid, []byte("still-here"))
@@ -206,7 +207,7 @@ func TestMuxChunkCloseEndsOneSessionOnly(t *testing.T) {
 			t.Fatalf("event = %q", ev.Payload)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("surviving session stopped receiving")
+		t.Fatal("surviving attachment stopped receiving")
 	}
 }
 
@@ -227,7 +228,7 @@ func TestMuxGatewayCloseTellsChunk(t *testing.T) {
 	}
 }
 
-func TestMuxConnLossFailsAllSessionsThenRedials(t *testing.T) {
+func TestMuxConnLossFailsAllAttachmentsThenRedials(t *testing.T) {
 	chunk := newFakeChunkieServer(t, nil)
 	pool := NewPool(testKey, Hooks{})
 	s1, s2 := openTwo(t, pool, chunk.addr())
@@ -240,10 +241,10 @@ func TestMuxConnLossFailsAllSessionsThenRedials(t *testing.T) {
 		select {
 		case <-s.Done():
 			if reason, fromChunk := s.CloseReason(); fromChunk || reason != "chunk unavailable" {
-				t.Fatalf("session %d close = %q fromChunk=%v", i+1, reason, fromChunk)
+				t.Fatalf("attachment %d close = %q fromChunk=%v", i+1, reason, fromChunk)
 			}
 		case <-time.After(5 * time.Second):
-			t.Fatalf("session %d survived its connection", i+1)
+			t.Fatalf("attachment %d survived its connection", i+1)
 		}
 	}
 
@@ -301,7 +302,7 @@ func TestMuxPongTimeoutKillsConn(t *testing.T) {
 	}
 }
 
-func TestMuxBacklogClosesOnlyTheStalledSession(t *testing.T) {
+func TestMuxBacklogClosesOnlyTheStalledAttachment(t *testing.T) {
 	chunk := newFakeChunkieServer(t, nil)
 	pool := NewPool(testKey, Hooks{})
 	s1, s2 := openTwo(t, pool, chunk.addr())
@@ -322,10 +323,10 @@ func TestMuxBacklogClosesOnlyTheStalledSession(t *testing.T) {
 			t.Fatalf("close = %q fromChunk=%v", reason, fromChunk)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("stalled session was never closed")
+		t.Fatal("stalled attachment was never closed")
 	}
 	if !waitFor(t, 5*time.Second, func() bool { return len(chunk.received(KindClose)) == 1 }) {
-		t.Fatal("chunk never told the stalled session closed")
+		t.Fatal("chunk never told the stalled attachment closed")
 	}
 
 	chunk.conn(0).WriteStream(s2.sid, []byte("healthy"))
@@ -335,7 +336,7 @@ func TestMuxBacklogClosesOnlyTheStalledSession(t *testing.T) {
 			t.Fatalf("event = %q", ev.Payload)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("healthy session starved by its neighbor's backlog")
+		t.Fatal("healthy attachment starved by its neighbor's backlog")
 	}
 }
 
@@ -358,10 +359,10 @@ func TestMuxIdleConnReaped(t *testing.T) {
 			t.Fatalf("conn down = %v, want idle reap", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("a sessionless connection was never reaped")
+		t.Fatal("an attachmentless connection was never reaped")
 	}
 
-	// The pool dials fresh for the next session instead of reusing the
+	// The pool dials fresh for the next attachment instead of reusing the
 	// reaped connection.
 	s2, err := pool.Open(ctx, chunk.addr(), Open{Game: "wum", Sub: "bob", Chunk: "park-test", Role: "player"})
 	if err != nil {
@@ -569,6 +570,34 @@ func TestResyncSnapshotResetsSpliceAndDropsStale(t *testing.T) {
 	}
 }
 
+// A resync snapshot that lost the wire race to a broadcast already
+// delivered past it must close the attachment, not rewind the splice —
+// the broadcast lane never re-sends the rewound span, so a rewound
+// attachment would stall silently until buffer overflow.
+func TestSnapshotBehindDeliveredSeqClosesAttachment(t *testing.T) {
+	chunk := welcomeServer(t)
+	pool := NewPool(testKey, Hooks{})
+	a := openAt(t, pool, chunk.addr(), "alice", "park-test", 5)
+	c := chunk.conn(0)
+	sid := chunk.received(KindOpen)[0].SID
+
+	// Tick 6 passes the gate (pos moves to 6) before the snapshot at 5 —
+	// queued on the backend before that tick committed — reaches the wire.
+	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(6))
+	if kind, _ := nextStream(t, a); kind != codec.KindTick {
+		t.Fatalf("frame kind = %d, want tick", kind)
+	}
+	c.WriteStream(sid, codec.EncodeSnapshot(codec.Snapshot{Seq: 5, Tick: 5, Z: []byte{1}}))
+	select {
+	case <-a.Done():
+		if reason, fromChunk := a.CloseReason(); fromChunk || reason != "splice rewind" {
+			t.Fatalf("close = %q fromChunk=%v, want splice rewind", reason, fromChunk)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("overtaken snapshot never closed the attachment")
+	}
+}
+
 // A splice buffer that overflows closes that attachment alone; its
 // neighbors on the shared connection keep their streams.
 func TestSpliceOverflowClosesOnlyThatAttachment(t *testing.T) {
@@ -610,7 +639,7 @@ func TestMuxRejectsWrongKey(t *testing.T) {
 	go func() {
 		// An accept loop, not a single accept: the pool's one-retry redial
 		// may land a second connection, which must also be rejected or it
-		// would sit unanswered in the backlog and the session would linger
+		// would sit unanswered in the backlog and the attachment would linger
 		// to the pong timeout.
 		first := true
 		for {
@@ -629,12 +658,12 @@ func TestMuxRejectsWrongKey(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	// The dial itself can succeed (the handshake is one-way); the chunk
-	// must refuse to speak, so the session dies instead of attaching.
+	// must refuse to speak, so the attachment dies instead of attaching.
 	if s, err := pool.Open(ctx, l.Addr().String(), Open{Game: "g", Sub: "a", Chunk: "p", Role: "player"}); err == nil {
 		select {
 		case <-s.Done():
 		case <-time.After(5 * time.Second):
-			t.Fatal("session on an unauthenticated conn survived")
+			t.Fatal("attachment on an unauthenticated conn survived")
 		}
 	}
 	if err := <-done; err == nil {

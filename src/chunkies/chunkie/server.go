@@ -285,7 +285,11 @@ func (c *broadcastConn) subscribed(chunk string) bool {
 // publish is the authority's tick fan-out (publishFunc). Everything is
 // encoded and written before it returns — the caller reuses the run
 // buffer next tick — and a failed write downs that connection only; its
-// sessions redial through the gateway.
+// sessions redial through the gateway. The per-connection writes run
+// concurrently: they hold the tick loop until the slowest completes, so
+// wedged peers must cost one write deadline between them, not one each —
+// serial writes would breach the verification ring's schedule budget at
+// three wedged connections and dark-close the chunk for the healthy ones.
 func (b *broadcaster) publish(chunk string, tick uint64, firstSeq int64, count uint16, run []byte) {
 	payload, err := trunk.EncodeBroadcast(b.game, chunk, codec.EncodeTick(tick, firstSeq, count, run))
 	if err != nil {
@@ -301,11 +305,17 @@ func (b *broadcaster) publish(chunk string, tick uint64, firstSeq int64, count u
 		}
 	}
 	b.mu.Unlock()
+	var wg sync.WaitGroup
 	for _, c := range targets {
-		if c.pc.WriteMessage(trunk.KindBroadcast, 0, payload) != nil {
-			c.pc.Close()
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if c.pc.WriteMessage(trunk.KindBroadcast, 0, payload) != nil {
+				c.pc.Close()
+			}
+		}()
 	}
+	wg.Wait()
 }
 
 // connSession is one multiplexed session's chunk-side state. The demux

@@ -757,9 +757,13 @@ func (a *Attachment) enqueue(ev Event) bool {
 // catch-up frames will follow, so it anchors pos itself; otherwise the
 // catch-up ends exactly at the welcome's Seq and anchors there. Catch-up
 // ticks advance monotonically (they ride behind the welcome that already
-// names their endpoint). A snapshot is a restore point and resets pos
-// outright — whatever the client saw beyond it is discarded by the
-// restore, so stale buffered broadcasts drop with it.
+// names their endpoint). A snapshot at or ahead of pos is a restore point
+// and resets pos outright — whatever the client saw beyond it is
+// discarded by the restore, so stale buffered broadcasts drop with it. A
+// snapshot behind pos lost a wire race with broadcasts already delivered
+// past it; rewinding would strand the client in a gap the broadcast lane
+// never refills (each tick is sent once), so the attachment closes
+// instead and the client recovers through a redial.
 func (a *Attachment) spliceUnicast(frame []byte) {
 	kind, p, ok := frameBody(frame)
 	if !ok {
@@ -771,6 +775,7 @@ func (a *Attachment) spliceUnicast(frame []byte) {
 		return
 	}
 	moved := false
+	var reason string
 	switch kind {
 	case codec.KindWelcome:
 		if w, err := codec.DecodeWelcome(p); err == nil && a.sinceSeq > 0 && w.Seq == a.sinceSeq {
@@ -778,14 +783,17 @@ func (a *Attachment) spliceUnicast(frame []byte) {
 		}
 	case codec.KindSnapshot:
 		if s, err := codec.DecodeSnapshot(p); err == nil {
-			a.pos, moved = s.Seq, true
+			if s.Seq >= a.pos {
+				a.pos, moved = s.Seq, true
+			} else {
+				reason = "splice rewind"
+			}
 		}
 	case codec.KindTick:
 		if _, last, ok := tickSpan(p); ok && last > a.pos {
 			a.pos, moved = last, true
 		}
 	}
-	var reason string
 	if moved {
 		reason = a.flushPending()
 	}
