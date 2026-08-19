@@ -371,6 +371,12 @@ type ringEntry struct {
 	wh   uint64
 }
 
+// publishFunc fans one committed tick's record run out to every gateway
+// connection subscribed to the chunk. Contract (shared with the trunk):
+// everything is copied before it returns, so the caller may reuse run on
+// the next tick.
+type publishFunc func(chunk string, tick uint64, firstSeq int64, count uint16, run []byte)
+
 // modules exposes the current distribution hashes riding every verdict:
 // the client presentation module and the sim module itself.
 type modules struct {
@@ -381,12 +387,13 @@ type modules struct {
 // authority is one chunk's sim authority: journal writer, validator, and
 // fan-out hub (src/chunkies/README.md). run() is the single owner of the host.
 type authority struct {
-	name  string
-	id    int64
-	host  *simHost
-	j     journal.Journal
-	mods  *modules
-	vocab Vocab
+	name    string
+	id      int64
+	host    *simHost
+	j       journal.Journal
+	mods    *modules
+	vocab   Vocab
+	publish publishFunc
 
 	// The tick schedule, derived from the sim's journaled rate segment
 	// (refreshSchedule): tick anchorTick falls at anchor, later ticks
@@ -589,7 +596,7 @@ func (a *authority) setTerrain(blob []byte) error {
 // closed, and hands back an authority ready for run(). A chunk whose
 // snapshot does not replay to its recorded world hash is refused, never
 // served wrong.
-func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing) (*authority, error) {
+func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing, publish publishFunc) (*authority, error) {
 	if tm.hz == 0 {
 		tm.hz = 24
 	}
@@ -599,6 +606,10 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 	if tm.now == nil {
 		tm.now = time.Now
 	}
+	if publish == nil {
+		// A dark authority (replay tooling, most tests) runs unpublished.
+		publish = func(string, uint64, int64, uint16, []byte) {}
+	}
 	host, err := newSimHost(module)
 	if err != nil {
 		return nil, err
@@ -606,6 +617,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 	a := &authority{
 		name: name, id: chunkIDFor(name), host: host, j: j, mods: mods,
 		vocab:      vocab,
+		publish:    publish,
 		tm:         tm,
 		moduleHash: displayHash(module),
 		subs:       map[*session]bool{},
@@ -1196,18 +1208,17 @@ func (a *authority) tickOnce() {
 		mEventsAppended.Add(float64(len(accepted)))
 		// One batch per tick: the run is the accepted intents' record
 		// bytes, seqs dense from the journal's first — the same bytes a
-		// client sent are the bytes every client receives.
+		// client sent are the bytes every client receives. Publish carries
+		// it once per subscribed gateway connection; the gateway-side
+		// splice fans it out to attachments.
 		var run []byte
 		for i := range accepted {
 			accepted[i].Seq = firstSeq + int64(i)
 			run = codec.AppendEventRecord(run, accepted[i].IntentID, accepted[i].Kind,
 				acceptedIntents[i].actorID, accepted[i].Payload)
 		}
-		f := codec.EncodeTick(tick, firstSeq, uint16(len(accepted)), run)
+		a.publish(a.name, tick, firstSeq, uint16(len(accepted)), run)
 		a.mu.Lock()
-		for s := range a.subs {
-			s.send(f)
-		}
 		a.lastSeq = accepted[len(accepted)-1].Seq
 		a.mu.Unlock()
 		for _, in := range acceptedIntents {
@@ -1318,9 +1329,9 @@ var errPastAttach = errors.New("past attach position")
 
 // catchupFrames builds the catch-up material on the caller's goroutine.
 // Divergence resyncs and fresh joins get the snapshot; rejoins get
-// min-cost with the ring-depth compute bound. Live events queued after the
-// attach position follow on the session channel, so the journal read stops
-// at the attach seq — anything newer is already on its way.
+// min-cost with the ring-depth compute bound. The journal read stops at
+// the attach seq — everything newer rides the broadcast lane, and the
+// gateway's seq gate splices the two into one dense stream.
 func (a *authority) catchupFrames(sinceSeq int64, sinceTick uint64, res attachResult) [][]byte {
 	snap := snapshotFrameFor(res.seq, res.tick, res.epoch, res.wh, res.terrain, res.state)
 	if sinceSeq > 0 && sinceSeq <= res.seq && sinceTick+uint64(len(a.ring)) >= res.tick {
@@ -1420,10 +1431,11 @@ type chunks struct {
 	j       journal.Journal
 	mods    *modules
 	tm      timing
+	publish publishFunc
 }
 
-func newChunks(module func() []byte, genesis []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing) *chunks {
-	return &chunks{byName: map[string]*authority{}, module: module, genesis: genesis, vocab: vocab, j: j, mods: mods, tm: tm}
+func newChunks(module func() []byte, genesis []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing, publish publishFunc) *chunks {
+	return &chunks{byName: map[string]*authority{}, module: module, genesis: genesis, vocab: vocab, j: j, mods: mods, tm: tm, publish: publish}
 }
 
 func (p *chunks) get(ctx context.Context, name string) (*authority, error) {
@@ -1435,7 +1447,7 @@ func (p *chunks) get(ctx context.Context, name string) (*authority, error) {
 	p.mu.Unlock()
 	// Open outside the registry lock (journal replay takes a moment); the
 	// rare double-open race resolves to the first registered instance.
-	a, err := openAuthority(ctx, name, p.module(), p.genesis, p.vocab, p.j, p.mods, p.tm)
+	a, err := openAuthority(ctx, name, p.module(), p.genesis, p.vocab, p.j, p.mods, p.tm, p.publish)
 	if err != nil {
 		return nil, err
 	}

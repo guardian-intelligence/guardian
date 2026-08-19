@@ -251,6 +251,7 @@ EOF
     park_database_url="$(scripts/wum-dev-db.sh url)"
     DATABASE_URL="$park_database_url" \
       CHUNK_NAME=park-mythra \
+      GAME=wum \
       TRUNK_PORT="$PARK_PORT" \
       HTTP_PORT="$PARK_HTTP_PORT" \
       METRICS_PORT="$PARK_METRICS_PORT" \

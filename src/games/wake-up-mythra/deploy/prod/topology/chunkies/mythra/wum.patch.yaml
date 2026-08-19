@@ -29,6 +29,8 @@
   value:
     - name: CHUNK_NAME
       value: park-mythra
+    - name: GAME
+      value: wum
     - name: INTERNAL_HOST
       value: 127.0.0.1
     - name: MAX_SESSIONS

@@ -35,7 +35,8 @@ func newChunkDirectory() *chunkDirectory {
 	return &chunkDirectory{chunks: map[string]string{}}
 }
 
-func (d *chunkDirectory) lookup(game, chunk string) (string, bool) {
+// Lookup satisfies trunk.Directory.
+func (d *chunkDirectory) Lookup(game, chunk string) (string, bool) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	addr, ok := d.chunks[game+"/"+chunk]
@@ -43,7 +44,7 @@ func (d *chunkDirectory) lookup(game, chunk string) (string, bool) {
 }
 
 func (d *chunkDirectory) allowed(game, chunk string) bool {
-	_, ok := d.lookup(game, chunk)
+	_, ok := d.Lookup(game, chunk)
 	return ok
 }
 
