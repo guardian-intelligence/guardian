@@ -4,7 +4,11 @@
 // once per connection, attachments open and close as multiplexed control
 // messages, and a single ping probes the backend's liveness for all of
 // them. That makes re-attaching to a different backend a control message
-// rather than a redial — the seam cross-chunk transfer needs.
+// rather than a redial — the seam cross-chunk transfer needs. Tick
+// fan-out is publish-once: the backend broadcasts each committed tick
+// once per connection, and the dial side replicates it to the local
+// attachments subscribed to that chunk, splicing it into each unicast
+// lane by seq.
 package trunk
 
 import (
@@ -22,6 +26,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
 )
 
 const (
@@ -34,6 +40,9 @@ const (
 	KindClose    = 4
 	KindPing     = 5
 	KindPong     = 6
+	// KindBroadcast rides backend to gateway only, SID 0: one committed
+	// tick frame addressed to a (game, chunk) instead of an attachment.
+	KindBroadcast = 7
 
 	defaultPingEvery  = 5 * time.Second
 	defaultPongWithin = 15 * time.Second
@@ -283,6 +292,72 @@ func DecodeOpen(payload []byte) (Open, error) {
 	return open, nil
 }
 
+// EncodeBroadcast builds the publish-once carrier payload: the (game,
+// chunk) address, then the tick frame's bytes verbatim — replication
+// forwards them without re-encoding.
+func EncodeBroadcast(game, chunk string, frame []byte) ([]byte, error) {
+	b := make([]byte, 0, 4+len(game)+len(chunk)+len(frame))
+	var err error
+	if b, err = appendProxyString(b, game); err != nil {
+		return nil, err
+	}
+	if b, err = appendProxyString(b, chunk); err != nil {
+		return nil, err
+	}
+	return append(b, frame...), nil
+}
+
+func DecodeBroadcast(payload []byte) (game, chunk string, frame []byte, err error) {
+	at := 0
+	if game, err = takeProxyString(payload, &at); err != nil {
+		return "", "", nil, err
+	}
+	if chunk, err = takeProxyString(payload, &at); err != nil {
+		return "", "", nil, err
+	}
+	frame = payload[at:]
+	if game == "" || chunk == "" || len(frame) == 0 {
+		return "", "", nil, errors.New("bad proxy broadcast")
+	}
+	return game, chunk, frame, nil
+}
+
+// frameBody splits one framed codec message into kind and payload without
+// copying (the codec framing: RFC 9000 varint length, then kind byte).
+// ok=false means the bytes are not exactly one whole frame.
+func frameBody(frame []byte) (kind byte, payload []byte, ok bool) {
+	if len(frame) == 0 {
+		return 0, nil, false
+	}
+	prefix := 1 << (frame[0] >> 6)
+	if len(frame) < prefix {
+		return 0, nil, false
+	}
+	n := uint64(frame[0] & 0x3f)
+	for _, b := range frame[1:prefix] {
+		n = n<<8 | uint64(b)
+	}
+	body := frame[prefix:]
+	if n == 0 || uint64(len(body)) != n {
+		return 0, nil, false
+	}
+	return body[0], body[1:], true
+}
+
+// tickSpan reads the dense seq span from a tick payload's fixed header,
+// without walking the record run.
+func tickSpan(p []byte) (first, last int64, ok bool) {
+	if len(p) < 18 {
+		return 0, 0, false
+	}
+	first = int64(binary.LittleEndian.Uint64(p[8:16]))
+	count := binary.LittleEndian.Uint16(p[16:18])
+	if count == 0 {
+		return 0, 0, false
+	}
+	return first, first + int64(count) - 1, true
+}
+
 // Hooks observe connection lifecycle for the owner's metrics; nil
 // callbacks are skipped.
 type Hooks struct {
@@ -376,7 +451,7 @@ func (p *Pool) Open(ctx context.Context, addr string, open Open) (*Attachment, e
 			e.conn = mc
 		}
 		e.mu.Unlock()
-		a, err := mc.openAttachment(body)
+		a, err := mc.openAttachment(open, body)
 		if err == nil || attempt > 0 {
 			return a, err
 		}
@@ -391,7 +466,8 @@ func (p *Pool) dial(ctx context.Context, addr string) (*muxConn, error) {
 	mc := &muxConn{
 		Conn: &Conn{c: c}, addr: addr, pool: p, hooks: p.hooks,
 		pingEvery: p.PingEvery, pongWithin: p.PongWithin, idleAfter: p.IdleAfter,
-		attachments: map[uint64]*Attachment{}, deadCh: make(chan struct{}),
+		attachments: map[uint64]*Attachment{}, byChunk: map[chunkKey]map[uint64]*Attachment{},
+		deadCh: make(chan struct{}),
 	}
 	if err := mc.writeHandshake(p.key); err != nil {
 		c.Close()
@@ -406,6 +482,8 @@ func (p *Pool) dial(ctx context.Context, addr string) (*muxConn, error) {
 	return mc, nil
 }
 
+type chunkKey struct{ game, chunk string }
+
 type muxConn struct {
 	*Conn
 	addr       string
@@ -418,6 +496,7 @@ type muxConn struct {
 
 	mu          sync.Mutex
 	attachments map[uint64]*Attachment
+	byChunk     map[chunkKey]map[uint64]*Attachment
 	nextSID     uint64
 	idleSince   time.Time
 	deadCh      chan struct{}
@@ -433,7 +512,7 @@ func (m *muxConn) dead() bool {
 	}
 }
 
-func (m *muxConn) openAttachment(openBody []byte) (*Attachment, error) {
+func (m *muxConn) openAttachment(open Open, openBody []byte) (*Attachment, error) {
 	m.mu.Lock()
 	if m.dead() {
 		m.mu.Unlock()
@@ -441,10 +520,17 @@ func (m *muxConn) openAttachment(openBody []byte) (*Attachment, error) {
 	}
 	m.nextSID++
 	a := &Attachment{
-		conn: m, sid: m.nextSID,
+		conn: m, sid: m.nextSID, key: chunkKey{open.Game, open.Chunk},
+		sinceSeq: open.SinceSeq, pos: -1,
 		events: make(chan Event, 256), done: make(chan struct{}),
 	}
 	m.attachments[a.sid] = a
+	set := m.byChunk[a.key]
+	if set == nil {
+		set = map[uint64]*Attachment{}
+		m.byChunk[a.key] = set
+	}
+	set[a.sid] = a
 	m.mu.Unlock()
 	if err := m.WriteMessage(KindOpen, a.sid, openBody); err != nil {
 		m.kill(err)
@@ -459,10 +545,29 @@ func (m *muxConn) lookup(sid uint64) *Attachment {
 	return m.attachments[sid]
 }
 
-func (m *muxConn) forget(sid uint64) {
+func (m *muxConn) forget(a *Attachment) {
 	m.mu.Lock()
-	delete(m.attachments, sid)
+	delete(m.attachments, a.sid)
+	if set := m.byChunk[a.key]; set != nil {
+		delete(set, a.sid)
+		if len(set) == 0 {
+			delete(m.byChunk, a.key)
+		}
+	}
 	m.mu.Unlock()
+}
+
+// chunkAttachments snapshots the broadcast fan-in for one chunk; gating
+// runs outside the lock because it can terminate an attachment.
+func (m *muxConn) chunkAttachments(game, chunk string) []*Attachment {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	set := m.byChunk[chunkKey{game, chunk}]
+	out := make([]*Attachment, 0, len(set))
+	for _, a := range set {
+		out = append(out, a)
+	}
+	return out
 }
 
 func (m *muxConn) readLoop() {
@@ -477,16 +582,19 @@ func (m *muxConn) readLoop() {
 			m.lastPong.Store(time.Now().UnixNano())
 		case KindStream, KindDatagram:
 			a := m.lookup(msg.SID)
-			if a == nil {
+			if a == nil || !a.deliver(Event{Kind: msg.Kind, Payload: msg.Payload}) {
 				continue
 			}
-			select {
-			case a.events <- Event{Kind: msg.Kind, Payload: msg.Payload}:
-			default:
-				// An attachment that can't drain chunk fan-out is closed
-				// rather than allowed to stall every other attachment's
-				// demux.
-				a.terminate("relay backlog", false, true)
+			if msg.Kind == KindStream {
+				a.spliceUnicast(msg.Payload)
+			}
+		case KindBroadcast:
+			game, chunk, frame, err := DecodeBroadcast(msg.Payload)
+			if err != nil {
+				continue
+			}
+			for _, a := range m.chunkAttachments(game, chunk) {
+				a.spliceBroadcast(frame)
 			}
 		case KindClose:
 			if a := m.lookup(msg.SID); a != nil {
@@ -558,11 +666,26 @@ type Event struct {
 	Payload []byte
 }
 
+// spliceMaxFrames/Bytes bound the per-attachment broadcast buffer: a gap
+// the unicast lane hasn't filled within this much fan-out means the
+// attachment's catch-up is stuck, and closing it hands recovery to the
+// client's redial.
+const (
+	spliceMaxFrames = 256
+	spliceMaxBytes  = 1 << 20
+)
+
+type pendingFrame struct {
+	first, last int64
+	frame       []byte
+}
+
 // Attachment is the gateway's handle on one multiplexed chunk session —
 // its lifetime is independent of the connection carrying it.
 type Attachment struct {
 	conn *muxConn
 	sid  uint64
+	key  chunkKey
 
 	events chan Event
 	done   chan struct{}
@@ -571,10 +694,128 @@ type Attachment struct {
 	// after it, so the channel close orders them.
 	reason    string
 	fromChunk bool
+
+	// Splice state, owned by the conn's readLoop. pos is the last seq
+	// handed to the relay (-1 until the unicast lane anchors it); pending
+	// buffers broadcast frames from beyond the gap the unicast catch-up
+	// is still filling; sinceSeq is the resume position the open stated,
+	// which tells the no-catch-up welcome apart.
+	sinceSeq     int64
+	pos          int64
+	pending      []pendingFrame
+	pendingBytes int
 }
 
 func (a *Attachment) Events() <-chan Event  { return a.events }
 func (a *Attachment) Done() <-chan struct{} { return a.done }
+
+// deliver hands one event to the attachment's relay. An attachment that
+// can't drain chunk fan-out is closed rather than allowed to stall every
+// other attachment's demux.
+func (a *Attachment) deliver(ev Event) bool {
+	select {
+	case a.events <- ev:
+		return true
+	default:
+		a.terminate("relay backlog", false, true)
+		return false
+	}
+}
+
+// spliceUnicast advances the splice position past a relayed unicast
+// frame. A welcome whose Seq equals the stated resume position means no
+// catch-up frames will follow, so it anchors pos itself; otherwise the
+// catch-up ends exactly at the welcome's Seq and anchors there. Catch-up
+// ticks advance monotonically (they ride behind the welcome that already
+// names their endpoint). A snapshot is a restore point and resets pos
+// outright — whatever the client saw beyond it is discarded by the
+// restore, so stale buffered broadcasts drop with it.
+func (a *Attachment) spliceUnicast(frame []byte) {
+	kind, p, ok := frameBody(frame)
+	if !ok {
+		return
+	}
+	switch kind {
+	case codec.KindWelcome:
+		w, err := codec.DecodeWelcome(p)
+		if err != nil || a.sinceSeq <= 0 || w.Seq != a.sinceSeq {
+			return
+		}
+		a.pos = w.Seq
+	case codec.KindSnapshot:
+		s, err := codec.DecodeSnapshot(p)
+		if err != nil {
+			return
+		}
+		a.pos = s.Seq
+	case codec.KindTick:
+		if _, last, ok := tickSpan(p); ok && last > a.pos {
+			a.pos = last
+		} else {
+			return
+		}
+	default:
+		return
+	}
+	a.flushPending()
+}
+
+// spliceBroadcast applies the seq gate to one broadcast tick frame.
+// Broadcast and unicast are written by different backend goroutines, so
+// their interleaving on the shared connection is not deterministic; the
+// gate restores exactly-once-in-order delivery against the dense
+// per-chunk seq line, which is what keeps the client-observable stream
+// contract intact.
+func (a *Attachment) spliceBroadcast(frame []byte) {
+	kind, p, ok := frameBody(frame)
+	if !ok || kind != codec.KindTick {
+		return
+	}
+	first, last, ok := tickSpan(p)
+	if !ok {
+		return
+	}
+	switch {
+	case last <= a.pos:
+		// Already delivered through the unicast lane.
+	case a.pos >= 0 && first == a.pos+1:
+		if !a.deliver(Event{Kind: KindStream, Payload: frame}) {
+			return
+		}
+		a.pos = last
+		a.flushPending()
+	default:
+		if len(a.pending) >= spliceMaxFrames || a.pendingBytes+len(frame) > spliceMaxBytes {
+			a.terminate("splice backlog", false, true)
+			return
+		}
+		a.pending = append(a.pending, pendingFrame{first: first, last: last, frame: frame})
+		a.pendingBytes += len(frame)
+	}
+}
+
+// flushPending drains the buffer after pos moved: frames the unicast lane
+// already covered drop, frames the gap's closure exposed deliver in
+// order. Broadcasts arrive in seq order per chunk, so the buffer is
+// sorted by construction and one front-to-back pass suffices.
+func (a *Attachment) flushPending() {
+	for len(a.pending) > 0 {
+		f := a.pending[0]
+		if f.last > a.pos && f.first != a.pos+1 {
+			return
+		}
+		a.pending = a.pending[1:]
+		a.pendingBytes -= len(f.frame)
+		if f.last <= a.pos {
+			continue
+		}
+		if !a.deliver(Event{Kind: KindStream, Payload: f.frame}) {
+			return
+		}
+		a.pos = f.last
+	}
+	a.pending = nil
+}
 
 // CloseReason reports why the attachment ended and whether the chunk said
 // so; a chunk-stated reason is meant for the client, anything else is the
@@ -606,7 +847,7 @@ func (a *Attachment) Close(reason string) { a.terminate(reason, false, true) }
 func (a *Attachment) terminate(reason string, fromChunk, notifyChunk bool) {
 	a.once.Do(func() {
 		a.reason, a.fromChunk = reason, fromChunk
-		a.conn.forget(a.sid)
+		a.conn.forget(a)
 		if notifyChunk {
 			// Asynchronous: terminate is called from relay and demux loops
 			// that must never block on a network write.

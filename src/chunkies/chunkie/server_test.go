@@ -59,7 +59,8 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	mods := toyMods(toyModule(t))
-	registry := newChunks(func() []byte { b, _ := mods.sim.Get(); return b }, nil, toyVocab(), j, mods, timing{hz: 24})
+	bcast := newBroadcaster("wum")
+	registry := newChunks(func() []byte { b, _ := mods.sim.Get(); return b }, nil, toyVocab(), j, mods, timing{hz: 24}, bcast.publish)
 	auth, err := registry.get(ctx, "park-test")
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +85,7 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 			if err != nil {
 				return
 			}
-			go handleTrunkConn(conn, key, "wum", resolve, 16)
+			go handleTrunkConn(conn, key, "wum", resolve, 16, bcast)
 		}
 	}()
 
@@ -169,5 +170,88 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 		reason, _ := alice.CloseReason()
 		t.Fatalf("closing bob closed alice (%q)", reason)
 	default:
+	}
+}
+
+// The publish seam's synchronous-copy contract, proven at the wire: one
+// publish reaches every attachment on the connection, and mutating the
+// run buffer after publish returns cannot corrupt what was delivered.
+func TestPublishCopiesRunAndFansOutPerConn(t *testing.T) {
+	ctx := context.Background()
+	pgPool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pgPool.Close)
+	j := journal.NewPg(pgPool)
+	if err := j.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mods := toyMods(toyModule(t))
+	bcast := newBroadcaster("wum")
+	// A pinned clock keeps the run loop owing zero ticks, so the only
+	// broadcast on the wire is the one this test publishes.
+	registry := newChunks(func() []byte { b, _ := mods.sim.Get(); return b }, nil, toyVocab(), j, mods, fixedClock(wallEpoch), bcast.publish)
+	auth, err := registry.get(ctx, "park-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(auth.close)
+
+	key := []byte("0123456789abcdef0123456789abcdef")
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	resolve := func(name string) (*authority, bool) {
+		if name != "park-test" {
+			return nil, false
+		}
+		return auth, true
+	}
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go handleTrunkConn(conn, key, "wum", resolve, 16, bcast)
+		}
+	}()
+
+	pool := trunk.NewPool(key, trunk.Hooks{})
+	openCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	alice, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Game: "wum", Sub: "alice", Chunk: "park-test", Role: "player", SinceSeq: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Game: "wum", Sub: "bob", Chunk: "park-test", Role: "spectator", SinceSeq: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The catch-up snapshot anchors each attachment's splice position;
+	// only then can a broadcast splice through.
+	for _, s := range []*trunk.Attachment{alice, bob} {
+		if _, err := codec.DecodeSnapshot(nextFrame(t, s, codec.KindSnapshot)); err != nil {
+			t.Fatalf("catch-up snapshot: %v", err)
+		}
+	}
+
+	want := move(9)
+	run := codec.AppendEventRecord(nil, 5, kMove, codec.ActorFor("alice"), want)
+	bcast.publish("park-test", 1, 1, 1, run)
+	for i := range run {
+		run[i] = 0xFF
+	}
+	for _, s := range []*trunk.Attachment{alice, bob} {
+		tick, recs, err := codec.DecodeTick(nextFrame(t, s, codec.KindTick))
+		if err != nil || tick.Tick != 1 || tick.FirstSeq != 1 || len(recs) != 1 {
+			t.Fatalf("broadcast tick = %+v recs=%d err=%v", tick, len(recs), err)
+		}
+		if recs[0].Intent != 5 || recs[0].Kind != kMove || !bytes.Equal(recs[0].Payload, want) {
+			t.Fatalf("delivered record %+v — the run mutation leaked into the broadcast", recs[0])
+		}
 	}
 }

@@ -113,7 +113,8 @@ func Run() {
 	}
 
 	mods := &modules{client: client, sim: simModule}
-	registry := newChunks(func() []byte { b, _ := simModule.Get(); return b }, genesis, vocab, j, mods, timing{hz: tickHz})
+	bcast := newBroadcaster(game)
+	registry := newChunks(func() []byte { b, _ := simModule.Get(); return b }, genesis, vocab, j, mods, timing{hz: tickHz}, bcast.publish)
 	auth, err := registry.get(ctx, chunkName)
 	if err != nil {
 		log.Fatalf("open chunk: %v", err)
@@ -141,7 +142,7 @@ func Run() {
 				}
 				return
 			}
-			go handleTrunkConn(conn, key, game, resolve, maxSessions)
+			go handleTrunkConn(conn, key, game, resolve, maxSessions, bcast)
 		}
 	}()
 
@@ -224,6 +225,89 @@ func terrainHandler(j journal.Journal, ready *atomic.Bool, genesis []byte) http.
 	}
 }
 
+// broadcaster is the publish-once half of tick fan-out: each committed
+// tick is encoded once and written once per gateway connection with a
+// live subscriber for the chunk; the gateway replicates to its local
+// attachments. A conn subscribes a chunk while it has sessions open on
+// it, so an idle conn costs no tick writes.
+type broadcaster struct {
+	game string
+
+	mu    sync.Mutex
+	conns map[*broadcastConn]struct{}
+}
+
+type broadcastConn struct {
+	pc *trunk.Conn
+
+	mu   sync.Mutex
+	subs map[string]int
+}
+
+func newBroadcaster(game string) *broadcaster {
+	return &broadcaster{game: game, conns: map[*broadcastConn]struct{}{}}
+}
+
+func (b *broadcaster) register(pc *trunk.Conn) *broadcastConn {
+	c := &broadcastConn{pc: pc, subs: map[string]int{}}
+	b.mu.Lock()
+	b.conns[c] = struct{}{}
+	b.mu.Unlock()
+	return c
+}
+
+func (b *broadcaster) unregister(c *broadcastConn) {
+	b.mu.Lock()
+	delete(b.conns, c)
+	b.mu.Unlock()
+}
+
+func (c *broadcastConn) subscribe(chunk string) {
+	c.mu.Lock()
+	c.subs[chunk]++
+	c.mu.Unlock()
+}
+
+func (c *broadcastConn) unsubscribe(chunk string) {
+	c.mu.Lock()
+	if c.subs[chunk]--; c.subs[chunk] <= 0 {
+		delete(c.subs, chunk)
+	}
+	c.mu.Unlock()
+}
+
+func (c *broadcastConn) subscribed(chunk string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.subs[chunk] > 0
+}
+
+// publish is the authority's tick fan-out (publishFunc). Everything is
+// encoded and written before it returns — the caller reuses the run
+// buffer next tick — and a failed write downs that connection only; its
+// sessions redial through the gateway.
+func (b *broadcaster) publish(chunk string, tick uint64, firstSeq int64, count uint16, run []byte) {
+	payload, err := trunk.EncodeBroadcast(b.game, chunk, codec.EncodeTick(tick, firstSeq, count, run))
+	if err != nil {
+		// A name too long for the wire also has no subscribers (Open caps
+		// the same strings), so there is nothing to write.
+		return
+	}
+	b.mu.Lock()
+	targets := make([]*broadcastConn, 0, len(b.conns))
+	for c := range b.conns {
+		if c.subscribed(chunk) {
+			targets = append(targets, c)
+		}
+	}
+	b.mu.Unlock()
+	for _, c := range targets {
+		if c.pc.WriteMessage(trunk.KindBroadcast, 0, payload) != nil {
+			c.pc.Close()
+		}
+	}
+}
+
 // connSession is one multiplexed session's chunk-side state. The demux
 // loop routes its frames here; run's two goroutines (writer, intent
 // drain) mirror the pair the per-session transport used to spawn.
@@ -261,12 +345,14 @@ func (cs *connSession) terminate(why string, notify bool) {
 	})
 }
 
-func handleTrunkConn(conn net.Conn, key []byte, game string, resolve func(chunk string) (*authority, bool), maxSessions int) {
+func handleTrunkConn(conn net.Conn, key []byte, game string, resolve func(chunk string) (*authority, bool), maxSessions int, b *broadcaster) {
 	pc, err := trunk.Accept(conn, key, time.Now())
 	if err != nil {
 		return
 	}
 	defer pc.Close()
+	bc := b.register(pc)
+	defer b.unregister(bc)
 	// The demux loop is the only writer of the map's entries; terminate
 	// (reachable from the authority's goroutines) deletes through reap, so
 	// access is locked.
@@ -336,10 +422,15 @@ func handleTrunkConn(conn net.Conn, key []byte, game string, resolve func(chunk 
 				pc: pc, sid: msg.SID, open: open,
 				inbound: make(chan []byte, 256), done: make(chan struct{}),
 			}
+			// Subscribed before the session attaches, so no committed tick
+			// can fall between the authority registering the session and
+			// this conn hearing broadcasts.
+			bc.subscribe(open.Chunk)
 			cs.reap = func() {
 				mu.Lock()
 				delete(sessions, cs.sid)
 				mu.Unlock()
+				bc.unsubscribe(cs.open.Chunk)
 			}
 			cs.s = &session{
 				sub: open.Sub, role: open.Role, chunk: chunk, out: make(chan []byte, 256),

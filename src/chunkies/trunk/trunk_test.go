@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
 )
 
 var testKey = []byte("0123456789abcdef0123456789abcdef")
@@ -368,6 +370,217 @@ func TestMuxIdleConnReaped(t *testing.T) {
 	defer s2.Close("")
 	if !waitFor(t, 5*time.Second, func() bool { return chunk.accepted.Load() == 2 }) {
 		t.Fatalf("connections = %d, want a fresh dial after the reap", chunk.accepted.Load())
+	}
+}
+
+// ---------- broadcast replication and the seq-gate splice ----------
+
+// tickFrameFor builds a single-record tick batch at the given seq — the
+// shape the chunk broadcasts and the splice gates on.
+func tickFrameFor(seq int64) []byte {
+	run := codec.AppendEventRecord(nil, uint64(seq), 0x0100, 7, nil)
+	return codec.EncodeTick(uint64(seq), seq, 1, run)
+}
+
+func sendBroadcast(t *testing.T, c *Conn, game, chunk string, frame []byte) {
+	t.Helper()
+	payload, err := EncodeBroadcast(game, chunk, frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.WriteMessage(KindBroadcast, 0, payload); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// nextStream returns the next stream frame's codec kind and payload.
+func nextStream(t *testing.T, a *Attachment) (byte, []byte) {
+	t.Helper()
+	for {
+		select {
+		case ev := <-a.Events():
+			if ev.Kind != KindStream {
+				continue
+			}
+			kind, p, ok := frameBody(ev.Payload)
+			if !ok {
+				t.Fatalf("undecodable frame %x", ev.Payload)
+			}
+			return kind, p
+		case <-a.Done():
+			reason, _ := a.CloseReason()
+			t.Fatalf("attachment closed (%q) while waiting for a frame", reason)
+		case <-time.After(5 * time.Second):
+			t.Fatal("no frame delivered")
+		}
+	}
+}
+
+// welcomeServer answers every open with a welcome at the open's stated
+// resume position — the no-catch-up shape, anchoring the splice there.
+func welcomeServer(t *testing.T) *fakeChunkieServer {
+	t.Helper()
+	return newFakeChunkieServer(t, func(c *Conn, m Msg) {
+		o, err := DecodeOpen(m.Payload)
+		if err != nil {
+			t.Errorf("open: %v", err)
+			return
+		}
+		c.WriteStream(m.SID, codec.EncodeWelcome(codec.Welcome{Seq: o.SinceSeq, Tick: uint64(o.SinceSeq), Hz: 24, Chunk: o.Chunk}))
+	})
+}
+
+func openAt(t *testing.T, p *Pool, addr, sub, chunk string, sinceSeq int64) *Attachment {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	a, err := p.Open(ctx, addr, Open{Game: "wum", Sub: sub, Chunk: chunk, Role: "player", SinceSeq: sinceSeq})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind, _ := nextStream(t, a); kind != codec.KindWelcome {
+		t.Fatalf("first frame kind = %d, want welcome", kind)
+	}
+	return a
+}
+
+// One broadcast write on the wire reaches every local attachment
+// subscribed to its chunk, and only those.
+func TestBroadcastReplicatesToChunkAttachments(t *testing.T) {
+	chunk := welcomeServer(t)
+	pool := NewPool(testKey, Hooks{})
+	a1 := openAt(t, pool, chunk.addr(), "alice", "park-test", 5)
+	a2 := openAt(t, pool, chunk.addr(), "bob", "park-test", 5)
+	other := openAt(t, pool, chunk.addr(), "carol", "park-other", 5)
+	if got := chunk.accepted.Load(); got != 1 {
+		t.Fatalf("attachments cost %d connections, want 1", got)
+	}
+
+	sendBroadcast(t, chunk.conn(0), "wum", "park-test", tickFrameFor(6))
+	for i, a := range []*Attachment{a1, a2} {
+		kind, p := nextStream(t, a)
+		if kind != codec.KindTick {
+			t.Fatalf("attachment %d frame kind = %d, want tick", i+1, kind)
+		}
+		if tk, _, err := codec.DecodeTick(p); err != nil || tk.FirstSeq != 6 {
+			t.Fatalf("attachment %d tick = %+v err=%v", i+1, tk, err)
+		}
+	}
+	// The other chunk's attachment saw nothing: broadcasts are addressed.
+	select {
+	case ev := <-other.Events():
+		t.Fatalf("unsubscribed attachment received %x", ev.Payload)
+	default:
+	}
+}
+
+// The late-attach splice: broadcasts racing ahead of the unicast catch-up
+// buffer until the gap closes, then the client edge sees one dense,
+// duplicate-free seq line.
+func TestLateAttachSplicesGaplessStream(t *testing.T) {
+	chunk := newFakeChunkieServer(t, nil)
+	pool := NewPool(testKey, Hooks{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	a, err := pool.Open(ctx, chunk.addr(), Open{Game: "wum", Sub: "alice", Chunk: "park-test", Role: "player", SinceSeq: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(t, 5*time.Second, func() bool { return chunk.conn(0) != nil && len(chunk.received(KindOpen)) == 1 }) {
+		t.Fatal("open never arrived")
+	}
+	c := chunk.conn(0)
+	sid := chunk.received(KindOpen)[0].SID
+
+	// Live fan-out outruns the catch-up: 6 and 7 arrive before the
+	// welcome, the unicast lane then repays 4 and 5, and 8 lands late. 6
+	// rides the wire twice — the dedup half of the gate.
+	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(6))
+	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(7))
+	c.WriteStream(sid, codec.EncodeWelcome(codec.Welcome{Seq: 5, Tick: 5, Hz: 24, Chunk: "park-test"}))
+	c.WriteStream(sid, tickFrameFor(4))
+	c.WriteStream(sid, tickFrameFor(5))
+	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(8))
+	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(6))
+	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(9))
+
+	if kind, _ := nextStream(t, a); kind != codec.KindWelcome {
+		t.Fatalf("first frame kind = %d, want welcome", kind)
+	}
+	for _, want := range []int64{4, 5, 6, 7, 8, 9} {
+		kind, p := nextStream(t, a)
+		if kind != codec.KindTick {
+			t.Fatalf("frame kind = %d, want tick %d", kind, want)
+		}
+		tk, _, err := codec.DecodeTick(p)
+		if err != nil || tk.FirstSeq != want {
+			t.Fatalf("tick seq = %d (err %v), want %d — splice is not gapless/dedup-free", tk.FirstSeq, err, want)
+		}
+	}
+	select {
+	case ev := <-a.Events():
+		t.Fatalf("extra frame after the spliced run: %x", ev.Payload)
+	default:
+	}
+}
+
+// A mid-session resync: the unicast snapshot resets the splice position,
+// stale buffered broadcasts drop, and the stream resumes densely from the
+// snapshot's seq.
+func TestResyncSnapshotResetsSpliceAndDropsStale(t *testing.T) {
+	chunk := welcomeServer(t)
+	pool := NewPool(testKey, Hooks{})
+	a := openAt(t, pool, chunk.addr(), "alice", "park-test", 5)
+	c := chunk.conn(0)
+	sid := chunk.received(KindOpen)[0].SID
+
+	// 7 and 8 gap past pos 5 and buffer; the snapshot at 8 supersedes
+	// them both.
+	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(7))
+	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(8))
+	c.WriteStream(sid, codec.EncodeSnapshot(codec.Snapshot{Seq: 8, Tick: 8, Z: []byte{1}}))
+	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(9))
+
+	if kind, _ := nextStream(t, a); kind != codec.KindSnapshot {
+		t.Fatal("snapshot did not reach the client edge")
+	}
+	kind, p := nextStream(t, a)
+	if kind != codec.KindTick {
+		t.Fatalf("post-snapshot frame kind = %d, want tick", kind)
+	}
+	if tk, _, err := codec.DecodeTick(p); err != nil || tk.FirstSeq != 9 {
+		t.Fatalf("post-snapshot tick = %+v err=%v, want seq 9 (stale 7/8 must drop)", tk, err)
+	}
+}
+
+// A splice buffer that overflows closes that attachment alone; its
+// neighbors on the shared connection keep their streams.
+func TestSpliceOverflowClosesOnlyThatAttachment(t *testing.T) {
+	chunk := welcomeServer(t)
+	pool := NewPool(testKey, Hooks{})
+	stuck := openAt(t, pool, chunk.addr(), "alice", "park-test", 5)
+	healthy := openAt(t, pool, chunk.addr(), "bob", "park-other", 5)
+	c := chunk.conn(0)
+
+	// Seq 6 never arrives, so every later frame buffers; one past the
+	// frame bound must close the attachment.
+	for seq := int64(7); seq < 7+spliceMaxFrames+1; seq++ {
+		sendBroadcast(t, c, "wum", "park-test", tickFrameFor(seq))
+	}
+	select {
+	case <-stuck.Done():
+		if reason, fromChunk := stuck.CloseReason(); fromChunk || reason != "splice backlog" {
+			t.Fatalf("close = %q fromChunk=%v, want splice backlog", reason, fromChunk)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("overflowing attachment was never closed")
+	}
+
+	sendBroadcast(t, c, "wum", "park-other", tickFrameFor(6))
+	if kind, p := nextStream(t, healthy); kind != codec.KindTick {
+		t.Fatalf("neighbor frame kind = %d, want tick", kind)
+	} else if tk, _, err := codec.DecodeTick(p); err != nil || tk.FirstSeq != 6 {
+		t.Fatalf("neighbor tick = %+v err=%v", tk, err)
 	}
 }
 
