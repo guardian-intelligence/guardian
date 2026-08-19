@@ -1,0 +1,32 @@
+# The chunkie durability volume on ash-worker0's second NVMe (serial
+# 362510FCEFD5, Talos UserVolumeConfig "chunkies" in talm). Static and
+# node-pinned by design; the claimRef reserves it for the WUM chunkie's
+# PVC so no other claim can bind it. Capacity understates the 960GB disk
+# to leave room for LUKS2 and XFS overhead.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ash-worker0-chunkies
+  labels:
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: chunkie
+spec:
+  capacity:
+    storage: 850Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: talos-user-volume
+  claimRef:
+    namespace: tenant-guardian-prod
+    name: chunkies-wal
+  local:
+    path: /var/mnt/chunkies
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - ash-worker0

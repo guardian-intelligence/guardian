@@ -18,6 +18,28 @@ machine:
         extraTags:
           node: ash-worker0
 ---
+# The chunkies durability volume: WAL segments + checkpoints for the
+# worlds this node serves (design of record: netcode spec, slices B-D).
+# Node-local by ruling — deliberately NOT in the LINSTOR mesh; contents
+# are expendable on reinstall (recovery re-seeds from the control
+# plane). During a node rebuild FD5 is also the staging disk: the volume
+# stays pending until the staging wipe, then provisions on reconcile.
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: chunkies
+provisioning:
+  diskSelector:
+    match: disk.serial == "362510FCEFD5"
+  minSize: 800GiB
+  grow: true
+filesystem:
+  type: xfs
+encryption:
+  provider: luks2
+  keys:
+    - slot: 0
+      nodeID: {}
+---
 apiVersion: v1alpha1
 kind: HostnameConfig
 hostname: ash-worker0

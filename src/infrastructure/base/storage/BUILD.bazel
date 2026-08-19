@@ -1,6 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = [
+        "chunkies-wal-pv.yaml",
         "kustomization.yaml",
         "linstor-data-pools.yaml",
         "linstor-encryption.yaml",
