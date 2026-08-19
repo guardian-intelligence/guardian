@@ -480,11 +480,11 @@ def _check_live_context_for(ctx, kubectl, kubeconfig, kube_api_server = ""):
         ctx.std.io.stderr.write("ERROR: kubeconfig points at " + server + "; expected a declared guardian-mgmt API endpoint (EXPECTED_KUBE_APIS)\n")
         return 1
 
-    nodes = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["get", "nodes", "-o", "name"], "kubectl get nodes", kube_api_server)
+    nodes = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["get", "nodes", "-l", "node-role.kubernetes.io/control-plane", "-o", "name"], "kubectl get control-plane nodes", kube_api_server)
     if nodes == None:
         return 1
     if _line_count(nodes) != 3:
-        ctx.std.io.stderr.write("ERROR: guardian-mgmt should have exactly 3 nodes; kubectl reported:\n" + nodes + "\n")
+        ctx.std.io.stderr.write("ERROR: guardian-mgmt should have exactly 3 control-plane nodes; kubectl reported:\n" + nodes + "\n")
         return 1
 
     node_details = _kubectl_capture_for(ctx, kubectl, kubeconfig, ["get", "nodes", "-o", "wide"], "kubectl get nodes -o wide", kube_api_server)
