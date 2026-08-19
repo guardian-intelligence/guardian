@@ -598,8 +598,20 @@ func (cs *connSession) handleFrame(payload []byte) {
 }
 
 // stageDeparture stages the game's departure event, if it declares one.
+// Only the actor's current session may depart: a superseded session (its
+// player rejoined before the transport reaped it) stages nothing, so a
+// stale close can never remove the entity a live session stands on.
 func stageDeparture(chunk *authority, s *session) {
 	if s.role != "player" || chunk.vocab.DepartKind == 0 {
+		return
+	}
+	chunk.mu.Lock()
+	current := chunk.players[s.dogID] == s
+	if current {
+		delete(chunk.players, s.dogID)
+	}
+	chunk.mu.Unlock()
+	if !current {
 		return
 	}
 	chunk.stageIntent(s, 0, chunk.vocab.DepartKind, nil)

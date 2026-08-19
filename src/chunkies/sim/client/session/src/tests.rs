@@ -920,6 +920,42 @@ fn a_connected_session_adopts_a_journaled_rate_without_resyncing() {
 }
 
 #[test]
+fn a_held_snapshot_keeps_the_join_that_overtook_it() {
+    // A fresh join's catch-up snapshot waits here for its terrain fetch,
+    // and the player's own join event — journaled one tick later — rides
+    // the broadcast lane past it. The restore must not fold in an event
+    // it does not cover: dropping it would orphan the dog's presence and
+    // hold every boost/move/check-in behind it forever.
+    let mut r = Rig::new(ROLE_PLAYER);
+    r.s.module_swapped(&mut r.m, PARK_A);
+    r.s.connected(&mut r.m, b"ticket", 0);
+    let join_id = r.m.intents()[0].0;
+    r.welcome(2000, TERRAIN);
+    r.snapshot(500, 2000, 9, TERRAIN);
+    assert_eq!(r.m.count(Verb::Restore), 0, "held for terrain");
+    r.event(501, 2001, EV_JOIN, DOG, join_id, &[]);
+    r.s.terrain_ready(&mut r.m, TERRAIN, true);
+    r.pump();
+    assert!(r.s.have_state);
+    r.run_to_tick(2001);
+    assert_eq!(r.s.seq(), 501, "the overtaking join applied");
+    assert!(r.s.presence, "the journal's join placed our dog");
+    assert_eq!(
+        r.m.emits_of(T_INTENT_ANSWERED).len(),
+        1,
+        "the pending join was answered by its own event"
+    );
+    // Presence reached, the held action lane is open: a boost goes
+    // straight to the wire instead of waiting in the ring.
+    r.m.clear();
+    let boost = r.s.intent_boost(&mut r.m, true, r.now);
+    assert!(
+        r.m.intents().contains(&(boost, EV_BOOST_SET)),
+        "presence unblocks gameplay intents"
+    );
+}
+
+#[test]
 fn a_snapshot_waits_for_its_terrain_then_lands() {
     let mut r = Rig::new(ROLE_PLAYER);
     r.s.connected(&mut r.m, b"ticket", 0);
@@ -950,13 +986,17 @@ fn a_restore_clears_the_queues_and_resends_unanswered_intents() {
     // an intent the journal has not answered, and a future event queued
     let join_id = r.m.intents()[0].0;
     let id = r.s.intent_check_in(&mut r.m, r.now);
+    r.event(250, 3000, 1, DOG, 0, &[]);
     r.event(400, 5000, 1, DOG, 0, &[]);
     r.m.clear();
     r.snapshot(300, 4000, 11, TERRAIN);
     r.pump();
     assert_eq!(r.s.seq(), 300);
     assert_eq!(r.s.tick(), 4000);
-    assert_eq!(r.s.queued_len, 0, "the queue does not survive a restore");
+    // The restore folds in everything at or below its seq; an event the
+    // snapshot does not cover is still owed to the world.
+    assert_eq!(r.s.queued_len, 1, "only covered events fold into a restore");
+    assert_eq!(bufs().queued[0].seq, 400);
     assert_eq!(r.s.recent_len, 0);
     // the restored state itself is the only ring entry: nothing older
     // survives, but the world is never left without a rollback floor

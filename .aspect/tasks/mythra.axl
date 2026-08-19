@@ -21,7 +21,7 @@ OPERATOR = "guardian-mythra-operator"
 CONSOLE = "mythra-journal-console-0"
 WORKLOADS = {
     "gateway": {"app": "chunkies-gateway", "container": "gateway", "deployment": "chunkies-gateway"},
-    "park": {"app": "chunkies-park", "container": "park", "deployment": "chunkies-park"},
+    "park": {"app": "chunkies-chunkie", "container": "chunkie", "deployment": "chunkies-chunkie"},
 }
 
 def _kubectl_path(ctx):
@@ -162,7 +162,7 @@ def _status_impl(ctx):
             NAMESPACE,
             "get",
             "deployment/chunkies-gateway",
-            "deployment/chunkies-park",
+            "deployment/chunkies-chunkie",
             "statefulset/mythra-journal-console",
             "pod/" + CONSOLE,
         ]),
@@ -180,7 +180,7 @@ def _status_impl(ctx):
             "get",
             "pods",
             "-l",
-            "app.kubernetes.io/name in (chunkies-gateway,chunkies-park)",
+            "app.kubernetes.io/name in (chunkies-gateway,chunkies-chunkie)",
             "-o",
             "wide",
         ]),
@@ -406,7 +406,7 @@ dev_up = task(
     implementation = _dev_up_impl,
     name = "up",
     group = ["mythra", "dev"],
-    summary = "Start the container-free local Wake Up Mythra stack, including chunkies-gateway and chunkies-park.",
+    summary = "Start the container-free local Wake Up Mythra stack, including chunkies-gateway and chunkies-chunkie.",
 )
 
 dev_down = task(
@@ -437,7 +437,7 @@ dev_smoke = task(
     implementation = _dev_smoke_impl,
     name = "smoke",
     group = ["mythra", "dev"],
-    summary = "Prove a headless player traverses chunkies-gateway and chunkies-park and its telemetry lands in local ClickHouse.",
+    summary = "Prove a headless player traverses chunkies-gateway and chunkies-chunkie and its telemetry lands in local ClickHouse.",
 )
 
 dev_latency = task(

@@ -53,7 +53,7 @@ try {
   let baseline;
   while (Date.now() < baselineDeadline) {
     baseline = await fetch(
-      `${CONTROL}?park=${encodeURIComponent(PARK)}&hz=${encodeURIComponent(FROM_RATE)}`,
+      `${CONTROL}?chunk=${encodeURIComponent(PARK)}&hz=${encodeURIComponent(FROM_RATE)}`,
       { method: "POST" },
     );
     if (baseline.ok) break;
@@ -139,7 +139,7 @@ try {
   const transitionAt = spans.length;
 
   const response = await fetch(
-    `${CONTROL}?park=${encodeURIComponent(PARK)}&hz=${encodeURIComponent(TO_RATE)}`,
+    `${CONTROL}?chunk=${encodeURIComponent(PARK)}&hz=${encodeURIComponent(TO_RATE)}`,
     { method: "POST" },
   );
   if (!response.ok) {

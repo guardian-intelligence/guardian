@@ -1044,11 +1044,21 @@ impl Session {
             return;
         }
         self.seq = self.held_seq;
-        // Safe because the authority queues a resync snapshot in-stream:
-        // everything already waiting here arrived ahead of it and is
-        // therefore folded into it. A snapshot delivered out of band would
-        // strand every event newer than itself.
-        self.queued_len = 0;
+        // Only events the snapshot already folded in are stale. An in-stream
+        // resync snapshot covers everything queued ahead of it, but a
+        // snapshot that waited here for its terrain fetch was overtaken by
+        // events newer than itself — a fresh join's own join event rides the
+        // broadcast lane during that fetch. Dropping those would orphan the
+        // dog's presence and every intent waiting on it.
+        let mut kept = 0;
+        for i in 0..self.queued_len {
+            let ev = bufs().queued[i];
+            if ev.seq > self.seq {
+                bufs().queued[kept] = ev;
+                kept += 1;
+            }
+        }
+        self.queued_len = kept;
         self.recent_head = 0;
         self.recent_len = 0;
         self.ring_head = 0;
