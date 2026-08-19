@@ -5,6 +5,7 @@
 
 import type { TransportPort } from "@guardian/chunkies";
 import { createTransport as createWebTransportPort } from "@guardian/chunkies-transport-web";
+import { reportError } from "@guardian/telemetry";
 import * as v from "valibot";
 
 const Session = v.object({
@@ -53,5 +54,9 @@ export function createTransport(options: TransportOptions): TransportPort {
     },
     onDialed: (dialMs) => options.onDialed(dialMs, anon),
     onBytesDown: options.onBytesDown,
+    // Every error the transport absorbs — dial phases, session death, even
+    // late rejections of abandoned dials — lands in the general error lane
+    // with its phase context; the analytics side filters on error.op.
+    onError: (e, context) => void reportError(e, { ...context, "wum.park": options.park }),
   });
 }

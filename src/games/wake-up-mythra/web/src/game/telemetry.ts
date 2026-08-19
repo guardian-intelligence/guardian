@@ -234,7 +234,11 @@ export function createTelemetry(ctx: {
           });
           return;
         case HostEmit.redial:
-          span("wum.redial", { "wum.backoff_ms": String(a), "wum.park": park });
+          span("wum.redial", {
+            "wum.backoff_ms": String(a),
+            "wum.attempt": String(b),
+            "wum.park": park,
+          });
           return;
         case HostEmit.teardown:
           span("wum.netcode_teardown", {

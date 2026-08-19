@@ -12,6 +12,14 @@
 // the connection down through `onClosed(reason)` instead of vanishing
 // into a swallowed promise (the transport this replaces did exactly
 // that). Loss on the datagram lane remains the lane's contract.
+//
+// Errors are data: every failure this file must absorb to keep its
+// contract — a dial that dies in any phase, a write that kills the path,
+// the peer tearing the session down, even the late rejections of a
+// transport already abandoned to a timeout — is handed to `onError` with
+// the phase that produced it before the contract action (throw, teardown,
+// nothing) proceeds. Self-inflicted rejections from our own teardown are
+// the one exception: those are the contract working, not evidence.
 
 import type {
   CloseReason,
@@ -54,13 +62,37 @@ export type TransportOptions = {
   /** Stream and datagram bytes as they arrive: the headline downlink
    * cost metric. */
   readonly onBytesDown?: ((n: number) => void) | undefined;
+  /**
+   * Every error this transport absorbs, with the phase that produced it:
+   * `error.op` is "transport.dial" (mint, handshake, handshake-late, open)
+   * or "transport.session" (uplink, datagram, downlink-stream,
+   * downlink-datagram, closed) under `error.phase`, plus
+   * `transport.endpoint` and `error.after_ms` since the dial started.
+   * Reporting only — the throw/teardown the error causes happens the same
+   * with or without a handler.
+   */
+  readonly onError?: ((error: unknown, context: Record<string, string>) => void) | undefined;
 };
 
 export function createTransport(options: TransportOptions): TransportPort {
+  const onError = options.onError ?? (() => {});
   return {
     async connect(sink: ConnectionSink): Promise<Dialed> {
       const dialStart = performance.now();
-      const minted = await options.mint();
+      const dialContext = (phase: string, endpoint?: string): Record<string, string> => ({
+        "error.op": "transport.dial",
+        "error.phase": phase,
+        "error.after_ms": String(Math.round(performance.now() - dialStart)),
+        ...(endpoint !== undefined ? { "transport.endpoint": endpoint } : {}),
+      });
+
+      let minted: Minted;
+      try {
+        minted = await options.mint();
+      } catch (e) {
+        onError(e, dialContext("mint"));
+        throw e;
+      }
 
       const transport = new WebTransport(
         `https://${minted.endpoint}/wt`,
@@ -72,6 +104,17 @@ export function createTransport(options: TransportOptions): TransportPort {
             }
           : undefined,
       );
+
+      // A transport we walk away from still owes evidence: its `ready` and
+      // `closed` settle after the dial already failed (on WebKit the real
+      // failure often surfaces only here), and unwatched they surface as
+      // anonymous unhandledrejection noise instead.
+      const abandonLoudly = () => {
+        closeQuietly(transport);
+        const late = (e: unknown) => onError(e, dialContext("handshake-late", minted.endpoint));
+        transport.ready.catch(late);
+        transport.closed.catch(late);
+      };
 
       // A blocked UDP path can leave the handshake pending forever — ready
       // neither resolves nor rejects and closed never settles — so nothing
@@ -89,7 +132,8 @@ export function createTransport(options: TransportOptions): TransportPort {
           }),
         ]);
       } catch (e) {
-        closeQuietly(transport);
+        abandonLoudly();
+        onError(e, dialContext("handshake", minted.endpoint));
         throw e;
       } finally {
         clearTimeout(dialTimer);
@@ -103,7 +147,8 @@ export function createTransport(options: TransportOptions): TransportPort {
         streamWriter = stream.writable.getWriter();
         datagramWriter = transport.datagrams.writable.getWriter();
       } catch (e) {
-        closeQuietly(transport);
+        abandonLoudly();
+        onError(e, dialContext("open", minted.endpoint));
         throw e;
       }
 
@@ -117,6 +162,18 @@ export function createTransport(options: TransportOptions): TransportPort {
         closed = true;
         closeQuietly(transport);
         sink.onClosed(reason);
+      };
+      // Reports a live-session error unless our own teardown caused it:
+      // after closeOnce, rejections out of the aborted streams and the
+      // closing transport are the teardown mechanics, not evidence.
+      const sessionError = (phase: string) => (e: unknown) => {
+        if (closed) return;
+        onError(e, {
+          "error.op": "transport.session",
+          "error.phase": phase,
+          "error.after_ms": String(Math.round(performance.now() - dialStart)),
+          "transport.endpoint": minted.endpoint,
+        });
       };
 
       // ---- the honest uplink ----
@@ -142,7 +199,8 @@ export function createTransport(options: TransportOptions): TransportPort {
             queue.shift();
             queuedBytes -= frame.byteLength;
           }
-        } catch {
+        } catch (e) {
+          sessionError("uplink")(e);
           closeOnce("write-error");
         } finally {
           draining = false;
@@ -164,31 +222,44 @@ export function createTransport(options: TransportOptions): TransportPort {
         sendDatagram: (bytes) => {
           if (closed) return;
           if (bytes.byteLength > connection.datagramBudget()) return;
-          void datagramWriter.write(bytes).catch(() => {
-            // The datagram lane is lossy by contract; a failed write is
-            // loss, not death. Stream writes are where death is detected.
-          });
+          // The datagram lane is lossy by contract; a failed write is
+          // loss, not death — but a rejection is a session error naming
+          // why the lane broke, so it reports even as the lane stays up.
+          // Stream writes are where death is detected.
+          void datagramWriter.write(bytes).catch(sessionError("datagram"));
         },
         datagramBudget: () => transport.datagrams.maxDatagramSize || DATAGRAM_FLOOR,
         close: () => closeOnce("transport"),
       };
 
-      void deliver(stream.readable, (bytes) => {
-        options.onBytesDown?.(bytes.length);
-        sink.onStreamBytes(bytes);
-      });
-      void deliver(transport.datagrams.readable, (bytes) => {
-        options.onBytesDown?.(bytes.length);
-        sink.onDatagram(bytes);
-      });
-      transport.closed.catch(() => {}).finally(() => closeOnce("transport"));
+      void deliver(
+        stream.readable,
+        (bytes) => {
+          options.onBytesDown?.(bytes.length);
+          sink.onStreamBytes(bytes);
+        },
+        sessionError("downlink-stream"),
+      );
+      void deliver(
+        transport.datagrams.readable,
+        (bytes) => {
+          options.onBytesDown?.(bytes.length);
+          sink.onDatagram(bytes);
+        },
+        sessionError("downlink-datagram"),
+      );
+      transport.closed.catch(sessionError("closed")).finally(() => closeOnce("transport"));
 
       return { connection, ticket: new TextEncoder().encode(minted.ticket) };
     },
   };
 }
 
-async function deliver(readable: ReadableStream, to: (bytes: Uint8Array) => void): Promise<void> {
+async function deliver(
+  readable: ReadableStream,
+  to: (bytes: Uint8Array) => void,
+  onReadError: (e: unknown) => void,
+): Promise<void> {
   // The DOM lib leaves WebTransport's streams unparameterized; the spec
   // says every chunk is a Uint8Array.
   const reader = (readable as ReadableStream<Uint8Array>).getReader();
@@ -198,8 +269,9 @@ async function deliver(readable: ReadableStream, to: (bytes: Uint8Array) => void
       if (done) return;
       if (value) to(value);
     }
-  } catch {
+  } catch (e) {
     // Torn down. `closed` settling is what redials.
+    onReadError(e);
   }
 }
 
