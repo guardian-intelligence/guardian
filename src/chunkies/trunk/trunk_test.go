@@ -131,12 +131,12 @@ func TestMuxSharesOneConnAcrossSessions(t *testing.T) {
 	pool := NewPool(testKey, Hooks{})
 	s1, s2 := openTwo(t, pool, chunk.addr())
 
+	if !waitFor(t, 5*time.Second, func() bool { return len(chunk.received(KindOpen)) == 2 }) {
+		t.Fatalf("opens = %d, want 2", len(chunk.received(KindOpen)))
+	}
 	// Two sessions, one TCP connection, one handshake.
 	if got := chunk.accepted.Load(); got != 1 {
 		t.Fatalf("sessions cost %d connections, want 1", got)
-	}
-	if !waitFor(t, 5*time.Second, func() bool { return len(chunk.received(KindOpen)) == 2 }) {
-		t.Fatalf("opens = %d, want 2", len(chunk.received(KindOpen)))
 	}
 	opens := chunk.received(KindOpen)
 	if opens[0].SID == opens[1].SID {
@@ -491,6 +491,7 @@ func TestLateAttachSplicesGaplessStream(t *testing.T) {
 	}
 	c := chunk.conn(0)
 	sid := chunk.received(KindOpen)[0].SID
+	counts := broadcastCounts()
 
 	// Live fan-out outruns the catch-up: 6 and 7 arrive before the
 	// welcome, the unicast lane then repays 4 and 5, and 8 lands late. 6
@@ -522,6 +523,13 @@ func TestLateAttachSplicesGaplessStream(t *testing.T) {
 		t.Fatalf("extra frame after the spliced run: %x", ev.Payload)
 	default:
 	}
+	// The gate's ledger: 6 and 7 took the buffered detour before
+	// delivering, the second 6 deduped, 8 and 9 delivered straight through.
+	for result, want := range map[string]float64{"delivered": 4, "buffered": 2, "deduped": 1, "overflow": 0} {
+		if d := broadcastCounts()[result] - counts[result]; d != want {
+			t.Errorf("broadcasts %s delta = %v, want %v", result, d, want)
+		}
+	}
 }
 
 // A mid-session resync: the unicast snapshot resets the splice position,
@@ -533,6 +541,7 @@ func TestResyncSnapshotResetsSpliceAndDropsStale(t *testing.T) {
 	a := openAt(t, pool, chunk.addr(), "alice", "park-test", 5)
 	c := chunk.conn(0)
 	sid := chunk.received(KindOpen)[0].SID
+	counts := broadcastCounts()
 
 	// 7 and 8 gap past pos 5 and buffer; the snapshot at 8 supersedes
 	// them both.
@@ -550,6 +559,13 @@ func TestResyncSnapshotResetsSpliceAndDropsStale(t *testing.T) {
 	}
 	if tk, _, err := codec.DecodeTick(p); err != nil || tk.FirstSeq != 9 {
 		t.Fatalf("post-snapshot tick = %+v err=%v, want seq 9 (stale 7/8 must drop)", tk, err)
+	}
+	// 7 and 8 buffered, then resolved as deduped when the snapshot reset
+	// the position past them; only 9 delivered.
+	for result, want := range map[string]float64{"delivered": 1, "buffered": 2, "deduped": 2, "overflow": 0} {
+		if d := broadcastCounts()[result] - counts[result]; d != want {
+			t.Errorf("broadcasts %s delta = %v, want %v", result, d, want)
+		}
 	}
 }
 

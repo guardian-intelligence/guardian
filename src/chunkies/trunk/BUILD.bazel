@@ -3,17 +3,29 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "trunk",
     srcs = [
+        "metrics.go",
         "trunk.go",
         "trunks.go",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/chunkies/trunk",
     visibility = ["//src/chunkies:__subpackages__"],
-    deps = ["//src/chunkies/codec"],
+    deps = [
+        "//src/chunkies/codec",
+        "@com_github_prometheus_client_golang//prometheus",
+        "@com_github_prometheus_client_golang//prometheus/promauto",
+    ],
 )
 
 go_test(
     name = "trunk_test",
-    srcs = ["trunk_test.go"],
+    srcs = [
+        "metrics_test.go",
+        "trunk_test.go",
+    ],
     embed = [":trunk"],
-    deps = ["//src/chunkies/codec"],
+    deps = [
+        "//src/chunkies/codec",
+        "@com_github_prometheus_client_golang//prometheus",
+        "@com_github_prometheus_client_golang//prometheus/testutil",
+    ],
 )

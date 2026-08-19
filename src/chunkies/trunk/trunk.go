@@ -178,6 +178,10 @@ func (p *Conn) WriteMessage(kind byte, sid uint64, payload []byte) error {
 	if len(payload) > proxyMaxPayload {
 		return errors.New("proxy payload too large")
 	}
+	// The stall clock starts before the lock: a slow peer shows up in
+	// every other writer's wait, and that shared head-of-line time is the
+	// histogram's subject.
+	start := time.Now()
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
 	p.c.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -187,6 +191,10 @@ func (p *Conn) WriteMessage(kind byte, sid uint64, payload []byte) error {
 	head[4] = kind
 	binary.LittleEndian.PutUint64(head[5:], sid)
 	_, err := p.c.Write(append(head, payload...))
+	mWriteStall.Observe(time.Since(start).Seconds())
+	if err == nil {
+		countFrame("send", kind, 13+len(payload))
+	}
 	return err
 }
 
@@ -212,6 +220,7 @@ func (p *Conn) ReadMessage() (Msg, error) {
 				return Msg{}, err
 			}
 		}
+		countFrame("recv", m.Kind, n+4)
 		if m.Kind == KindPing {
 			if err := p.WriteMessage(KindPong, m.SID, nil); err != nil {
 				return Msg{}, err
@@ -531,6 +540,9 @@ func (m *muxConn) openAttachment(open Open, openBody []byte) (*Attachment, error
 		m.byChunk[a.key] = set
 	}
 	set[a.sid] = a
+	// Inside the registry lock so a concurrent kill's sweep can only
+	// decrement after this increment.
+	mAttachments.Inc()
 	m.mu.Unlock()
 	if err := m.WriteMessage(KindOpen, a.sid, openBody); err != nil {
 		m.kill(err)
@@ -547,6 +559,7 @@ func (m *muxConn) lookup(sid uint64) *Attachment {
 
 func (m *muxConn) forget(a *Attachment) {
 	m.mu.Lock()
+	mAttachments.Dec()
 	delete(m.attachments, a.sid)
 	if set := m.byChunk[a.key]; set != nil {
 		delete(set, a.sid)
@@ -579,7 +592,11 @@ func (m *muxConn) readLoop() {
 		}
 		switch msg.Kind {
 		case KindPong:
-			m.lastPong.Store(time.Now().UnixNano())
+			now := time.Now()
+			m.lastPong.Store(now.UnixNano())
+			if d, ok := pingRTT(msg.SID, now); ok {
+				mRTT.Observe(d.Seconds())
+			}
 		case KindStream, KindDatagram:
 			a := m.lookup(msg.SID)
 			if a == nil || !a.deliver(Event{Kind: msg.Kind, Payload: msg.Payload}) {
@@ -695,11 +712,15 @@ type Attachment struct {
 	reason    string
 	fromChunk bool
 
-	// Splice state, owned by the conn's readLoop. pos is the last seq
-	// handed to the relay (-1 until the unicast lane anchors it); pending
-	// buffers broadcast frames from beyond the gap the unicast catch-up
-	// is still filling; sinceSeq is the resume position the open stated,
-	// which tells the no-catch-up welcome apart.
+	// Splice state under spliceMu: the conn's readLoop runs the gate,
+	// while terminate — reachable from any goroutine — settles the
+	// buffer's gauge accounting. pos is the last seq handed to the relay
+	// (-1 until the unicast lane anchors it); pending buffers broadcast
+	// frames from beyond the gap the unicast catch-up is still filling;
+	// sinceSeq is the resume position the open stated, which tells the
+	// no-catch-up welcome apart.
+	spliceMu     sync.Mutex
+	spliceDone   bool
 	sinceSeq     int64
 	pos          int64
 	pending      []pendingFrame
@@ -713,11 +734,20 @@ func (a *Attachment) Done() <-chan struct{} { return a.done }
 // can't drain chunk fan-out is closed rather than allowed to stall every
 // other attachment's demux.
 func (a *Attachment) deliver(ev Event) bool {
+	if a.enqueue(ev) {
+		return true
+	}
+	a.terminate("relay backlog", false, true)
+	return false
+}
+
+// enqueue is the non-closing half of deliver, for callers holding
+// spliceMu (terminate needs that lock to settle the splice buffer).
+func (a *Attachment) enqueue(ev Event) bool {
 	select {
 	case a.events <- ev:
 		return true
 	default:
-		a.terminate("relay backlog", false, true)
 		return false
 	}
 }
@@ -735,29 +765,34 @@ func (a *Attachment) spliceUnicast(frame []byte) {
 	if !ok {
 		return
 	}
-	switch kind {
-	case codec.KindWelcome:
-		w, err := codec.DecodeWelcome(p)
-		if err != nil || a.sinceSeq <= 0 || w.Seq != a.sinceSeq {
-			return
-		}
-		a.pos = w.Seq
-	case codec.KindSnapshot:
-		s, err := codec.DecodeSnapshot(p)
-		if err != nil {
-			return
-		}
-		a.pos = s.Seq
-	case codec.KindTick:
-		if _, last, ok := tickSpan(p); ok && last > a.pos {
-			a.pos = last
-		} else {
-			return
-		}
-	default:
+	a.spliceMu.Lock()
+	if a.spliceDone {
+		a.spliceMu.Unlock()
 		return
 	}
-	a.flushPending()
+	moved := false
+	switch kind {
+	case codec.KindWelcome:
+		if w, err := codec.DecodeWelcome(p); err == nil && a.sinceSeq > 0 && w.Seq == a.sinceSeq {
+			a.pos, moved = w.Seq, true
+		}
+	case codec.KindSnapshot:
+		if s, err := codec.DecodeSnapshot(p); err == nil {
+			a.pos, moved = s.Seq, true
+		}
+	case codec.KindTick:
+		if _, last, ok := tickSpan(p); ok && last > a.pos {
+			a.pos, moved = last, true
+		}
+	}
+	var reason string
+	if moved {
+		reason = a.flushPending()
+	}
+	a.spliceMu.Unlock()
+	if reason != "" {
+		a.terminate(reason, false, true)
+	}
 }
 
 // spliceBroadcast applies the seq gate to one broadcast tick frame.
@@ -775,46 +810,64 @@ func (a *Attachment) spliceBroadcast(frame []byte) {
 	if !ok {
 		return
 	}
+	var reason string
+	a.spliceMu.Lock()
 	switch {
+	case a.spliceDone:
 	case last <= a.pos:
 		// Already delivered through the unicast lane.
+		mBroadcasts.WithLabelValues("deduped").Inc()
 	case a.pos >= 0 && first == a.pos+1:
-		if !a.deliver(Event{Kind: KindStream, Payload: frame}) {
-			return
+		if !a.enqueue(Event{Kind: KindStream, Payload: frame}) {
+			reason = "relay backlog"
+			break
 		}
+		mBroadcasts.WithLabelValues("delivered").Inc()
 		a.pos = last
-		a.flushPending()
+		reason = a.flushPending()
 	default:
 		if len(a.pending) >= spliceMaxFrames || a.pendingBytes+len(frame) > spliceMaxBytes {
-			a.terminate("splice backlog", false, true)
-			return
+			mBroadcasts.WithLabelValues("overflow").Inc()
+			reason = "splice backlog"
+			break
 		}
 		a.pending = append(a.pending, pendingFrame{first: first, last: last, frame: frame})
 		a.pendingBytes += len(frame)
+		mBroadcasts.WithLabelValues("buffered").Inc()
+		mSpliceBufFrames.Inc()
+	}
+	a.spliceMu.Unlock()
+	if reason != "" {
+		a.terminate(reason, false, true)
 	}
 }
 
-// flushPending drains the buffer after pos moved: frames the unicast lane
-// already covered drop, frames the gap's closure exposed deliver in
-// order. Broadcasts arrive in seq order per chunk, so the buffer is
-// sorted by construction and one front-to-back pass suffices.
-func (a *Attachment) flushPending() {
+// flushPending drains the buffer after pos moved, under spliceMu: frames
+// the unicast lane already covered drop, frames the gap's closure exposed
+// deliver in order. Broadcasts arrive in seq order per chunk, so the
+// buffer is sorted by construction and one front-to-back pass suffices. A
+// non-empty reason tells the caller to terminate once the lock drops.
+func (a *Attachment) flushPending() (reason string) {
 	for len(a.pending) > 0 {
 		f := a.pending[0]
 		if f.last > a.pos && f.first != a.pos+1 {
-			return
+			return ""
 		}
 		a.pending = a.pending[1:]
 		a.pendingBytes -= len(f.frame)
+		mSpliceBufFrames.Dec()
 		if f.last <= a.pos {
+			mBroadcasts.WithLabelValues("deduped").Inc()
 			continue
 		}
-		if !a.deliver(Event{Kind: KindStream, Payload: f.frame}) {
-			return
+		if !a.enqueue(Event{Kind: KindStream, Payload: f.frame}) {
+			return "relay backlog"
 		}
+		mBroadcasts.WithLabelValues("delivered").Inc()
 		a.pos = f.last
 	}
 	a.pending = nil
+	return ""
 }
 
 // CloseReason reports why the attachment ended and whether the chunk said
@@ -847,6 +900,11 @@ func (a *Attachment) Close(reason string) { a.terminate(reason, false, true) }
 func (a *Attachment) terminate(reason string, fromChunk, notifyChunk bool) {
 	a.once.Do(func() {
 		a.reason, a.fromChunk = reason, fromChunk
+		a.spliceMu.Lock()
+		a.spliceDone = true
+		mSpliceBufFrames.Sub(float64(len(a.pending)))
+		a.pending, a.pendingBytes = nil, 0
+		a.spliceMu.Unlock()
 		a.conn.forget(a)
 		if notifyChunk {
 			// Asynchronous: terminate is called from relay and demux loops
