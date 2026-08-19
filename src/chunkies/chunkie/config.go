@@ -1,4 +1,4 @@
-package park
+package chunkie
 
 import (
 	"context"
@@ -42,22 +42,23 @@ func databaseURL() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	host := envStr("PG_HOST", "postgres-products-rw.tenant-guardian-prod.svc:5432")
-	db := envStr("PG_DATABASE", "mythra")
-	user := envStr("PG_USER", "mythra")
+	host, db, user := os.Getenv("PG_HOST"), os.Getenv("PG_DATABASE"), os.Getenv("PG_USER")
+	if host == "" || db == "" || user == "" {
+		return "", fmt.Errorf("PG_PASSWORD_FILE is set but PG_HOST/PG_DATABASE/PG_USER are not")
+	}
 	return fmt.Sprintf("postgresql://%s:%s@%s/%s?sslmode=require&pool_max_conns=4",
 		user, url.QueryEscape(strings.TrimSpace(string(pw))), host, db), nil
 }
 
-func devTickRateHandler(registry *parks, allowedParks map[string]bool) http.HandlerFunc {
+func devTickRateHandler(registry *chunks, allowedParks map[string]bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
 			http.Error(w, "POST required", http.StatusMethodNotAllowed)
 			return
 		}
-		park := r.URL.Query().Get("park")
-		if !allowedParks[park] {
+		chunk := r.URL.Query().Get("chunk")
+		if !allowedParks[chunk] {
 			http.NotFound(w, r)
 			return
 		}
@@ -66,9 +67,9 @@ func devTickRateHandler(registry *parks, allowedParks map[string]bool) http.Hand
 			http.Error(w, fmt.Sprintf("hz must be an integer in %d..%d", minTickHz, maxTickHz), http.StatusBadRequest)
 			return
 		}
-		a, ok := registry.current(park)
+		a, ok := registry.current(chunk)
 		if !ok {
-			http.Error(w, "park has no live authority; connect the drill client first", http.StatusConflict)
+			http.Error(w, "chunk has no live authority; connect the drill client first", http.StatusConflict)
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -79,6 +80,6 @@ func devTickRateHandler(registry *parks, allowedParks map[string]bool) http.Hand
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(map[string]any{"park": park, "rateHz": hz})
+		json.NewEncoder(w).Encode(map[string]any{"chunk": chunk, "rateHz": hz})
 	}
 }

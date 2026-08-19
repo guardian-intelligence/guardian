@@ -1,4 +1,4 @@
-package park
+package chunkie
 
 import (
 	"log"
@@ -8,12 +8,12 @@ import (
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
 )
 
-// session is one attached replica: the park side of a gateway-relayed
+// session is one attached replica: the chunk side of a gateway-relayed
 // WebTransport session.
 type session struct {
 	sub      string
 	role     string
-	park     *authority
+	chunk     *authority
 	closeFn  func(string)
 	out      chan []byte
 	dogID    uint64
@@ -39,22 +39,22 @@ func (s *session) sendReject(intentID uint64, reason uint32) {
 
 func (s *session) closeSession(why string) {
 	s.closeOnce.Do(func() {
-		log.Printf("wt session close: sub=%s role=%s park=%s reason=%q dur=%s",
-			s.sub, s.role, s.park.name, why, time.Since(s.openedAt).Round(time.Millisecond))
+		log.Printf("wt session close: sub=%s role=%s chunk=%s reason=%q dur=%s",
+			s.sub, s.role, s.chunk.name, why, time.Since(s.openedAt).Round(time.Millisecond))
 		if s.closeFn != nil {
 			s.closeFn(why)
 		}
 	})
 }
 
-func checkVerdict(park *authority, data []byte) ([]byte, bool) {
+func checkVerdict(chunk *authority, data []byte) ([]byte, bool) {
 	chk, err := codec.DecodeCheck(data)
 	if err != nil {
 		return nil, false
 	}
-	ok, now := park.verdictFor(chk.Tick, chk.WH)
-	_, cw := park.mods.client.Get()
-	_, pw := park.mods.park.Get()
+	ok, now := chunk.verdictFor(chk.Tick, chk.WH)
+	_, cw := chunk.mods.client.Get()
+	_, pw := chunk.mods.sim.Get()
 	result := "unknown"
 	v := codec.Verdict{Sub: chk.Sub, Lineage: 0, Tick: chk.Tick, Now: now, CTMS: chk.CTMS,
 		CW: codec.ModuleWord(cw), PW: codec.ModuleWord(pw)}

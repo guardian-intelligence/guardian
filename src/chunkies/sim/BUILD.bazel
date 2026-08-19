@@ -65,9 +65,9 @@ diff_test(
 )
 
 diff_test(
-    name = "park_artifact_current_test",
+    name = "sim_artifact_current_test",
     file1 = "//src/games/wake-up-mythra/sim:park_wasm",
-    file2 = "//src/chunkies/mount:behaviors/park.wasm",
+    file2 = "//src/chunkies/mount:behaviors/sim.wasm",
 )
 
 diff_test(
@@ -95,7 +95,7 @@ diff_test(
 )
 
 diff_test(
-    name = "park_configmap_lockstep_test",
-    file1 = "//src/chunkies/mount:behaviors/park.wasm",
-    file2 = "//src/games/wake-up-mythra/deploy/prod:behavior/park.wasm",
+    name = "sim_configmap_lockstep_test",
+    file1 = "//src/chunkies/mount:behaviors/sim.wasm",
+    file2 = "//src/games/wake-up-mythra/deploy/prod:behavior/sim.wasm",
 )

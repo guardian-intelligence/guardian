@@ -1234,7 +1234,7 @@ spec:
       namespace: tenant-guardian-prod
     - apiVersion: apps/v1
       kind: Deployment
-      name: chunkies-park
+      name: chunkies-chunkie
       namespace: tenant-guardian-prod
     - apiVersion: apps/v1
       kind: Deployment

@@ -1,6 +1,6 @@
 // Package journaltest is the conformance suite for journal.Journal
 // implementations. The suite IS the interface contract: any backend that
-// passes may serve as the durable truth of a park, and a backend swap is
+// passes may serve as the durable truth of a chunk, and a backend swap is
 // exactly "make this pass".
 package journaltest
 
@@ -97,23 +97,23 @@ func Run(t *testing.T, factory func(t *testing.T) journal.Journal) {
 	t.Run("parks_are_isolated", func(t *testing.T) {
 		j := factory(t)
 		if first, err := j.Append(ctx, 7, 0, []journal.Event{ev(1, "seven")}); err != nil || first != 1 {
-			t.Fatalf("park 7: seq=%d err=%v", first, err)
+			t.Fatalf("chunk 7: seq=%d err=%v", first, err)
 		}
 		if first, err := j.Append(ctx, 8, 0, []journal.Event{ev(1, "eight")}); err != nil || first != 1 {
-			t.Fatalf("park 8 must start at seq 1: seq=%d err=%v", first, err)
+			t.Fatalf("chunk 8 must start at seq 1: seq=%d err=%v", first, err)
 		}
 		count := 0
 		if err := j.Read(ctx, 8, 1, func(e journal.Event) error {
 			count++
 			if e.Actor != "eight" {
-				return fmt.Errorf("park 8 sees park 7 event %q", e.Actor)
+				return fmt.Errorf("chunk 8 sees chunk 7 event %q", e.Actor)
 			}
 			return nil
 		}); err != nil {
 			t.Fatal(err)
 		}
 		if count != 1 {
-			t.Fatalf("park 8 has %d events, want 1", count)
+			t.Fatalf("chunk 8 has %d events, want 1", count)
 		}
 	})
 
@@ -194,7 +194,7 @@ func Run(t *testing.T, factory func(t *testing.T) journal.Journal) {
 	t.Run("snapshots_latest_wins_and_round_trips", func(t *testing.T) {
 		j := factory(t)
 		if _, ok, err := j.LatestSnapshot(ctx, 1); err != nil || ok {
-			t.Fatalf("empty park: ok=%v err=%v, want false, nil", ok, err)
+			t.Fatalf("empty chunk: ok=%v err=%v, want false, nil", ok, err)
 		}
 		state := []byte{0x4D, 0x59, 0x50, 0x31, 0, 1, 2, 0xFF}
 		older := journal.Snapshot{Seq: 10, Tick: 240, Epoch: 1, WH: 1<<63 + 7, TerrainID: 1<<64 - 3, State: state}
@@ -226,7 +226,7 @@ func Run(t *testing.T, factory func(t *testing.T) journal.Journal) {
 			t.Fatal(err)
 		}
 		// re-putting the same identity is a no-op, never an error and
-		// never a mutation — ten thousand parks share one fixture row
+		// never a mutation — ten thousand chunks share one fixture row
 		if err := j.PutTerrain(ctx, id, 1, []byte{0xEE}); err != nil {
 			t.Fatal(err)
 		}

@@ -1,3 +1,5 @@
+load("@aspect_bazel_lib//lib:diff_test.bzl", "diff_test")
+
 filegroup(
     name = "manifests",
     srcs = glob(
@@ -18,7 +20,21 @@ filegroup(
 exports_files(
     [
         "behavior/client.wasm",
-        "behavior/park.wasm",
+        "behavior/sim.wasm",
     ],
     visibility = ["//src/chunkies/sim:__pkg__"],
+)
+
+# The mounted game content the chunkies host boot-reads must be the same
+# bytes the game's own package holds.
+diff_test(
+    name = "game_manifest_lockstep_test",
+    file1 = "content/game.conf",
+    file2 = "//src/games/wake-up-mythra/services/wum:game.conf",
+)
+
+diff_test(
+    name = "genesis_lockstep_test",
+    file1 = "content/genesis.bin",
+    file2 = "//src/games/wake-up-mythra/services/wum:fixture_park.bin",
 )

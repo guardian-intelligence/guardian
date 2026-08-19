@@ -8,46 +8,46 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
-	"github.com/guardian-intelligence/guardian/src/chunkies/parkproxy"
+	"github.com/guardian-intelligence/guardian/src/chunkies/trunk"
 )
 
 var sessionCount atomic.Int64
 
 var (
 	mSessions = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "mythra_sessions", Help: "Connected sessions."}, []string{"role"})
+		Name: "chunkies_sessions", Help: "Connected sessions."}, []string{"role"})
 	mHandshakes = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "mythra_handshakes_total", Help: "Session handshakes."}, []string{"result"})
+		Name: "chunkies_handshakes_total", Help: "Session handshakes."}, []string{"result"})
 	mMints = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "mythra_session_mints_total", Help: "POST /session ticket mints."}, []string{"result"})
+		Name: "chunkies_session_mints_total", Help: "POST /session ticket mints."}, []string{"result"})
 	mDgSent = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "mythra_datagrams_sent_total", Help: "Datagrams sent."})
+		Name: "chunkies_datagrams_sent_total", Help: "Datagrams sent."})
 	mDgErrors = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "mythra_datagram_errors_total", Help: "SendDatagram failures."})
+		Name: "chunkies_datagram_errors_total", Help: "SendDatagram failures."})
 	mDgRejected = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "mythra_datagrams_rejected_total", Help: "Client datagrams dropped at the gateway (not a well-formed check)."})
+		Name: "chunkies_datagrams_rejected_total", Help: "Client datagrams dropped at the gateway (not a well-formed check)."})
 	mUnknownFrames = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "mythra_unknown_frames_total", Help: "Client stream frames of unknown kind dropped at the gateway."})
-	mParkConns = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "mythra_park_conns", Help: "Live multiplexed gateway-to-park connections."})
-	mParkConnFailures = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "mythra_park_conn_failures_total", Help: "Gateway-to-park connection failures."}, []string{"stage"})
+		Name: "chunkies_unknown_frames_total", Help: "Client stream frames of unknown kind dropped at the gateway."})
+	mTrunkConns = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "chunkies_trunk_conns", Help: "Live multiplexed gateway-to-chunk connections."})
+	mTrunkConnFailures = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "chunkies_trunk_conn_failures_total", Help: "Gateway-to-chunk connection failures."}, []string{"stage"})
 )
 
-func newParkPool(key []byte) *parkproxy.Pool {
-	return parkproxy.NewPool(key, parkproxy.Hooks{
-		ConnUp: func(string) { mParkConns.Inc() },
+func newTrunkPool(key []byte) *trunk.Pool {
+	return trunk.NewPool(key, trunk.Hooks{
+		ConnUp: func(string) { mTrunkConns.Inc() },
 		ConnDown: func(addr string, err error) {
-			mParkConns.Dec()
+			mTrunkConns.Dec()
 			// An idle reap is routine lifecycle; counting it as failure
 			// would bake noise into anything alerting on this counter.
-			if errors.Is(err, parkproxy.ErrIdle) {
+			if errors.Is(err, trunk.ErrIdle) {
 				return
 			}
-			mParkConnFailures.WithLabelValues("run").Inc()
-			log.Printf("park conn %s down: %v", addr, err)
+			mTrunkConnFailures.WithLabelValues("run").Inc()
+			log.Printf("chunk conn %s down: %v", addr, err)
 		},
-		DialError: func(addr string) { mParkConnFailures.WithLabelValues("dial").Inc() },
+		DialError: func(addr string) { mTrunkConnFailures.WithLabelValues("dial").Inc() },
 	})
 }
 
@@ -60,5 +60,8 @@ type gameHandlers struct {
 	// poll it becomes routable.
 	directory *chunkDirectory
 	game      string
-	anonMints *anonLimiter
+	// defaultChunk answers a mint that names no chunk; empty means the
+	// client must always name one.
+	defaultChunk string
+	anonMints    *anonLimiter
 }

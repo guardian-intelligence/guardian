@@ -20,18 +20,15 @@ func TestToyGameConformance(t *testing.T) {
 	// Kind numbers mirror sim/shared/toy/src/lib.rs — by value, not by
 	// import: the suite consumes artifacts, never game source.
 	const (
-		kJoin         = 0x0100
-		kMove         = 0x0101
-		kClockSkip    = 0x0009
-		kEpochAdvance = 0x0006
-		kRateSet      = 0x000A
+		kJoin = 0x0100
+		kMove = 0x0101
 	)
 	move := func(d int32) []byte {
 		return binary.LittleEndian.AppendUint32(nil, uint32(d))
 	}
 
 	Run(t, Game{
-		Park: module,
+		Sim: module,
 		Corpus: []Event{
 			{Kind: kJoin, Actor: 0xA11CE},
 			{Kind: kJoin, Actor: 0xB0B},
@@ -40,11 +37,6 @@ func TestToyGameConformance(t *testing.T) {
 			{Kind: kMove, Actor: 0xB0B, Payload: move(-8)},
 			{Kind: kMove, Actor: 0xCA401, Payload: move(1)},
 			{Kind: kMove, Actor: 0xDEAD, Payload: move(3)}, // absent: a valid reject
-		},
-		System: System{
-			RateSet:      kRateSet,
-			ClockSkip:    kClockSkip,
-			EpochAdvance: kEpochAdvance,
 		},
 	})
 }

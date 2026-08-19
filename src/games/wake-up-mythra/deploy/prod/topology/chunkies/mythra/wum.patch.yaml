@@ -27,7 +27,7 @@
 - op: add
   path: /spec/template/spec/containers/0/env
   value:
-    - name: PARK_NAME
+    - name: CHUNK_NAME
       value: park-mythra
     - name: INTERNAL_HOST
       value: 127.0.0.1
@@ -35,7 +35,7 @@
       value: "4000"
     - name: GOMEMLIMIT
       value: 3500MiB
-    - name: PARK_PORT
+    - name: TRUNK_PORT
       value: "9632"
     - name: HTTP_PORT
       value: "9631"
@@ -45,8 +45,18 @@
       value: /etc/chunkies/internal/password
     - name: PG_PASSWORD_FILE
       value: /etc/mythra/pg/mythra
+    - name: PG_HOST
+      value: postgres-products-rw.tenant-guardian-prod.svc:5432
+    - name: PG_DATABASE
+      value: mythra
+    - name: PG_USER
+      value: mythra
     - name: BEHAVIOR_DIR
       value: /etc/mythra/behavior
+    - name: GAME_MANIFEST_FILE
+      value: /etc/mythra/content/game.conf
+    - name: GENESIS_FILE
+      value: /etc/mythra/content/genesis.bin
     - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
       value: otel-collector.guardian-analytics.svc.cozy.local:4317
 - op: add
@@ -54,6 +64,9 @@
   value:
     - name: behavior
       mountPath: /etc/mythra/behavior
+      readOnly: true
+    - name: game-content
+      mountPath: /etc/mythra/content
       readOnly: true
     - name: internal-key
       mountPath: /etc/chunkies/internal
@@ -67,6 +80,9 @@
     - name: behavior
       configMap:
         name: mythra-behavior
+    - name: game-content
+      configMap:
+        name: mythra-game-content
     - name: internal-key
       secret:
         secretName: chunkies-internal-key

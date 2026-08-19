@@ -24,10 +24,10 @@ spec:
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMServiceScrape
 metadata:
-  name: chunkies-park
+  name: chunkies-chunkie
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: chunkies-park
+    app.kubernetes.io/name: chunkies-chunkie
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
 spec:
@@ -36,7 +36,7 @@ spec:
       - tenant-guardian-prod
   selector:
     matchLabels:
-      app.kubernetes.io/name: chunkies-park
+      app.kubernetes.io/name: chunkies-chunkie
       app.kubernetes.io/component: metrics
   endpoints:
     - port: metrics
@@ -50,7 +50,7 @@ metadata:
   name: chunkies
   namespace: tenant-guardian-prod
   labels:
-    app.kubernetes.io/name: chunkies-park
+    app.kubernetes.io/name: chunkies-chunkie
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
 spec:
@@ -67,36 +67,36 @@ spec:
             summary: "chunkies-gateway metrics scrape is down"
             description: "No chunkies-gateway replica has been scrapeable for five minutes."
         - alert: ChunkiesParkScrapeDown
-          expr: sum(up{namespace="tenant-guardian-prod",job="chunkies-park-metrics"}) < 1 or absent(up{namespace="tenant-guardian-prod",job="chunkies-park-metrics"})
+          expr: sum(up{namespace="tenant-guardian-prod",job="chunkies-chunkie-metrics"}) < 1 or absent(up{namespace="tenant-guardian-prod",job="chunkies-chunkie-metrics"})
           for: 5m
           labels:
             severity: warning
             guardian_stage: prod
           annotations:
-            summary: "chunkies-park metrics scrape is down"
-            description: "No chunkies-park replica has been scrapeable for five minutes."
+            summary: "chunkies-chunkie metrics scrape is down"
+            description: "No chunkies-chunkie replica has been scrapeable for five minutes."
         - alert: ChunkiesParkTickBudgetExceeded
-          expr: histogram_quantile(0.99, sum(rate(mythra_tick_duration_seconds_bucket{job="chunkies-park-metrics"}[5m])) by (le)) > 0.035
+          expr: histogram_quantile(0.99, sum(rate(chunkies_tick_duration_seconds_bucket{job="chunkies-chunkie-metrics"}[5m])) by (le)) > 0.035
           for: 10m
           labels:
             severity: warning
             guardian_stage: prod
           annotations:
-            summary: "chunkies-park tick p99 above 35ms"
+            summary: "chunkies-chunkie tick p99 above 35ms"
             description: "Authority tick p99 is approaching the 41.7ms budget at 24Hz."
         - alert: ChunkiesParkJournalAppendErrors
-          expr: increase(mythra_journal_append_errors_total{job="chunkies-park-metrics"}[10m]) > 0
+          expr: increase(chunkies_journal_append_errors_total{job="chunkies-chunkie-metrics"}[10m]) > 0
           labels:
             severity: warning
             guardian_stage: prod
           annotations:
-            summary: "chunkies-park journal appends are failing"
+            summary: "chunkies-chunkie journal appends are failing"
             description: "The park closed authority after a journal append failure."
         - alert: ChunkiesParkIntentRejectSpike
-          expr: sum(increase(mythra_intents_rejected_total{job="chunkies-park-metrics",reason!="target"}[15m])) by (reason) > 20
+          expr: sum(increase(chunkies_intents_rejected_total{job="chunkies-chunkie-metrics",reason!="target"}[15m])) by (reason) > 20
           labels:
             severity: warning
             guardian_stage: prod
           annotations:
-            summary: "chunkies-park rejecting intents ({{ $labels.reason }})"
+            summary: "chunkies-chunkie rejecting intents ({{ $labels.reason }})"
             description: "More than 20 intents were rejected for one reason in 15 minutes."

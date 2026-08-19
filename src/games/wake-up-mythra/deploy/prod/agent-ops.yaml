@@ -222,8 +222,8 @@ spec:
         (
           request.name.startsWith("chunkies-gateway-") &&
           oldObject.metadata.labels["app.kubernetes.io/name"] == "chunkies-gateway" ||
-          request.name.startsWith("chunkies-park-") &&
-          oldObject.metadata.labels["app.kubernetes.io/name"] == "chunkies-park"
+          request.name.startsWith("chunkies-chunkie-") &&
+          oldObject.metadata.labels["app.kubernetes.io/name"] == "chunkies-chunkie"
         ) &&
         "guardian.dev/product" in oldObject.metadata.labels &&
         oldObject.metadata.labels["guardian.dev/product"] == "mythra"

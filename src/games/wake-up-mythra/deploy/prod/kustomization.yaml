@@ -26,7 +26,24 @@ configMapGenerator:
     namespace: tenant-guardian-prod
     files:
       - behavior/client.wasm
-      - behavior/park.wasm
+      - behavior/sim.wasm
+    options:
+      disableNameSuffixHash: true
+      labels:
+        app.kubernetes.io/name: chunkies
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/product: mythra
+        guardian.dev/stage: prod
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
+  # The game's boot-read content: vocabulary manifest + genesis artifact.
+  # Its own ConfigMap so behavior-module growth and game content never
+  # share the 1MiB apiserver object cap.
+  - name: mythra-game-content
+    namespace: tenant-guardian-prod
+    files:
+      - content/game.conf
+      - content/genesis.bin
     options:
       disableNameSuffixHash: true
       labels:

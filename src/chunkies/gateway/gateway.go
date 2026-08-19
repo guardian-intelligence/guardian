@@ -25,7 +25,7 @@ import (
 	webtransport "github.com/quic-go/webtransport-go"
 
 	"github.com/guardian-intelligence/guardian/src/chunkies/mount"
-	"github.com/guardian-intelligence/guardian/src/chunkies/parkproxy"
+	"github.com/guardian-intelligence/guardian/src/chunkies/trunk"
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
 	"github.com/guardian-intelligence/guardian/src/shared/go/telemetry"
 )
@@ -34,11 +34,11 @@ type chunkiesGateway struct {
 	admission *gameHandlers
 	directory *chunkDirectory
 	game      string
-	parks     *parkproxy.Pool
+	trunks     *trunk.Pool
 }
 
 // Run is the chunkies-gateway process: public WebTransport, admission,
-// and park routing.
+// and chunk routing.
 func Run() {
 	wtPort := envInt("WT_PORT", 4433)
 	httpPort := envInt("HTTP_PORT", 9634)
@@ -46,7 +46,10 @@ func Run() {
 	publicAddr := envStr("PUBLIC_ADDR", "")
 	allowedOrigins := envStr("ALLOWED_ORIGINS", "")
 	maxSessions := envInt("MAX_SESSIONS", 4000)
-	game := envStr("GAME", "wum")
+	game := envStr("GAME", "")
+	if game == "" {
+		log.Fatal("GAME not set")
+	}
 	directoryFile := envStr("CHUNK_DIRECTORY_FILE", "/etc/chunkies/directory/chunks.conf")
 	directory := newChunkDirectory()
 	if err := loadChunkDirectory(directoryFile, directory); err != nil {
@@ -56,7 +59,7 @@ func Run() {
 		log.Printf("chunk directory %s: %v (starting empty)", directoryFile, err)
 	}
 	go watchChunkDirectory(directoryFile, directory)
-	key, err := parkproxy.ReadKey(envStr("INTERNAL_KEY_FILE", ""))
+	key, err := trunk.ReadKey(envStr("INTERNAL_KEY_FILE", ""))
 	if err != nil {
 		log.Fatalf("internal key: %v", err)
 	}
@@ -69,25 +72,30 @@ func Run() {
 	}
 	defer traceShutdown(context.Background())
 
-	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/mythra/behavior")
+	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/chunkies/behavior")
 	client := mount.NewModule("client", mount.DefaultClient)
-	parkModule := mount.NewModule("park", mount.DefaultPark)
+	simModule := mount.NewModule("sim", mount.DefaultSim)
 	// nil acceptance: the gateway only distributes module bytes, and the
 	// browser's boot gate is the consumer-side decision there.
-	go mount.Watch(behaviorDir, nil, client, parkModule)
-	assets := newAssetCatalog(envStr("ASSET_DIR", "/etc/mythra/assets"))
+	go mount.Watch(behaviorDir, nil, client, simModule)
+	assets := newAssetCatalog(envStr("ASSET_DIR", "/etc/chunkies/assets"))
 
-	issuer := envStr("OIDC_ISSUER", "https://auth.wakeupmythra.com/realms/wakeupmythra.com")
-	gate := newOIDCGate(issuer, envStr("OIDC_JWKS_URL", ""), envStr("OIDC_CLIENT_IDS", "wake-up-mythra"), os.Getenv("REQUIRE_EMAIL_VERIFIED") == "true")
+	issuer := envStr("OIDC_ISSUER", "")
+	clientIDs := envStr("OIDC_CLIENT_IDS", "")
+	if issuer == "" || clientIDs == "" {
+		log.Fatal("OIDC_ISSUER and OIDC_CLIENT_IDS not set")
+	}
+	gate := newOIDCGate(issuer, envStr("OIDC_JWKS_URL", ""), clientIDs, os.Getenv("REQUIRE_EMAIL_VERIFIED") == "true")
 	tickets, err := newTicketMint(os.Getenv("TICKET_KEY_FILE"))
 	if err != nil {
 		log.Fatalf("ticket key: %v", err)
 	}
 	admission := &gameHandlers{
 		tickets: tickets, maxSessions: maxSessions, directory: directory, game: game,
-		anonMints: newAnonLimiter(),
+		defaultChunk: envStr("DEFAULT_CHUNK", ""),
+		anonMints:    newAnonLimiter(),
 	}
-	gateway := &chunkiesGateway{admission: admission, directory: directory, game: game, parks: newParkPool(key)}
+	gateway := &chunkiesGateway{admission: admission, directory: directory, game: game, trunks: newTrunkPool(key)}
 
 	sans := []net.IP{net.ParseIP("127.0.0.1")}
 	if host, _, err := net.SplitHostPort(publicAddr); err == nil {
@@ -170,8 +178,8 @@ func Run() {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		_, cw := client.Get()
-		_, pw := parkModule.Get()
-		info := map[string]any{"addr": addr, "clientWasm": cw, "parkWasm": pw}
+		_, pw := simModule.Get()
+		info := map[string]any{"addr": addr, "clientWasm": cw, "simWasm": pw}
 		if hash, selfSigned := certHash(); selfSigned {
 			info["certHashB64"] = hash
 		}
@@ -191,7 +199,7 @@ func Run() {
 		}
 	}
 	pageMux.HandleFunc("/behavior/client.wasm", serveModule(client))
-	pageMux.HandleFunc("/behavior/park.wasm", serveModule(parkModule))
+	pageMux.HandleFunc("/behavior/sim.wasm", serveModule(simModule))
 	pageMux.HandleFunc("/assets/", func(w http.ResponseWriter, r *http.Request) {
 		ref := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/assets/"), ".svg")
 		body, ok := assets.get(ref)
@@ -203,14 +211,14 @@ func Run() {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		w.Write(body)
 	})
-	parkHTTP, err := url.Parse(envStr("PARK_HTTP_URL", "http://127.0.0.1:9631"))
+	chunkieHTTP, err := url.Parse(envStr("CHUNKIE_HTTP_URL", "http://127.0.0.1:9631"))
 	if err != nil {
-		log.Fatalf("PARK_HTTP_URL: %v", err)
+		log.Fatalf("CHUNKIE_HTTP_URL: %v", err)
 	}
-	parkProxy := httputil.NewSingleHostReverseProxy(parkHTTP)
-	pageMux.Handle("/terrain/", parkProxy)
-	if os.Getenv("WUM_DEV_LIVE_TICK_RATE") == "true" {
-		pageMux.Handle("/dev/tick-rate", parkProxy)
+	chunkieProxy := httputil.NewSingleHostReverseProxy(chunkieHTTP)
+	pageMux.Handle("/terrain/", chunkieProxy)
+	if os.Getenv("CHUNKIES_DEV_LIVE_TICK_RATE") == "true" {
+		pageMux.Handle("/dev/tick-rate", chunkieProxy)
 	}
 
 	page := &http.Server{Addr: fmt.Sprintf(":%d", httpPort), Handler: telemetry.Middleware(pageMux, telemetry.WithTraceparentOnly("/wt-info"))}
@@ -248,12 +256,6 @@ func Run() {
 	obs.Shutdown(shutdownCtx)
 }
 
-// Doorman-level reject reasons live above the sim's code space.
-const (
-	rejectReadOnly = 100
-	rejectNotYours = 101
-)
-
 func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 	if n := sessionCount.Add(1); n > int64(g.admission.maxSessions) {
 		sessionCount.Add(-1)
@@ -288,24 +290,24 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 		sess.CloseWithError(4401, "bad ticket")
 		return
 	}
-	backend, ok := g.directory.lookup(g.game, ticket.Park)
+	backend, ok := g.directory.lookup(g.game, ticket.Chunk)
 	if !ok {
-		mHandshakes.WithLabelValues("park_unavailable").Inc()
-		sess.CloseWithError(4503, "park unavailable")
+		mHandshakes.WithLabelValues("chunk_unavailable").Inc()
+		sess.CloseWithError(4503, "chunk unavailable")
 		return
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	park, err := g.parks.Open(dialCtx, backend, parkproxy.Open{
-		Sub: ticket.Sub, Park: ticket.Park, Role: ticket.Role,
+	chunk, err := g.trunks.Open(dialCtx, backend, trunk.Open{
+		Sub: ticket.Sub, Chunk: ticket.Chunk, Role: ticket.Role,
 		Remote: sess.RemoteAddr().String(), SinceSeq: hello.SinceSeq, SinceTick: hello.SinceTick,
 	})
 	cancel()
 	if err != nil {
-		mHandshakes.WithLabelValues("park_unavailable").Inc()
-		sess.CloseWithError(4503, "park unavailable")
+		mHandshakes.WithLabelValues("chunk_unavailable").Inc()
+		sess.CloseWithError(4503, "chunk unavailable")
 		return
 	}
-	defer park.Close("bye")
+	defer chunk.Close("bye")
 	defer sess.CloseWithError(4000, "bye")
 	stream.SetReadDeadline(time.Time{})
 	mHandshakes.WithLabelValues("ok").Inc()
@@ -321,14 +323,14 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 		return err
 	}
 	go func() {
-		relay := func(ev parkproxy.Event) bool {
+		relay := func(ev trunk.Event) bool {
 			switch ev.Kind {
-			case parkproxy.KindStream:
+			case trunk.KindStream:
 				if writeStream(ev.Payload) != nil {
-					park.Close("client stalled")
+					chunk.Close("client stalled")
 					return false
 				}
-			case parkproxy.KindDatagram:
+			case trunk.KindDatagram:
 				if sess.SendDatagram(ev.Payload) != nil {
 					mDgErrors.Inc()
 				} else {
@@ -339,16 +341,16 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 		}
 		for {
 			select {
-			case ev := <-park.Events():
+			case ev := <-chunk.Events():
 				if !relay(ev) {
 					return
 				}
-			case <-park.Done():
-				// Flush frames the park sent ahead of its close (a final
+			case <-chunk.Done():
+				// Flush frames the chunk sent ahead of its close (a final
 				// reject or goodbye) before closing the client.
 				for drained := false; !drained; {
 					select {
-					case ev := <-park.Events():
+					case ev := <-chunk.Events():
 						if !relay(ev) {
 							return
 						}
@@ -358,10 +360,10 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 				}
 				// A park-stated reason is meant for the client; a transport
 				// failure is not the client's fault and reads as outage.
-				if reason, fromPark := park.CloseReason(); fromPark {
+				if reason, fromPark := chunk.CloseReason(); fromPark {
 					sess.CloseWithError(4000, reason)
 				} else {
-					sess.CloseWithError(4503, "park unavailable")
+					sess.CloseWithError(4503, "chunk unavailable")
 				}
 				return
 			}
@@ -375,12 +377,12 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 			}
 			// The only datagram a client may send is a fixed-size hash
 			// check; everything else is dropped here so junk never
-			// reaches a park.
+			// reaches a chunk.
 			if len(data) != codec.CheckLen || data[0] != codec.DgCheck {
 				mDgRejected.Inc()
 				continue
 			}
-			if park.SendDatagram(data) != nil {
+			if chunk.SendDatagram(data) != nil {
 				return
 			}
 		}
@@ -396,7 +398,7 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 	for {
 		kind, payload, err := frames.Next()
 		if err != nil {
-			park.Close("client gone")
+			chunk.Close("client gone")
 			return
 		}
 		now := time.Now()
@@ -415,22 +417,22 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 				continue
 			}
 			if ticket.Role != "player" {
-				writeStream(codec.EncodeReject(codec.Reject{Intent: rec.Intent, Reason: rejectReadOnly}))
+				writeStream(codec.EncodeReject(codec.Reject{Intent: rec.Intent, Reason: codec.RejectReadOnly}))
 				continue
 			}
 			// Game-blind binding: the envelope's actor must be the
 			// authenticated subject's, for every kind — then the client's
 			// bytes travel untouched.
 			if rec.Actor != codec.ActorFor(ticket.Sub) {
-				writeStream(codec.EncodeReject(codec.Reject{Intent: rec.Intent, Reason: rejectNotYours}))
+				writeStream(codec.EncodeReject(codec.Reject{Intent: rec.Intent, Reason: codec.RejectNotYours}))
 				continue
 			}
-			if park.SendStream(frames.Raw()) != nil {
+			if chunk.SendStream(frames.Raw()) != nil {
 				return
 			}
 		case codec.KindResync:
 			if _, err := codec.DecodeResync(payload); err == nil {
-				if park.SendStream(frames.Raw()) != nil {
+				if chunk.SendStream(frames.Raw()) != nil {
 					return
 				}
 			}

@@ -1,39 +1,34 @@
 // Package wum is Wake Up Mythra's game vocabulary on the server side:
-// the event kind numbers, the actor binding, the reject-reason names, and
-// the genesis content artifact. Payload contents stay opaque to Go — the
-// park module owns the rules — so this package is deliberately thin, and
-// it is the only place the transport packages learn anything WUM-shaped.
+// the event kind numbers, the actor binding, and the genesis content
+// artifact. The framework never imports this package — the running host
+// learns the same facts from game.conf (the game manifest it mounts) —
+// so the constants here serve WUM's own code and tests, and game.conf is
+// held in lockstep by TestManifestMatchesVocabulary.
 package wum
 
 import (
-	"encoding/binary"
 	_ "embed"
-	"strconv"
 
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
 )
 
-// Event kinds, as the park module numbers them (src/chunkies/README.md). The
-// actor rides the SimEvent envelope; these numbers predate the framework
-// kind-range convention (0x0100+ for game kinds) and are grandfathered —
-// the journal's history is written in them.
+// Player event kinds, as the park module numbers them. The actor rides
+// the SimEvent envelope; these numbers predate the framework kind-range
+// convention (0x0100+ for game kinds) and are grandfathered — the
+// journal's history is written in them. The system kinds (day_reset,
+// epoch_advance, content_set, clock_skip, rate_set = 5..7, 9, 10) are
+// framework constants now: codec.Kind*.
 const (
 	EvJoin         = 1
 	EvLeave        = 2
 	EvCheckIn      = 3
 	EvMoveTo       = 4
-	EvDayReset     = 5
-	EvEpochAdvance = 6
-	EvTerrainSet   = 7
+	EvDayReset     = codec.KindDayReset
+	EvEpochAdvance = codec.KindEpochAdvance
+	EvTerrainSet   = codec.KindContentSet
 	EvBoostSet     = 8
-	EvClockSkip    = 9
-	EvRateSet      = 10
-)
-
-// Doorman-level reject reasons live above the sim's code space.
-const (
-	RejectReadOnly = 100
-	RejectNotYours = 101
+	EvClockSkip    = codec.KindClockSkip
+	EvRateSet      = codec.KindRateSet
 )
 
 // FixtureTerrain is the world every brand-new park is born with until
@@ -50,72 +45,3 @@ func DogIDFor(sub string) uint64 {
 	return codec.ActorFor(sub)
 }
 
-// EventActor resolves a journal event to its SimEvent form across the two
-// payload eras. Rows written before the v5 flag day carried the dog id as
-// a payload prefix on actor kinds; rows written after carry the v5
-// payload and name the subject in the actor column. The eras are
-// distinguished by payload length, which the two encodings never share
-// for any kind. This shim dies with the Postgres journal.
-func EventActor(kind uint16, actor string, payload []byte) (uint64, []byte) {
-	oldLen := map[uint16]int{EvJoin: 8, EvLeave: 8, EvCheckIn: 8, EvMoveTo: 10, EvBoostSet: 9}
-	switch kind {
-	case EvJoin, EvLeave, EvCheckIn, EvMoveTo, EvBoostSet:
-		if len(payload) == oldLen[kind] {
-			return binary.LittleEndian.Uint64(payload[:8]), payload[8:]
-		}
-		if actor == "" || actor == "system" {
-			return 0, payload
-		}
-		return DogIDFor(actor), payload
-	default:
-		return 0, payload
-	}
-}
-
-// ActionName is deliberately bounded: a client-controlled numeric kind
-// must never become unbounded metric cardinality. Kept aligned with
-// src/games/wake-up-mythra/client/src/actions.ts; unknown attempts share one bucket.
-func ActionName(kind uint16) string {
-	switch kind {
-	case EvJoin:
-		return "join"
-	case EvCheckIn:
-		return "check_in"
-	case EvMoveTo:
-		return "move_to"
-	case EvBoostSet:
-		return "boost"
-	default:
-		return "unknown"
-	}
-}
-
-func RejectReasonName(code uint32) string {
-	switch code {
-	case 1:
-		return "encoding"
-	case 2:
-		return "present"
-	case 3:
-		return "absent"
-	case 4:
-		return "full"
-	case 5:
-		return "checked_in"
-	case 6:
-		return "kind"
-	case 7:
-		return "epoch"
-	case 8:
-		return "target"
-	case 9:
-		return "terrain"
-	case 10:
-		return "noop"
-	case RejectReadOnly:
-		return "read_only"
-	case RejectNotYours:
-		return "not_yours"
-	}
-	return strconv.FormatUint(uint64(code), 10)
-}

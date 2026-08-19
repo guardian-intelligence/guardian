@@ -65,7 +65,10 @@ wasm_module(
     name = "toy_wasm",
     lib = ":toy_cdylib",
     out = "toy.wasm",
-    visibility = ["//src/chunkies/gametest:__pkg__"],
+    visibility = [
+        "//src/chunkies/gametest:__pkg__",
+        "//src/chunkies/chunkie:__pkg__",
+    ],
 )
 
 # Formatting drift fails `bazelisk test //...`; the fix is `aspect tidy`.

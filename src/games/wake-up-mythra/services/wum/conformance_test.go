@@ -20,7 +20,7 @@ func TestWUMGameConformance(t *testing.T) {
 	alice, bob, carol := DogIDFor("alice"), DogIDFor("bob"), DogIDFor("carol")
 
 	gametest.Run(t, gametest.Game{
-		Park:    mount.DefaultPark,
+		Sim:     mount.DefaultSim,
 		Modules: map[string][]byte{"client": mount.DefaultClient},
 		Genesis: FixtureTerrain,
 		Corpus: []gametest.Event{
@@ -36,11 +36,6 @@ func TestWUMGameConformance(t *testing.T) {
 			{Kind: EvBoostSet, Actor: alice, Payload: []byte{0}},
 			{Kind: EvLeave, Actor: bob},
 			{Kind: EvDayReset, Payload: binary.LittleEndian.AppendUint32(nil, 1)},
-		},
-		System: gametest.System{
-			RateSet:      EvRateSet,
-			ClockSkip:    EvClockSkip,
-			EpochAdvance: EvEpochAdvance,
 		},
 	})
 }

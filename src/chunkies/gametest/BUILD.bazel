@@ -12,6 +12,7 @@ go_library(
     importpath = "github.com/guardian-intelligence/guardian/src/chunkies/gametest",
     visibility = GAME_FACING,
     deps = [
+        "//src/chunkies/codec",
         "@com_github_tetratelabs_wazero//:go_default_library",
         "@com_github_tetratelabs_wazero//api:go_default_library",
     ],

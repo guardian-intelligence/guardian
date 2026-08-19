@@ -1,0 +1,14 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "trunk",
+    srcs = ["trunk.go"],
+    importpath = "github.com/guardian-intelligence/guardian/src/chunkies/trunk",
+    visibility = ["//src/chunkies:__subpackages__"],
+)
+
+go_test(
+    name = "trunk_test",
+    srcs = ["trunk_test.go"],
+    embed = [":trunk"],
+)

@@ -51,7 +51,7 @@ leg_command_pattern() {
   flagd) echo "flagd" ;;
   ingest) echo "analytics/ingest" ;;
   devissuer) echo "devissuer" ;;
-  park) echo "chunkies-park" ;;
+  park) echo "chunkies-chunkie" ;;
   gateway) echo "chunkies-gateway" ;;
   web) echo "vp dev" ;;
   esac
@@ -250,14 +250,16 @@ EOF
     mkdir -p "$ROOT/src/chunkies/assets"
     park_database_url="$(scripts/wum-dev-db.sh url)"
     DATABASE_URL="$park_database_url" \
-      PARK_NAME=park-mythra \
-      PARK_PORT="$PARK_PORT" \
+      CHUNK_NAME=park-mythra \
+      TRUNK_PORT="$PARK_PORT" \
       HTTP_PORT="$PARK_HTTP_PORT" \
       METRICS_PORT="$PARK_METRICS_PORT" \
       INTERNAL_KEY_FILE="$RUN_DIR/internal.key" \
       BEHAVIOR_DIR="$ROOT/src/chunkies/behaviors" \
+      GAME_MANIFEST_FILE="$ROOT/src/games/wake-up-mythra/services/wum/game.conf" \
+      GENESIS_FILE="$ROOT/src/games/wake-up-mythra/services/wum/fixture_park.bin" \
       TICK_HZ="$DEV_TICK_HZ" \
-      WUM_DEV_LIVE_TICK_RATE=true \
+      CHUNKIES_DEV_LIVE_TICK_RATE=true \
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://127.0.0.1:${OTLP_GRPC_PORT}" \
       "$ROOT/$PARK" >>"$(logfile park)" 2>&1 &
     echo $! >"$(pidfile park)"
@@ -267,6 +269,9 @@ EOF
     STARTED="gateway $STARTED"
     printf 'wum park-mythra 127.0.0.1:%s\n' "$PARK_PORT" >"$RUN_DIR/chunks.conf"
     OIDC_ISSUER="$ISSUER" \
+      OIDC_CLIENT_IDS=wake-up-mythra \
+      GAME=wum \
+      DEFAULT_CHUNK=park-mythra \
       BEHAVIOR_DIR="$ROOT/src/chunkies/behaviors" \
       ASSET_DIR="$ROOT/src/chunkies/assets" \
       PUBLIC_ADDR="${WUM_DEV_PUBLIC_ADDR:-127.0.0.1:${GATEWAY_WT_PORT}}" \
@@ -274,9 +279,9 @@ EOF
       METRICS_PORT="$GATEWAY_METRICS_PORT" \
       WT_PORT="$GATEWAY_WT_PORT" \
       CHUNK_DIRECTORY_FILE="$RUN_DIR/chunks.conf" \
-      PARK_HTTP_URL="http://127.0.0.1:${PARK_HTTP_PORT}" \
+      CHUNKIE_HTTP_URL="http://127.0.0.1:${PARK_HTTP_PORT}" \
       INTERNAL_KEY_FILE="$RUN_DIR/internal.key" \
-      WUM_DEV_LIVE_TICK_RATE=true \
+      CHUNKIES_DEV_LIVE_TICK_RATE=true \
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://127.0.0.1:${OTLP_GRPC_PORT}" \
       "$ROOT/$GATEWAY" >>"$(logfile gateway)" 2>&1 &
     echo $! >"$(pidfile gateway)"
@@ -316,11 +321,11 @@ up() {
 
   acquire_lock
   echo "wum-dev: building Chunkies + devissuer + telemetry legs…" >&2
-  bazelisk build //src/chunkies:chunkies-gateway //src/chunkies:chunkies-park //src/chunkies/devissuer \
+  bazelisk build //src/chunkies:chunkies-gateway //src/chunkies:chunkies-chunkie //src/chunkies/devissuer \
     //src/analytics/ingest @ip2asn_combined//file \
     @multitool//tools/clickhouse-server @multitool//tools/otelcol-contrib @multitool//tools/flagd >&2
   GATEWAY="$(bazelisk cquery --output=files //src/chunkies:chunkies-gateway 2>/dev/null | head -1)"
-  PARK="$(bazelisk cquery --output=files //src/chunkies:chunkies-park 2>/dev/null | head -1)"
+  PARK="$(bazelisk cquery --output=files //src/chunkies:chunkies-chunkie 2>/dev/null | head -1)"
   DEVISSUER="$(bazelisk cquery --output=files //src/chunkies/devissuer 2>/dev/null | head -1)"
   INGEST="$(bazelisk cquery --output=files //src/analytics/ingest 2>/dev/null | head -1)"
   CLICKHOUSE="$(bazelisk cquery --output=files @multitool//tools/clickhouse-server 2>/dev/null | head -1)"
@@ -420,7 +425,7 @@ smoke() {
   fi
 
   # Run scoping: the trace lane is scoped by this run's unique player name
-  # (it rides the span as wum.sub); the events lane by the page id the
+  # (it rides the span as chunkies.sub); the events lane by the page id the
   # probe page minted (plus the sink's clock) — no other session's rows,
   # concurrent smoke, or localStorage replay of a stale queue can satisfy
   # either.
@@ -458,7 +463,7 @@ smoke() {
   poll_deadline=$((SECONDS + 60))
   while :; do
     events="$(ch_query "SELECT count() FROM guardian_analytics.events WHERE event_name = 'wum.connected' AND page_id = unhex('$page_id') AND toUnixTimestamp64Milli(server_ts) >= $t0")" || events=0
-    spans="$(ch_query "SELECT count() FROM guardian_analytics.otel_traces WHERE ServiceName = 'chunkies-gateway' AND SpanName = 'POST /session' AND SpanAttributes['wum.sub'] = '$player'")" || spans=0
+    spans="$(ch_query "SELECT count() FROM guardian_analytics.otel_traces WHERE ServiceName = 'chunkies-gateway' AND SpanName = 'POST /session' AND SpanAttributes['chunkies.sub'] = '$player'")" || spans=0
     if [ "$events" -ge 1 ] && [ "$spans" -ge 1 ]; then
       break
     fi
@@ -527,18 +532,18 @@ latency() {
   server_actions=0
   poll_deadline=$((SECONDS + 60))
   while :; do
-    server_actions="$(ch_query "SELECT count() FROM guardian_analytics.otel_traces WHERE SpanName = 'mythra.intent' AND SpanAttributes['wum.result'] = 'accepted' AND SpanAttributes['wum.rate_hz'] IN ('$from_hz', '$to_hz') AND toUnixTimestamp64Milli(Timestamp) >= $t0")" || server_actions=0
+    server_actions="$(ch_query "SELECT count() FROM guardian_analytics.otel_traces WHERE SpanName = 'chunkies.intent' AND SpanAttributes['chunkies.result'] = 'accepted' AND SpanAttributes['chunkies.rate_hz'] IN ('$from_hz', '$to_hz') AND toUnixTimestamp64Milli(Timestamp) >= $t0")" || server_actions=0
     [ "$server_actions" -ge "$actions" ] && break
     [ "$SECONDS" -lt "$poll_deadline" ] || break
     sleep 2
   done
   if [ "$server_actions" -lt "$actions" ]; then
-    echo "wum-dev: LATENCY FAIL — only $server_actions/$actions accepted mythra.intent spans landed" >&2
+    echo "wum-dev: LATENCY FAIL — only $server_actions/$actions accepted chunkies.intent spans landed" >&2
     return 1
   fi
 
   echo "SERVER_ACTIONS (receipt -> next tick -> durable fan-out)"
-  ch_query "SELECT SpanAttributes['wum.rate_hz'] AS rate_hz, SpanAttributes['wum.kind'] AS kind, count() AS n, round(quantileExact(0.5)(toFloat64OrZero(SpanAttributes['wum.tick_queue_ms'])), 2) AS queue_p50_ms, round(quantileExact(0.95)(toFloat64OrZero(SpanAttributes['wum.tick_queue_ms'])), 2) AS queue_p95_ms, round(quantileExact(0.5)(toFloat64OrZero(SpanAttributes['wum.authority_ms'])), 2) AS authority_p50_ms, round(quantileExact(0.95)(toFloat64OrZero(SpanAttributes['wum.authority_ms'])), 2) AS authority_p95_ms FROM guardian_analytics.otel_traces WHERE SpanName = 'mythra.intent' AND SpanAttributes['wum.result'] = 'accepted' AND SpanAttributes['wum.rate_hz'] IN ('$from_hz', '$to_hz') AND toUnixTimestamp64Milli(Timestamp) >= $t0 GROUP BY rate_hz, kind ORDER BY toUInt32(rate_hz), kind FORMAT PrettyCompactNoEscapes"
+  ch_query "SELECT SpanAttributes['chunkies.rate_hz'] AS rate_hz, SpanAttributes['chunkies.kind'] AS kind, count() AS n, round(quantileExact(0.5)(toFloat64OrZero(SpanAttributes['chunkies.tick_queue_ms'])), 2) AS queue_p50_ms, round(quantileExact(0.95)(toFloat64OrZero(SpanAttributes['chunkies.tick_queue_ms'])), 2) AS queue_p95_ms, round(quantileExact(0.5)(toFloat64OrZero(SpanAttributes['chunkies.authority_ms'])), 2) AS authority_p50_ms, round(quantileExact(0.95)(toFloat64OrZero(SpanAttributes['chunkies.authority_ms'])), 2) AS authority_p95_ms FROM guardian_analytics.otel_traces WHERE SpanName = 'chunkies.intent' AND SpanAttributes['chunkies.result'] = 'accepted' AND SpanAttributes['chunkies.rate_hz'] IN ('$from_hz', '$to_hz') AND toUnixTimestamp64Milli(Timestamp) >= $t0 GROUP BY rate_hz, kind ORDER BY toUInt32(rate_hz), kind FORMAT PrettyCompactNoEscapes"
   echo "wum-dev: LATENCY PASS — one page adopted ${from_hz}Hz -> ${to_hz}Hz; $actions client actions and $server_actions authority spans"
 }
 

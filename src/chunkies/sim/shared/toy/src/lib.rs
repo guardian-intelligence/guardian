@@ -16,7 +16,10 @@ use chunkies_abi::{OK, Simulation};
 /// Game event kinds (the game range starts at 0x0100).
 pub const K_JOIN: u16 = 0x0100;
 pub const K_MOVE: u16 = 0x0101;
-/// Framework-driven system events this game supports.
+pub const K_LEAVE: u16 = 0x0102;
+/// Framework-driven system events (kind numbers are framework constants,
+/// mirrored in src/chunkies/codec/kinds.go).
+pub const K_DAY_RESET: u16 = 0x0005;
 pub const K_CLOCK_SKIP: u16 = 0x0009;
 pub const K_EPOCH_ADVANCE: u16 = 0x0006;
 pub const K_RATE_SET: u16 = 0x000A;
@@ -76,6 +79,14 @@ impl Toy {
         }
         self.actors[at] = Actor { id, pos };
         self.n += 1;
+    }
+
+    fn remove(&mut self, at: usize) {
+        for i in at..self.n - 1 {
+            self.actors[i] = self.actors[i + 1];
+        }
+        self.n -= 1;
+        self.actors[self.n] = EMPTY;
     }
 }
 
@@ -140,6 +151,24 @@ impl Simulation for Toy {
                     return ERR_ABSENT;
                 };
                 self.actors[i].pos = self.actors[i].pos.saturating_add(d);
+                OK
+            }
+            K_LEAVE => {
+                if !payload.is_empty() {
+                    return ERR_ENCODING;
+                }
+                let Some(i) = self.find(actor) else {
+                    return ERR_ABSENT;
+                };
+                self.remove(i);
+                OK
+            }
+            K_DAY_RESET => {
+                // The toy has no daily state; the event is accepted so the
+                // host's wall-clock day rollover is never a reject.
+                if payload.len() != 4 || actor != 0 {
+                    return ERR_ENCODING;
+                }
                 OK
             }
             K_CLOCK_SKIP => {

@@ -1,7 +1,7 @@
 package gateway
 
 // Behavioral coverage for the gateway relay loop: what a connected client
-// can get through to a park, and what the gateway absorbs. The park side
+// can get through to a chunk, and what the gateway absorbs. The chunk side
 // is a fake speaking the real proxy protocol, so every assertion is about
 // bytes that actually crossed the internal boundary.
 
@@ -21,28 +21,27 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	webtransport "github.com/quic-go/webtransport-go"
 
-	"github.com/guardian-intelligence/guardian/src/chunkies/parkproxy"
+	"github.com/guardian-intelligence/guardian/src/chunkies/trunk"
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
-	"github.com/guardian-intelligence/guardian/src/games/wake-up-mythra/services/wum"
 )
 
-// fakePark accepts authenticated multiplexed connections and records
+// fakeChunkie accepts authenticated multiplexed connections and records
 // every message the gateway forwards (pings are answered inside
 // ReadMessage and never recorded).
-type fakePark struct {
+type fakeChunkie struct {
 	addr string
 	mu   sync.Mutex
-	msgs []parkproxy.Msg
+	msgs []trunk.Msg
 }
 
-func newFakePark(t *testing.T, key []byte) *fakePark {
+func newFakeChunkie(t *testing.T, key []byte) *fakeChunkie {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { l.Close() })
-	p := &fakePark{addr: l.Addr().String()}
+	p := &fakeChunkie{addr: l.Addr().String()}
 	go func() {
 		for {
 			conn, err := l.Accept()
@@ -50,7 +49,7 @@ func newFakePark(t *testing.T, key []byte) *fakePark {
 				return
 			}
 			go func(c net.Conn) {
-				proxy, err := parkproxy.Accept(c, key, time.Now())
+				proxy, err := trunk.Accept(c, key, time.Now())
 				if err != nil {
 					c.Close()
 					return
@@ -73,7 +72,7 @@ func newFakePark(t *testing.T, key []byte) *fakePark {
 	return p
 }
 
-func (p *fakePark) received(kind byte) [][]byte {
+func (p *fakeChunkie) received(kind byte) [][]byte {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var out [][]byte
@@ -99,7 +98,7 @@ func waitFor(t *testing.T, d time.Duration, fn func() bool) bool {
 }
 
 type relayHarness struct {
-	park    *fakePark
+	backend *fakeChunkie
 	tickets *ticketMint
 	dir     *chunkDirectory
 	chunk   string
@@ -112,17 +111,17 @@ func newRelayHarness(t *testing.T) *relayHarness {
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	park := newFakePark(t, key)
+	backend := newFakeChunkie(t, key)
 	tickets, err := newTicketMint("")
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := newChunkDirectory()
-	dir.replace(map[string]string{"wum/park-test": park.addr})
+	dir.replace(map[string]string{"wum/park-test": backend.addr})
 	gw := &chunkiesGateway{
 		admission: &gameHandlers{tickets: tickets, maxSessions: 16, directory: dir, game: "wum"},
 		directory: dir, game: "wum",
-		parks: parkproxy.NewPool(key, parkproxy.Hooks{}),
+		trunks: trunk.NewPool(key, trunk.Hooks{}),
 	}
 
 	rc := newRotatingCert([]net.IP{net.ParseIP("127.0.0.1")})
@@ -171,7 +170,7 @@ func newRelayHarness(t *testing.T) *relayHarness {
 		t.Cleanup(func() { sess.CloseWithError(0, "") })
 		return sess
 	}
-	return &relayHarness{park: park, tickets: tickets, dir: dir, chunk: "park-test", dial: dial}
+	return &relayHarness{backend: backend, tickets: tickets, dir: dir, chunk: "park-test", dial: dial}
 }
 
 // hello opens the bidi stream and completes admission for the given role.
@@ -181,7 +180,7 @@ func (h *relayHarness) hello(t *testing.T, sess *webtransport.Session, sub, role
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := h.tickets.mint(ticket{Sub: sub, Park: h.chunk, Role: role, Exp: time.Now().Add(time.Minute).Unix()})
+	raw := h.tickets.mint(ticket{Sub: sub, Chunk: h.chunk, Role: role, Exp: time.Now().Add(time.Minute).Unix()})
 	frame := codec.EncodeHello(codec.Hello{Proto: codec.Proto, SinceSeq: -1, Ticket: raw})
 	if _, err := stream.Write(frame); err != nil {
 		t.Fatal(err)
@@ -190,7 +189,7 @@ func (h *relayHarness) hello(t *testing.T, sess *webtransport.Session, sub, role
 }
 
 func moveIntent(sub string, id uint64, node uint16) []byte {
-	return codec.EncodeIntent(id, 4, wum.DogIDFor(sub), binary.LittleEndian.AppendUint16(nil, node))
+	return codec.EncodeIntent(id, 4, codec.ActorFor(sub), binary.LittleEndian.AppendUint16(nil, node))
 }
 
 func TestRelaySplicesIntentBytesVerbatim(t *testing.T) {
@@ -202,12 +201,12 @@ func TestRelaySplicesIntentBytesVerbatim(t *testing.T) {
 	if _, err := stream.Write(frame); err != nil {
 		t.Fatal(err)
 	}
-	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(parkproxy.KindStream)) == 1 }) {
-		t.Fatalf("intent never reached the park")
+	if !waitFor(t, 5*time.Second, func() bool { return len(h.backend.received(trunk.KindStream)) == 1 }) {
+		t.Fatalf("intent never reached the chunk")
 	}
-	got := h.park.received(parkproxy.KindStream)[0]
+	got := h.backend.received(trunk.KindStream)[0]
 	if string(got) != string(frame) {
-		t.Fatalf("park received %x, want the client's frame %x", got, frame)
+		t.Fatalf("chunk received %x, want the client's frame %x", got, frame)
 	}
 }
 
@@ -223,8 +222,8 @@ func TestRelayPacesBurstsInsteadOfClosing(t *testing.T) {
 			t.Fatalf("write %d: %v", i, err)
 		}
 	}
-	if !waitFor(t, 15*time.Second, func() bool { return len(h.park.received(parkproxy.KindStream)) == n }) {
-		t.Fatalf("park got %d of %d intents; the old limiter would have closed the session", len(h.park.received(parkproxy.KindStream)), n)
+	if !waitFor(t, 15*time.Second, func() bool { return len(h.backend.received(trunk.KindStream)) == n }) {
+		t.Fatalf("chunk got %d of %d intents; the old limiter would have closed the session", len(h.backend.received(trunk.KindStream)), n)
 	}
 	if elapsed := time.Since(start); elapsed < 500*time.Millisecond {
 		t.Fatalf("burst of %d relayed in %v: the shaper did not pace", n, elapsed)
@@ -233,7 +232,7 @@ func TestRelayPacesBurstsInsteadOfClosing(t *testing.T) {
 	if _, err := stream.Write(moveIntent("burst-sub", n+1, 2)); err != nil {
 		t.Fatalf("session unusable after burst: %v", err)
 	}
-	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(parkproxy.KindStream)) == n+1 }) {
+	if !waitFor(t, 5*time.Second, func() bool { return len(h.backend.received(trunk.KindStream)) == n+1 }) {
 		t.Fatal("post-burst intent never arrived")
 	}
 }
@@ -252,12 +251,12 @@ func TestRelayDropsJunkDatagrams(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(parkproxy.KindDatagram)) >= 1 }) {
-		t.Fatal("well-formed check never reached the park")
+	if !waitFor(t, 5*time.Second, func() bool { return len(h.backend.received(trunk.KindDatagram)) >= 1 }) {
+		t.Fatal("well-formed check never reached the chunk")
 	}
 	// Datagrams are unordered; wait a beat, then require the junk stayed out.
 	time.Sleep(200 * time.Millisecond)
-	for _, got := range h.park.received(parkproxy.KindDatagram) {
+	for _, got := range h.backend.received(trunk.KindDatagram) {
 		if string(got) != string(good) {
 			t.Fatalf("junk datagram %x crossed the gateway", got)
 		}
@@ -276,11 +275,11 @@ func TestRelayDropsUnknownKindsAndLivesOn(t *testing.T) {
 	if _, err := stream.Write(intent); err != nil {
 		t.Fatal(err)
 	}
-	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(parkproxy.KindStream)) == 1 }) {
+	if !waitFor(t, 5*time.Second, func() bool { return len(h.backend.received(trunk.KindStream)) == 1 }) {
 		t.Fatal("intent after unknown frame never arrived — unknown kind killed the session")
 	}
-	if got := h.park.received(parkproxy.KindStream)[0]; string(got) != string(intent) {
-		t.Fatalf("park received %x, want %x", got, intent)
+	if got := h.backend.received(trunk.KindStream)[0]; string(got) != string(intent) {
+		t.Fatalf("chunk received %x, want %x", got, intent)
 	}
 }
 
@@ -301,11 +300,11 @@ func TestRelayRejectsSpectatorIntents(t *testing.T) {
 		t.Fatalf("kind = %d, want reject", kind)
 	}
 	rej, err := codec.DecodeReject(payload)
-	if err != nil || rej.Intent != 21 || rej.Reason != wum.RejectReadOnly {
+	if err != nil || rej.Intent != 21 || rej.Reason != codec.RejectReadOnly {
 		t.Fatalf("reject = %+v (err %v), want intent 21 reason read_only", rej, err)
 	}
-	if got := h.park.received(parkproxy.KindStream); len(got) != 0 {
-		t.Fatalf("spectator intent reached the park: %x", got)
+	if got := h.backend.received(trunk.KindStream); len(got) != 0 {
+		t.Fatalf("spectator intent reached the chunk: %x", got)
 	}
 }
 func TestRelayRoutesChunksAddedAtRuntime(t *testing.T) {
@@ -317,7 +316,7 @@ func TestRelayRoutesChunksAddedAtRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := h.tickets.mint(ticket{Sub: "late-sub", Park: "park-late", Role: "player", Exp: time.Now().Add(time.Minute).Unix()})
+	raw := h.tickets.mint(ticket{Sub: "late-sub", Chunk: "park-late", Role: "player", Exp: time.Now().Add(time.Minute).Unix()})
 	if _, err := stream.Write(codec.EncodeHello(codec.Hello{Proto: codec.Proto, SinceSeq: -1, Ticket: raw})); err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +330,7 @@ func TestRelayRoutesChunksAddedAtRuntime(t *testing.T) {
 	// The same file-load path the watcher runs makes it routable with no
 	// process restart.
 	path := filepath.Join(t.TempDir(), "chunks.conf")
-	if err := os.WriteFile(path, []byte("wum park-late "+h.park.addr+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("wum park-late "+h.backend.addr+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := loadChunkDirectory(path, h.dir); err != nil {
@@ -344,7 +343,7 @@ func TestRelayRoutesChunksAddedAtRuntime(t *testing.T) {
 	if _, err := stream2.Write(moveIntent("late-sub", 5, 1)); err != nil {
 		t.Fatal(err)
 	}
-	if !waitFor(t, 5*time.Second, func() bool { return len(h.park.received(parkproxy.KindStream)) == 1 }) {
+	if !waitFor(t, 5*time.Second, func() bool { return len(h.backend.received(trunk.KindStream)) == 1 }) {
 		t.Fatal("intent to the runtime-added chunk never arrived")
 	}
 }

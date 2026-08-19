@@ -139,15 +139,15 @@ client compute O(subscribed), not O(world).
 | `games/wake-up-mythra/sim/nav` | deterministic A* | pathing, `path_cost`; movement is state (position, waypoint, target — all hashed), never a cache |
 | `chunkies/sim/client/clock` (wasm, no_std) | client tick discipline | Acquiring → Locked (±2% slew) → FastForward (big deficits) → SnapshotRequired (beyond the ring). No floats, no host clocks — the host feeds it times and executes its step-count directives |
 | `chunkies-codec` (the spec at `src/chunkies/codec/spec/`, with Rust/Go/TS implementations) | the wire protocol, v5 | the golden vectors and caps table are the protocol; the three implementations are held to them. One shared unit, the EventRecord (`intent \| elen \| kind \| actor \| payload`): the same bytes are the client's intent envelope, the per-tick batch element, and (planned) the write-ahead record element, so an accepted intent is never re-encoded between arrival, fan-out, and disk |
-| `chunkies/sim/client/session` (wasm, no_std) | the replica session | seq-dense event ordering over tick batches, snapshot ring + rollback, resync/strike policy, intent identity + resend, and the own-intent prediction overlay over two host-held park slots (journal replica / presented). Time and transport are inputs; the host executes its verbs |
+| `chunkies/sim/client/session` (wasm, no_std) | the replica session | seq-dense event ordering over tick batches, snapshot ring + rollback, resync/strike policy, intent identity + resend, and the own-intent prediction overlay over two host-held sim slots (journal replica / presented). Time and transport are inputs; the host executes its verbs |
 | `chunkies/sim/shared/abi` | the game↔host contract | the `Simulation` trait and `export_simulation!`: a game crate carries no unsafe and no extern surface, cannot misdeclare the ABI, and opts out of the content-fetch dance entirely with a zero content cap. The toy reference game (`chunkies/sim/shared/toy`) is the macro's proof and the conformance vehicle |
 | `chunkies/sim/client` (wasm) | presentation + the session ABI | render smoothing; re-exports the clock and the session. Never feeds back into world state |
-| `chunkies/gateway` | public transport | WebTransport, OIDC-ticket admission, uplink shaping, actor binding at ingress, and park routing |
-| `chunkies/park` | the authority | the anchored tick schedule, event stamping, journal append, hash ring, snapshot cadence, module swaps, fan-out, and the gateway-facing park boundary |
-| `chunkies/parkproxy` | internal transport | the authenticated, HMAC-fenced gateway↔park framing |
-| `chunkies/mount` | module delivery | the behavior mount: hot-reloaded client/park wasm slots and the committed defaults |
-| `games/wake-up-mythra/services/wum` | the game's server vocabulary | kind numbers, dog-id binding, reject names, the genesis terrain — the only WUM-shaped thing the transport packages see |
-| `chunkies/journal` | durability | Postgres `park_events` / `park_snapshots` / `park_terrain`; per-park seq is dense and single-writer; `journaltest.Run` is the conformance suite |
+| `chunkies/gateway` | public transport | WebTransport, OIDC-ticket admission, uplink shaping, actor binding at ingress, and chunk routing |
+| `chunkies/chunkie` | the runtime | the anchored tick schedule, event stamping, journal append, hash ring, snapshot cadence, module swaps, fan-out, and the trunk-facing chunk boundary |
+| `chunkies/trunk` | internal transport | the authenticated, HMAC-fenced gateway↔chunkie multiplexing: one conn per pair, many attachments |
+| `chunkies/mount` | module delivery | the behavior mount: hot-reloaded client/sim wasm slots and the committed defaults |
+| `games/wake-up-mythra/services/wum` | the game's server vocabulary | kind numbers, dog-id binding, and the genesis terrain, for the game's own code and tests. The running host learns the same facts from the mounted game manifest (`game.conf`) — the framework imports nothing WUM-shaped |
+| `chunkies/journal` | durability | Postgres `park_events` / `park_snapshots` / `park_terrain` (table names die with the PG journal); per-chunk seq is dense and single-writer; `journaltest.Run` is the conformance suite |
 | `chunkies/gametest` | the game contract | the game-blind conformance suite over built artifacts: determinism, snapshot completeness, reject purity, system-event semantics; `wum` wires the committed modules through it |
 | `src/chunkies/host/ts` | the game-agnostic replica host | moves opaque bytes between wire, wasm, and screen: the session module, the replica slot, the transport, and the guarded extension/projection doors a game layer reaches its own exports through. Knows no game vocabulary; the name is a deliberate find-and-replaceable placeholder |
 | `src/games/wake-up-mythra/client` | the game layer | WUM over the host: intent verbs, the HUD/view/terrain decodes, the glide presenter, and the isometric renderer. If TypeScript (or Go) can read a game rule, the rule is in the wrong place |
@@ -179,30 +179,30 @@ recorded one (never serve divergence), then repay the downtime before the
 doors open: a gap under a minute is stepped through (the world lived while
 the server was away), a longer one journals a single `clock_skip` event that
 jumps the tick to the schedule and re-floors the snapshot. Either way the
-park reopens on exactly the tick the wall clock defines. Measured: a park
+chunk reopens on exactly the tick the wall clock defines. Measured: a chunk
 minutes deep reopens in under a second; drilled live three times with a
 player connected.
 
 **What if the wall clock itself jumps?** Forward: the schedule demands
-catch-up ticks, bounded per wakeup; past the hash ring the park closes and
+catch-up ticks, bounded per wakeup; past the hash ring the chunk closes and
 repays the gap through the dark reopen path. Backward (NTP step, lying
-RTC): the park never unticks and never idles backward — it simply waits for
-reality to catch up, visible as negative `mythra_tick_lag_seconds`.
+RTC): the chunk never unticks and never idles backward — it simply waits for
+reality to catch up, visible as negative `chunkies_tick_lag_seconds`.
 
 **A client sends an intent during a server blip — then what?** Today: lost.
 Intents are idempotent by `(actor, intent_id)`, so client-side
 resend-after-rejoin is safe by design but not yet implemented. Backlog.
 
 **Storage math (exercise).** A journal row is ~120B (fields + payload +
-tuple overhead); a snapshot every 512 events. Small park, 20 players × 2
+tuple overhead); a snapshot every 512 events. Small chunk, 20 players × 2
 acts/min: 57,600 events/day ≈ 7MB + ~112 snapshots ≈ 15MB/day — years per
 10GB. The 2000-bot drill measured 1–2GB/day: scale is linear in *human*
 action rate, and ticks cost zero. Rerun the math before believing any
 retention urgency.
 
 **What does an idle session cost?** ~100KB/hour downlink (checks +
-verdicts). An *active* park scales with total human activity × occupancy —
-the 2000-active drill measured ~20MB/hour/session. A mega-park needs
+verdicts). An *active* chunk scales with total human activity × occupancy —
+the 2000-active drill measured ~20MB/hour/session. A mega-chunk needs
 interest management (culling the fan-out) before it meets the idle target;
 tracked as future work.
 

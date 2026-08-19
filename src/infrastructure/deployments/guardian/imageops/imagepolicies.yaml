@@ -355,24 +355,24 @@ spec:
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
 metadata:
-  name: chunkies-park
+  name: chunkies-chunkie
   namespace: guardian-imageops
   labels:
     app.kubernetes.io/part-of: guardian
 spec:
-  image: ghcr.io/guardian-intelligence/chunkies-park
+  image: ghcr.io/guardian-intelligence/chunkies-chunkie
   interval: 1m0s
 ---
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImagePolicy
 metadata:
-  name: chunkies-park
+  name: chunkies-chunkie
   namespace: guardian-imageops
   labels:
     app.kubernetes.io/part-of: guardian
 spec:
   imageRepositoryRef:
-    name: chunkies-park
+    name: chunkies-chunkie
   filterTags:
     pattern: '^edge$'
   policy:

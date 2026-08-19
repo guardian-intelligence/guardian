@@ -71,7 +71,7 @@ spec:
               protocol: TCP
             - port: "4318"
               protocol: TCP
-    # chunkies-gateway and chunkies-park run hostNetwork (the public game
+    # chunkies-gateway and chunkies-chunkie run hostNetwork (the public game
     # plane), so their spans arrive
     # with the node's identity, not a pod endpoint — no label can match.
     # Nodes are already inside the cluster trust boundary.

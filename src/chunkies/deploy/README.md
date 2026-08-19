@@ -14,7 +14,7 @@ documented in docs/netcode.md ("Topology").
 - `components/chunkie` — one pod owning one or more chunks of a game's
   world (WUM's chunks are parks). Framework-owned: image pin, probes,
   security posture, and the single-writer rollout strategy (maxSurge 0 —
-  one journal writer per park, always). Chunkies never canary; they roll by
+  one journal writer per chunk, always). Chunkies never canary; they roll by
   checkpoint/restore.
 
 ## How a game consumes them

@@ -1,4 +1,4 @@
-package park
+package chunkie
 
 import (
 	"bytes"
@@ -24,13 +24,12 @@ import (
 	"github.com/guardian-intelligence/guardian/src/chunkies/journal"
 	"github.com/guardian-intelligence/guardian/src/chunkies/mount"
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
-	"github.com/guardian-intelligence/guardian/src/games/wake-up-mythra/services/wum"
 )
 
 const (
 	snapshotEvery  = 512 // events between durable snapshots
 	snapshotMaxAge = 15 * time.Minute
-	dedupWindow    = 4096 // remembered (actor, intent_id) pairs per park
+	dedupWindow    = 4096 // remembered (actor, intent_id) pairs per chunk
 
 	// ringSeconds bounds how stale a client check (and a rejoin's fast-
 	// forward) may be. Older checks answer "unknown", which the client
@@ -48,15 +47,16 @@ const (
 	// cost bounded and making the jump an event every replica sees.
 	darkStepWindow = 60 * time.Second
 
-	// Kept in lockstep with sim/shared/park's rate_set validation. Below
-	// 12Hz a boosted dog would cross more than half a cell in one axis
-	// sub-move, violating nav's collision boundary.
+	// The host's own scheduling bounds. A game's module may impose a
+	// stricter floor through its rate_set validation — a rejected rate_set
+	// holds the world's current rate — so these only keep ring sizes and
+	// tick math sane.
 	minTickHz = 12
 	maxTickHz = 1000
 )
 
-// wallEpoch is the instant of tick 0 for every park: tick N is defined as
-// wallEpoch + N*tickDur + the park's phase offset. The mapping is a
+// wallEpoch is the instant of tick 0 for every chunk: tick N is defined as
+// wallEpoch + N*tickDur + the chunk's phase offset. The mapping is a
 // definition, not a measurement — the scheduler chases it, so hitches and
 // downtime are always repaid and a tick number doubles as a timestamp.
 var wallEpoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -70,9 +70,9 @@ type timing struct {
 	now func() time.Time
 }
 
-// parkHost wraps one wazero instance of the park module (the game state
+// simHost wraps one wazero instance of the sim module (the game state
 // machine). Not goroutine-safe: owned by its authority's loop.
-type parkHost struct {
+type simHost struct {
 	rt         wazero.Runtime
 	mem        api.Memory
 	ioPtr      uint32
@@ -99,10 +99,10 @@ const hostABIEra = 2
 // passes through — this process only distributes those bytes, and the
 // browser's own boot gate decides there.
 func acceptModule(slot string, module []byte) error {
-	if slot != "park" {
+	if slot != "sim" {
 		return nil
 	}
-	h, err := newParkHost(module)
+	h, err := newSimHost(module)
 	if err != nil {
 		return err
 	}
@@ -110,7 +110,7 @@ func acceptModule(slot string, module []byte) error {
 	return nil
 }
 
-func newParkHost(module []byte) (*parkHost, error) {
+func newSimHost(module []byte) (*simHost, error) {
 	ctx := context.Background()
 	rt := wazero.NewRuntime(ctx)
 	mod, err := rt.Instantiate(ctx, module)
@@ -118,19 +118,19 @@ func newParkHost(module []byte) (*parkHost, error) {
 		rt.Close(ctx)
 		return nil, err
 	}
-	h := &parkHost{rt: rt, mem: mod.Memory()}
+	h := &simHost{rt: rt, mem: mod.Memory()}
 	get := func(name string) api.Function { return mod.ExportedFunction(name) }
 	fABI := get("abi_version")
 	if fABI == nil {
 		rt.Close(ctx)
-		return nil, errors.New("park module does not declare abi_version")
+		return nil, errors.New("sim module does not declare abi_version")
 	}
 	if vs, err := fABI.Call(ctx); err != nil || len(vs) == 0 {
 		rt.Close(ctx)
-		return nil, fmt.Errorf("park module abi_version: %v", err)
+		return nil, fmt.Errorf("sim module abi_version: %v", err)
 	} else if era := uint32(vs[0]); era != hostABIEra {
 		rt.Close(ctx)
-		return nil, fmt.Errorf("park module declares ABI era %d, this host speaks %d", era, hostABIEra)
+		return nil, fmt.Errorf("sim module declares ABI era %d, this host speaks %d", era, hostABIEra)
 	}
 	h.fInit, h.fRestore, h.fSnapshot = get("sim_init"), get("sim_restore"), get("sim_snapshot")
 	h.fStep, h.fApply, h.fHash = get("sim_step"), get("sim_apply"), get("sim_hash")
@@ -144,7 +144,7 @@ func newParkHost(module []byte) (*parkHost, error) {
 		h.fEpoch == nil || h.fSetTerrain == nil || h.fTerrainID == nil ||
 		ioBuf == nil || ioCap == nil || terrainBuf == nil || terrainCap == nil {
 		rt.Close(ctx)
-		return nil, errors.New("park module missing sim ABI exports")
+		return nil, errors.New("sim module missing sim ABI exports")
 	}
 	for _, f := range []struct {
 		dst *uint32
@@ -160,11 +160,11 @@ func newParkHost(module []byte) (*parkHost, error) {
 	return h, nil
 }
 
-func (h *parkHost) close() { h.rt.Close(context.Background()) }
+func (h *simHost) close() { h.rt.Close(context.Background()) }
 
 // callE is the non-panicking call used for candidate modules under soak:
 // a candidate that traps is a rejected deploy, not a host bug.
-func (h *parkHost) callE(f api.Function, args ...uint64) (uint64, error) {
+func (h *simHost) callE(f api.Function, args ...uint64) (uint64, error) {
 	res, err := f.Call(context.Background(), args...)
 	if err != nil {
 		return 0, err
@@ -175,12 +175,12 @@ func (h *parkHost) callE(f api.Function, args ...uint64) (uint64, error) {
 	return res[0], nil
 }
 
-func (h *parkHost) call(f api.Function, args ...uint64) uint64 {
+func (h *simHost) call(f api.Function, args ...uint64) uint64 {
 	res, err := h.callE(f, args...)
 	if err != nil {
 		// The live module validates its inputs and never traps on data; a
-		// trap is a host bug and this park instance is unusable.
-		panic(fmt.Sprintf("park module trapped: %v", err))
+		// trap is a host bug and this chunk instance is unusable.
+		panic(fmt.Sprintf("sim module trapped: %v", err))
 	}
 	return res
 }
@@ -189,12 +189,12 @@ func (h *parkHost) call(f api.Function, args ...uint64) uint64 {
 // unspecified above the result width — the arm64 backend leaves argument
 // remnants in the high bits — so every i32 result MUST come through here,
 // never through a bare `call(...) != 0`.
-func (h *parkHost) call32(f api.Function, args ...uint64) uint32 {
+func (h *simHost) call32(f api.Function, args ...uint64) uint32 {
 	return uint32(h.call(f, args...))
 }
 
-func (h *parkHost) Init(seed uint64, parkID int64, epoch uint32) error {
-	if code := h.call32(h.fInit, seed, uint64(parkID), uint64(epoch)); code != 0 {
+func (h *simHost) Init(seed uint64, chunkID int64, epoch uint32) error {
+	if code := h.call32(h.fInit, seed, uint64(chunkID), uint64(epoch)); code != 0 {
 		return fmt.Errorf("sim_init rejected: code %d", code)
 	}
 	return nil
@@ -203,7 +203,7 @@ func (h *parkHost) Init(seed uint64, parkID int64, epoch uint32) error {
 // SetTerrain loads a terrain artifact into the module. Required before
 // Init or Restore and around every terrain_set event during replay — the
 // sim cross-checks the blob's identity at each of those boundaries.
-func (h *parkHost) SetTerrain(blob []byte) error {
+func (h *simHost) SetTerrain(blob []byte) error {
 	if uint32(len(blob)) > h.terrainCap || !h.mem.Write(h.terrainPtr, blob) {
 		return errors.New("terrain blob does not fit module terrain buffer")
 	}
@@ -213,9 +213,9 @@ func (h *parkHost) SetTerrain(blob []byte) error {
 	return nil
 }
 
-func (h *parkHost) TerrainID() uint64 { return h.call(h.fTerrainID) }
+func (h *simHost) TerrainID() uint64 { return h.call(h.fTerrainID) }
 
-func (h *parkHost) Restore(state []byte) error {
+func (h *simHost) Restore(state []byte) error {
 	if uint32(len(state)) > h.ioCap || !h.mem.Write(h.ioPtr, state) {
 		return errors.New("snapshot does not fit module io buffer")
 	}
@@ -225,39 +225,39 @@ func (h *parkHost) Restore(state []byte) error {
 	return nil
 }
 
-func (h *parkHost) Snapshot() []byte {
+func (h *simHost) Snapshot() []byte {
 	n := h.call32(h.fSnapshot)
 	b, ok := h.mem.Read(h.ioPtr, n)
 	if !ok {
-		panic("park module snapshot read out of bounds")
+		panic("sim module snapshot read out of bounds")
 	}
 	out := make([]byte, n)
 	copy(out, b)
 	return out
 }
 
-func (h *parkHost) Step()         { h.call(h.fStep) }
-func (h *parkHost) Hash() uint64  { return h.call(h.fHash) }
-func (h *parkHost) Tick() uint64  { return h.call(h.fTick) }
-func (h *parkHost) Epoch() uint32 { return h.call32(h.fEpoch) }
+func (h *simHost) Step()         { h.call(h.fStep) }
+func (h *simHost) Hash() uint64  { return h.call(h.fHash) }
+func (h *simHost) Tick() uint64  { return h.call(h.fTick) }
+func (h *simHost) Epoch() uint32 { return h.call32(h.fEpoch) }
 
 // Rate and the mapping anchor come from state; a pre-rate module runs the
 // genesis segment (24Hz anchored at tick 0 = wallEpoch).
-func (h *parkHost) Rate() int {
+func (h *simHost) Rate() int {
 	if h.fRate == nil {
 		return 24
 	}
 	return int(h.call32(h.fRate))
 }
 
-func (h *parkHost) AnchorTick() uint64 {
+func (h *simHost) AnchorTick() uint64 {
 	if h.fAnchorTick == nil {
 		return 0
 	}
 	return h.call(h.fAnchorTick)
 }
 
-func (h *parkHost) AnchorNs() uint64 {
+func (h *simHost) AnchorNs() uint64 {
 	if h.fAnchorNs == nil {
 		return 0
 	}
@@ -266,7 +266,7 @@ func (h *parkHost) AnchorNs() uint64 {
 
 // Candidate-safe variants: errors instead of panics, used only while a
 // new module soaks in the dark before an epoch swap.
-func (h *parkHost) SetTerrainE(blob []byte) error {
+func (h *simHost) SetTerrainE(blob []byte) error {
 	if uint32(len(blob)) > h.terrainCap || !h.mem.Write(h.terrainPtr, blob) {
 		return errors.New("terrain blob does not fit candidate terrain buffer")
 	}
@@ -280,7 +280,7 @@ func (h *parkHost) SetTerrainE(blob []byte) error {
 	return nil
 }
 
-func (h *parkHost) RestoreE(state []byte) error {
+func (h *simHost) RestoreE(state []byte) error {
 	if uint32(len(state)) > h.ioCap || !h.mem.Write(h.ioPtr, state) {
 		return errors.New("snapshot does not fit candidate io buffer")
 	}
@@ -294,7 +294,7 @@ func (h *parkHost) RestoreE(state []byte) error {
 	return nil
 }
 
-func (h *parkHost) ApplyE(event []byte) (uint32, error) {
+func (h *simHost) ApplyE(event []byte) (uint32, error) {
 	if uint32(len(event)) > h.ioCap || !h.mem.Write(h.ioPtr, event) {
 		return 1, nil
 	}
@@ -302,16 +302,16 @@ func (h *parkHost) ApplyE(event []byte) (uint32, error) {
 	return uint32(code), err
 }
 
-func (h *parkHost) StepE() error {
+func (h *simHost) StepE() error {
 	_, err := h.callE(h.fStep)
 	return err
 }
 
-func (h *parkHost) HashE() (uint64, error) { return h.callE(h.fHash) }
+func (h *simHost) HashE() (uint64, error) { return h.callE(h.fHash) }
 
 // Apply runs one encoded event (kind u16 LE + payload) through sim_apply.
 // The module must not mutate on a nonzero return (pinned by its tests).
-func (h *parkHost) Apply(event []byte) uint32 {
+func (h *simHost) Apply(event []byte) uint32 {
 	if uint32(len(event)) > h.ioCap || !h.mem.Write(h.ioPtr, event) {
 		return 1 // the sim's ERR_ENCODING
 	}
@@ -372,28 +372,29 @@ type ringEntry struct {
 }
 
 // modules exposes the current distribution hashes riding every verdict:
-// the client presentation module and the park module itself.
+// the client presentation module and the sim module itself.
 type modules struct {
 	client *mount.Module
-	park   *mount.Module
+	sim    *mount.Module
 }
 
-// authority is one park's sim authority: journal writer, validator, and
+// authority is one chunk's sim authority: journal writer, validator, and
 // fan-out hub (src/chunkies/README.md). run() is the single owner of the host.
 type authority struct {
-	name string
-	id   int64
-	host *parkHost
-	j    journal.Journal
-	mods *modules
+	name  string
+	id    int64
+	host  *simHost
+	j     journal.Journal
+	mods  *modules
+	vocab Vocab
 
 	// The tick schedule, derived from the sim's journaled rate segment
 	// (refreshSchedule): tick anchorTick falls at anchor, later ticks
 	// advance at tickDur. anchor degrades to a process-local stand-in
 	// when the module cannot journal a clock_skip yet. phase staggers
-	// co-located parks' tick work across the tick interval, derived from
-	// the immutable park id so player-votable metadata can never move a
-	// park's clock.
+	// co-located chunks' tick work across the tick interval, derived from
+	// the immutable chunk id so player-votable metadata can never move a
+	// chunk's clock.
 	tm         timing
 	hz         int
 	tickDur    time.Duration
@@ -409,14 +410,14 @@ type authority struct {
 	terrainBlob []byte
 
 	// The module-update lane (src/chunkies/README.md, module epochs): when the
-	// behavior mount serves a park module whose hash differs from the
+	// behavior mount serves a sim module whose hash differs from the
 	// running one, a candidate instance soaks in the dark — fed the same
 	// events, stepped in lockstep, fanning out nothing — and on a clean
 	// soak the swap commits as an epoch_advance journal event plus a
 	// synchronous boundary snapshot hashed by the new module. All fields
 	// are owned by the tick goroutine.
 	moduleHash string // display hash of the running module
-	cand       *parkHost
+	cand       *simHost
 	candHash   string
 	candSum    uint64 // first 8 bytes (LE) of the candidate's sha256
 	soakLeft   int
@@ -458,7 +459,7 @@ func displayHash(b []byte) string {
 // that must lead this tick's batch — the journaled boundary between the
 // old module's ticks and the new one's.
 func (a *authority) swapPrelude() []stagedIntent {
-	bytes, hash := a.mods.park.Get()
+	bytes, hash := a.mods.sim.Get()
 	if a.cand != nil && hash != a.candHash {
 		a.failSoak("", errors.New("superseded by a newer module"))
 	}
@@ -466,25 +467,28 @@ func (a *authority) swapPrelude() []stagedIntent {
 		if len(bytes) == 0 || hash == a.moduleHash || hash == a.badModule {
 			return nil
 		}
-		cand, err := newParkHost(bytes)
+		cand, err := newSimHost(bytes)
 		if err != nil {
 			a.badModule = hash
-			log.Printf("park %s: module %s rejected: %v", a.name, hash, err)
+			log.Printf("chunk %s: module %s rejected: %v", a.name, hash, err)
 			mEpochSwaps.WithLabelValues("soak_abort").Inc()
 			return nil
 		}
 		a.cand, a.candHash, a.soakLeft = cand, hash, soakTicks(a.hz)
 		sum := sha256.Sum256(bytes)
 		a.candSum = binary.LittleEndian.Uint64(sum[:8])
-		if err := cand.SetTerrainE(a.terrainBlob); err != nil {
-			a.failSoak(hash, err)
-			return nil
+		// A content-free game has no blob to stage.
+		if len(a.terrainBlob) > 0 {
+			if err := cand.SetTerrainE(a.terrainBlob); err != nil {
+				a.failSoak(hash, err)
+				return nil
+			}
 		}
 		if err := cand.RestoreE(a.host.Snapshot()); err != nil {
 			a.failSoak(hash, err)
 			return nil
 		}
-		log.Printf("park %s: module %s soaking for %s / %d ticks at %dHz (live %s)",
+		log.Printf("chunk %s: module %s soaking for %s / %d ticks at %dHz (live %s)",
 			a.name, hash, soakDuration, a.soakLeft, a.hz, a.moduleHash)
 		return nil
 	}
@@ -495,7 +499,7 @@ func (a *authority) swapPrelude() []stagedIntent {
 	var p [12]byte
 	binary.LittleEndian.PutUint32(p[:4], a.host.Epoch()+1)
 	binary.LittleEndian.PutUint64(p[4:], a.candSum)
-	return []stagedIntent{{actor: "system", kind: wum.EvEpochAdvance, payload: p[:]}}
+	return []stagedIntent{{actor: "system", kind: codec.KindEpochAdvance, payload: p[:]}}
 }
 
 // failSoak rejects the candidate. A non-empty hash pins it as bad so the
@@ -508,7 +512,7 @@ func (a *authority) failSoak(hash string, err error) {
 	if hash != "" {
 		a.badModule = hash
 	}
-	log.Printf("park %s: module soak aborted (%s): %v", a.name, a.candHash, err)
+	log.Printf("chunk %s: module soak aborted (%s): %v", a.name, a.candHash, err)
 	mEpochSwaps.WithLabelValues("soak_abort").Inc()
 }
 
@@ -554,25 +558,23 @@ func (a *authority) promote(t uint64) {
 	a.mu.Unlock()
 	a.eventsSinceSnap = 0
 	a.lastSnapAt = a.tm.now()
-	log.Printf("park %s: epoch %d — module %s live (was %s), wh %016x", a.name, a.host.Epoch(), a.moduleHash, prev, wh)
+	log.Printf("chunk %s: epoch %d — module %s live (was %s), wh %016x", a.name, a.host.Epoch(), a.moduleHash, prev, wh)
 	mEpochSwaps.WithLabelValues("committed").Inc()
 }
 
-func parkIDFor(name string) int64 {
+func chunkIDFor(name string) int64 {
 	f := fnv.New64a()
-	// The generation tag versions every park's journal lineage at once: a
-	// park id under a new tag has an empty journal, so worlds born under
+	// The generation tag versions every chunk's journal lineage at once: a
+	// chunk id under a new tag has an empty journal, so worlds born under
 	// an incompatible sim never replay through the current one.
 	f.Write([]byte("g2/" + name))
 	return int64(f.Sum64())
 }
 
 // setTerrain loads a blob into the host and caches its identity for the
-// welcome/snapshot frames (and the bytes for soak candidates).
+// welcome/snapshot frames (and the bytes for soak candidates). The blob is
+// opaque to the host — the sim's content stage validates or rejects it.
 func (a *authority) setTerrain(blob []byte) error {
-	if _, _, _, err := terrainHeaderFields(blob); err != nil {
-		return err
-	}
 	if err := a.host.SetTerrain(blob); err != nil {
 		return err
 	}
@@ -581,13 +583,13 @@ func (a *authority) setTerrain(blob []byte) error {
 	return nil
 }
 
-// openAuthority restores the park from its journal (genesis-snapshotting a
+// openAuthority restores the chunk from its journal (genesis-snapshotting a
 // brand new one on the genesis terrain), repays the gap between the
 // replayed tick and the wall-clock schedule while the doors are still
-// closed, and hands back an authority ready for run(). A park whose
+// closed, and hands back an authority ready for run(). A chunk whose
 // snapshot does not replay to its recorded world hash is refused, never
 // served wrong.
-func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, j journal.Journal, mods *modules, tm timing) (*authority, error) {
+func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing) (*authority, error) {
 	if tm.hz == 0 {
 		tm.hz = 24
 	}
@@ -597,12 +599,13 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 	if tm.now == nil {
 		tm.now = time.Now
 	}
-	host, err := newParkHost(module)
+	host, err := newSimHost(module)
 	if err != nil {
 		return nil, err
 	}
 	a := &authority{
-		name: name, id: parkIDFor(name), host: host, j: j, mods: mods,
+		name: name, id: chunkIDFor(name), host: host, j: j, mods: mods,
+		vocab:      vocab,
 		tm:         tm,
 		moduleHash: displayHash(module),
 		subs:       map[*session]bool{},
@@ -612,26 +615,30 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 		stop:       make(chan struct{}),
 		lastSnapAt: tm.now(),
 		// utcDay 0: the first tick after every open stages a day_reset, so
-		// a park that slept across midnight wakes with the right day.
+		// a chunk that slept across midnight wakes with the right day.
 	}
 	fail := func(err error) (*authority, error) {
 		host.close()
-		return nil, fmt.Errorf("park %s: %w", name, err)
+		return nil, fmt.Errorf("chunk %s: %w", name, err)
 	}
 	snap, ok, err := j.LatestSnapshot(ctx, a.id)
 	if err != nil {
 		return fail(err)
 	}
 	if ok {
-		blob, found, err := j.TerrainBlob(ctx, snap.TerrainID)
-		if err != nil {
-			return fail(err)
-		}
-		if !found {
-			return fail(fmt.Errorf("terrain %016x missing — snapshot cannot restore", snap.TerrainID))
-		}
-		if err := a.setTerrain(blob); err != nil {
-			return fail(err)
+		// TerrainID 0 is a content-free game (content_cap 0): there is no
+		// blob to fetch and no content stage to run.
+		if snap.TerrainID != 0 {
+			blob, found, err := j.TerrainBlob(ctx, snap.TerrainID)
+			if err != nil {
+				return fail(err)
+			}
+			if !found {
+				return fail(fmt.Errorf("terrain %016x missing — snapshot cannot restore", snap.TerrainID))
+			}
+			if err := a.setTerrain(blob); err != nil {
+				return fail(err)
+			}
 		}
 		if err := host.Restore(snap.State); err != nil {
 			return fail(err)
@@ -658,7 +665,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 			for host.Tick() < ev.Tick {
 				host.Step()
 			}
-			if ev.Kind == wum.EvTerrainSet && len(ev.Payload) == 12 {
+			if ev.Kind == codec.KindContentSet && len(ev.Payload) == 12 {
 				tid := binary.LittleEndian.Uint64(ev.Payload[4:12])
 				blob, found, err := j.TerrainBlob(ctx, tid)
 				if err != nil {
@@ -671,26 +678,28 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 					return fail(err)
 				}
 			}
-			actor, payload := wum.EventActor(ev.Kind, ev.Actor, ev.Payload)
+			actor, payload := a.vocab.eventActor(ev.Kind, ev.Actor, ev.Payload)
 			if code := host.Apply(simEvent(ev.Kind, actor, payload)); code != 0 {
 				return fail(fmt.Errorf("replay: event seq %d rejected with code %d", ev.Seq, code))
 			}
 			a.lastSeq = ev.Seq
 		}
 	} else {
-		// Genesis: the terrain artifact becomes durable first, then the
+		// Genesis: the content artifact becomes durable first, then the
 		// snapshot that references it — events alone cannot recreate a
-		// park, and a snapshot must never point at an unstored blob.
-		schema, _, _, err := terrainHeaderFields(genesisTerrain)
-		if err != nil {
-			return fail(err)
-		}
-		tid := terrainID(genesisTerrain)
-		if err := j.PutTerrain(ctx, tid, schema, genesisTerrain); err != nil {
-			return fail(err)
-		}
-		if err := a.setTerrain(genesisTerrain); err != nil {
-			return fail(err)
+		// chunk, and a snapshot must never point at an unstored blob. A
+		// content-free game (no genesis artifact) skips the dance; the
+		// blob's layout is the sim's business, so schema rides as zero.
+		if len(genesisTerrain) > 0 {
+			// The sim validates the blob (content stage) before anything
+			// durable happens: a corrupt genesis must never become an
+			// immutable journal row.
+			if err := a.setTerrain(genesisTerrain); err != nil {
+				return fail(err)
+			}
+			if err := j.PutTerrain(ctx, terrainID(genesisTerrain), 0, genesisTerrain); err != nil {
+				return fail(err)
+			}
 		}
 		var b [8]byte
 		rand.Read(b[:])
@@ -698,7 +707,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 			return fail(err)
 		}
 		if err := j.PutSnapshot(ctx, a.id, journal.Snapshot{
-			Seq: 0, Tick: 0, Epoch: 1, WH: host.Hash(), TerrainID: tid, State: host.Snapshot(),
+			Seq: 0, Tick: 0, Epoch: 1, WH: host.Hash(), TerrainID: host.TerrainID(), State: host.Snapshot(),
 		}); err != nil {
 			return fail(err)
 		}
@@ -740,14 +749,14 @@ func (a *authority) rateChange(ctx context.Context, hz int) error {
 	tick, epoch := a.host.Tick(), a.host.Epoch()
 	var p [4]byte
 	binary.LittleEndian.PutUint32(p[:], uint32(hz))
-	if code := a.host.Apply(simEvent(wum.EvRateSet, 0, p[:])); code != 0 {
+	if code := a.host.Apply(simEvent(codec.KindRateSet, 0, p[:])); code != 0 {
 		// A module from before rates existed (mount skew during a
 		// deploy): hold the world's rate; the desired rate lands on the
 		// first reopen under a rate-capable module.
-		log.Printf("park %s: module rejected rate_set %dHz (code %d) — holding %dHz", a.name, hz, code, a.hz)
+		log.Printf("chunk %s: module rejected rate_set %dHz (code %d) — holding %dHz", a.name, hz, code, a.hz)
 		return nil
 	}
-	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: wum.EvRateSet, Actor: "system", Payload: p[:]}
+	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: codec.KindRateSet, Actor: "system", Payload: p[:]}
 	firstSeq, err := a.j.Append(ctx, a.id, a.lastSeq, []journal.Event{ev})
 	if err != nil {
 		// State is ahead of the journal: never serve it.
@@ -764,12 +773,12 @@ func (a *authority) rateChange(ctx context.Context, hz int) error {
 		Seq: a.lastSeq, Tick: t, Epoch: epoch, WH: a.host.Hash(),
 		TerrainID: a.host.TerrainID(), State: a.host.Snapshot(),
 	}); err != nil {
-		log.Printf("park %s: snapshot after rate_set failed: %v", a.name, err)
+		log.Printf("chunk %s: snapshot after rate_set failed: %v", a.name, err)
 	} else {
 		mSnapshots.Inc()
 		a.lastSnapAt = a.tm.now()
 	}
-	log.Printf("park %s: rate_set %dHz at tick %d", a.name, hz, t)
+	log.Printf("chunk %s: rate_set %dHz at tick %d", a.name, hz, t)
 	return nil
 }
 
@@ -780,17 +789,17 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	tick, epoch := a.host.Tick(), a.host.Epoch()
 	var p [8]byte
 	binary.LittleEndian.PutUint64(p[:], target)
-	if code := a.host.Apply(simEvent(wum.EvClockSkip, 0, p[:])); code != 0 {
+	if code := a.host.Apply(simEvent(codec.KindClockSkip, 0, p[:])); code != 0 {
 		// A module from before clock_skip existed (mount skew during a
 		// deploy): anchor to this process so the schedule holds drift-free
 		// for the instance's life; the real repayment lands on the first
 		// reopen under a skip-capable module.
 		a.anchorTick = tick
 		a.anchor = a.tm.now().Add(-a.phase)
-		log.Printf("park %s: module rejected clock_skip (code %d) — process-anchored until the module lane converges", a.name, code)
+		log.Printf("chunk %s: module rejected clock_skip (code %d) — process-anchored until the module lane converges", a.name, code)
 		return nil
 	}
-	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: wum.EvClockSkip, Actor: "system", Payload: p[:]}
+	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: codec.KindClockSkip, Actor: "system", Payload: p[:]}
 	firstSeq, err := a.j.Append(ctx, a.id, a.lastSeq, []journal.Event{ev})
 	if err != nil {
 		// State is ahead of the journal: never serve it.
@@ -808,12 +817,12 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 		Seq: a.lastSeq, Tick: t, Epoch: epoch, WH: a.host.Hash(),
 		TerrainID: a.host.TerrainID(), State: a.host.Snapshot(),
 	}); err != nil {
-		log.Printf("park %s: snapshot after clock_skip failed: %v", a.name, err)
+		log.Printf("chunk %s: snapshot after clock_skip failed: %v", a.name, err)
 	} else {
 		mSnapshots.Inc()
 		a.lastSnapAt = a.tm.now()
 	}
-	log.Printf("park %s: clock_skip %d -> %d (%s of downtime repaid)",
+	log.Printf("chunk %s: clock_skip %d -> %d (%s of downtime repaid)",
 		a.name, tick, t, time.Duration(t-tick)*a.tickDur)
 	return nil
 }
@@ -841,14 +850,14 @@ func elapsed(from, to time.Time) time.Duration {
 // recordIntent closes one server-observed action lifecycle. The span's
 // duration is receipt -> durable fan-out/reject; tick_queue_ms isolates the
 // only component a higher tick rate is expected to shrink. Intent/actor ids
-// never become attributes: kind, result, park and rate are bounded analysis
+// never become attributes: kind, result, chunk and rate are bounded analysis
 // dimensions, while per-player identifiers would be both unnecessary and
 // high-cardinality.
 func (a *authority) recordIntent(in stagedIntent, result string, reject uint32, finished time.Time) {
 	if in.sess == nil || in.intentID == 0 || in.receivedAt.IsZero() {
 		return
 	}
-	kind := wum.ActionName(in.kind)
+	kind := a.vocab.actionName(in.kind)
 	rateHz := in.rateHz
 	if rateHz == 0 {
 		rateHz = a.hz
@@ -859,19 +868,19 @@ func (a *authority) recordIntent(in stagedIntent, result string, reject uint32, 
 	mIntentAuthorityDur.WithLabelValues(kind, result).Observe(total.Seconds())
 
 	attrs := []attribute.KeyValue{
-		attribute.String("wum.kind", kind),
-		attribute.String("wum.result", result),
-		attribute.String("wum.park", a.name),
-		attribute.Int("wum.rate_hz", rateHz),
-		attribute.Float64("wum.tick_queue_ms", float64(queue.Microseconds())/1000),
-		attribute.Float64("wum.authority_ms", float64(total.Microseconds())/1000),
+		attribute.String("chunkies.kind", kind),
+		attribute.String("chunkies.result", result),
+		attribute.String("chunkies.chunk", a.name),
+		attribute.Int("chunkies.rate_hz", rateHz),
+		attribute.Float64("chunkies.tick_queue_ms", float64(queue.Microseconds())/1000),
+		attribute.Float64("chunkies.authority_ms", float64(total.Microseconds())/1000),
 	}
 	if reject != 0 {
-		attrs = append(attrs, attribute.String("wum.reject_reason", wum.RejectReasonName(reject)))
+		attrs = append(attrs, attribute.String("chunkies.reject_reason", a.vocab.rejectName(reject)))
 	}
 	_, span := otel.Tracer("guardian/chunkies/authority").Start(
 		context.Background(),
-		"mythra.intent",
+		"chunkies.intent",
 		trace.WithTimestamp(in.receivedAt),
 		trace.WithAttributes(attrs...),
 	)
@@ -957,12 +966,12 @@ func (a *authority) stageRateChange(req rateChangeReq) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, in := range a.staged {
-		if in.kind == wum.EvRateSet {
+		if in.kind == codec.KindRateSet {
 			return errors.New("another tick-rate change is pending")
 		}
 	}
 	a.staged = append(a.staged, stagedIntent{
-		actor: "system", kind: wum.EvRateSet, payload: payload[:], done: req.done,
+		actor: "system", kind: codec.KindRateSet, payload: payload[:], done: req.done,
 	})
 	return nil
 }
@@ -990,7 +999,7 @@ func (a *authority) verdictFor(tick, wh uint64) (ok *bool, now uint64) {
 // state, not config, so every pod generation (and rollback) computes the
 // identical mapping. Live changes preserve and rehash the existing
 // verification ring while resizing it for the new wall-time depth. They
-// also preserve the park's sub-tick phase so the boundary itself does not
+// also preserve the chunk's sub-tick phase so the boundary itself does not
 // move; dark boot/convergence may derive the phase for its resulting rate.
 func (a *authority) refreshSchedule(rephase bool) {
 	a.hz = a.host.Rate()
@@ -1029,7 +1038,7 @@ func (a *authority) tickInstant(t uint64) time.Time {
 }
 
 // targetTick is the tick whose instant most recently passed: the tick the
-// park should be on right now.
+// chunk should be on right now.
 func (a *authority) targetTick(now time.Time) uint64 {
 	d := now.Sub(a.anchor) - a.phase
 	if d < 0 {
@@ -1041,12 +1050,12 @@ func (a *authority) targetTick(now time.Time) uint64 {
 		remainder*uint64(a.hz)/uint64(time.Second)
 }
 
-// run is the authority loop: the single goroutine touching the parkHost.
+// run is the authority loop: the single goroutine touching the simHost.
 // Ticks are scheduled against the wall clock, never free-counted: each
 // wakeup runs every tick whose instant has passed (bounded per wakeup),
 // then sleeps until the next tick's instant. A short hitch repays itself;
 // the sim never runs ahead of its schedule — if the wall clock steps
-// backward, the park idles until reality catches up.
+// backward, the chunk idles until reality catches up.
 func (a *authority) run() {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
@@ -1072,7 +1081,7 @@ func (a *authority) run() {
 				// forward): every client is beyond fast-forward range
 				// anyway, so repay the gap where gaps are repaid — the
 				// dark reopen path.
-				log.Printf("park %s: %d ticks behind schedule — closing to repay the gap dark", a.name, target-cur)
+				log.Printf("chunk %s: %d ticks behind schedule — closing to repay the gap dark", a.name, target-cur)
 				a.close()
 				continue
 			}
@@ -1098,7 +1107,7 @@ func (a *authority) tickOnce() {
 		a.utcDay = day
 		var p [4]byte
 		binary.LittleEndian.PutUint32(p[:], day)
-		a.stageSystem(wum.EvDayReset, p[:])
+		a.stageSystem(codec.KindDayReset, p[:])
 	}
 
 	prelude := a.swapPrelude()
@@ -1134,12 +1143,12 @@ func (a *authority) tickOnce() {
 					a.mu.Unlock()
 				}
 			}
-			log.Printf("park %s: intent rejected: actor=%s kind=%d intent=%d reason=%s(%d)",
-				a.name, in.actor, in.kind, in.intentID, wum.RejectReasonName(code), code)
-			mIntentsRejected.WithLabelValues(wum.RejectReasonName(code)).Inc()
+			log.Printf("chunk %s: intent rejected: actor=%s kind=%d intent=%d reason=%s(%d)",
+				a.name, in.actor, in.kind, in.intentID, a.vocab.rejectName(code), code)
+			mIntentsRejected.WithLabelValues(a.vocab.rejectName(code)).Inc()
 			a.recordIntent(in, "rejected", code, a.tm.now())
 			if in.done != nil {
-				in.done <- fmt.Errorf("rate_set rejected: %s (%d)", wum.RejectReasonName(code), code)
+				in.done <- fmt.Errorf("rate_set rejected: %s (%d)", a.vocab.rejectName(code), code)
 			}
 			continue
 		}
@@ -1163,7 +1172,7 @@ func (a *authority) tickOnce() {
 	// Durable-before-visible: the batch commits before any session sees an
 	// event. On journal failure the authority's state is ahead of the
 	// truth, so the only safe move is to stop serving; sessions redial and
-	// the park reopens from the journal (roll forward, never serve
+	// the chunk reopens from the journal (roll forward, never serve
 	// divergence).
 	if len(accepted) > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1180,7 +1189,7 @@ func (a *authority) tickOnce() {
 					in.done <- fmt.Errorf("rate_set append: %w", err)
 				}
 			}
-			log.Printf("park %s: journal append failed (%v) — closing for a journal-clean reopen", a.name, err)
+			log.Printf("chunk %s: journal append failed (%v) — closing for a journal-clean reopen", a.name, err)
 			a.close()
 			return
 		}
@@ -1202,7 +1211,7 @@ func (a *authority) tickOnce() {
 		a.lastSeq = accepted[len(accepted)-1].Seq
 		a.mu.Unlock()
 		for _, in := range acceptedIntents {
-			if in.kind != wum.EvRateSet || len(in.payload) != 4 {
+			if in.kind != codec.KindRateSet || len(in.payload) != 4 {
 				continue
 			}
 			oldHz := a.hz
@@ -1211,7 +1220,7 @@ func (a *authority) tickOnce() {
 			a.snapCache = snapCacheEntry{}
 			a.mu.Unlock()
 			mRateChanges.Inc()
-			log.Printf("park %s: live rate_set %dHz -> %dHz at tick %d",
+			log.Printf("chunk %s: live rate_set %dHz -> %dHz at tick %d",
 				a.name, oldHz, a.hz, tick)
 		}
 		finished := a.tm.now()
@@ -1252,7 +1261,7 @@ func (a *authority) tickOnce() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := a.j.PutSnapshot(ctx, a.id, snap); err != nil {
-				log.Printf("park %s: snapshot write failed: %v", a.name, err)
+				log.Printf("chunk %s: snapshot write failed: %v", a.name, err)
 			} else {
 				mSnapshots.Inc()
 			}
@@ -1280,7 +1289,7 @@ func (a *authority) handleAttach(req attachReq) attachResult {
 	res := attachResult{
 		// Lineage and generation are the netcode rewrite's stream
 		// identity; the Postgres-journal era has exactly one history per
-		// park, so both ride as zero until the fencing lane mints them.
+		// chunk, so both ride as zero until the fencing lane mints them.
 		welcome: codec.EncodeWelcome(codec.Welcome{
 			Lineage: 0, Generation: 0, Sub: 0,
 			Epoch: a.host.Epoch(), Seq: a.lastSeq, Tick: a.host.Tick(),
@@ -1322,7 +1331,7 @@ func (a *authority) catchupFrames(sinceSeq int64, sinceTick uint64, res attachRe
 			if ev.Seq > res.seq {
 				return errPastAttach
 			}
-			f := eventFrameFor(&ev)
+			f := a.eventFrameFor(&ev)
 			events = append(events, f)
 			eventBytes += len(f)
 			return nil
@@ -1370,8 +1379,8 @@ func snapshotFrameFor(seq int64, tick uint64, epoch uint32, wh, terrain uint64, 
 
 // eventFrameFor rebuilds one journal row as a single-record tick batch
 // for catch-up, resolving the payload era on the way out.
-func eventFrameFor(ev *journal.Event) []byte {
-	actor, payload := wum.EventActor(ev.Kind, ev.Actor, ev.Payload)
+func (a *authority) eventFrameFor(ev *journal.Event) []byte {
+	actor, payload := a.vocab.eventActor(ev.Kind, ev.Actor, ev.Payload)
 	run := codec.AppendEventRecord(nil, ev.IntentID, ev.Kind, actor, payload)
 	return codec.EncodeTick(ev.Tick, ev.Seq, 1, run)
 }
@@ -1390,7 +1399,7 @@ func (a *authority) close() {
 	a.subs = map[*session]bool{}
 	a.mu.Unlock()
 	for _, s := range subs {
-		s.closeSession("park reopening")
+		s.closeSession("chunk reopening")
 	}
 	close(a.stop)
 }
@@ -1401,22 +1410,23 @@ func (a *authority) isClosed() bool {
 	return a.closed
 }
 
-// parks is the registry of open authorities on this hub.
-type parks struct {
+// chunks is the registry of open authorities on this hub.
+type chunks struct {
 	mu      sync.Mutex
 	byName  map[string]*authority
 	module  func() []byte
-	genesis []byte // terrain artifact every brand-new park is born with
+	genesis []byte // content artifact every brand-new chunk is born with
+	vocab   Vocab
 	j       journal.Journal
 	mods    *modules
 	tm      timing
 }
 
-func newParks(module func() []byte, genesis []byte, j journal.Journal, mods *modules, tm timing) *parks {
-	return &parks{byName: map[string]*authority{}, module: module, genesis: genesis, j: j, mods: mods, tm: tm}
+func newChunks(module func() []byte, genesis []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing) *chunks {
+	return &chunks{byName: map[string]*authority{}, module: module, genesis: genesis, vocab: vocab, j: j, mods: mods, tm: tm}
 }
 
-func (p *parks) get(ctx context.Context, name string) (*authority, error) {
+func (p *chunks) get(ctx context.Context, name string) (*authority, error) {
 	p.mu.Lock()
 	if a, ok := p.byName[name]; ok && !a.isClosed() {
 		p.mu.Unlock()
@@ -1425,7 +1435,7 @@ func (p *parks) get(ctx context.Context, name string) (*authority, error) {
 	p.mu.Unlock()
 	// Open outside the registry lock (journal replay takes a moment); the
 	// rare double-open race resolves to the first registered instance.
-	a, err := openAuthority(ctx, name, p.module(), p.genesis, p.j, p.mods, p.tm)
+	a, err := openAuthority(ctx, name, p.module(), p.genesis, p.vocab, p.j, p.mods, p.tm)
 	if err != nil {
 		return nil, err
 	}
@@ -1438,14 +1448,14 @@ func (p *parks) get(ctx context.Context, name string) (*authority, error) {
 	}
 	p.byName[name] = a
 	go a.run()
-	mParks.Set(float64(len(p.byName)))
+	mChunks.Set(float64(len(p.byName)))
 	return a, nil
 }
 
 // current returns an already-running authority. The local rate drill uses
 // this instead of get: its subject is an existing connected session, so a
-// control request must not quietly create a new park and call that success.
-func (p *parks) current(name string) (*authority, bool) {
+// control request must not quietly create a new chunk and call that success.
+func (p *chunks) current(name string) (*authority, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	a, ok := p.byName[name]
