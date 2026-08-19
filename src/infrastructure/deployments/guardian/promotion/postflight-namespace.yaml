@@ -1,0 +1,18 @@
+# The Kargo project namespace, created here rather than in pipelines/: this
+# tree's cli-nightly-promoter lives in it, and guardian-promotion-pipelines
+# (which holds the Project CR) dependsOn this Kustomization — the namespace
+# must come from the side that applies first. The kargo.akuity.io/project
+# label is Kargo's namespace-adoption contract. Prune is disabled because
+# the namespace holds Freight history.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: guardian-postflight
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+  labels:
+    kargo.akuity.io/project: "true"
+    app.kubernetes.io/part-of: guardian
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

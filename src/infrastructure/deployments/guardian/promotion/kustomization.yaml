@@ -18,6 +18,7 @@ configMapGenerator:
       - ../system/release-manifest.yaml
 resources:
   - namespace.yaml
+  - postflight-namespace.yaml
   - kargo-helmrelease.yaml
   - kargo-networkpolicy.yaml
   - kargo-state-metrics.yaml
