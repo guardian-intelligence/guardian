@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"errors"
 	"log"
 	"sync/atomic"
 
@@ -38,6 +39,11 @@ func newParkPool(key []byte) *parkproxy.Pool {
 		ConnUp: func(string) { mParkConns.Inc() },
 		ConnDown: func(addr string, err error) {
 			mParkConns.Dec()
+			// An idle reap is routine lifecycle; counting it as failure
+			// would bake noise into anything alerting on this counter.
+			if errors.Is(err, parkproxy.ErrIdle) {
+				return
+			}
 			mParkConnFailures.WithLabelValues("run").Inc()
 			log.Printf("park conn %s down: %v", addr, err)
 		},

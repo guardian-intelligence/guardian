@@ -200,6 +200,9 @@ type connSession struct {
 	done    chan struct{}
 	reap    func()
 	once    sync.Once
+	// resyncShed remembers a resync request shed under inbound pressure;
+	// the drain replays it once it resumes.
+	resyncShed atomic.Bool
 }
 
 // terminate ends this session only; the shared connection lives on for
@@ -268,16 +271,22 @@ func handleParkConn(conn net.Conn, key []byte, park *authority, maxSessions int)
 				// A malformed open is that session's failure (a version-skew
 				// window during a rolling deploy), not grounds to drop every
 				// live session on the pair.
-				pc.WriteClose(msg.SID, "bad open")
+				if pc.WriteClose(msg.SID, "bad open") != nil {
+					return
+				}
 				continue
 			}
 			if open.Park != park.name {
-				pc.WriteClose(msg.SID, "wrong park")
+				if pc.WriteClose(msg.SID, "wrong park") != nil {
+					return
+				}
 				continue
 			}
 			if n := sessionCount.Add(1); n > int64(maxSessions) {
 				sessionCount.Add(-1)
-				pc.WriteClose(msg.SID, "at capacity")
+				if pc.WriteClose(msg.SID, "at capacity") != nil {
+					return
+				}
 				continue
 			}
 			cs := &connSession{
@@ -310,8 +319,14 @@ func handleParkConn(conn net.Conn, key []byte, park *authority, maxSessions int)
 				// the authority (an attach or journal wait), not the client.
 				// Shed the frame instead of the player: intents are
 				// idempotent by (actor, intent_id), so nothing is double
-				// applied and the disconnect is saved.
-				mInboundDropped.Inc()
+				// applied and the disconnect is saved. A resync request
+				// must survive the shed, though — its payload is unused, so
+				// a flag replays it when the drain resumes.
+				if kind, _, err := codec.NewReader(bytes.NewReader(msg.Payload)).Next(); err == nil && kind == codec.KindResync {
+					cs.resyncShed.Store(true)
+				} else {
+					mInboundDropped.Inc()
+				}
 			}
 		case parkproxy.KindDatagram:
 			if lookup(msg.SID) == nil {
@@ -386,9 +401,23 @@ func (cs *connSession) run() {
 		select {
 		case b := <-cs.inbound:
 			cs.handleFrame(b)
+			// The flag is only ever set while inbound is full, so there is
+			// always a drained frame to hang this replay on.
+			if cs.resyncShed.Swap(false) {
+				cs.requestResync()
+			}
 		case <-cs.done:
 			return
 		}
+	}
+}
+
+func (cs *connSession) requestResync() {
+	mResyncs.Inc()
+	select {
+	case cs.s.park.attach <- attachReq{sess: cs.s, resync: true, done: make(chan attachResult, 1)}:
+	case <-cs.s.park.stop:
+		cs.terminate("park unavailable", true)
 	}
 }
 
@@ -419,12 +448,7 @@ func (cs *connSession) handleFrame(payload []byte) {
 		if _, err := codec.DecodeResync(framePayload); err != nil {
 			return
 		}
-		mResyncs.Inc()
-		select {
-		case park.attach <- attachReq{sess: s, resync: true, done: make(chan attachResult, 1)}:
-		case <-park.stop:
-			cs.terminate("park unavailable", true)
-		}
+		cs.requestResync()
 	}
 }
 

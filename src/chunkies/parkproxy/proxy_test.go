@@ -379,13 +379,22 @@ func TestMuxRejectsWrongKey(t *testing.T) {
 	t.Cleanup(func() { l.Close() })
 	done := make(chan error, 1)
 	go func() {
-		conn, err := l.Accept()
-		if err != nil {
-			done <- err
-			return
+		// An accept loop, not a single accept: the pool's one-retry redial
+		// may land a second connection, which must also be rejected or it
+		// would sit unanswered in the backlog and the session would linger
+		// to the pong timeout.
+		first := true
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			_, aerr := Accept(conn, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), time.Now())
+			if first {
+				done <- aerr
+				first = false
+			}
 		}
-		_, err = Accept(conn, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), time.Now())
-		done <- err
 	}()
 	pool := NewPool([]byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), Hooks{})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

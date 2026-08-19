@@ -47,6 +47,10 @@ const (
 
 var errSessionClosed = errors.New("proxy session closed")
 
+// ErrIdle is the reason a sessionless connection was reaped; owners can
+// tell routine lifecycle from failure in their ConnDown hook.
+var ErrIdle = errors.New("idle")
+
 // Open carries one session's identity to the park. It rides the
 // authenticated connection, so it needs no signature of its own.
 type Open struct {
@@ -352,12 +356,17 @@ func (p *Pool) Open(ctx context.Context, addr string, open Open) (*Session, erro
 	}
 	p.mu.Unlock()
 
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	for attempt := 0; ; attempt++ {
-		if e.conn == nil || e.conn.dead() {
-			mc, err := p.dial(ctx, addr)
+		// The entry lock covers only the dial decision (ctx bounds the
+		// dial itself); the open write happens outside it so one slow
+		// write can't head-of-line-block every other session's open.
+		e.mu.Lock()
+		mc := e.conn
+		if mc == nil || mc.dead() {
+			var err error
+			mc, err = p.dial(ctx, addr)
 			if err != nil {
+				e.mu.Unlock()
 				if p.hooks.DialError != nil {
 					p.hooks.DialError(addr)
 				}
@@ -365,7 +374,8 @@ func (p *Pool) Open(ctx context.Context, addr string, open Open) (*Session, erro
 			}
 			e.conn = mc
 		}
-		s, err := e.conn.openSession(body)
+		e.mu.Unlock()
+		s, err := mc.openSession(body)
 		if err == nil || attempt > 0 {
 			return s, err
 		}
@@ -506,7 +516,7 @@ func (m *muxConn) pingLoop() {
 			idle := !m.idleSince.IsZero() && time.Since(m.idleSince) > m.idleAfter
 			m.mu.Unlock()
 			if idle {
-				m.kill(errors.New("idle"))
+				m.kill(ErrIdle)
 				return
 			}
 			if err := m.WriteMessage(KindPing, uint64(time.Now().UnixNano()), nil); err != nil {
