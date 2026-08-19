@@ -10,10 +10,12 @@ go_library(
         "session.go",
         "terrain.go",
         "vocab.go",
+        "wal.go",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/chunkies/chunkie",
     visibility = ["//src/chunkies:__subpackages__"],
     deps = [
+        "//src/chunkies/chunkie/ticklog",
         "//src/chunkies/journal",
         "//src/chunkies/mount",
         "//src/chunkies/trunk",
@@ -36,6 +38,7 @@ go_test(
     srcs = [
         "authority_test.go",
         "server_test.go",
+        "wal_test.go",
     ],
     data = [
         "//src/chunkies/sim/shared:toy_wasm",

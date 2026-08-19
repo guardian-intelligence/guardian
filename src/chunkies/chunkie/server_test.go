@@ -62,7 +62,7 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 	}
 	mods := toyMods(toyModule(t))
 	bcast := newBroadcaster("wum", 24, 1)
-	registry := newChunks(func() []byte { b, _ := mods.sim.Get(); return b }, nil, toyVocab(), j, mods, timing{hz: 24}, bcast.publish)
+	registry := newChunks(func() []byte { b, _ := mods.sim.Get(); return b }, nil, toyVocab(), j, mods, timing{hz: 24}, bcast.publish, nil)
 	auth, err := registry.get(ctx, "park-test")
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +193,7 @@ func TestPublishCopiesRunAndFansOutPerConn(t *testing.T) {
 	bcast := newBroadcaster("wum", 24, 1)
 	// A pinned clock keeps the run loop owing zero ticks, so the only
 	// broadcast on the wire is the one this test publishes.
-	registry := newChunks(func() []byte { b, _ := mods.sim.Get(); return b }, nil, toyVocab(), j, mods, fixedClock(wallEpoch), bcast.publish)
+	registry := newChunks(func() []byte { b, _ := mods.sim.Get(); return b }, nil, toyVocab(), j, mods, fixedClock(wallEpoch), bcast.publish, nil)
 	auth, err := registry.get(ctx, "park-test")
 	if err != nil {
 		t.Fatal(err)
