@@ -72,10 +72,17 @@ func Run() {
 	defer traceShutdown(context.Background())
 
 	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/chunkies/behavior")
-	client := mount.NewModule("client", mount.DefaultClient)
-	simModule := mount.NewModule("sim", mount.DefaultSim)
+	client := mount.NewModule("client")
+	simModule := mount.NewModule("sim")
 	// nil acceptance: the gateway only distributes module bytes, and the
-	// browser's boot gate is the consumer-side decision there.
+	// browser's boot gate is the consumer-side decision there. The mount
+	// exists before the process (ConfigMap volumes mount first), so one
+	// synchronous scan settles it; /behavior/*.wasm and /wt-info promise
+	// module bytes, and a pod declared without its game must crash loudly.
+	mount.Load(behaviorDir, nil, client, simModule)
+	if err := mount.Require(client, simModule); err != nil {
+		log.Fatalf("%v (BEHAVIOR_DIR=%s)", err, behaviorDir)
+	}
 	go mount.Watch(behaviorDir, nil, client, simModule)
 	assets := newAssetCatalog(envStr("ASSET_DIR", "/etc/chunkies/assets"))
 

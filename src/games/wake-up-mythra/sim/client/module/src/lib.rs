@@ -7,7 +7,7 @@
 //! ABI (all integers; fractional values Q16.16). Payloads move through the
 //! staging buffer, which is the host's only window into this module.
 //!
-//! Session core (chunkies_session). There is one park — the journal
+//! Session core (wum_session). There is one park — the journal
 //! replica — and the renderer and HUD read it directly:
 //!   abi_version() -> u32           the host refuses a version it does not
 //!                                  know at boot; additions never bump it,
@@ -90,7 +90,7 @@
 //! clock's state rides `session_pump`'s return at bit 8.
 #![no_std]
 
-use chunkies_session::{Host, Session};
+use wum_session::{Host, Session};
 
 #[cfg(target_arch = "wasm32")]
 #[panic_handler]
@@ -300,8 +300,7 @@ pub extern "C" fn smooth_frame(n: u32, alpha_q16: u32, snap_q16: u32) {
     let n = (n as usize).min(MAX_DOGS);
     let frame = unsafe { core::slice::from_raw_parts_mut(&raw mut FRAME as *mut i32, n * 4) };
     for quad in frame.chunks_exact_mut(4) {
-        let (sx, sy) =
-            chunkies_render::smooth(quad[0], quad[1], quad[2], quad[3], alpha_q16, snap_q16);
+        let (sx, sy) = wum_render::smooth(quad[0], quad[1], quad[2], quad[3], alpha_q16, snap_q16);
         quad[0] = sx;
         quad[1] = sy;
     }

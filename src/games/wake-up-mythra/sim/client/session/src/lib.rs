@@ -68,8 +68,8 @@
 //! any repair that rewrites it.
 #![cfg_attr(not(test), no_std)]
 
-use chunkies_clock::{Clock, F_SNAPSHOT, STEP_COST_US, State};
 use core::mem;
+use wum_clock::{Clock, F_SNAPSHOT, STEP_COST_US, State};
 
 pub use chunkies_codec as wire;
 
@@ -565,7 +565,7 @@ impl Session {
 
         seq: 0,
         tick: 0,
-        hz: chunkies_clock::GENESIS_HZ,
+        hz: wum_clock::GENESIS_HZ,
         terrain_id: 0,
 
         connected: false,
@@ -639,7 +639,7 @@ impl Session {
         self.counter = 0;
         self.seq = 0;
         self.tick = 0;
-        self.hz = chunkies_clock::GENESIS_HZ;
+        self.hz = wum_clock::GENESIS_HZ;
         self.terrain_id = 0;
         self.connected = false;
         self.conn = 0;
@@ -771,8 +771,8 @@ impl Session {
         dst[16..24].copy_from_slice(&self.error_q16(now_ms).to_le_bytes());
         dst[24..32].copy_from_slice(&self.tick.to_le_bytes());
         dst[32..40].copy_from_slice(&self.seq.to_le_bytes());
-        dst[40..44].copy_from_slice(&(chunkies_clock::TRAIL_TARGET_TICKS as u32).to_le_bytes());
-        dst[44..48].copy_from_slice(&(chunkies_clock::LAG_TICKS as u32).to_le_bytes());
+        dst[40..44].copy_from_slice(&(wum_clock::TRAIL_TARGET_TICKS as u32).to_le_bytes());
+        dst[44..48].copy_from_slice(&(wum_clock::LAG_TICKS as u32).to_le_bytes());
         for (i, s) in self.stats[..(DIAG_BYTES - 48) / 8].iter().enumerate() {
             let at = 48 + i * 8;
             dst[at..at + 8].copy_from_slice(&s.to_le_bytes());

@@ -1,4 +1,6 @@
+load("@aspect_bazel_lib//lib:diff_test.bzl", "diff_test")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_shared_library", "rust_test", "rustfmt_test")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 load("//src/chunkies/sim:wasm.bzl", "wasm_module")
 
 # The Wake Up Mythra world simulation. Everything here is the game's: the
@@ -9,14 +11,11 @@ load("//src/chunkies/sim:wasm.bzl", "wasm_module")
 # The dependency direction is one-way: this game depends on chunkies (the
 # ABI it exports through), and chunkies depends on nothing here.
 
-# The framework's sim hub owns the built-artifact refresh and the fixed-point
-# gate, and needs to see this game's wasm, fixture, and sources.
+# The framework's fixed-point gate needs this game's sources; the game's
+# own client stack (client/) links the park for its goldens generator.
 CHUNKIES_SIM = ["//src/chunkies/sim:__pkg__"]
 
-# Legacy: //src/chunkies/sim/client's goldens_gen instantiates this game's
-# park to emit record-layout goldens. It is the last framework->game edge in
-# Rust and is slated for removal; do not add to this list.
-LEGACY_GOLDENS_GEN = ["//src/chunkies/sim/client:__pkg__"]
+GAME_CLIENT = ["//src/games/wake-up-mythra/sim/client:__pkg__"]
 
 filegroup(
     name = "sources",
@@ -48,7 +47,7 @@ rust_library(
     srcs = ["terrain/src/lib.rs"],
     crate_name = "mythra_sim_terrain",
     edition = "2024",
-    visibility = LEGACY_GOLDENS_GEN,
+    visibility = GAME_CLIENT,
     deps = [":core"],
 )
 
@@ -95,7 +94,7 @@ rust_library(
     srcs = ["park/src/lib.rs"],
     crate_name = "mythra_sim_park",
     edition = "2024",
-    visibility = LEGACY_GOLDENS_GEN,
+    visibility = GAME_CLIENT,
     deps = [
         ":core",
         ":nav",
@@ -129,6 +128,53 @@ wasm_module(
     lib = ":park_cdylib",
     out = "park.wasm",
     visibility = CHUNKIES_SIM,
+)
+
+# Copies freshly built modules, the fixture terrain, the generated
+# telemetry table, and the record-layout goldens over the committed
+# artifacts (the prod ConfigMap copy plus the framework-facing tables the
+# game's generators still feed). The diff tests below fail the build when
+# source and committed bytes drift.
+sh_binary(
+    name = "refresh",
+    srcs = ["refresh.sh"],
+    data = [
+        ":fixture_park",
+        ":park_wasm",
+        "//src/games/wake-up-mythra/sim/client:client_wasm",
+        "//src/games/wake-up-mythra/sim/client:goldens_json",
+        "//src/games/wake-up-mythra/sim/client:telemetry_gen_ts",
+    ],
+)
+
+diff_test(
+    name = "client_artifact_current_test",
+    file1 = "//src/games/wake-up-mythra/sim/client:client_wasm",
+    file2 = "//src/games/wake-up-mythra/deploy/prod:behavior/client.wasm",
+)
+
+diff_test(
+    name = "sim_artifact_current_test",
+    file1 = ":park_wasm",
+    file2 = "//src/games/wake-up-mythra/deploy/prod:behavior/sim.wasm",
+)
+
+diff_test(
+    name = "fixture_artifact_current_test",
+    file1 = ":fixture_park",
+    file2 = "//src/games/wake-up-mythra/services/wum:fixture_park.bin",
+)
+
+diff_test(
+    name = "telemetry_table_current_test",
+    file1 = "//src/games/wake-up-mythra/sim/client:telemetry_gen_ts",
+    file2 = "//src/chunkies/host/ts:src/telemetry.gen.ts",
+)
+
+diff_test(
+    name = "goldens_current_test",
+    file1 = "//src/games/wake-up-mythra/sim/client:goldens_json",
+    file2 = "//src/chunkies/testkit/ts:goldens/records.json",
 )
 
 # Formatting drift fails `bazelisk test //...`; the fix is `aspect tidy`.

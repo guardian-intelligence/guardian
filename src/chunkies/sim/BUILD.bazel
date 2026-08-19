@@ -1,5 +1,3 @@
-load("@aspect_bazel_lib//lib:diff_test.bzl", "diff_test")
-load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 # Every game's sim sources, held to the same fixed-point invariant as the
@@ -7,16 +5,13 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 # lives here, and adding a game means adding a line to this list.
 GAME_SIM_SOURCES = [
     "//src/games/wake-up-mythra/sim:sources",
+    "//src/games/wake-up-mythra/sim/client:sources",
 ]
 
-# The world-sim stack, grouped by execution tier (see README.md): shared/
-# runs byte-identically under wazero on the server and in every client,
-# client/ and server/ are single-sided. Built artifacts are committed
-# (embed default + ConfigMap delivery both need bytes in git); `bazel run
-# :refresh` regenerates them and the diff tests below fail the build when
-# source and committed bytes drift. The fixture terrain blob rides the
-# same discipline: its bytes name every park's world, so they only change
-# through an explicit refresh.
+# The framework's sim surface: the wasm32 build platform, the byte-stable
+# wasm_module rule (wasm.bzl), the wire codec crate (client/), and the
+# fixed-point gate below. Game module crates, their committed artifacts,
+# and the refresh lane live with their games.
 
 platform(
     name = "wasm32",
@@ -25,22 +20,6 @@ platform(
         "@platforms//os:none",
     ],
     visibility = ["//visibility:public"],
-)
-
-# Copies freshly built modules, the fixture terrain, the generated
-# telemetry tables, and the record-layout goldens over the committed
-# artifacts (service embed copy + the prod ConfigMap copy + the TS
-# package copies).
-sh_binary(
-    name = "refresh",
-    srcs = ["refresh.sh"],
-    data = [
-        "//src/chunkies/sim/client:client_wasm",
-        "//src/chunkies/sim/client:goldens_json",
-        "//src/chunkies/sim/client:telemetry_gen_ts",
-        "//src/games/wake-up-mythra/sim:fixture_park",
-        "//src/games/wake-up-mythra/sim:park_wasm",
-    ],
 )
 
 # Fixed-point invariant, layer 1: the float type tokens are banned from sim
@@ -56,46 +35,4 @@ sh_test(
         "//src/chunkies/sim/client:sources",
         "//src/chunkies/sim/shared:sources",
     ] + GAME_SIM_SOURCES,
-)
-
-diff_test(
-    name = "client_artifact_current_test",
-    file1 = "//src/chunkies/sim/client:client_wasm",
-    file2 = "//src/chunkies/mount:behaviors/client.wasm",
-)
-
-diff_test(
-    name = "sim_artifact_current_test",
-    file1 = "//src/games/wake-up-mythra/sim:park_wasm",
-    file2 = "//src/chunkies/mount:behaviors/sim.wasm",
-)
-
-diff_test(
-    name = "fixture_artifact_current_test",
-    file1 = "//src/games/wake-up-mythra/sim:fixture_park",
-    file2 = "//src/games/wake-up-mythra/services/wum:fixture_park.bin",
-)
-
-diff_test(
-    name = "telemetry_table_current_test",
-    file1 = "//src/chunkies/sim/client:telemetry_gen_ts",
-    file2 = "//src/chunkies/host/ts:src/telemetry.gen.ts",
-)
-
-diff_test(
-    name = "goldens_current_test",
-    file1 = "//src/chunkies/sim/client:goldens_json",
-    file2 = "//src/chunkies/testkit/ts:goldens/records.json",
-)
-
-diff_test(
-    name = "client_configmap_lockstep_test",
-    file1 = "//src/chunkies/mount:behaviors/client.wasm",
-    file2 = "//src/games/wake-up-mythra/deploy/prod:behavior/client.wasm",
-)
-
-diff_test(
-    name = "sim_configmap_lockstep_test",
-    file1 = "//src/chunkies/mount:behaviors/sim.wasm",
-    file2 = "//src/games/wake-up-mythra/deploy/prod:behavior/sim.wasm",
 )

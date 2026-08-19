@@ -15,14 +15,17 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-# Kept in lockstep with the service's committed sim modules by the diff
-# tests in //src/chunkies/sim.
+# Kept in lockstep with the built modules by the diff tests in
+# //src/games/wake-up-mythra/sim; the conformance run reads them too.
 exports_files(
     [
         "behavior/client.wasm",
         "behavior/sim.wasm",
     ],
-    visibility = ["//src/chunkies/sim:__pkg__"],
+    visibility = [
+        "//src/games/wake-up-mythra/services/wum:__pkg__",
+        "//src/games/wake-up-mythra/sim:__pkg__",
+    ],
 )
 
 # The mounted game content the chunkies host boot-reads must be the same

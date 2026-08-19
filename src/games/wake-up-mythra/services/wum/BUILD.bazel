@@ -3,8 +3,8 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 exports_files(
     ["fixture_park.bin"],
     visibility = [
-        "//src/chunkies/sim:__pkg__",
         "//src/games/wake-up-mythra/deploy/prod:__pkg__",
+        "//src/games/wake-up-mythra/sim:__pkg__",
     ],
 )
 
@@ -28,10 +28,11 @@ go_test(
         "conformance_test.go",
         "manifest_test.go",
     ],
-    data = ["game.conf"],
-    embed = [":wum"],
-    deps = [
-        "//src/chunkies/gametest",
-        "//src/chunkies/mount",
+    data = [
+        "game.conf",
+        "//src/games/wake-up-mythra/deploy/prod:behavior/client.wasm",
+        "//src/games/wake-up-mythra/deploy/prod:behavior/sim.wasm",
     ],
+    embed = [":wum"],
+    deps = ["//src/chunkies/gametest"],
 )
