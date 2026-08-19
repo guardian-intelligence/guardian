@@ -53,10 +53,19 @@ func TestSoakSustainedRate(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := run(3)
+	ctx := context.Background()
 	for tick := 1; tick <= ticks; tick++ {
 		for c := 0; c < chunks; c++ {
 			if err := l.AppendTick(c, uint64(tick), int64(tick), 1, payload, uint64(tick)); err != nil {
 				t.Fatalf("tick %d chunk %d: %v", tick, c, err)
+			}
+		}
+		// A real tick loop produces at tick cadence, not CPU speed; the
+		// barrier paces the burst so slow CI disks measure sustained
+		// throughput rather than unbounded enqueue against one queue.
+		if tick%250 == 0 {
+			if err := l.Barrier(ctx); err != nil {
+				t.Fatalf("barrier at tick %d: %v", tick, err)
 			}
 		}
 	}

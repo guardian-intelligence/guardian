@@ -153,50 +153,19 @@ func readSegmentHeaders(dir string) ([]segref, error) {
 	return segs, nil
 }
 
+// readHeader hands the codec a bounded prefix of the file and lets its
+// decoder — the layout's single owner — report the consumed length.
 func readHeader(path string) (codec.SegmentHeader, int, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return codec.SegmentHeader{}, 0, err
 	}
 	defer f.Close()
-	return readHeaderFrom(bufio.NewReader(f))
-}
-
-// readHeaderFrom streams a header without knowing its length up front:
-// the fixed prelude names the chunk count, each table row names its own
-// length, and the accumulated bytes are handed to the codec for the
-// authoritative CRC-checked decode.
-func readHeaderFrom(r *bufio.Reader) (codec.SegmentHeader, int, error) {
-	buf := make([]byte, 16)
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return codec.SegmentHeader{}, 0, codec.ErrCorrupt
+	buf, err := io.ReadAll(io.LimitReader(f, codec.MaxSegmentHeaderLen))
+	if err != nil {
+		return codec.SegmentHeader{}, 0, err
 	}
-	n := int(binary.LittleEndian.Uint16(buf[14:16]))
-	if string(buf[:4]) != "CHKW" || n > codec.MaxSegmentChunks {
-		return codec.SegmentHeader{}, 0, codec.ErrCorrupt
-	}
-	for i := 0; i < n; i++ {
-		nl, err := r.ReadByte()
-		if err != nil {
-			return codec.SegmentHeader{}, 0, codec.ErrCorrupt
-		}
-		buf = append(buf, nl)
-		row := make([]byte, int(nl)+16)
-		if _, err := io.ReadFull(r, row); err != nil {
-			return codec.SegmentHeader{}, 0, codec.ErrCorrupt
-		}
-		buf = append(buf, row...)
-	}
-	sum := make([]byte, 4)
-	if _, err := io.ReadFull(r, sum); err != nil {
-		return codec.SegmentHeader{}, 0, codec.ErrCorrupt
-	}
-	buf = append(buf, sum...)
-	h, consumed, err := codec.DecodeSegmentHeader(buf)
-	if err != nil || consumed != len(buf) {
-		return codec.SegmentHeader{}, 0, codec.ErrCorrupt
-	}
-	return h, consumed, nil
+	return codec.DecodeSegmentHeader(buf)
 }
 
 // generationCaps returns, per segment, the exclusive tick bound for each

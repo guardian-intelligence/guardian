@@ -51,6 +51,12 @@ const MaxRecordLen = 1 << 20
 // of truth. A chunk steps on one core, so the bound is far past any pod.
 const MaxSegmentChunks = 4096
 
+// MaxSegmentHeaderLen bounds an encoded SegmentHeader: the fixed prelude,
+// the largest possible chunk table, and the checksum. A reader may hand
+// DecodeSegmentHeader this much of a file and let it report the consumed
+// length, keeping the layout in exactly one place.
+const MaxSegmentHeaderLen = 16 + MaxSegmentChunks*(1+255+16) + 4
+
 const segmentMagic = "CHKW"
 
 // SegmentVersion is the current segment layout. There is no cross-version

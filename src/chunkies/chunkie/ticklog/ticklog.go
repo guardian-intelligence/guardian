@@ -298,11 +298,14 @@ func (l *Log) barrier(ctx context.Context, chunk int, epoch uint32) error {
 	}
 	done := make(chan struct{})
 	p := pending{barrier: done, chunk: chunk, epoch: epoch, rotate: chunk >= 0, enq: l.now().UnixNano()}
+	// The dying case is what keeps a barrier from hanging on a wedged
+	// disk: the syncer may be stuck inside a hung write and never
+	// service the queue, but the watchdog still poisons.
 	select {
 	case l.ch <- p:
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-l.done:
+	case <-l.dying:
 		return l.err()
 	}
 	select {
@@ -310,6 +313,8 @@ func (l *Log) barrier(ctx context.Context, chunk int, epoch uint32) error {
 		return l.err()
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-l.dying:
+		return l.err()
 	}
 }
 
@@ -319,11 +324,15 @@ func (l *Log) barrier(ctx context.Context, chunk int, epoch uint32) error {
 func (l *Log) Faults() <-chan error { return l.fch }
 
 // Close barriers and releases. After a fault it releases only. The close
-// itself is not a fault: Faults never fires for it.
+// itself is not a fault: Faults never fires for it. On a wedged disk the
+// syncer goroutine may be unreclaimable inside a hung write; Close
+// returns the fault instead of waiting on it.
 func (l *Log) Close() error {
 	err := l.Barrier(context.Background())
 	l.poison(errClosed)
-	<-l.done
+	if err == nil {
+		<-l.done
+	}
 	return err
 }
 

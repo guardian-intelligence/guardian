@@ -122,6 +122,39 @@ func TestWatchdogTripsOnHungSync(t *testing.T) {
 	l.Close()
 }
 
+// TestCloseReturnsOnHungDisk: with the syncer stuck inside a hung write
+// forever, Close must return the fault instead of hanging — the syncer
+// goroutine is unreclaimable, the caller is not.
+func TestCloseReturnsOnHungDisk(t *testing.T) {
+	fs := newMemfs()
+	l, err := Create(Config{
+		Dir: "/log", Generation: 1, Chunks: specsFor(1),
+		SyncInterval: time.Millisecond, MaxDurableLag: 30 * time.Millisecond, fs: fs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs.setStall(true) // never cleared
+	if err := l.AppendTick(0, 1, 1, 1, run(1), 1); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-l.Faults():
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchdog never tripped")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- l.Close() }()
+	select {
+	case err := <-closed:
+		if !errors.Is(err, ErrStalled) {
+			t.Fatalf("close on a hung disk: %v, want the stall fault", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close hung on a hung disk")
+	}
+}
+
 // TestBarrierRespectsContext: a barrier against a wedged log must return
 // with the context, not hang.
 func TestBarrierRespectsContext(t *testing.T) {
