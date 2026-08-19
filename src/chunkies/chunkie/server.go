@@ -234,33 +234,58 @@ func terrainHandler(j journal.Journal, ready *atomic.Bool, genesis []byte) http.
 }
 
 // broadcaster is the publish-once half of tick fan-out: each committed
-// tick is encoded once and written once per gateway connection with a
+// tick is encoded once and handed to every gateway connection with a
 // live subscriber for the chunk; the gateway replicates to its local
 // attachments. A conn subscribes a chunk while it has sessions open on
 // it, so an idle conn costs no tick writes.
 type broadcaster struct {
 	game string
+	// queueFrames bounds each conn's broadcast queue; a field only so
+	// tests can shrink it.
+	queueFrames int
 
 	mu    sync.Mutex
 	conns map[*broadcastConn]struct{}
 }
 
+// broadcastQueueFrames sizes the per-conn queue in ticks of frames: one
+// frame per subscribed chunk per tick, so 256 is ~64 ticks of headroom
+// for a four-chunk chunkie — 1.3s at 48Hz, 2.7s at 24Hz. A consumer
+// further behind than that is shed, not awaited.
+const broadcastQueueFrames = 256
+
+// broadcastWriter is what the broadcaster needs from a trunk conn — a
+// seam so tests can wedge the write side deterministically.
+type broadcastWriter interface {
+	WriteMessage(kind byte, sid uint64, payload []byte) error
+	Close() error
+}
+
 type broadcastConn struct {
-	pc *trunk.Conn
+	pc broadcastWriter
 
 	mu   sync.Mutex
 	subs map[string]int
+
+	// queue feeds the conn's writer goroutine; stop ends that goroutine;
+	// dead removes the conn as a publish target. once makes teardown
+	// idempotent between the down paths and unregister.
+	queue chan []byte
+	stop  chan struct{}
+	once  sync.Once
+	dead  atomic.Bool
 }
 
 func newBroadcaster(game string) *broadcaster {
-	return &broadcaster{game: game, conns: map[*broadcastConn]struct{}{}}
+	return &broadcaster{game: game, queueFrames: broadcastQueueFrames, conns: map[*broadcastConn]struct{}{}}
 }
 
-func (b *broadcaster) register(pc *trunk.Conn) *broadcastConn {
-	c := &broadcastConn{pc: pc, subs: map[string]int{}}
+func (b *broadcaster) register(pc broadcastWriter) *broadcastConn {
+	c := &broadcastConn{pc: pc, subs: map[string]int{}, queue: make(chan []byte, b.queueFrames), stop: make(chan struct{})}
 	b.mu.Lock()
 	b.conns[c] = struct{}{}
 	b.mu.Unlock()
+	go c.write()
 	return c
 }
 
@@ -268,6 +293,39 @@ func (b *broadcaster) unregister(c *broadcastConn) {
 	b.mu.Lock()
 	delete(b.conns, c)
 	b.mu.Unlock()
+	// The read side owns the conn's close; here only the writer stops.
+	c.dead.Store(true)
+	c.once.Do(func() { close(c.stop) })
+}
+
+// down removes the conn as a publish target and closes it — its
+// sessions redial through the gateway. reason is the bounded metric
+// label: queue_full or write_error.
+func (c *broadcastConn) down(reason string) {
+	c.once.Do(func() {
+		c.dead.Store(true)
+		mBroadcastDowns.WithLabelValues(reason).Inc()
+		c.pc.Close()
+		close(c.stop)
+	})
+}
+
+// write is the conn's broadcast writer: the only goroutine putting tick
+// fan-out on this wire, so per-conn broadcast order is the queue's FIFO
+// order. A wedged peer blocks here — never the tick loop — until the
+// write deadline errors out or a queue overflow downs the conn.
+func (c *broadcastConn) write() {
+	for {
+		select {
+		case payload := <-c.queue:
+			if c.pc.WriteMessage(trunk.KindBroadcast, 0, payload) != nil {
+				c.down("write_error")
+				return
+			}
+		case <-c.stop:
+			return
+		}
+	}
 }
 
 func (c *broadcastConn) subscribe(chunk string) {
@@ -290,14 +348,14 @@ func (c *broadcastConn) subscribed(chunk string) bool {
 	return c.subs[chunk] > 0
 }
 
-// publish is the authority's tick fan-out (publishFunc). Everything is
-// encoded and written before it returns — the caller reuses the run
-// buffer next tick — and a failed write downs that connection only; its
-// sessions redial through the gateway. The per-connection writes run
-// concurrently: they hold the tick loop until the slowest completes, so
-// wedged peers must cost one write deadline between them, not one each —
-// serial writes would breach the verification ring's schedule budget at
-// three wedged connections and dark-close the chunk for the healthy ones.
+// publish is the authority's tick fan-out (publishFunc). The payload is
+// encoded once, synchronously — the caller reuses the run buffer next
+// tick — and delivery is detached: enqueue per conn and return. The
+// tick loop never touches the network, so a peer that stops draining
+// costs its own connection (queue overflow downs it; sessions redial
+// through the gateway) instead of holding the tick — a stall the WAL's
+// lag watchdog could never see, since nothing is appended while a tick
+// waits on a write.
 func (b *broadcaster) publish(chunk string, tick uint64, firstSeq int64, count uint16, run []byte) {
 	payload, err := trunk.EncodeBroadcast(b.game, chunk, codec.EncodeTick(tick, firstSeq, count, run))
 	if err != nil {
@@ -308,22 +366,18 @@ func (b *broadcaster) publish(chunk string, tick uint64, firstSeq int64, count u
 	b.mu.Lock()
 	targets := make([]*broadcastConn, 0, len(b.conns))
 	for c := range b.conns {
-		if c.subscribed(chunk) {
+		if !c.dead.Load() && c.subscribed(chunk) {
 			targets = append(targets, c)
 		}
 	}
 	b.mu.Unlock()
-	var wg sync.WaitGroup
 	for _, c := range targets {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if c.pc.WriteMessage(trunk.KindBroadcast, 0, payload) != nil {
-				c.pc.Close()
-			}
-		}()
+		select {
+		case c.queue <- payload:
+		default:
+			c.down("queue_full")
+		}
 	}
-	wg.Wait()
 }
 
 // connSession is one multiplexed session's chunk-side state. The demux
