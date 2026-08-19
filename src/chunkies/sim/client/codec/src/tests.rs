@@ -26,7 +26,7 @@ const FX_SYS_KIND: u16 = 0x0009;
 // Record vectors are authority-side (write-ahead log, checkpoints) and
 // implemented in Go only; a Rust authority promotes them into this crate.
 const GO_ONLY: &[&str] = &["segment", "tickrec", "watermark", "checkpoint"];
-const GO_ONLY_CAPS: &[&str] = &["WAL_MAX_RECORD"];
+const GO_ONLY_CAPS: &[&str] = &["WAL_MAX_RECORD", "WAL_MAX_CHUNKS"];
 
 fn unhex(s: &str) -> Vec<u8> {
     assert!(s.len() % 2 == 0, "odd hex length");

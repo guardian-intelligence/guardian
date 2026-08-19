@@ -2,8 +2,8 @@ package codec
 
 import (
 	"bytes"
-	"encoding/hex"
 	_ "embed"
+	"encoding/hex"
 	"strconv"
 	"strings"
 	"testing"
@@ -33,6 +33,8 @@ const (
 	fxActor      = 0xA1A2A3A4A5A6A7A8
 	fxKind       = 0x0104
 	fxSysKind    = 0x0009
+	fxChunk      = 21
+	fxOrdinal    = 5
 )
 
 func fxRec1() []byte {
@@ -94,10 +96,16 @@ var encoders = map[string]func() []byte{
 		})
 	},
 	"segment": func() []byte {
-		return EncodeSegmentHeader(SegmentHeader{Version: 1, Lineage: fxLineage, Generation: fxGeneration, FirstTick: fxTick})
+		return EncodeSegmentHeader(SegmentHeader{
+			Version: SegmentVersion, Generation: fxGeneration, Ordinal: fxOrdinal,
+			Chunks: []SegmentChunk{
+				{Name: "park-a", Lineage: fxLineage, Epoch: fxEpoch, FirstTick: fxTick},
+				{Name: "park-b", Lineage: 8, Epoch: 6, FirstTick: 2048},
+			},
+		})
 	},
-	"tickrec":    func() []byte { return AppendTickRecord(nil, fxTick, fxSeq, fxEpoch, 2, fxRun(), fxWH) },
-	"watermark":  func() []byte { return AppendWatermark(nil, fxTick) },
+	"tickrec":    func() []byte { return AppendTickRecord(nil, fxChunk, fxTick, fxSeq, 2, fxRun(), fxWH) },
+	"watermark":  func() []byte { return AppendWatermark(nil, fxChunk, fxTick) },
 	"checkpoint": func() []byte { return EncodeCheckpoint(fxCheckpoint()) },
 }
 
@@ -114,7 +122,13 @@ var decoders = map[string]func([]byte) error{
 	"snapshot":   frameDecoder(KindSnapshot, func(p []byte) error { _, err := DecodeSnapshot(p); return err }),
 	"check":      func(b []byte) error { _, err := DecodeCheck(b); return err },
 	"verdict":    func(b []byte) error { _, err := DecodeVerdict(b); return err },
-	"segment":    func(b []byte) error { _, err := DecodeSegmentHeader(b); return err },
+	"segment": func(b []byte) error {
+		_, n, err := DecodeSegmentHeader(b)
+		if err == nil && n != len(b) {
+			return ErrBadPayload
+		}
+		return err
+	},
 	"tickrec":    recordDecoder,
 	"watermark":  recordDecoder,
 	"checkpoint": func(b []byte) error { _, err := DecodeCheckpoint(b); return err },
@@ -234,6 +248,7 @@ func TestCaps(t *testing.T) {
 		"MAX_FRAME":      MaxFrameLen,
 		"DG_MAX":         DatagramMax,
 		"WAL_MAX_RECORD": MaxRecordLen,
+		"WAL_MAX_CHUNKS": MaxSegmentChunks,
 	}
 	seen := 0
 	for _, line := range strings.Split(capsTxt, "\n") {

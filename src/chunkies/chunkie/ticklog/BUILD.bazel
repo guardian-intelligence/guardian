@@ -1,0 +1,35 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "ticklog",
+    srcs = [
+        "fs.go",
+        "fs_linux.go",
+        "fs_other.go",
+        "scan.go",
+        "ticklog.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/chunkies/chunkie/ticklog",
+    visibility = ["//src/chunkies:__subpackages__"],
+    deps = [
+        "//src/chunkies/codec",
+        "@org_golang_x_sys//unix",
+    ],
+)
+
+go_test(
+    name = "ticklog_test",
+    timeout = "long",
+    srcs = [
+        "allocs_test.go",
+        "bench_test.go",
+        "crash_test.go",
+        "fault_test.go",
+        "main_test.go",
+        "memfs_test.go",
+        "model_test.go",
+        "ticklog_test.go",
+    ],
+    embed = [":ticklog"],
+    deps = ["//src/chunkies/codec"],
+)
