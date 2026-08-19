@@ -32,6 +32,24 @@ const RESYNC_WHY: Record<number, string> = {
   [ResyncReason.framing]: "unreadable frame length",
 };
 
+// Codes the mapping knows and deliberately does not beacon: per-event and
+// per-check cadence facts whose volume would evict rarer spans from the
+// bounded beacon queue (the debug and stats panes still see every code).
+// Anything else the switch below doesn't name ships raw as `wum.emit`, so
+// a new core emission is never silently unrecorded — merely unnamed until
+// this mapping catches up.
+const UNBEACONED: ReadonlySet<number> = new Set<number>([
+  Emit.welcome,
+  Emit.eventApplied,
+  Emit.checkSent,
+  Emit.verdict,
+  Emit.moduleSwapped,
+  Emit.intentSent,
+  Emit.presence,
+  Emit.replayed,
+  Emit.intentResent,
+]);
+
 // Every span this module emits goes through one function, so a harness can
 // watch the whole vocabulary by tapping one place. The tap is a read: it
 // never replaces the emission, and nothing installs one outside `?probe=1`.
@@ -234,7 +252,11 @@ export function createTelemetry(ctx: {
           });
           return;
         case HostEmit.redial:
-          span("wum.redial", { "wum.backoff_ms": String(a), "wum.park": park });
+          span("wum.redial", {
+            "wum.backoff_ms": String(a),
+            "wum.attempt": String(b),
+            "wum.park": park,
+          });
           return;
         case HostEmit.teardown:
           span("wum.netcode_teardown", {
@@ -250,6 +272,13 @@ export function createTelemetry(ctx: {
           return;
         }
         default:
+          if (UNBEACONED.has(code)) return;
+          span("wum.emit", {
+            "wum.code": String(code),
+            "wum.a": String(a),
+            "wum.b": String(b),
+            "wum.park": park,
+          });
           return;
       }
     },

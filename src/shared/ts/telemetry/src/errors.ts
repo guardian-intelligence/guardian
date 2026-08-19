@@ -28,7 +28,21 @@ interface Shape {
 
 function shapeOf(v: unknown): Shape {
   if (v instanceof Error) {
-    return { type: v.name, message: v.message, stack: v.stack ?? "" };
+    // Platform error types often carry their evidence in typed fields with
+    // an empty message (WebKit's WebTransportError notoriously so). Fold
+    // the fields into the message — it drives the signature and is what
+    // dashboards group by — and never let the message be empty: an
+    // all-empty message collapses unrelated failures into one signature.
+    const parts: string[] = [];
+    const source = (v as { source?: unknown }).source;
+    if (typeof source === "string") parts.push(`source=${source}`);
+    const streamErrorCode = (v as { streamErrorCode?: unknown }).streamErrorCode;
+    if (typeof streamErrorCode === "number") parts.push(`streamErrorCode=${streamErrorCode}`);
+    let message = v.message;
+    if (parts.length > 0)
+      message = message ? `${message} [${parts.join(" ")}]` : `[${parts.join(" ")}]`;
+    if (message === "") message = v.name;
+    return { type: v.name, message, stack: v.stack ?? "" };
   }
   if (typeof v === "object" && v !== null) {
     let json = "";
