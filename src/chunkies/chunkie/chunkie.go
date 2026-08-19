@@ -441,8 +441,8 @@ type authority struct {
 	ringHead uint64
 	lastSeq  int64
 	closed   bool
-	seen     map[string]struct{}
-	seenFifo []string
+	seen     map[codec.DedupEntry]struct{}
+	seenFifo []codec.DedupEntry
 
 	attach chan attachReq
 	rate   chan rateChangeReq
@@ -626,7 +626,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 		moduleHash: displayHash(module),
 		subs:       map[*session]bool{},
 		players:    map[uint64]*session{},
-		seen:       map[string]struct{}{},
+		seen:       map[codec.DedupEntry]struct{}{},
 		attach:     make(chan attachReq),
 		rate:       make(chan rateChangeReq),
 		stop:       make(chan struct{}),
@@ -918,8 +918,11 @@ func (a *authority) stageIntent(s *session, intentID uint64, kind uint16, payloa
 	// Intent id 0 marks connection-lifecycle intents (the departure staged
 	// on disconnect): every session of a sub uses the same id there, so
 	// idempotency bookkeeping would swallow every departure after the first.
+	// The window keys by dogID, not sub: it is exactly what a checkpoint
+	// manifest persists (codec.DedupEntry), and nothing derived from the
+	// authenticated subject may reach node-local disk.
 	if intentID != 0 {
-		key := fmt.Sprintf("%s/%d", s.sub, intentID)
+		key := codec.DedupEntry{Actor: s.dogID, Intent: intentID}
 		if _, dup := a.seen[key]; dup {
 			a.mu.Unlock()
 			mIntentsDeduped.Inc()
@@ -1156,7 +1159,7 @@ func (a *authority) tickOnce() {
 				// under the same id has to reach the sim.
 				if in.intentID != 0 {
 					a.mu.Lock()
-					delete(a.seen, fmt.Sprintf("%s/%d", in.actor, in.intentID))
+					delete(a.seen, codec.DedupEntry{Actor: in.actorID, Intent: in.intentID})
 					a.mu.Unlock()
 				}
 			}

@@ -30,6 +30,7 @@ type Module struct {
 	slot  string
 	bytes []byte
 	hash  string
+	sum   [32]byte
 }
 
 // NewModule is born empty: the mounted behavior dir is a module's only
@@ -59,7 +60,7 @@ func (m *Module) Set(module []byte) {
 	hash := hex.EncodeToString(sum[:4])
 	m.mu.Lock()
 	changed := hash != m.hash
-	m.bytes, m.hash = module, hash
+	m.bytes, m.hash, m.sum = module, hash, sum
 	m.mu.Unlock()
 	if changed {
 		mInfo.DeletePartialMatch(prometheus.Labels{"slot": m.slot})
@@ -72,6 +73,14 @@ func (m *Module) Get() ([]byte, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.bytes, m.hash
+}
+
+// Sum is the module's full sha256 — the identity a checkpoint manifest
+// pins (codec.Checkpoint CW/PW), computed once per Set, never per read.
+func (m *Module) Sum() [32]byte {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sum
 }
 
 // loadSlot adopts the dir's current bytes for one slot, once per content
