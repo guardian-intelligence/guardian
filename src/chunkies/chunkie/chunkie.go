@@ -433,6 +433,10 @@ type authority struct {
 	mu       sync.Mutex
 	staged   []stagedIntent
 	subs     map[*session]bool
+	// The actor's current player session. A rejoin supersedes the previous
+	// session (a reloaded page's zombie, an undetected drop) and fences its
+	// departure: only the current session may remove the actor's entity.
+	players  map[uint64]*session
 	ring     []ringEntry // ringSeconds*hz entries
 	ringHead uint64
 	lastSeq  int64
@@ -621,6 +625,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 		tm:         tm,
 		moduleHash: displayHash(module),
 		subs:       map[*session]bool{},
+		players:    map[uint64]*session{},
 		seen:       map[string]struct{}{},
 		attach:     make(chan attachReq),
 		rate:       make(chan rateChangeReq),
@@ -1321,6 +1326,15 @@ func (a *authority) handleAttach(req attachReq) attachResult {
 		return attachResult{err: errors.New("authority closed")}
 	}
 	a.subs[s] = true
+	if s.role == "player" {
+		// The newest session owns the actor's departure. An older session —
+		// a reloaded page's zombie the transport has not reaped yet, or a
+		// second open tab — stays attached and readable, but its close can
+		// no longer remove the entity this session is standing on. The
+		// client host redials on any close, so evicting the old session
+		// here would make two live tabs supersede each other forever.
+		a.players[s.dogID] = s
+	}
 	a.mu.Unlock()
 	return res
 }

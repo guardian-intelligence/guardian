@@ -312,20 +312,29 @@ func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
 		}
 	}
 
+	attach := func(s *session) {
+		t.Helper()
+		if res := a.handleAttach(attachReq{sess: s}); res.err != nil {
+			t.Fatal(res.err)
+		}
+	}
+
 	// First page load: join, then the connection drops and the departure
 	// is staged with intent id 0. The first tick after any open also
 	// journals the day_reset that seeds the sim's day index (seq 2).
-	s1 := &session{sub: "carol", dogID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
+	s1 := &session{sub: "carol", role: "player", chunk: a, dogID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
+	attach(s1)
 	a.stageIntent(s1, 1, kJoin, nil)
 	a.tickOnce()
 	seqAfter(2, "first join + day_reset")
-	stageDeparture(a, &session{sub: "carol", role: "player", dogID: codec.ActorFor("carol")})
+	stageDeparture(a, s1)
 	a.tickOnce()
 	seqAfter(3, "first departure")
 
 	// Refreshed page: an intent for an absent actor is rejected, then the
 	// client rejoins and retries under the SAME intent id.
-	s2 := &session{sub: "carol", dogID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
+	s2 := &session{sub: "carol", role: "player", chunk: a, dogID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
+	attach(s2)
 	a.stageIntent(s2, 42, kMove, move(2))
 	a.tickOnce()
 	seqAfter(3, "move while absent")
@@ -336,9 +345,67 @@ func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
 
 	// Second disconnect: the departure must not be swallowed as a resend
 	// of the first one.
-	stageDeparture(a, &session{sub: "carol", role: "player", dogID: codec.ActorFor("carol")})
+	stageDeparture(a, s2)
 	a.tickOnce()
 	seqAfter(6, "second departure")
+}
+
+// The prod reload cascade: a page reload joins a second session while the
+// transport still holds the first. The rejoin supersedes the zombie, and
+// the zombie's eventual reap must not remove the dog the live session is
+// standing on.
+func TestStaleSessionDepartureIsFenced(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	j := journal.NewPg(pool)
+	if err := j.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	module := toyModule(t)
+	a, err := openAuthority(ctx, "park-fence", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.host.close()
+
+	seqAfter := func(want int64, step string) {
+		t.Helper()
+		if a.lastSeq != want {
+			t.Fatalf("%s: journal lastSeq = %d, want %d", step, a.lastSeq, want)
+		}
+	}
+	attach := func(s *session) {
+		t.Helper()
+		if res := a.handleAttach(attachReq{sess: s}); res.err != nil {
+			t.Fatal(res.err)
+		}
+	}
+
+	s1 := &session{sub: "carol", role: "player", chunk: a, dogID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
+	attach(s1)
+	a.stageIntent(s1, 1, kJoin, nil)
+	a.tickOnce()
+	seqAfter(2, "join + day_reset")
+
+	// The reload's session attaches while the zombie is still undetected;
+	// the zombie stays attached (the client host redials on any close, so
+	// evicting it would make two live tabs supersede each other forever).
+	s2 := &session{sub: "carol", role: "player", chunk: a, dogID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
+	attach(s2)
+
+	// The zombie's reap stages nothing: the dog stays in the park.
+	stageDeparture(a, s1)
+	a.tickOnce()
+	seqAfter(2, "fenced stale departure")
+
+	// The live session's own close still removes the dog.
+	stageDeparture(a, s2)
+	a.tickOnce()
+	seqAfter(3, "current departure")
 }
 
 // Publish-once fan-out at the source: each committing tick publishes
