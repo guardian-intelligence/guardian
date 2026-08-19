@@ -1,69 +1,369 @@
 package parkproxy
 
+// Behavioral coverage for the multiplexed transport: how many TCP
+// connections sessions cost, what failure tears down, and what stays up.
+
 import (
 	"context"
 	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
-func TestProxyRoundTrip(t *testing.T) {
-	key := []byte("0123456789abcdef0123456789abcdef")
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+var testKey = []byte("0123456789abcdef0123456789abcdef")
+
+// fakeParkServer accepts authenticated connections and records every
+// message; onOpen scripts the park's reaction to a session opening.
+type fakeParkServer struct {
+	t        *testing.T
+	l        net.Listener
+	accepted atomic.Int32
+	onOpen   func(c *Conn, m Msg)
+
+	mu    sync.Mutex
+	msgs  []Msg
+	conns []*Conn
+}
+
+func newFakeParkServer(t *testing.T, onOpen func(c *Conn, m Msg)) *fakeParkServer {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	t.Cleanup(func() { l.Close() })
+	f := &fakeParkServer{t: t, l: l, onOpen: onOpen}
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			f.accepted.Add(1)
+			go func(c net.Conn) {
+				pc, err := Accept(c, testKey, time.Now())
+				if err != nil {
+					c.Close()
+					return
+				}
+				f.mu.Lock()
+				f.conns = append(f.conns, pc)
+				f.mu.Unlock()
+				for {
+					m, err := pc.ReadMessage()
+					if err != nil {
+						return
+					}
+					if len(m.Payload) > 0 {
+						m.Payload = append([]byte(nil), m.Payload...)
+					}
+					f.mu.Lock()
+					f.msgs = append(f.msgs, m)
+					f.mu.Unlock()
+					if m.Kind == KindOpen && f.onOpen != nil {
+						f.onOpen(pc, m)
+					}
+				}
+			}(conn)
+		}
+	}()
+	return f
+}
 
-	want := Open{Sub: "alice", Park: "park-mythra", Role: "player", Remote: "127.0.0.1:1", SinceSeq: 41, SinceTick: 90}
+func (f *fakeParkServer) addr() string { return f.l.Addr().String() }
+
+func (f *fakeParkServer) received(kind byte) []Msg {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []Msg
+	for _, m := range f.msgs {
+		if m.Kind == kind {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func (f *fakeParkServer) conn(i int) *Conn {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if i >= len(f.conns) {
+		return nil
+	}
+	return f.conns[i]
+}
+
+func waitFor(t *testing.T, d time.Duration, fn func() bool) bool {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return true
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return fn()
+}
+
+func openTwo(t *testing.T, p *Pool, addr string) (*Session, *Session) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s1, err := p.Open(ctx, addr, Open{Sub: "alice", Park: "park-test", Role: "player", SinceSeq: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := p.Open(ctx, addr, Open{Sub: "bob", Park: "park-test", Role: "spectator", SinceSeq: 7, SinceTick: 90})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s1, s2
+}
+
+func TestMuxSharesOneConnAcrossSessions(t *testing.T) {
+	park := newFakeParkServer(t, func(c *Conn, m Msg) {
+		c.WriteStream(m.SID, []byte("welcome"))
+	})
+	pool := NewPool(testKey, Hooks{})
+	s1, s2 := openTwo(t, pool, park.addr())
+
+	// Two sessions, one TCP connection, one handshake.
+	if got := park.accepted.Load(); got != 1 {
+		t.Fatalf("sessions cost %d connections, want 1", got)
+	}
+	if !waitFor(t, 5*time.Second, func() bool { return len(park.received(KindOpen)) == 2 }) {
+		t.Fatalf("opens = %d, want 2", len(park.received(KindOpen)))
+	}
+	opens := park.received(KindOpen)
+	if opens[0].SID == opens[1].SID {
+		t.Fatalf("both sessions share sid %d", opens[0].SID)
+	}
+	o1, err := DecodeOpen(opens[0].Payload)
+	if err != nil || o1.Sub != "alice" || o1.Park != "park-test" || o1.Role != "player" || o1.SinceSeq != -1 {
+		t.Fatalf("open 1 = %+v (err %v)", o1, err)
+	}
+	o2, err := DecodeOpen(opens[1].Payload)
+	if err != nil || o2.Sub != "bob" || o2.Role != "spectator" || o2.SinceSeq != 7 || o2.SinceTick != 90 {
+		t.Fatalf("open 2 = %+v (err %v)", o2, err)
+	}
+
+	// Each session's welcome landed on its own event queue.
+	for i, s := range []*Session{s1, s2} {
+		select {
+		case ev := <-s.Events():
+			if ev.Kind != KindStream || string(ev.Payload) != "welcome" {
+				t.Fatalf("session %d event = %d %q", i+1, ev.Kind, ev.Payload)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("session %d never got its welcome", i+1)
+		}
+	}
+
+	// Uplink frames route by sid.
+	if err := s2.SendStream([]byte("from-bob")); err != nil {
+		t.Fatal(err)
+	}
+	if !waitFor(t, 5*time.Second, func() bool { return len(park.received(KindStream)) == 1 }) {
+		t.Fatal("uplink frame never arrived")
+	}
+	if m := park.received(KindStream)[0]; m.SID != s2.sid || string(m.Payload) != "from-bob" {
+		t.Fatalf("stream = sid %d %q, want sid %d from-bob", m.SID, m.Payload, s2.sid)
+	}
+}
+
+func TestMuxParkCloseEndsOneSessionOnly(t *testing.T) {
+	park := newFakeParkServer(t, nil)
+	pool := NewPool(testKey, Hooks{})
+	s1, s2 := openTwo(t, pool, park.addr())
+
+	if !waitFor(t, 5*time.Second, func() bool { return park.conn(0) != nil && len(park.received(KindOpen)) == 2 }) {
+		t.Fatal("opens never arrived")
+	}
+	park.conn(0).WriteClose(s2.sid, "wrong park")
+	select {
+	case <-s2.Done():
+		if reason, fromPark := s2.CloseReason(); !fromPark || reason != "wrong park" {
+			t.Fatalf("close = %q fromPark=%v, want park-stated wrong park", reason, fromPark)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("park close never reached the session")
+	}
+
+	// The surviving session still works both ways.
+	select {
+	case <-s1.Done():
+		t.Fatal("closing one session killed its neighbor")
+	default:
+	}
+	park.conn(0).WriteStream(s1.sid, []byte("still-here"))
+	select {
+	case ev := <-s1.Events():
+		if string(ev.Payload) != "still-here" {
+			t.Fatalf("event = %q", ev.Payload)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("surviving session stopped receiving")
+	}
+}
+
+func TestMuxGatewayCloseTellsPark(t *testing.T) {
+	park := newFakeParkServer(t, nil)
+	pool := NewPool(testKey, Hooks{})
+	s1, _ := openTwo(t, pool, park.addr())
+
+	s1.Close("bye")
+	if !waitFor(t, 5*time.Second, func() bool { return len(park.received(KindClose)) == 1 }) {
+		t.Fatal("park never heard about the close")
+	}
+	if m := park.received(KindClose)[0]; m.SID != s1.sid || string(m.Payload) != "bye" {
+		t.Fatalf("close = sid %d %q", m.SID, m.Payload)
+	}
+	if err := s1.SendStream([]byte("late")); err == nil {
+		t.Fatal("send after close succeeded")
+	}
+}
+
+func TestMuxConnLossFailsAllSessionsThenRedials(t *testing.T) {
+	park := newFakeParkServer(t, nil)
+	pool := NewPool(testKey, Hooks{})
+	s1, s2 := openTwo(t, pool, park.addr())
+
+	if !waitFor(t, 5*time.Second, func() bool { return park.conn(0) != nil }) {
+		t.Fatal("no server conn")
+	}
+	park.conn(0).Close()
+	for i, s := range []*Session{s1, s2} {
+		select {
+		case <-s.Done():
+			if reason, fromPark := s.CloseReason(); fromPark || reason != "park unavailable" {
+				t.Fatalf("session %d close = %q fromPark=%v", i+1, reason, fromPark)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("session %d survived its connection", i+1)
+		}
+	}
+
+	// The next open pays one redial, not an error.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s3, err := pool.Open(ctx, park.addr(), Open{Sub: "carol", Park: "park-test", Role: "player"})
+	if err != nil {
+		t.Fatalf("open after conn loss: %v", err)
+	}
+	defer s3.Close("")
+	if !waitFor(t, 5*time.Second, func() bool { return park.accepted.Load() == 2 }) {
+		t.Fatalf("redial made %d connections total, want 2", park.accepted.Load())
+	}
+}
+
+func TestMuxPongTimeoutKillsConn(t *testing.T) {
+	// A listener that accepts the handshake and then goes silent: writes
+	// succeed into the OS buffer, so only the liveness probe can tell the
+	// park is a zombie.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			if _, err := Accept(conn, testKey, time.Now()); err != nil {
+				conn.Close()
+			}
+			// Authenticated, then silent: never reads, never pongs.
+		}
+	}()
+
+	pool := NewPool(testKey, Hooks{})
+	pool.PingEvery = 20 * time.Millisecond
+	pool.PongWithin = 100 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s, err := pool.Open(ctx, l.Addr().String(), Open{Sub: "alice", Park: "park-test", Role: "player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.Done():
+		if reason, fromPark := s.CloseReason(); fromPark || reason != "park unavailable" {
+			t.Fatalf("close = %q fromPark=%v", reason, fromPark)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a silent park was never detected")
+	}
+}
+
+func TestMuxBacklogClosesOnlyTheStalledSession(t *testing.T) {
+	park := newFakeParkServer(t, nil)
+	pool := NewPool(testKey, Hooks{})
+	s1, s2 := openTwo(t, pool, park.addr())
+
+	if !waitFor(t, 5*time.Second, func() bool { return park.conn(0) != nil && len(park.received(KindOpen)) == 2 }) {
+		t.Fatal("opens never arrived")
+	}
+	// Nobody drains s1: fan-out past its queue must close it, not stall
+	// the shared demux.
+	for i := 0; i < 400; i++ {
+		if err := park.conn(0).WriteStream(s1.sid, []byte("tick")); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+	}
+	select {
+	case <-s1.Done():
+		if reason, fromPark := s1.CloseReason(); fromPark || reason != "relay backlog" {
+			t.Fatalf("close = %q fromPark=%v", reason, fromPark)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stalled session was never closed")
+	}
+	if !waitFor(t, 5*time.Second, func() bool { return len(park.received(KindClose)) == 1 }) {
+		t.Fatal("park never told the stalled session closed")
+	}
+
+	park.conn(0).WriteStream(s2.sid, []byte("healthy"))
+	select {
+	case ev := <-s2.Events():
+		if string(ev.Payload) != "healthy" {
+			t.Fatalf("event = %q", ev.Payload)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("healthy session starved by its neighbor's backlog")
+	}
+}
+
+func TestMuxRejectsWrongKey(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
 	done := make(chan error, 1)
 	go func() {
-		conn, err := listener.Accept()
+		conn, err := l.Accept()
 		if err != nil {
 			done <- err
 			return
 		}
-		proxy, got, err := Accept(conn, key, time.Now())
-		if err == nil && got != want {
-			t.Errorf("open = %+v, want %+v", got, want)
-		}
-		if err == nil {
-			kind, payload, readErr := proxy.ReadMessage()
-			if readErr != nil {
-				err = readErr
-			} else if kind != KindStream || string(payload) != "hello" {
-				t.Errorf("message = %d %q", kind, payload)
-			}
-		}
+		_, err = Accept(conn, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), time.Now())
 		done <- err
 	}()
-
-	proxy, err := Dial(context.Background(), listener.Addr().String(), key, want)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer proxy.Close()
-	if err := proxy.WriteMessage(KindStream, []byte("hello")); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestProxyRejectsWrongKey(t *testing.T) {
-	left, right := net.Pipe()
-	defer left.Close()
-	defer right.Close()
-
-	done := make(chan error, 1)
-	go func() {
-		_, _, err := Accept(right, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), time.Now())
-		done <- err
-	}()
-	p := &Conn{Conn: left}
-	if err := p.writeOpen([]byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), Open{Sub: "a", Park: "p", Role: "player"}); err != nil {
-		t.Fatal(err)
+	pool := NewPool([]byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), Hooks{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// The dial itself can succeed (the handshake is one-way); the park
+	// must refuse to speak, so the session dies instead of attaching.
+	if s, err := pool.Open(ctx, l.Addr().String(), Open{Sub: "a", Park: "p", Role: "player"}); err == nil {
+		select {
+		case <-s.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("session on an unauthenticated conn survived")
+		}
 	}
 	if err := <-done; err == nil {
 		t.Fatal("wrong key accepted")

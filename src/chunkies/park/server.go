@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -106,7 +107,7 @@ func Run() {
 				}
 				return
 			}
-			go handleParkProxy(conn, key, authority, maxSessions)
+			go handleParkConn(conn, key, authority, maxSessions)
 		}
 	}()
 
@@ -187,120 +188,205 @@ func terrainHandler(j journal.Journal, ready *atomic.Bool) http.HandlerFunc {
 	}
 }
 
-func handleParkProxy(conn net.Conn, key []byte, park *authority, maxSessions int) {
-	proxy, open, err := parkproxy.Accept(conn, key, time.Now())
+// connSession is one multiplexed session's park-side state. The demux
+// loop routes its frames here; run's two goroutines (writer, intent
+// drain) mirror the pair the per-session transport used to spawn.
+type connSession struct {
+	pc      *parkproxy.Conn
+	sid     uint64
+	s       *session
+	open    parkproxy.Open
+	inbound chan []byte
+	done    chan struct{}
+	once    sync.Once
+}
+
+// terminate ends this session only; the shared connection lives on for
+// the others, so it must never be closed from here.
+func (cs *connSession) terminate(why string, notify bool) {
+	cs.once.Do(func() {
+		if notify {
+			cs.pc.WriteClose(cs.sid, why)
+		}
+		close(cs.done)
+	})
+}
+
+func handleParkConn(conn net.Conn, key []byte, park *authority, maxSessions int) {
+	pc, err := parkproxy.Accept(conn, key, time.Now())
 	if err != nil {
 		return
 	}
-	defer proxy.Close()
-	if open.Park != park.name {
-		proxy.WriteMessage(parkproxy.KindClose, []byte("wrong park"))
-		return
-	}
-	if n := sessionCount.Add(1); n > int64(maxSessions) {
-		sessionCount.Add(-1)
-		proxy.WriteMessage(parkproxy.KindClose, []byte("at capacity"))
-		return
-	}
-	defer sessionCount.Add(-1)
+	defer pc.Close()
+	// sessions is touched only by this demux loop; termination elsewhere
+	// closes a session's done channel and the loop prunes it on the next
+	// frame for that id.
+	sessions := map[uint64]*connSession{}
+	defer func() {
+		for _, cs := range sessions {
+			cs.terminate("park unavailable", false)
+		}
+	}()
 
-	done := make(chan struct{})
-	s := &session{
-		sub: open.Sub, role: open.Role, park: park, out: make(chan []byte, 256),
-		dogID: wum.DogIDFor(open.Sub), openedAt: time.Now(),
-		closeFn: func(why string) {
-			proxy.WriteMessage(parkproxy.KindClose, []byte(why))
-			proxy.Close()
-		},
+	for {
+		msg, err := pc.ReadMessage()
+		if err != nil {
+			return
+		}
+		switch msg.Kind {
+		case parkproxy.KindOpen:
+			open, err := parkproxy.DecodeOpen(msg.Payload)
+			if err != nil || sessions[msg.SID] != nil {
+				// The gateway is the only authenticated peer; a malformed
+				// open or a reused id means the connection state is not to
+				// be trusted any further.
+				return
+			}
+			if open.Park != park.name {
+				pc.WriteClose(msg.SID, "wrong park")
+				continue
+			}
+			if n := sessionCount.Add(1); n > int64(maxSessions) {
+				sessionCount.Add(-1)
+				pc.WriteClose(msg.SID, "at capacity")
+				continue
+			}
+			cs := &connSession{
+				pc: pc, sid: msg.SID, open: open,
+				inbound: make(chan []byte, 64), done: make(chan struct{}),
+			}
+			cs.s = &session{
+				sub: open.Sub, role: open.Role, park: park, out: make(chan []byte, 256),
+				dogID: wum.DogIDFor(open.Sub), openedAt: time.Now(),
+				closeFn: func(why string) { cs.terminate(why, true) },
+			}
+			sessions[msg.SID] = cs
+			go cs.run()
+		case parkproxy.KindStream:
+			cs := sessions[msg.SID]
+			if cs == nil {
+				continue
+			}
+			select {
+			case <-cs.done:
+				delete(sessions, msg.SID)
+				continue
+			default:
+			}
+			select {
+			case cs.inbound <- msg.Payload:
+			default:
+				// The gateway shapes intents to 20/s; a full buffer means
+				// this session's drain is wedged, not that the client is
+				// fast.
+				cs.terminate("intent backlog", true)
+				delete(sessions, msg.SID)
+			}
+		case parkproxy.KindDatagram:
+			if sessions[msg.SID] == nil {
+				continue
+			}
+			if verdict, ok := checkVerdict(park, msg.Payload); ok {
+				if pc.WriteDatagram(msg.SID, verdict) != nil {
+					return
+				}
+			}
+		case parkproxy.KindClose:
+			if cs := sessions[msg.SID]; cs != nil {
+				cs.terminate("", false)
+				delete(sessions, msg.SID)
+			}
+		}
 	}
+}
+
+func (cs *connSession) run() {
+	defer sessionCount.Add(-1)
+	park := cs.s.park
 	attached := make(chan attachResult, 1)
 	select {
-	case park.attach <- attachReq{sess: s, sinceSeq: open.SinceSeq, sinceTick: open.SinceTick, done: attached}:
+	case park.attach <- attachReq{sess: cs.s, sinceSeq: cs.open.SinceSeq, sinceTick: cs.open.SinceTick, done: attached}:
 	case <-park.stop:
-		proxy.WriteMessage(parkproxy.KindClose, []byte("park unavailable"))
+		cs.terminate("park unavailable", true)
+		return
+	case <-cs.done:
 		return
 	}
 	res := <-attached
 	if res.err != nil {
-		proxy.WriteMessage(parkproxy.KindClose, []byte("park unavailable"))
+		cs.terminate("park unavailable", true)
 		return
 	}
-	defer park.detach(s)
-	defer close(done)
-	defer stageDeparture(park, s)
+	defer park.detach(cs.s)
+	defer stageDeparture(park, cs.s)
 
 	go func() {
-		write := func(b []byte) bool { return proxy.WriteMessage(parkproxy.KindStream, b) == nil }
+		write := func(b []byte) bool { return cs.pc.WriteStream(cs.sid, b) == nil }
 		if !write(res.welcome) {
-			proxy.Close()
+			cs.terminate("park unavailable", false)
 			return
 		}
-		for _, frame := range park.catchupFrames(open.SinceSeq, open.SinceTick, res) {
+		for _, frame := range park.catchupFrames(cs.open.SinceSeq, cs.open.SinceTick, res) {
 			if !write(frame) {
-				proxy.Close()
+				cs.terminate("park unavailable", false)
 				return
 			}
 		}
 		for {
 			select {
-			case frame := <-s.out:
+			case frame := <-cs.s.out:
 				if !write(frame) {
-					proxy.Close()
+					cs.terminate("park unavailable", false)
 					return
 				}
-			case <-done:
+			case <-cs.done:
 				return
 			}
 		}
 	}()
 
 	for {
-		kind, payload, err := proxy.ReadMessage()
+		select {
+		case b := <-cs.inbound:
+			cs.handleFrame(b)
+		case <-cs.done:
+			return
+		}
+	}
+}
+
+func (cs *connSession) handleFrame(payload []byte) {
+	s, park := cs.s, cs.s.park
+	frameKind, framePayload, err := codec.NewReader(bytes.NewReader(payload)).Next()
+	if err != nil {
+		return
+	}
+	switch frameKind {
+	case codec.KindIntent:
+		rec, err := codec.DecodeIntent(framePayload)
 		if err != nil {
 			return
 		}
-		switch kind {
-		case parkproxy.KindStream:
-			frameKind, framePayload, err := codec.NewReader(bytes.NewReader(payload)).Next()
-			if err != nil {
-				continue
-			}
-			switch frameKind {
-			case codec.KindIntent:
-				rec, err := codec.DecodeIntent(framePayload)
-				if err != nil {
-					continue
-				}
-				if s.role != "player" {
-					s.sendReject(rec.Intent, wum.RejectReadOnly)
-					continue
-				}
-				// Game-blind binding: the envelope's actor must be the
-				// authenticated session's, for every kind.
-				if rec.Actor != s.dogID {
-					s.sendReject(rec.Intent, wum.RejectNotYours)
-					continue
-				}
-				park.stageIntent(s, rec.Intent, rec.Kind, rec.Payload)
-			case codec.KindResync:
-				if _, err := codec.DecodeResync(framePayload); err != nil {
-					continue
-				}
-				mResyncs.Inc()
-				select {
-				case park.attach <- attachReq{sess: s, resync: true, done: make(chan attachResult, 1)}:
-				case <-park.stop:
-					return
-				}
-			}
-		case parkproxy.KindDatagram:
-			if verdict, ok := checkVerdict(park, payload); ok {
-				if proxy.WriteMessage(parkproxy.KindDatagram, verdict) != nil {
-					return
-				}
-			}
-		case parkproxy.KindClose:
+		if s.role != "player" {
+			s.sendReject(rec.Intent, wum.RejectReadOnly)
 			return
+		}
+		// Game-blind binding: the envelope's actor must be the
+		// authenticated session's, for every kind.
+		if rec.Actor != s.dogID {
+			s.sendReject(rec.Intent, wum.RejectNotYours)
+			return
+		}
+		park.stageIntent(s, rec.Intent, rec.Kind, rec.Payload)
+	case codec.KindResync:
+		if _, err := codec.DecodeResync(framePayload); err != nil {
+			return
+		}
+		mResyncs.Inc()
+		select {
+		case park.attach <- attachReq{sess: s, resync: true, done: make(chan attachResult, 1)}:
+		case <-park.stop:
+			cs.terminate("park unavailable", true)
 		}
 	}
 }

@@ -26,12 +26,13 @@ import (
 	"github.com/guardian-intelligence/guardian/src/games/wake-up-mythra/services/wum"
 )
 
-// fakePark accepts one authenticated proxy connection and records every
-// message the gateway forwards.
+// fakePark accepts authenticated multiplexed connections and records
+// every message the gateway forwards (pings are answered inside
+// ReadMessage and never recorded).
 type fakePark struct {
 	addr string
 	mu   sync.Mutex
-	msgs [][2]any // kind byte, payload copy
+	msgs []parkproxy.Msg
 }
 
 func newFakePark(t *testing.T, key []byte) *fakePark {
@@ -49,19 +50,21 @@ func newFakePark(t *testing.T, key []byte) *fakePark {
 				return
 			}
 			go func(c net.Conn) {
-				proxy, _, err := parkproxy.Accept(c, key, time.Now())
+				proxy, err := parkproxy.Accept(c, key, time.Now())
 				if err != nil {
 					c.Close()
 					return
 				}
 				for {
-					kind, payload, err := proxy.ReadMessage()
+					m, err := proxy.ReadMessage()
 					if err != nil {
 						return
 					}
-					cp := append([]byte(nil), payload...)
+					if len(m.Payload) > 0 {
+						m.Payload = append([]byte(nil), m.Payload...)
+					}
 					p.mu.Lock()
-					p.msgs = append(p.msgs, [2]any{kind, cp})
+					p.msgs = append(p.msgs, m)
 					p.mu.Unlock()
 				}
 			}(conn)
@@ -75,8 +78,8 @@ func (p *fakePark) received(kind byte) [][]byte {
 	defer p.mu.Unlock()
 	var out [][]byte
 	for _, m := range p.msgs {
-		if m[0].(byte) == kind {
-			out = append(out, m[1].([]byte))
+		if m.Kind == kind {
+			out = append(out, m.Payload)
 		}
 	}
 	return out
@@ -119,7 +122,7 @@ func newRelayHarness(t *testing.T) *relayHarness {
 	gw := &chunkiesGateway{
 		admission: &gameHandlers{tickets: tickets, maxSessions: 16, directory: dir, game: "wum"},
 		directory: dir, game: "wum",
-		key: key,
+		parks: parkproxy.NewPool(key, parkproxy.Hooks{}),
 	}
 
 	rc := newRotatingCert([]net.IP{net.ParseIP("127.0.0.1")})
