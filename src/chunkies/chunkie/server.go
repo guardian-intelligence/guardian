@@ -33,6 +33,10 @@ func Run() {
 	if chunkName == "" {
 		log.Fatal("CHUNK_NAME not set")
 	}
+	game := envStr("GAME", "")
+	if game == "" {
+		log.Fatal("GAME not set")
+	}
 	internalHost := envStr("INTERNAL_HOST", "127.0.0.1")
 	trunkPort := envInt("TRUNK_PORT", 9632)
 	httpPort := envInt("HTTP_PORT", 9631)
@@ -110,7 +114,7 @@ func Run() {
 
 	mods := &modules{client: client, sim: simModule}
 	registry := newChunks(func() []byte { b, _ := simModule.Get(); return b }, genesis, vocab, j, mods, timing{hz: tickHz})
-	authority, err := registry.get(ctx, chunkName)
+	auth, err := registry.get(ctx, chunkName)
 	if err != nil {
 		log.Fatalf("open chunk: %v", err)
 	}
@@ -122,6 +126,12 @@ func Run() {
 		log.Fatalf("chunk listen: %v", err)
 	}
 	defer internal.Close()
+	resolve := func(name string) (*authority, bool) {
+		if name != chunkName {
+			return nil, false
+		}
+		return auth, true
+	}
 	go func() {
 		for {
 			conn, err := internal.Accept()
@@ -131,7 +141,7 @@ func Run() {
 				}
 				return
 			}
-			go handleTrunkConn(conn, key, authority, maxSessions)
+			go handleTrunkConn(conn, key, game, resolve, maxSessions)
 		}
 	}()
 
@@ -153,7 +163,7 @@ func Run() {
 	obsMux.Handle("/metrics", promhttp.Handler())
 	obsMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	obsMux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
-		if !ready.Load() || authority.isClosed() {
+		if !ready.Load() || auth.isClosed() {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
@@ -172,7 +182,7 @@ func Run() {
 	<-ctx.Done()
 	ready.Store(false)
 	internal.Close()
-	authority.close()
+	auth.close()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	chunkieHTTP.Shutdown(shutdownCtx)
@@ -214,7 +224,7 @@ func terrainHandler(j journal.Journal, ready *atomic.Bool, genesis []byte) http.
 	}
 }
 
-// connSession is one multiplexed session's park-side state. The demux
+// connSession is one multiplexed session's chunk-side state. The demux
 // loop routes its frames here; run's two goroutines (writer, intent
 // drain) mirror the pair the per-session transport used to spawn.
 type connSession struct {
@@ -251,7 +261,7 @@ func (cs *connSession) terminate(why string, notify bool) {
 	})
 }
 
-func handleTrunkConn(conn net.Conn, key []byte, chunk *authority, maxSessions int) {
+func handleTrunkConn(conn net.Conn, key []byte, game string, resolve func(chunk string) (*authority, bool), maxSessions int) {
 	pc, err := trunk.Accept(conn, key, time.Now())
 	if err != nil {
 		return
@@ -302,7 +312,14 @@ func handleTrunkConn(conn net.Conn, key []byte, chunk *authority, maxSessions in
 				}
 				continue
 			}
-			if open.Chunk != chunk.name {
+			if open.Game != game {
+				if pc.WriteClose(msg.SID, "wrong game") != nil {
+					return
+				}
+				continue
+			}
+			chunk, ok := resolve(open.Chunk)
+			if !ok {
 				if pc.WriteClose(msg.SID, "wrong chunk") != nil {
 					return
 				}
@@ -355,10 +372,11 @@ func handleTrunkConn(conn net.Conn, key []byte, chunk *authority, maxSessions in
 				}
 			}
 		case trunk.KindDatagram:
-			if lookup(msg.SID) == nil {
+			cs := lookup(msg.SID)
+			if cs == nil {
 				continue
 			}
-			if verdict, ok := checkVerdict(chunk, msg.Payload); ok {
+			if verdict, ok := checkVerdict(cs.s.chunk, msg.Payload); ok {
 				if pc.WriteDatagram(msg.SID, verdict) != nil {
 					return
 				}

@@ -1,10 +1,10 @@
-// Package parkproxy is the authenticated internal transport between the
-// gateway and a chunk backend. One TCP connection carries every session for
-// its (gateway, backend) pair: the HMAC handshake happens once per
-// connection, sessions open and close as multiplexed control messages, and
-// a single ping probes the backend's liveness for all of them. That makes
-// re-attaching a session to a different backend a control message rather
-// than a redial — the seam cross-chunk transfer needs.
+// Package trunk is the authenticated internal transport between the
+// gateway and a chunk backend. One TCP connection carries every
+// attachment for its (gateway, backend) pair: the HMAC handshake happens
+// once per connection, attachments open and close as multiplexed control
+// messages, and a single ping probes the backend's liveness for all of
+// them. That makes re-attaching to a different backend a control message
+// rather than a redial — the seam cross-chunk transfer needs.
 package trunk
 
 import (
@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	proxyMagic      = "CHUNKY02"
+	proxyMagic      = "CHUNKY03"
 	proxyMaxPayload = 1 << 20
 
 	KindOpen     = 1
@@ -45,17 +45,18 @@ const (
 	acceptReadTimeout = 30 * time.Second
 )
 
-var errSessionClosed = errors.New("proxy session closed")
+var errAttachmentClosed = errors.New("trunk attachment closed")
 
-// ErrIdle is the reason a sessionless connection was reaped; owners can
-// tell routine lifecycle from failure in their ConnDown hook.
+// ErrIdle is the reason an attachmentless connection was reaped; owners
+// can tell routine lifecycle from failure in their ConnDown hook.
 var ErrIdle = errors.New("idle")
 
-// Open carries one session's identity to the chunk. It rides the
+// Open carries one attachment's identity to the chunk. It rides the
 // authenticated connection, so it needs no signature of its own.
 type Open struct {
+	Game      string
 	Sub       string
-	Chunk      string
+	Chunk     string
 	Role      string
 	Remote    string
 	SinceSeq  int64
@@ -70,7 +71,7 @@ type Msg struct {
 	Payload []byte
 }
 
-// Conn is one authenticated proxy connection shared by many sessions.
+// Conn is one authenticated proxy connection shared by many attachments.
 type Conn struct {
 	c       net.Conn
 	writeMu sync.Mutex
@@ -151,9 +152,9 @@ func (p *Conn) readHandshake(key []byte, now time.Time) error {
 	if string(body[:len(proxyMagic)]) != proxyMagic {
 		return errors.New("bad proxy magic")
 	}
-	// The freshness window bounds replay of a captured handshake. It now
-	// authenticates a whole connection rather than one session; the real
-	// boundary is key possession on the cluster network, as before.
+	// The freshness window bounds replay of a captured handshake. It
+	// authenticates a whole connection rather than one attachment; the
+	// real boundary is key possession on the cluster network, as before.
 	ts := int64(binary.LittleEndian.Uint64(body[len(proxyMagic):]))
 	if d := now.Sub(time.Unix(ts, 0)); d < -30*time.Second || d > 30*time.Second {
 		return errors.New("stale proxy handshake")
@@ -163,7 +164,7 @@ func (p *Conn) readHandshake(key []byte, now time.Time) error {
 
 // WriteMessage frames kind|sid|payload onto the shared connection. The
 // deadline bounds how long one stalled peer can hold the write lock every
-// other session shares.
+// other attachment shares.
 func (p *Conn) WriteMessage(kind byte, sid uint64, payload []byte) error {
 	if len(payload) > proxyMaxPayload {
 		return errors.New("proxy payload too large")
@@ -251,7 +252,7 @@ func encodeOpen(open Open) ([]byte, error) {
 	b = binary.LittleEndian.AppendUint64(b, uint64(open.SinceSeq))
 	b = binary.LittleEndian.AppendUint64(b, open.SinceTick)
 	var err error
-	for _, s := range []string{open.Sub, open.Chunk, open.Role, open.Remote} {
+	for _, s := range []string{open.Game, open.Sub, open.Chunk, open.Role, open.Remote} {
 		b, err = appendProxyString(b, s)
 		if err != nil {
 			return nil, err
@@ -269,14 +270,14 @@ func DecodeOpen(payload []byte) (Open, error) {
 		SinceTick: binary.LittleEndian.Uint64(payload[8:]),
 	}
 	at := 16
-	for _, field := range []*string{&open.Sub, &open.Chunk, &open.Role, &open.Remote} {
+	for _, field := range []*string{&open.Game, &open.Sub, &open.Chunk, &open.Role, &open.Remote} {
 		s, err := takeProxyString(payload, &at)
 		if err != nil {
 			return Open{}, err
 		}
 		*field = s
 	}
-	if at != len(payload) || open.Sub == "" || open.Chunk == "" || (open.Role != "player" && open.Role != "spectator") {
+	if at != len(payload) || open.Game == "" || open.Sub == "" || open.Chunk == "" || (open.Role != "player" && open.Role != "spectator") {
 		return Open{}, errors.New("bad proxy open")
 	}
 	return open, nil
@@ -298,8 +299,8 @@ type Pool struct {
 	key   []byte
 	hooks Hooks
 	// PingEvery and PongWithin pace the liveness probe each connection
-	// runs, and IdleAfter is how long a connection with zero sessions is
-	// kept before it is closed (backends leave the directory; their
+	// runs, and IdleAfter is how long a connection with zero attachments
+	// is kept before it is closed (backends leave the directory; their
 	// connections must not outlive them). The defaults suit production
 	// and tests shrink them.
 	PingEvery  time.Duration
@@ -340,10 +341,10 @@ func (p *Pool) forgetConn(m *muxConn) {
 	e.mu.Unlock()
 }
 
-// Open attaches a new session over addr's shared connection, dialing it if
+// Open adds a new attachment over addr's shared connection, dialing it if
 // needed. A connection that died since its last use costs one redial, not
-// an error surfaced to the session.
-func (p *Pool) Open(ctx context.Context, addr string, open Open) (*Session, error) {
+// an error surfaced to the attachment.
+func (p *Pool) Open(ctx context.Context, addr string, open Open) (*Attachment, error) {
 	body, err := encodeOpen(open)
 	if err != nil {
 		return nil, err
@@ -359,7 +360,7 @@ func (p *Pool) Open(ctx context.Context, addr string, open Open) (*Session, erro
 	for attempt := 0; ; attempt++ {
 		// The entry lock covers only the dial decision (ctx bounds the
 		// dial itself); the open write happens outside it so one slow
-		// write can't head-of-line-block every other session's open.
+		// write can't head-of-line-block every other attachment's open.
 		e.mu.Lock()
 		mc := e.conn
 		if mc == nil || mc.dead() {
@@ -375,9 +376,9 @@ func (p *Pool) Open(ctx context.Context, addr string, open Open) (*Session, erro
 			e.conn = mc
 		}
 		e.mu.Unlock()
-		s, err := mc.openSession(body)
+		a, err := mc.openAttachment(body)
 		if err == nil || attempt > 0 {
-			return s, err
+			return a, err
 		}
 	}
 }
@@ -390,7 +391,7 @@ func (p *Pool) dial(ctx context.Context, addr string) (*muxConn, error) {
 	mc := &muxConn{
 		Conn: &Conn{c: c}, addr: addr, pool: p, hooks: p.hooks,
 		pingEvery: p.PingEvery, pongWithin: p.PongWithin, idleAfter: p.IdleAfter,
-		sessions: map[uint64]*Session{}, deadCh: make(chan struct{}),
+		attachments: map[uint64]*Attachment{}, deadCh: make(chan struct{}),
 	}
 	if err := mc.writeHandshake(p.key); err != nil {
 		c.Close()
@@ -415,12 +416,12 @@ type muxConn struct {
 	idleAfter  time.Duration
 	lastPong   atomic.Int64
 
-	mu        sync.Mutex
-	sessions  map[uint64]*Session
-	nextSID   uint64
-	idleSince time.Time
-	deadCh    chan struct{}
-	deadOnce  sync.Once
+	mu          sync.Mutex
+	attachments map[uint64]*Attachment
+	nextSID     uint64
+	idleSince   time.Time
+	deadCh      chan struct{}
+	deadOnce    sync.Once
 }
 
 func (m *muxConn) dead() bool {
@@ -432,35 +433,35 @@ func (m *muxConn) dead() bool {
 	}
 }
 
-func (m *muxConn) openSession(openBody []byte) (*Session, error) {
+func (m *muxConn) openAttachment(openBody []byte) (*Attachment, error) {
 	m.mu.Lock()
 	if m.dead() {
 		m.mu.Unlock()
 		return nil, errors.New("proxy conn closed")
 	}
 	m.nextSID++
-	s := &Session{
+	a := &Attachment{
 		conn: m, sid: m.nextSID,
 		events: make(chan Event, 256), done: make(chan struct{}),
 	}
-	m.sessions[s.sid] = s
+	m.attachments[a.sid] = a
 	m.mu.Unlock()
-	if err := m.WriteMessage(KindOpen, s.sid, openBody); err != nil {
+	if err := m.WriteMessage(KindOpen, a.sid, openBody); err != nil {
 		m.kill(err)
 		return nil, err
 	}
-	return s, nil
+	return a, nil
 }
 
-func (m *muxConn) lookup(sid uint64) *Session {
+func (m *muxConn) lookup(sid uint64) *Attachment {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.sessions[sid]
+	return m.attachments[sid]
 }
 
 func (m *muxConn) forget(sid uint64) {
 	m.mu.Lock()
-	delete(m.sessions, sid)
+	delete(m.attachments, sid)
 	m.mu.Unlock()
 }
 
@@ -475,20 +476,21 @@ func (m *muxConn) readLoop() {
 		case KindPong:
 			m.lastPong.Store(time.Now().UnixNano())
 		case KindStream, KindDatagram:
-			s := m.lookup(msg.SID)
-			if s == nil {
+			a := m.lookup(msg.SID)
+			if a == nil {
 				continue
 			}
 			select {
-			case s.events <- Event{Kind: msg.Kind, Payload: msg.Payload}:
+			case a.events <- Event{Kind: msg.Kind, Payload: msg.Payload}:
 			default:
-				// A session that can't drain chunk fan-out is closed rather
-				// than allowed to stall every other session's demux.
-				s.terminate("relay backlog", false, true)
+				// An attachment that can't drain chunk fan-out is closed
+				// rather than allowed to stall every other attachment's
+				// demux.
+				a.terminate("relay backlog", false, true)
 			}
 		case KindClose:
-			if s := m.lookup(msg.SID); s != nil {
-				s.terminate(string(msg.Payload), true, false)
+			if a := m.lookup(msg.SID); a != nil {
+				a.terminate(string(msg.Payload), true, false)
 			}
 		}
 	}
@@ -508,7 +510,7 @@ func (m *muxConn) pingLoop() {
 			}
 			m.mu.Lock()
 			switch {
-			case len(m.sessions) > 0:
+			case len(m.attachments) > 0:
 				m.idleSince = time.Time{}
 			case m.idleSince.IsZero():
 				m.idleSince = time.Now()
@@ -532,13 +534,13 @@ func (m *muxConn) kill(err error) {
 		close(m.deadCh)
 		m.Close()
 		m.mu.Lock()
-		sessions := make([]*Session, 0, len(m.sessions))
-		for _, s := range m.sessions {
-			sessions = append(sessions, s)
+		attachments := make([]*Attachment, 0, len(m.attachments))
+		for _, a := range m.attachments {
+			attachments = append(attachments, a)
 		}
 		m.mu.Unlock()
-		for _, s := range sessions {
-			s.terminate("chunk unavailable", false, false)
+		for _, a := range attachments {
+			a.terminate("chunk unavailable", false, false)
 		}
 		// A goroutine because kill can run under a caller already holding
 		// the pool entry's lock (a failed open).
@@ -549,72 +551,71 @@ func (m *muxConn) kill(err error) {
 	})
 }
 
-// Event is one message delivered to a session: a stream frame or a
+// Event is one message delivered to an attachment: a stream frame or a
 // datagram from the chunk.
 type Event struct {
 	Kind    byte
 	Payload []byte
 }
 
-// Session is the gateway's handle on one multiplexed chunk session — an
-// attachment object whose lifetime is independent of the connection
-// carrying it.
-type Session struct {
+// Attachment is the gateway's handle on one multiplexed chunk session —
+// its lifetime is independent of the connection carrying it.
+type Attachment struct {
 	conn *muxConn
 	sid  uint64
 
 	events chan Event
 	done   chan struct{}
 	once   sync.Once
-	// reason and fromPark are written before done closes and read only
+	// reason and fromChunk are written before done closes and read only
 	// after it, so the channel close orders them.
-	reason   string
-	fromPark bool
+	reason    string
+	fromChunk bool
 }
 
-func (s *Session) Events() <-chan Event  { return s.events }
-func (s *Session) Done() <-chan struct{} { return s.done }
+func (a *Attachment) Events() <-chan Event  { return a.events }
+func (a *Attachment) Done() <-chan struct{} { return a.done }
 
-// CloseReason reports why the session ended and whether the chunk said so;
-// a park-stated reason is meant for the client, anything else is the
+// CloseReason reports why the attachment ended and whether the chunk said
+// so; a chunk-stated reason is meant for the client, anything else is the
 // transport's own failure. Valid once Done is closed.
-func (s *Session) CloseReason() (string, bool) { return s.reason, s.fromPark }
+func (a *Attachment) CloseReason() (string, bool) { return a.reason, a.fromChunk }
 
-func (s *Session) SendStream(frame []byte) error { return s.send(KindStream, frame) }
-func (s *Session) SendDatagram(b []byte) error   { return s.send(KindDatagram, b) }
+func (a *Attachment) SendStream(frame []byte) error { return a.send(KindStream, frame) }
+func (a *Attachment) SendDatagram(b []byte) error   { return a.send(KindDatagram, b) }
 
-func (s *Session) send(kind byte, b []byte) error {
+func (a *Attachment) send(kind byte, b []byte) error {
 	select {
-	case <-s.done:
-		return errSessionClosed
+	case <-a.done:
+		return errAttachmentClosed
 	default:
 	}
 	// A write error may have left a partial frame on the wire; the framing
 	// has no resync marker, so the connection is unusable for everyone.
-	if err := s.conn.WriteMessage(kind, s.sid, b); err != nil {
-		s.conn.kill(err)
+	if err := a.conn.WriteMessage(kind, a.sid, b); err != nil {
+		a.conn.kill(err)
 		return err
 	}
 	return nil
 }
 
-// Close ends the session and tells the chunk; the shared connection lives
-// on for its other sessions.
-func (s *Session) Close(reason string) { s.terminate(reason, false, true) }
+// Close ends the attachment and tells the chunk; the shared connection
+// lives on for its other attachments.
+func (a *Attachment) Close(reason string) { a.terminate(reason, false, true) }
 
-func (s *Session) terminate(reason string, fromPark, notifyPark bool) {
-	s.once.Do(func() {
-		s.reason, s.fromPark = reason, fromPark
-		s.conn.forget(s.sid)
-		if notifyPark {
+func (a *Attachment) terminate(reason string, fromChunk, notifyChunk bool) {
+	a.once.Do(func() {
+		a.reason, a.fromChunk = reason, fromChunk
+		a.conn.forget(a.sid)
+		if notifyChunk {
 			// Asynchronous: terminate is called from relay and demux loops
 			// that must never block on a network write.
 			go func() {
-				if err := s.conn.WriteClose(s.sid, reason); err != nil {
-					s.conn.kill(err)
+				if err := a.conn.WriteClose(a.sid, reason); err != nil {
+					a.conn.kill(err)
 				}
 			}()
 		}
-		close(s.done)
+		close(a.done)
 	})
 }

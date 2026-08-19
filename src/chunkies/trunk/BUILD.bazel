@@ -2,7 +2,10 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "trunk",
-    srcs = ["trunk.go"],
+    srcs = [
+        "trunk.go",
+        "trunks.go",
+    ],
     importpath = "github.com/guardian-intelligence/guardian/src/chunkies/trunk",
     visibility = ["//src/chunkies:__subpackages__"],
 )

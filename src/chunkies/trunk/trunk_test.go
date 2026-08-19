@@ -107,15 +107,15 @@ func waitFor(t *testing.T, d time.Duration, fn func() bool) bool {
 	return fn()
 }
 
-func openTwo(t *testing.T, p *Pool, addr string) (*Session, *Session) {
+func openTwo(t *testing.T, p *Pool, addr string) (*Attachment, *Attachment) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s1, err := p.Open(ctx, addr, Open{Sub: "alice", Chunk: "park-test", Role: "player", SinceSeq: -1})
+	s1, err := p.Open(ctx, addr, Open{Game: "wum", Sub: "alice", Chunk: "park-test", Role: "player", SinceSeq: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s2, err := p.Open(ctx, addr, Open{Sub: "bob", Chunk: "park-test", Role: "spectator", SinceSeq: 7, SinceTick: 90})
+	s2, err := p.Open(ctx, addr, Open{Game: "wum", Sub: "bob", Chunk: "park-test", Role: "spectator", SinceSeq: 7, SinceTick: 90})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestMuxSharesOneConnAcrossSessions(t *testing.T) {
 		t.Fatalf("both sessions share sid %d", opens[0].SID)
 	}
 	o1, err := DecodeOpen(opens[0].Payload)
-	if err != nil || o1.Sub != "alice" || o1.Chunk != "park-test" || o1.Role != "player" || o1.SinceSeq != -1 {
+	if err != nil || o1.Game != "wum" || o1.Sub != "alice" || o1.Chunk != "park-test" || o1.Role != "player" || o1.SinceSeq != -1 {
 		t.Fatalf("open 1 = %+v (err %v)", o1, err)
 	}
 	o2, err := DecodeOpen(opens[1].Payload)
@@ -150,7 +150,7 @@ func TestMuxSharesOneConnAcrossSessions(t *testing.T) {
 	}
 
 	// Each session's welcome landed on its own event queue.
-	for i, s := range []*Session{s1, s2} {
+	for i, s := range []*Attachment{s1, s2} {
 		select {
 		case ev := <-s.Events():
 			if ev.Kind != KindStream || string(ev.Payload) != "welcome" {
@@ -173,7 +173,7 @@ func TestMuxSharesOneConnAcrossSessions(t *testing.T) {
 	}
 }
 
-func TestMuxParkCloseEndsOneSessionOnly(t *testing.T) {
+func TestMuxChunkCloseEndsOneSessionOnly(t *testing.T) {
 	chunk := newFakeChunkieServer(t, nil)
 	pool := NewPool(testKey, Hooks{})
 	s1, s2 := openTwo(t, pool, chunk.addr())
@@ -184,8 +184,8 @@ func TestMuxParkCloseEndsOneSessionOnly(t *testing.T) {
 	chunk.conn(0).WriteClose(s2.sid, "wrong chunk")
 	select {
 	case <-s2.Done():
-		if reason, fromPark := s2.CloseReason(); !fromPark || reason != "wrong chunk" {
-			t.Fatalf("close = %q fromPark=%v, want park-stated wrong chunk", reason, fromPark)
+		if reason, fromChunk := s2.CloseReason(); !fromChunk || reason != "wrong chunk" {
+			t.Fatalf("close = %q fromChunk=%v, want chunk-stated wrong chunk", reason, fromChunk)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("chunk close never reached the session")
@@ -208,7 +208,7 @@ func TestMuxParkCloseEndsOneSessionOnly(t *testing.T) {
 	}
 }
 
-func TestMuxGatewayCloseTellsPark(t *testing.T) {
+func TestMuxGatewayCloseTellsChunk(t *testing.T) {
 	chunk := newFakeChunkieServer(t, nil)
 	pool := NewPool(testKey, Hooks{})
 	s1, _ := openTwo(t, pool, chunk.addr())
@@ -234,11 +234,11 @@ func TestMuxConnLossFailsAllSessionsThenRedials(t *testing.T) {
 		t.Fatal("no server conn")
 	}
 	chunk.conn(0).Close()
-	for i, s := range []*Session{s1, s2} {
+	for i, s := range []*Attachment{s1, s2} {
 		select {
 		case <-s.Done():
-			if reason, fromPark := s.CloseReason(); fromPark || reason != "chunk unavailable" {
-				t.Fatalf("session %d close = %q fromPark=%v", i+1, reason, fromPark)
+			if reason, fromChunk := s.CloseReason(); fromChunk || reason != "chunk unavailable" {
+				t.Fatalf("session %d close = %q fromChunk=%v", i+1, reason, fromChunk)
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatalf("session %d survived its connection", i+1)
@@ -248,7 +248,7 @@ func TestMuxConnLossFailsAllSessionsThenRedials(t *testing.T) {
 	// The next open pays one redial, not an error.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s3, err := pool.Open(ctx, chunk.addr(), Open{Sub: "carol", Chunk: "park-test", Role: "player"})
+	s3, err := pool.Open(ctx, chunk.addr(), Open{Game: "wum", Sub: "carol", Chunk: "park-test", Role: "player"})
 	if err != nil {
 		t.Fatalf("open after conn loss: %v", err)
 	}
@@ -285,14 +285,14 @@ func TestMuxPongTimeoutKillsConn(t *testing.T) {
 	pool.PongWithin = 100 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s, err := pool.Open(ctx, l.Addr().String(), Open{Sub: "alice", Chunk: "park-test", Role: "player"})
+	s, err := pool.Open(ctx, l.Addr().String(), Open{Game: "wum", Sub: "alice", Chunk: "park-test", Role: "player"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case <-s.Done():
-		if reason, fromPark := s.CloseReason(); fromPark || reason != "chunk unavailable" {
-			t.Fatalf("close = %q fromPark=%v", reason, fromPark)
+		if reason, fromChunk := s.CloseReason(); fromChunk || reason != "chunk unavailable" {
+			t.Fatalf("close = %q fromChunk=%v", reason, fromChunk)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("a silent chunk was never detected")
@@ -316,8 +316,8 @@ func TestMuxBacklogClosesOnlyTheStalledSession(t *testing.T) {
 	}
 	select {
 	case <-s1.Done():
-		if reason, fromPark := s1.CloseReason(); fromPark || reason != "relay backlog" {
-			t.Fatalf("close = %q fromPark=%v", reason, fromPark)
+		if reason, fromChunk := s1.CloseReason(); fromChunk || reason != "relay backlog" {
+			t.Fatalf("close = %q fromChunk=%v", reason, fromChunk)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("stalled session was never closed")
@@ -345,7 +345,7 @@ func TestMuxIdleConnReaped(t *testing.T) {
 	pool.IdleAfter = 60 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s, err := pool.Open(ctx, chunk.addr(), Open{Sub: "alice", Chunk: "park-test", Role: "player"})
+	s, err := pool.Open(ctx, chunk.addr(), Open{Game: "wum", Sub: "alice", Chunk: "park-test", Role: "player"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestMuxIdleConnReaped(t *testing.T) {
 
 	// The pool dials fresh for the next session instead of reusing the
 	// reaped connection.
-	s2, err := pool.Open(ctx, chunk.addr(), Open{Sub: "bob", Chunk: "park-test", Role: "player"})
+	s2, err := pool.Open(ctx, chunk.addr(), Open{Game: "wum", Sub: "bob", Chunk: "park-test", Role: "player"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestMuxRejectsWrongKey(t *testing.T) {
 	defer cancel()
 	// The dial itself can succeed (the handshake is one-way); the chunk
 	// must refuse to speak, so the session dies instead of attaching.
-	if s, err := pool.Open(ctx, l.Addr().String(), Open{Sub: "a", Chunk: "p", Role: "player"}); err == nil {
+	if s, err := pool.Open(ctx, l.Addr().String(), Open{Game: "g", Sub: "a", Chunk: "p", Role: "player"}); err == nil {
 		select {
 		case <-s.Done():
 		case <-time.After(5 * time.Second):

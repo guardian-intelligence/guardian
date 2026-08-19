@@ -34,8 +34,8 @@ var (
 		Name: "chunkies_trunk_conn_failures_total", Help: "Gateway-to-chunk connection failures."}, []string{"stage"})
 )
 
-func newTrunkPool(key []byte) *trunk.Pool {
-	return trunk.NewPool(key, trunk.Hooks{
+func newTrunks(key []byte, dir trunk.Directory) *trunk.Trunks {
+	return trunk.NewTrunks(key, dir, trunk.Hooks{
 		ConnUp: func(string) { mTrunkConns.Inc() },
 		ConnDown: func(addr string, err error) {
 			mTrunkConns.Dec()

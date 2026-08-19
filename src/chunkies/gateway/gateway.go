@@ -32,9 +32,8 @@ import (
 
 type chunkiesGateway struct {
 	admission *gameHandlers
-	directory *chunkDirectory
 	game      string
-	trunks     *trunk.Pool
+	trunks    *trunk.Trunks
 }
 
 // Run is the chunkies-gateway process: public WebTransport, admission,
@@ -95,7 +94,7 @@ func Run() {
 		defaultChunk: envStr("DEFAULT_CHUNK", ""),
 		anonMints:    newAnonLimiter(),
 	}
-	gateway := &chunkiesGateway{admission: admission, directory: directory, game: game, trunks: newTrunkPool(key)}
+	gateway := &chunkiesGateway{admission: admission, game: game, trunks: newTrunks(key, directory)}
 
 	sans := []net.IP{net.ParseIP("127.0.0.1")}
 	if host, _, err := net.SplitHostPort(publicAddr); err == nil {
@@ -290,15 +289,9 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 		sess.CloseWithError(4401, "bad ticket")
 		return
 	}
-	backend, ok := g.directory.lookup(g.game, ticket.Chunk)
-	if !ok {
-		mHandshakes.WithLabelValues("chunk_unavailable").Inc()
-		sess.CloseWithError(4503, "chunk unavailable")
-		return
-	}
 	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	chunk, err := g.trunks.Open(dialCtx, backend, trunk.Open{
-		Sub: ticket.Sub, Chunk: ticket.Chunk, Role: ticket.Role,
+	chunk, err := g.trunks.Attach(dialCtx, trunk.AttachSpec{
+		Game: g.game, Chunk: ticket.Chunk, Sub: ticket.Sub, Role: ticket.Role,
 		Remote: sess.RemoteAddr().String(), SinceSeq: hello.SinceSeq, SinceTick: hello.SinceTick,
 	})
 	cancel()
@@ -358,9 +351,9 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 						drained = true
 					}
 				}
-				// A park-stated reason is meant for the client; a transport
+				// A chunk-stated reason is meant for the client; a transport
 				// failure is not the client's fault and reads as outage.
-				if reason, fromPark := chunk.CloseReason(); fromPark {
+				if reason, fromChunk := chunk.CloseReason(); fromChunk {
 					sess.CloseWithError(4000, reason)
 				} else {
 					sess.CloseWithError(4503, "chunk unavailable")

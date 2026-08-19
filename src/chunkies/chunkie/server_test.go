@@ -22,7 +22,7 @@ import (
 
 // nextFrame reads session events until one carries a stream frame of the
 // wanted codec kind.
-func nextFrame(t *testing.T, s *trunk.Session, want byte) []byte {
+func nextFrame(t *testing.T, s *trunk.Attachment, want byte) []byte {
 	t.Helper()
 	deadline := time.After(10 * time.Second)
 	for {
@@ -60,11 +60,11 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 	}
 	mods := toyMods(toyModule(t))
 	registry := newChunks(func() []byte { b, _ := mods.sim.Get(); return b }, nil, toyVocab(), j, mods, timing{hz: 24})
-	authority, err := registry.get(ctx, "park-test")
+	auth, err := registry.get(ctx, "park-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(authority.close)
+	t.Cleanup(auth.close)
 
 	key := []byte("0123456789abcdef0123456789abcdef")
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -72,45 +72,52 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { l.Close() })
+	resolve := func(name string) (*authority, bool) {
+		if name != "park-test" {
+			return nil, false
+		}
+		return auth, true
+	}
 	go func() {
 		for {
 			conn, err := l.Accept()
 			if err != nil {
 				return
 			}
-			go handleTrunkConn(conn, key, authority, 16)
+			go handleTrunkConn(conn, key, "wum", resolve, 16)
 		}
 	}()
 
 	pool := trunk.NewPool(key, trunk.Hooks{})
 	openCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	alice, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Sub: "alice", Chunk: "park-test", Role: "player", SinceSeq: -1})
+	alice, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Game: "wum", Sub: "alice", Chunk: "park-test", Role: "player", SinceSeq: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	bob, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Sub: "bob", Chunk: "park-test", Role: "spectator", SinceSeq: -1})
+	bob, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Game: "wum", Sub: "bob", Chunk: "park-test", Role: "spectator", SinceSeq: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Both sessions attach through one connection and get their own
 	// welcome.
-	for _, s := range []*trunk.Session{alice, bob} {
+	for _, s := range []*trunk.Attachment{alice, bob} {
 		if _, err := codec.DecodeWelcome(nextFrame(t, s, codec.KindWelcome)); err != nil {
 			t.Fatalf("welcome: %v", err)
 		}
 	}
 
-	// A session opened for the wrong chunk — or with an open the chunk can't
-	// accept (the version-skew shape) — is refused without disturbing the
+	// A session opened for the wrong chunk or game — or with an open the
+	// chunk can't accept (the version-skew shape) — is refused without disturbing the
 	// connection's live sessions.
 	for _, tc := range []struct {
 		open   trunk.Open
 		reason string
 	}{
-		{trunk.Open{Sub: "carol", Chunk: "park-elsewhere", Role: "player", SinceSeq: -1}, "wrong chunk"},
-		{trunk.Open{Sub: "carol", Chunk: "park-test", Role: "admin", SinceSeq: -1}, "bad open"},
+		{trunk.Open{Game: "wum", Sub: "carol", Chunk: "park-elsewhere", Role: "player", SinceSeq: -1}, "wrong chunk"},
+		{trunk.Open{Game: "elsewhere", Sub: "carol", Chunk: "park-test", Role: "player", SinceSeq: -1}, "wrong game"},
+		{trunk.Open{Game: "wum", Sub: "carol", Chunk: "park-test", Role: "admin", SinceSeq: -1}, "bad open"},
 	} {
 		refused, err := pool.Open(openCtx, l.Addr().String(), tc.open)
 		if err != nil {
@@ -118,8 +125,8 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 		}
 		select {
 		case <-refused.Done():
-			if reason, fromPark := refused.CloseReason(); !fromPark || reason != tc.reason {
-				t.Fatalf("close = %q fromPark=%v, want park-stated %q", reason, fromPark, tc.reason)
+			if reason, fromChunk := refused.CloseReason(); !fromChunk || reason != tc.reason {
+				t.Fatalf("close = %q fromChunk=%v, want chunk-stated %q", reason, fromChunk, tc.reason)
 			}
 		case <-time.After(10 * time.Second):
 			t.Fatalf("open was not refused with %q", tc.reason)
@@ -130,7 +137,7 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 	// each addressed by its own id. Batches may also carry system events
 	// (the real-clock authority repays downtime at open), so look for the
 	// record rather than assuming it travels alone.
-	tickWith := func(s *trunk.Session, kind uint16, actor uint64) {
+	tickWith := func(s *trunk.Attachment, kind uint16, actor uint64) {
 		t.Helper()
 		for {
 			_, records, err := codec.DecodeTick(nextFrame(t, s, codec.KindTick))
@@ -147,7 +154,7 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 	if err := alice.SendStream(codec.EncodeIntent(1, kJoin, codec.ActorFor("alice"), nil)); err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range []*trunk.Session{alice, bob} {
+	for _, s := range []*trunk.Attachment{alice, bob} {
 		tickWith(s, kJoin, codec.ActorFor("alice"))
 	}
 

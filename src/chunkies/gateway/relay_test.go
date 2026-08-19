@@ -120,8 +120,8 @@ func newRelayHarness(t *testing.T) *relayHarness {
 	dir.replace(map[string]string{"wum/park-test": backend.addr})
 	gw := &chunkiesGateway{
 		admission: &gameHandlers{tickets: tickets, maxSessions: 16, directory: dir, game: "wum"},
-		directory: dir, game: "wum",
-		trunks: trunk.NewPool(key, trunk.Hooks{}),
+		game:      "wum",
+		trunks:    trunk.NewTrunks(key, dir, trunk.Hooks{}),
 	}
 
 	rc := newRotatingCert([]net.IP{net.ParseIP("127.0.0.1")})
