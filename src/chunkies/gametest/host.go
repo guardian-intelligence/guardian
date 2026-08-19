@@ -22,8 +22,6 @@ var requiredExportsV1 = []string{
 	"sim_terrain_id",
 }
 
-// v1 rate exports are demanded only when the game declares a rate_set
-// kind (a pre-rate module runs the genesis segment).
 var rateExportsV1 = []string{"sim_rate", "sim_anchor_tick", "sim_anchor_ns"}
 
 var requiredExportsV2 = []string{
@@ -35,16 +33,13 @@ var requiredExportsV2 = []string{
 }
 
 // requiredExports returns the surface a module of the given generation
-// owes, given the game's declared kinds.
-func requiredExports(abi uint32, sys System) []string {
+// owes. The system events (rate_set included) are framework contract, so
+// the rate surface is mandatory for every generation.
+func requiredExports(abi uint32) []string {
 	if abi >= 2 {
 		return requiredExportsV2
 	}
-	names := requiredExportsV1
-	if sys.RateSet != 0 {
-		names = append(append([]string{}, names...), rateExportsV1...)
-	}
-	return names
+	return append(append([]string{}, requiredExportsV1...), rateExportsV1...)
 }
 
 // host drives one instance of a game module through the sim ABI. Every

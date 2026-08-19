@@ -24,7 +24,6 @@ import (
 	"github.com/guardian-intelligence/guardian/src/chunkies/journal"
 	"github.com/guardian-intelligence/guardian/src/chunkies/mount"
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
-	"github.com/guardian-intelligence/guardian/src/games/wake-up-mythra/services/wum"
 )
 
 const (
@@ -48,9 +47,10 @@ const (
 	// cost bounded and making the jump an event every replica sees.
 	darkStepWindow = 60 * time.Second
 
-	// Kept in lockstep with sim/shared/park's rate_set validation. Below
-	// 12Hz a boosted dog would cross more than half a cell in one axis
-	// sub-move, violating nav's collision boundary.
+	// The host's own scheduling bounds. A game's module may impose a
+	// stricter floor through its rate_set validation — a rejected rate_set
+	// holds the world's current rate — so these only keep ring sizes and
+	// tick math sane.
 	minTickHz = 12
 	maxTickHz = 1000
 )
@@ -381,11 +381,12 @@ type modules struct {
 // authority is one park's sim authority: journal writer, validator, and
 // fan-out hub (src/chunkies/README.md). run() is the single owner of the host.
 type authority struct {
-	name string
-	id   int64
-	host *parkHost
-	j    journal.Journal
-	mods *modules
+	name  string
+	id    int64
+	host  *parkHost
+	j     journal.Journal
+	mods  *modules
+	vocab Vocab
 
 	// The tick schedule, derived from the sim's journaled rate segment
 	// (refreshSchedule): tick anchorTick falls at anchor, later ticks
@@ -476,9 +477,12 @@ func (a *authority) swapPrelude() []stagedIntent {
 		a.cand, a.candHash, a.soakLeft = cand, hash, soakTicks(a.hz)
 		sum := sha256.Sum256(bytes)
 		a.candSum = binary.LittleEndian.Uint64(sum[:8])
-		if err := cand.SetTerrainE(a.terrainBlob); err != nil {
-			a.failSoak(hash, err)
-			return nil
+		// A content-free game has no blob to stage.
+		if len(a.terrainBlob) > 0 {
+			if err := cand.SetTerrainE(a.terrainBlob); err != nil {
+				a.failSoak(hash, err)
+				return nil
+			}
 		}
 		if err := cand.RestoreE(a.host.Snapshot()); err != nil {
 			a.failSoak(hash, err)
@@ -495,7 +499,7 @@ func (a *authority) swapPrelude() []stagedIntent {
 	var p [12]byte
 	binary.LittleEndian.PutUint32(p[:4], a.host.Epoch()+1)
 	binary.LittleEndian.PutUint64(p[4:], a.candSum)
-	return []stagedIntent{{actor: "system", kind: wum.EvEpochAdvance, payload: p[:]}}
+	return []stagedIntent{{actor: "system", kind: codec.KindEpochAdvance, payload: p[:]}}
 }
 
 // failSoak rejects the candidate. A non-empty hash pins it as bad so the
@@ -568,11 +572,9 @@ func parkIDFor(name string) int64 {
 }
 
 // setTerrain loads a blob into the host and caches its identity for the
-// welcome/snapshot frames (and the bytes for soak candidates).
+// welcome/snapshot frames (and the bytes for soak candidates). The blob is
+// opaque to the host — the sim's content stage validates or rejects it.
 func (a *authority) setTerrain(blob []byte) error {
-	if _, _, _, err := terrainHeaderFields(blob); err != nil {
-		return err
-	}
 	if err := a.host.SetTerrain(blob); err != nil {
 		return err
 	}
@@ -587,7 +589,7 @@ func (a *authority) setTerrain(blob []byte) error {
 // closed, and hands back an authority ready for run(). A park whose
 // snapshot does not replay to its recorded world hash is refused, never
 // served wrong.
-func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, j journal.Journal, mods *modules, tm timing) (*authority, error) {
+func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing) (*authority, error) {
 	if tm.hz == 0 {
 		tm.hz = 24
 	}
@@ -603,6 +605,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 	}
 	a := &authority{
 		name: name, id: parkIDFor(name), host: host, j: j, mods: mods,
+		vocab:      vocab,
 		tm:         tm,
 		moduleHash: displayHash(module),
 		subs:       map[*session]bool{},
@@ -623,15 +626,19 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 		return fail(err)
 	}
 	if ok {
-		blob, found, err := j.TerrainBlob(ctx, snap.TerrainID)
-		if err != nil {
-			return fail(err)
-		}
-		if !found {
-			return fail(fmt.Errorf("terrain %016x missing — snapshot cannot restore", snap.TerrainID))
-		}
-		if err := a.setTerrain(blob); err != nil {
-			return fail(err)
+		// TerrainID 0 is a content-free game (content_cap 0): there is no
+		// blob to fetch and no content stage to run.
+		if snap.TerrainID != 0 {
+			blob, found, err := j.TerrainBlob(ctx, snap.TerrainID)
+			if err != nil {
+				return fail(err)
+			}
+			if !found {
+				return fail(fmt.Errorf("terrain %016x missing — snapshot cannot restore", snap.TerrainID))
+			}
+			if err := a.setTerrain(blob); err != nil {
+				return fail(err)
+			}
 		}
 		if err := host.Restore(snap.State); err != nil {
 			return fail(err)
@@ -658,7 +665,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 			for host.Tick() < ev.Tick {
 				host.Step()
 			}
-			if ev.Kind == wum.EvTerrainSet && len(ev.Payload) == 12 {
+			if ev.Kind == codec.KindContentSet && len(ev.Payload) == 12 {
 				tid := binary.LittleEndian.Uint64(ev.Payload[4:12])
 				blob, found, err := j.TerrainBlob(ctx, tid)
 				if err != nil {
@@ -671,26 +678,26 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 					return fail(err)
 				}
 			}
-			actor, payload := wum.EventActor(ev.Kind, ev.Actor, ev.Payload)
+			actor, payload := a.vocab.eventActor(ev.Kind, ev.Actor, ev.Payload)
 			if code := host.Apply(simEvent(ev.Kind, actor, payload)); code != 0 {
 				return fail(fmt.Errorf("replay: event seq %d rejected with code %d", ev.Seq, code))
 			}
 			a.lastSeq = ev.Seq
 		}
 	} else {
-		// Genesis: the terrain artifact becomes durable first, then the
+		// Genesis: the content artifact becomes durable first, then the
 		// snapshot that references it — events alone cannot recreate a
-		// park, and a snapshot must never point at an unstored blob.
-		schema, _, _, err := terrainHeaderFields(genesisTerrain)
-		if err != nil {
-			return fail(err)
-		}
-		tid := terrainID(genesisTerrain)
-		if err := j.PutTerrain(ctx, tid, schema, genesisTerrain); err != nil {
-			return fail(err)
-		}
-		if err := a.setTerrain(genesisTerrain); err != nil {
-			return fail(err)
+		// park, and a snapshot must never point at an unstored blob. A
+		// content-free game (no genesis artifact) skips the dance; the
+		// blob's layout is the sim's business, so schema rides as zero.
+		if len(genesisTerrain) > 0 {
+			tid := terrainID(genesisTerrain)
+			if err := j.PutTerrain(ctx, tid, 0, genesisTerrain); err != nil {
+				return fail(err)
+			}
+			if err := a.setTerrain(genesisTerrain); err != nil {
+				return fail(err)
+			}
 		}
 		var b [8]byte
 		rand.Read(b[:])
@@ -698,7 +705,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 			return fail(err)
 		}
 		if err := j.PutSnapshot(ctx, a.id, journal.Snapshot{
-			Seq: 0, Tick: 0, Epoch: 1, WH: host.Hash(), TerrainID: tid, State: host.Snapshot(),
+			Seq: 0, Tick: 0, Epoch: 1, WH: host.Hash(), TerrainID: host.TerrainID(), State: host.Snapshot(),
 		}); err != nil {
 			return fail(err)
 		}
@@ -740,14 +747,14 @@ func (a *authority) rateChange(ctx context.Context, hz int) error {
 	tick, epoch := a.host.Tick(), a.host.Epoch()
 	var p [4]byte
 	binary.LittleEndian.PutUint32(p[:], uint32(hz))
-	if code := a.host.Apply(simEvent(wum.EvRateSet, 0, p[:])); code != 0 {
+	if code := a.host.Apply(simEvent(codec.KindRateSet, 0, p[:])); code != 0 {
 		// A module from before rates existed (mount skew during a
 		// deploy): hold the world's rate; the desired rate lands on the
 		// first reopen under a rate-capable module.
 		log.Printf("park %s: module rejected rate_set %dHz (code %d) — holding %dHz", a.name, hz, code, a.hz)
 		return nil
 	}
-	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: wum.EvRateSet, Actor: "system", Payload: p[:]}
+	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: codec.KindRateSet, Actor: "system", Payload: p[:]}
 	firstSeq, err := a.j.Append(ctx, a.id, a.lastSeq, []journal.Event{ev})
 	if err != nil {
 		// State is ahead of the journal: never serve it.
@@ -780,7 +787,7 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	tick, epoch := a.host.Tick(), a.host.Epoch()
 	var p [8]byte
 	binary.LittleEndian.PutUint64(p[:], target)
-	if code := a.host.Apply(simEvent(wum.EvClockSkip, 0, p[:])); code != 0 {
+	if code := a.host.Apply(simEvent(codec.KindClockSkip, 0, p[:])); code != 0 {
 		// A module from before clock_skip existed (mount skew during a
 		// deploy): anchor to this process so the schedule holds drift-free
 		// for the instance's life; the real repayment lands on the first
@@ -790,7 +797,7 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 		log.Printf("park %s: module rejected clock_skip (code %d) — process-anchored until the module lane converges", a.name, code)
 		return nil
 	}
-	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: wum.EvClockSkip, Actor: "system", Payload: p[:]}
+	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: codec.KindClockSkip, Actor: "system", Payload: p[:]}
 	firstSeq, err := a.j.Append(ctx, a.id, a.lastSeq, []journal.Event{ev})
 	if err != nil {
 		// State is ahead of the journal: never serve it.
@@ -848,7 +855,7 @@ func (a *authority) recordIntent(in stagedIntent, result string, reject uint32, 
 	if in.sess == nil || in.intentID == 0 || in.receivedAt.IsZero() {
 		return
 	}
-	kind := wum.ActionName(in.kind)
+	kind := a.vocab.actionName(in.kind)
 	rateHz := in.rateHz
 	if rateHz == 0 {
 		rateHz = a.hz
@@ -859,19 +866,19 @@ func (a *authority) recordIntent(in stagedIntent, result string, reject uint32, 
 	mIntentAuthorityDur.WithLabelValues(kind, result).Observe(total.Seconds())
 
 	attrs := []attribute.KeyValue{
-		attribute.String("wum.kind", kind),
-		attribute.String("wum.result", result),
-		attribute.String("wum.park", a.name),
-		attribute.Int("wum.rate_hz", rateHz),
-		attribute.Float64("wum.tick_queue_ms", float64(queue.Microseconds())/1000),
-		attribute.Float64("wum.authority_ms", float64(total.Microseconds())/1000),
+		attribute.String("chunkies.kind", kind),
+		attribute.String("chunkies.result", result),
+		attribute.String("chunkies.chunk", a.name),
+		attribute.Int("chunkies.rate_hz", rateHz),
+		attribute.Float64("chunkies.tick_queue_ms", float64(queue.Microseconds())/1000),
+		attribute.Float64("chunkies.authority_ms", float64(total.Microseconds())/1000),
 	}
 	if reject != 0 {
-		attrs = append(attrs, attribute.String("wum.reject_reason", wum.RejectReasonName(reject)))
+		attrs = append(attrs, attribute.String("chunkies.reject_reason", a.vocab.rejectName(reject)))
 	}
 	_, span := otel.Tracer("guardian/chunkies/authority").Start(
 		context.Background(),
-		"mythra.intent",
+		"chunkies.intent",
 		trace.WithTimestamp(in.receivedAt),
 		trace.WithAttributes(attrs...),
 	)
@@ -957,12 +964,12 @@ func (a *authority) stageRateChange(req rateChangeReq) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, in := range a.staged {
-		if in.kind == wum.EvRateSet {
+		if in.kind == codec.KindRateSet {
 			return errors.New("another tick-rate change is pending")
 		}
 	}
 	a.staged = append(a.staged, stagedIntent{
-		actor: "system", kind: wum.EvRateSet, payload: payload[:], done: req.done,
+		actor: "system", kind: codec.KindRateSet, payload: payload[:], done: req.done,
 	})
 	return nil
 }
@@ -1098,7 +1105,7 @@ func (a *authority) tickOnce() {
 		a.utcDay = day
 		var p [4]byte
 		binary.LittleEndian.PutUint32(p[:], day)
-		a.stageSystem(wum.EvDayReset, p[:])
+		a.stageSystem(codec.KindDayReset, p[:])
 	}
 
 	prelude := a.swapPrelude()
@@ -1135,11 +1142,11 @@ func (a *authority) tickOnce() {
 				}
 			}
 			log.Printf("park %s: intent rejected: actor=%s kind=%d intent=%d reason=%s(%d)",
-				a.name, in.actor, in.kind, in.intentID, wum.RejectReasonName(code), code)
-			mIntentsRejected.WithLabelValues(wum.RejectReasonName(code)).Inc()
+				a.name, in.actor, in.kind, in.intentID, a.vocab.rejectName(code), code)
+			mIntentsRejected.WithLabelValues(a.vocab.rejectName(code)).Inc()
 			a.recordIntent(in, "rejected", code, a.tm.now())
 			if in.done != nil {
-				in.done <- fmt.Errorf("rate_set rejected: %s (%d)", wum.RejectReasonName(code), code)
+				in.done <- fmt.Errorf("rate_set rejected: %s (%d)", a.vocab.rejectName(code), code)
 			}
 			continue
 		}
@@ -1202,7 +1209,7 @@ func (a *authority) tickOnce() {
 		a.lastSeq = accepted[len(accepted)-1].Seq
 		a.mu.Unlock()
 		for _, in := range acceptedIntents {
-			if in.kind != wum.EvRateSet || len(in.payload) != 4 {
+			if in.kind != codec.KindRateSet || len(in.payload) != 4 {
 				continue
 			}
 			oldHz := a.hz
@@ -1322,7 +1329,7 @@ func (a *authority) catchupFrames(sinceSeq int64, sinceTick uint64, res attachRe
 			if ev.Seq > res.seq {
 				return errPastAttach
 			}
-			f := eventFrameFor(&ev)
+			f := a.eventFrameFor(&ev)
 			events = append(events, f)
 			eventBytes += len(f)
 			return nil
@@ -1370,8 +1377,8 @@ func snapshotFrameFor(seq int64, tick uint64, epoch uint32, wh, terrain uint64, 
 
 // eventFrameFor rebuilds one journal row as a single-record tick batch
 // for catch-up, resolving the payload era on the way out.
-func eventFrameFor(ev *journal.Event) []byte {
-	actor, payload := wum.EventActor(ev.Kind, ev.Actor, ev.Payload)
+func (a *authority) eventFrameFor(ev *journal.Event) []byte {
+	actor, payload := a.vocab.eventActor(ev.Kind, ev.Actor, ev.Payload)
 	run := codec.AppendEventRecord(nil, ev.IntentID, ev.Kind, actor, payload)
 	return codec.EncodeTick(ev.Tick, ev.Seq, 1, run)
 }
@@ -1406,14 +1413,15 @@ type parks struct {
 	mu      sync.Mutex
 	byName  map[string]*authority
 	module  func() []byte
-	genesis []byte // terrain artifact every brand-new park is born with
+	genesis []byte // content artifact every brand-new park is born with
+	vocab   Vocab
 	j       journal.Journal
 	mods    *modules
 	tm      timing
 }
 
-func newParks(module func() []byte, genesis []byte, j journal.Journal, mods *modules, tm timing) *parks {
-	return &parks{byName: map[string]*authority{}, module: module, genesis: genesis, j: j, mods: mods, tm: tm}
+func newParks(module func() []byte, genesis []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing) *parks {
+	return &parks{byName: map[string]*authority{}, module: module, genesis: genesis, vocab: vocab, j: j, mods: mods, tm: tm}
 }
 
 func (p *parks) get(ctx context.Context, name string) (*authority, error) {
@@ -1425,7 +1433,7 @@ func (p *parks) get(ctx context.Context, name string) (*authority, error) {
 	p.mu.Unlock()
 	// Open outside the registry lock (journal replay takes a moment); the
 	// rare double-open race resolves to the first registered instance.
-	a, err := openAuthority(ctx, name, p.module(), p.genesis, p.j, p.mods, p.tm)
+	a, err := openAuthority(ctx, name, p.module(), p.genesis, p.vocab, p.j, p.mods, p.tm)
 	if err != nil {
 		return nil, err
 	}

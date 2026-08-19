@@ -45,8 +45,18 @@
       value: /etc/chunkies/internal/password
     - name: PG_PASSWORD_FILE
       value: /etc/mythra/pg/mythra
+    - name: PG_HOST
+      value: postgres-products-rw.tenant-guardian-prod.svc:5432
+    - name: PG_DATABASE
+      value: mythra
+    - name: PG_USER
+      value: mythra
     - name: BEHAVIOR_DIR
       value: /etc/mythra/behavior
+    - name: GAME_MANIFEST_FILE
+      value: /etc/mythra/behavior/game.conf
+    - name: GENESIS_FILE
+      value: /etc/mythra/behavior/genesis.bin
     - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
       value: otel-collector.guardian-analytics.svc.cozy.local:4317
 - op: add

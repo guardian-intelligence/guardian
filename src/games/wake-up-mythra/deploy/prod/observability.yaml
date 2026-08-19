@@ -76,7 +76,7 @@ spec:
             summary: "chunkies-park metrics scrape is down"
             description: "No chunkies-park replica has been scrapeable for five minutes."
         - alert: ChunkiesParkTickBudgetExceeded
-          expr: histogram_quantile(0.99, sum(rate(mythra_tick_duration_seconds_bucket{job="chunkies-park-metrics"}[5m])) by (le)) > 0.035
+          expr: histogram_quantile(0.99, sum(rate(chunkies_tick_duration_seconds_bucket{job="chunkies-park-metrics"}[5m])) by (le)) > 0.035
           for: 10m
           labels:
             severity: warning
@@ -85,7 +85,7 @@ spec:
             summary: "chunkies-park tick p99 above 35ms"
             description: "Authority tick p99 is approaching the 41.7ms budget at 24Hz."
         - alert: ChunkiesParkJournalAppendErrors
-          expr: increase(mythra_journal_append_errors_total{job="chunkies-park-metrics"}[10m]) > 0
+          expr: increase(chunkies_journal_append_errors_total{job="chunkies-park-metrics"}[10m]) > 0
           labels:
             severity: warning
             guardian_stage: prod
@@ -93,7 +93,7 @@ spec:
             summary: "chunkies-park journal appends are failing"
             description: "The park closed authority after a journal append failure."
         - alert: ChunkiesParkIntentRejectSpike
-          expr: sum(increase(mythra_intents_rejected_total{job="chunkies-park-metrics",reason!="target"}[15m])) by (reason) > 20
+          expr: sum(increase(chunkies_intents_rejected_total{job="chunkies-park-metrics",reason!="target"}[15m])) by (reason) > 20
           labels:
             severity: warning
             guardian_stage: prod

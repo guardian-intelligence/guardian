@@ -1,19 +1,14 @@
 package park
 
-import (
-	"encoding/binary"
-	"fmt"
-)
 
-// Terrain artifact plumbing on the host side. The blob's semantics belong
-// to the sim; the host only needs its content identity (to store, serve,
-// and cross-check it) and its header dims (for the welcome line). Both are
-// pure functions of the bytes, mirroring the sim's derivation exactly.
-
-const terrainHeader = 16
+// Content artifact plumbing on the host side. The blob is opaque — its
+// layout belongs entirely to the sim, which validates it at the content
+// stage. The host only needs its content identity (to store, serve, and
+// cross-check it), a pure function of the bytes mirroring the sim's
+// derivation exactly.
 
 // terrainID is mix64(fnv1a(blob)): the artifact's single name everywhere —
-// journal rows, terrain_set payloads, the /terrain URL, the world hash.
+// journal rows, content_set payloads, the /terrain URL, the world hash.
 func terrainID(blob []byte) uint64 {
 	h := uint64(0xCBF29CE484222325)
 	for _, b := range blob {
@@ -26,11 +21,3 @@ func terrainID(blob []byte) uint64 {
 	return z ^ (z >> 31)
 }
 
-func terrainHeaderFields(blob []byte) (schema uint32, w, h uint16, err error) {
-	if len(blob) < terrainHeader || string(blob[:4]) != "MYT1" {
-		return 0, 0, 0, fmt.Errorf("not a terrain blob (%d bytes)", len(blob))
-	}
-	return binary.LittleEndian.Uint32(blob[4:8]),
-		binary.LittleEndian.Uint16(blob[8:10]),
-		binary.LittleEndian.Uint16(blob[10:12]), nil
-}

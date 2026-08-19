@@ -15,6 +15,8 @@ import (
 	"encoding/binary"
 	"math/rand"
 	"testing"
+
+	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
 )
 
 // Event is one sim event: kind, acting entity, and opaque payload. Actor
@@ -24,15 +26,6 @@ type Event struct {
 	Kind    uint16
 	Actor   uint64
 	Payload []byte
-}
-
-// System names the game's kind numbers for the framework-driven events
-// (the host builds these payloads itself). Zero means the module predates
-// that event and its assertions are skipped.
-type System struct {
-	RateSet      uint16 // {hz u32}
-	ClockSkip    uint16 // {to_tick u64}, forward only
-	EpochAdvance uint16 // {epoch u32, module_hash u64}
 }
 
 // Game is everything a game owes the suite: built artifacts and two
@@ -45,7 +38,6 @@ type Game struct {
 	Modules map[string][]byte // other shipped modules: artifact gates only
 	Genesis []byte            // genesis content artifact
 	Corpus  []Event
-	System  System
 }
 
 const (
@@ -108,7 +100,7 @@ func runArtifacts(t *testing.T, g Game) {
 	if h.abi == 0 {
 		t.Errorf("park: abi_version = 0")
 	}
-	for _, name := range requiredExports(h.abi, g.System) {
+	for _, name := range requiredExports(h.abi) {
 		if _, ok := h.fns[name]; !ok {
 			t.Errorf("park module does not export %s", name)
 		}
@@ -388,11 +380,15 @@ func runContentIdentity(t *testing.T, g Game) {
 	}
 }
 
+// runSystemEvents drives the framework-minted events every game module
+// must speak; their kind numbers are framework constants (codec.Kind*),
+// not game vocabulary.
 func runSystemEvents(t *testing.T, g Game) {
 	le32 := func(v uint32) []byte { b := make([]byte, 4); binary.LittleEndian.PutUint32(b, v); return b }
 	le64 := func(v uint64) []byte { b := make([]byte, 8); binary.LittleEndian.PutUint64(b, v); return b }
 
-	if kind := g.System.RateSet; kind != 0 {
+	{
+		kind := codec.KindRateSet
 		t.Run("rate_set", func(t *testing.T) {
 			a, b := open(t, g, seeds[0]), open(t, g, seeds[0])
 			defer a.close()
@@ -422,7 +418,8 @@ func runSystemEvents(t *testing.T, g Game) {
 		})
 	}
 
-	if kind := g.System.ClockSkip; kind != 0 {
+	{
+		kind := codec.KindClockSkip
 		t.Run("clock_skip", func(t *testing.T) {
 			a, b := open(t, g, seeds[0]), open(t, g, seeds[0])
 			defer a.close()
@@ -440,7 +437,8 @@ func runSystemEvents(t *testing.T, g Game) {
 		})
 	}
 
-	if kind := g.System.EpochAdvance; kind != 0 {
+	{
+		kind := codec.KindEpochAdvance
 		t.Run("epoch_advance", func(t *testing.T) {
 			a, b := open(t, g, seeds[0]), open(t, g, seeds[0])
 			defer a.close()

@@ -236,8 +236,8 @@ func clientIP(r *http.Request) string {
 }
 
 // handleSessionMint is POST /session: identity in, admission ticket out.
-// Two doors: an OIDC bearer mints a player (or spectator) for the WUM
-// account it names, and a bare ?spectate&device=<uuid> mints an anonymous
+// Two doors: an OIDC bearer mints a player (or spectator) for the account
+// it names, and a bare ?spectate&device=<uuid> mints an anonymous
 // spectator — the acquisition funnel. Parks are a fixed registry, not a
 // request-path side effect: an unknown name never opens an authority. The
 // email_verified requirement is config-gated until every broker asserts it.
@@ -249,7 +249,7 @@ func (h *gameHandlers) handleSessionMint(gate *oidcGate, publicAddr string, cert
 		}
 		park := r.URL.Query().Get("park")
 		if park == "" {
-			park = "park-mythra"
+			park = h.defaultChunk
 		}
 		if !h.directory.allowed(h.game, park) {
 			mMints.WithLabelValues("unknown_park").Inc()
@@ -311,7 +311,7 @@ func (h *gameHandlers) handleSessionMint(gate *oidcGate, publicAddr string, cert
 		// identity: this line and the span attributes are the join between
 		// a client rpc trace and everything the session does afterwards.
 		telemetry.SpanAttrs(r.Context(), map[string]string{
-			"wum.sub": sub, "wum.park": park, "wum.role": role,
+			"chunkies.sub": sub, "chunkies.chunk": park, "chunkies.role": role,
 		})
 		if tid := telemetry.TraceIDFrom(r.Context()); tid != "" {
 			log.Printf("session minted: sub=%s park=%s role=%s trace_id=%s", sub, park, role, tid)

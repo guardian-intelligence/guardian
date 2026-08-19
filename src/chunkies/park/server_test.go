@@ -15,10 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/guardian-intelligence/guardian/src/chunkies/journal"
-	"github.com/guardian-intelligence/guardian/src/chunkies/mount"
 	"github.com/guardian-intelligence/guardian/src/chunkies/parkproxy"
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
-	"github.com/guardian-intelligence/guardian/src/games/wake-up-mythra/services/wum"
 	"github.com/guardian-intelligence/guardian/src/postflight/controlplane/pgtest"
 )
 
@@ -60,8 +58,8 @@ func TestParkConnMultiplexesSessions(t *testing.T) {
 	if err := j.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	mods := &modules{client: mount.NewModule("client", mount.DefaultClient), park: mount.NewModule("park", mount.DefaultPark)}
-	registry := newParks(func() []byte { b, _ := mods.park.Get(); return b }, wum.FixtureTerrain, j, mods, timing{hz: 24})
+	mods := toyMods(toyModule(t))
+	registry := newParks(func() []byte { b, _ := mods.park.Get(); return b }, nil, toyVocab(), j, mods, timing{hz: 24})
 	authority, err := registry.get(ctx, "park-test")
 	if err != nil {
 		t.Fatal(err)
@@ -146,19 +144,19 @@ func TestParkConnMultiplexesSessions(t *testing.T) {
 			}
 		}
 	}
-	if err := alice.SendStream(codec.EncodeIntent(1, wum.EvJoin, wum.DogIDFor("alice"), nil)); err != nil {
+	if err := alice.SendStream(codec.EncodeIntent(1, kJoin, codec.ActorFor("alice"), nil)); err != nil {
 		t.Fatal(err)
 	}
 	for _, s := range []*parkproxy.Session{alice, bob} {
-		tickWith(s, wum.EvJoin, wum.DogIDFor("alice"))
+		tickWith(s, kJoin, codec.ActorFor("alice"))
 	}
 
 	// Closing one session leaves its neighbor attached and served.
 	bob.Close("bye")
-	if err := alice.SendStream(codec.EncodeIntent(2, wum.EvCheckIn, wum.DogIDFor("alice"), nil)); err != nil {
+	if err := alice.SendStream(codec.EncodeIntent(2, kMove, codec.ActorFor("alice"), move(3))); err != nil {
 		t.Fatal(err)
 	}
-	tickWith(alice, wum.EvCheckIn, wum.DogIDFor("alice"))
+	tickWith(alice, kMove, codec.ActorFor("alice"))
 	select {
 	case <-alice.Done():
 		reason, _ := alice.CloseReason()

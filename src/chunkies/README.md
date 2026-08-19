@@ -146,7 +146,7 @@ client compute O(subscribed), not O(world).
 | `chunkies/park` | the authority | the anchored tick schedule, event stamping, journal append, hash ring, snapshot cadence, module swaps, fan-out, and the gateway-facing park boundary |
 | `chunkies/parkproxy` | internal transport | the authenticated, HMAC-fenced gateway↔park framing |
 | `chunkies/mount` | module delivery | the behavior mount: hot-reloaded client/park wasm slots and the committed defaults |
-| `games/wake-up-mythra/services/wum` | the game's server vocabulary | kind numbers, dog-id binding, reject names, the genesis terrain — the only WUM-shaped thing the transport packages see |
+| `games/wake-up-mythra/services/wum` | the game's server vocabulary | kind numbers, dog-id binding, and the genesis terrain, for the game's own code and tests. The running host learns the same facts from the mounted game manifest (`game.conf`) — the framework imports nothing WUM-shaped |
 | `chunkies/journal` | durability | Postgres `park_events` / `park_snapshots` / `park_terrain`; per-park seq is dense and single-writer; `journaltest.Run` is the conformance suite |
 | `chunkies/gametest` | the game contract | the game-blind conformance suite over built artifacts: determinism, snapshot completeness, reject purity, system-event semantics; `wum` wires the committed modules through it |
 | `src/chunkies/host/ts` | the game-agnostic replica host | moves opaque bytes between wire, wasm, and screen: the session module, the replica slot, the transport, and the guarded extension/projection doors a game layer reaches its own exports through. Knows no game vocabulary; the name is a deliberate find-and-replaceable placeholder |
@@ -187,7 +187,7 @@ player connected.
 catch-up ticks, bounded per wakeup; past the hash ring the park closes and
 repays the gap through the dark reopen path. Backward (NTP step, lying
 RTC): the park never unticks and never idles backward — it simply waits for
-reality to catch up, visible as negative `mythra_tick_lag_seconds`.
+reality to catch up, visible as negative `chunkies_tick_lag_seconds`.
 
 **A client sends an intent during a server blip — then what?** Today: lost.
 Intents are idempotent by `(actor, intent_id)`, so client-side

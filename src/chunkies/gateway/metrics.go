@@ -15,23 +15,23 @@ var sessionCount atomic.Int64
 
 var (
 	mSessions = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "mythra_sessions", Help: "Connected sessions."}, []string{"role"})
+		Name: "chunkies_sessions", Help: "Connected sessions."}, []string{"role"})
 	mHandshakes = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "mythra_handshakes_total", Help: "Session handshakes."}, []string{"result"})
+		Name: "chunkies_handshakes_total", Help: "Session handshakes."}, []string{"result"})
 	mMints = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "mythra_session_mints_total", Help: "POST /session ticket mints."}, []string{"result"})
+		Name: "chunkies_session_mints_total", Help: "POST /session ticket mints."}, []string{"result"})
 	mDgSent = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "mythra_datagrams_sent_total", Help: "Datagrams sent."})
+		Name: "chunkies_datagrams_sent_total", Help: "Datagrams sent."})
 	mDgErrors = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "mythra_datagram_errors_total", Help: "SendDatagram failures."})
+		Name: "chunkies_datagram_errors_total", Help: "SendDatagram failures."})
 	mDgRejected = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "mythra_datagrams_rejected_total", Help: "Client datagrams dropped at the gateway (not a well-formed check)."})
+		Name: "chunkies_datagrams_rejected_total", Help: "Client datagrams dropped at the gateway (not a well-formed check)."})
 	mUnknownFrames = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "mythra_unknown_frames_total", Help: "Client stream frames of unknown kind dropped at the gateway."})
+		Name: "chunkies_unknown_frames_total", Help: "Client stream frames of unknown kind dropped at the gateway."})
 	mParkConns = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "mythra_park_conns", Help: "Live multiplexed gateway-to-park connections."})
+		Name: "chunkies_park_conns", Help: "Live multiplexed gateway-to-park connections."})
 	mParkConnFailures = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "mythra_park_conn_failures_total", Help: "Gateway-to-park connection failures."}, []string{"stage"})
+		Name: "chunkies_park_conn_failures_total", Help: "Gateway-to-park connection failures."}, []string{"stage"})
 )
 
 func newParkPool(key []byte) *parkproxy.Pool {
@@ -60,5 +60,8 @@ type gameHandlers struct {
 	// poll it becomes routable.
 	directory *chunkDirectory
 	game      string
-	anonMints *anonLimiter
+	// defaultChunk answers a mint that names no chunk; empty means the
+	// client must always name one.
+	defaultChunk string
+	anonMints    *anonLimiter
 }

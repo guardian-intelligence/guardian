@@ -46,7 +46,10 @@ func Run() {
 	publicAddr := envStr("PUBLIC_ADDR", "")
 	allowedOrigins := envStr("ALLOWED_ORIGINS", "")
 	maxSessions := envInt("MAX_SESSIONS", 4000)
-	game := envStr("GAME", "wum")
+	game := envStr("GAME", "")
+	if game == "" {
+		log.Fatal("GAME not set")
+	}
 	directoryFile := envStr("CHUNK_DIRECTORY_FILE", "/etc/chunkies/directory/chunks.conf")
 	directory := newChunkDirectory()
 	if err := loadChunkDirectory(directoryFile, directory); err != nil {
@@ -69,23 +72,28 @@ func Run() {
 	}
 	defer traceShutdown(context.Background())
 
-	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/mythra/behavior")
+	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/chunkies/behavior")
 	client := mount.NewModule("client", mount.DefaultClient)
 	parkModule := mount.NewModule("park", mount.DefaultPark)
 	// nil acceptance: the gateway only distributes module bytes, and the
 	// browser's boot gate is the consumer-side decision there.
 	go mount.Watch(behaviorDir, nil, client, parkModule)
-	assets := newAssetCatalog(envStr("ASSET_DIR", "/etc/mythra/assets"))
+	assets := newAssetCatalog(envStr("ASSET_DIR", "/etc/chunkies/assets"))
 
-	issuer := envStr("OIDC_ISSUER", "https://auth.wakeupmythra.com/realms/wakeupmythra.com")
-	gate := newOIDCGate(issuer, envStr("OIDC_JWKS_URL", ""), envStr("OIDC_CLIENT_IDS", "wake-up-mythra"), os.Getenv("REQUIRE_EMAIL_VERIFIED") == "true")
+	issuer := envStr("OIDC_ISSUER", "")
+	clientIDs := envStr("OIDC_CLIENT_IDS", "")
+	if issuer == "" || clientIDs == "" {
+		log.Fatal("OIDC_ISSUER and OIDC_CLIENT_IDS not set")
+	}
+	gate := newOIDCGate(issuer, envStr("OIDC_JWKS_URL", ""), clientIDs, os.Getenv("REQUIRE_EMAIL_VERIFIED") == "true")
 	tickets, err := newTicketMint(os.Getenv("TICKET_KEY_FILE"))
 	if err != nil {
 		log.Fatalf("ticket key: %v", err)
 	}
 	admission := &gameHandlers{
 		tickets: tickets, maxSessions: maxSessions, directory: directory, game: game,
-		anonMints: newAnonLimiter(),
+		defaultChunk: envStr("DEFAULT_CHUNK", ""),
+		anonMints:    newAnonLimiter(),
 	}
 	gateway := &chunkiesGateway{admission: admission, directory: directory, game: game, parks: newParkPool(key)}
 
@@ -209,7 +217,7 @@ func Run() {
 	}
 	parkProxy := httputil.NewSingleHostReverseProxy(parkHTTP)
 	pageMux.Handle("/terrain/", parkProxy)
-	if os.Getenv("WUM_DEV_LIVE_TICK_RATE") == "true" {
+	if os.Getenv("CHUNKIES_DEV_LIVE_TICK_RATE") == "true" {
 		pageMux.Handle("/dev/tick-rate", parkProxy)
 	}
 
@@ -247,12 +255,6 @@ func Run() {
 	page.Shutdown(shutdownCtx)
 	obs.Shutdown(shutdownCtx)
 }
-
-// Doorman-level reject reasons live above the sim's code space.
-const (
-	rejectReadOnly = 100
-	rejectNotYours = 101
-)
 
 func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 	if n := sessionCount.Add(1); n > int64(g.admission.maxSessions) {
@@ -415,14 +417,14 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 				continue
 			}
 			if ticket.Role != "player" {
-				writeStream(codec.EncodeReject(codec.Reject{Intent: rec.Intent, Reason: rejectReadOnly}))
+				writeStream(codec.EncodeReject(codec.Reject{Intent: rec.Intent, Reason: codec.RejectReadOnly}))
 				continue
 			}
 			// Game-blind binding: the envelope's actor must be the
 			// authenticated subject's, for every kind — then the client's
 			// bytes travel untouched.
 			if rec.Actor != codec.ActorFor(ticket.Sub) {
-				writeStream(codec.EncodeReject(codec.Reject{Intent: rec.Intent, Reason: rejectNotYours}))
+				writeStream(codec.EncodeReject(codec.Reject{Intent: rec.Intent, Reason: codec.RejectNotYours}))
 				continue
 			}
 			if park.SendStream(frames.Raw()) != nil {

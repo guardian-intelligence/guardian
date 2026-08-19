@@ -42,6 +42,8 @@
       value: "false"
     - name: GAME
       value: wum
+    - name: DEFAULT_CHUNK
+      value: park-mythra
     - name: CHUNK_DIRECTORY_FILE
       value: /etc/chunkies/directory/chunks.conf
     - name: PARK_HTTP_URL

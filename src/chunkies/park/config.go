@@ -42,9 +42,10 @@ func databaseURL() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	host := envStr("PG_HOST", "postgres-products-rw.tenant-guardian-prod.svc:5432")
-	db := envStr("PG_DATABASE", "mythra")
-	user := envStr("PG_USER", "mythra")
+	host, db, user := os.Getenv("PG_HOST"), os.Getenv("PG_DATABASE"), os.Getenv("PG_USER")
+	if host == "" || db == "" || user == "" {
+		return "", fmt.Errorf("PG_PASSWORD_FILE is set but PG_HOST/PG_DATABASE/PG_USER are not")
+	}
 	return fmt.Sprintf("postgresql://%s:%s@%s/%s?sslmode=require&pool_max_conns=4",
 		user, url.QueryEscape(strings.TrimSpace(string(pw))), host, db), nil
 }

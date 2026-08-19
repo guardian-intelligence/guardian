@@ -25,10 +25,10 @@ var DefaultClient []byte
 var DefaultPark []byte
 
 var mInfo = promauto.NewGaugeVec(prometheus.GaugeOpts{
-	Name: "mythra_behavior_script", Help: "1 for the currently loaded module hash per slot."}, []string{"slot", "hash"})
+	Name: "chunkies_behavior_script", Help: "1 for the currently loaded module hash per slot."}, []string{"slot", "hash"})
 
 var mRefused = promauto.NewCounterVec(prometheus.CounterOpts{
-	Name: "mythra_behavior_refused_total", Help: "Mounted module bytes refused by the process's acceptance gate."}, []string{"slot"})
+	Name: "chunkies_behavior_refused_total", Help: "Mounted module bytes refused by the process's acceptance gate."}, []string{"slot"})
 
 // Module tracks a distributed module's bytes plus content hash.
 type Module struct {
@@ -70,7 +70,7 @@ func (m *Module) Get() ([]byte, string) {
 // accept, when non-nil, gates every new byte content before it becomes the
 // slot's module — the process's defense against a mount that converged
 // ahead of the process image (a refused module keeps the current one
-// serving, counted by mythra_behavior_refused_total). A nil accept takes
+// serving, counted by chunkies_behavior_refused_total). A nil accept takes
 // everything: right for a process that only distributes bytes and never
 // runs them, since the consumer's own boot gate decides there.
 func Watch(dir string, accept func(slot string, module []byte) error, client, park *Module) {

@@ -23,7 +23,6 @@ import (
 
 	"github.com/guardian-intelligence/guardian/src/chunkies/parkproxy"
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
-	"github.com/guardian-intelligence/guardian/src/games/wake-up-mythra/services/wum"
 )
 
 // fakePark accepts authenticated multiplexed connections and records
@@ -190,7 +189,7 @@ func (h *relayHarness) hello(t *testing.T, sess *webtransport.Session, sub, role
 }
 
 func moveIntent(sub string, id uint64, node uint16) []byte {
-	return codec.EncodeIntent(id, 4, wum.DogIDFor(sub), binary.LittleEndian.AppendUint16(nil, node))
+	return codec.EncodeIntent(id, 4, codec.ActorFor(sub), binary.LittleEndian.AppendUint16(nil, node))
 }
 
 func TestRelaySplicesIntentBytesVerbatim(t *testing.T) {
@@ -301,7 +300,7 @@ func TestRelayRejectsSpectatorIntents(t *testing.T) {
 		t.Fatalf("kind = %d, want reject", kind)
 	}
 	rej, err := codec.DecodeReject(payload)
-	if err != nil || rej.Intent != 21 || rej.Reason != wum.RejectReadOnly {
+	if err != nil || rej.Intent != 21 || rej.Reason != codec.RejectReadOnly {
 		t.Fatalf("reject = %+v (err %v), want intent 21 reason read_only", rej, err)
 	}
 	if got := h.park.received(parkproxy.KindStream); len(got) != 0 {

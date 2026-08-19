@@ -37,10 +37,5 @@ func TestWUMGameConformance(t *testing.T) {
 			{Kind: EvLeave, Actor: bob},
 			{Kind: EvDayReset, Payload: binary.LittleEndian.AppendUint32(nil, 1)},
 		},
-		System: gametest.System{
-			RateSet:      EvRateSet,
-			ClockSkip:    EvClockSkip,
-			EpochAdvance: EvEpochAdvance,
-		},
 	})
 }

@@ -6,6 +6,7 @@ go_library(
     name = "codec",
     srcs = [
         "codec.go",
+        "kinds.go",
         "records.go",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/chunkies/codec",

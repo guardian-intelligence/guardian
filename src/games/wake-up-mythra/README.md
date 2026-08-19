@@ -88,7 +88,7 @@ restores, or reloads. It also reports two deliberately separate latency views:
 
 Every row carries the rate the same connection actually observed, and the
 command fails unless every client-observed action has a corresponding
-completed `mythra.intent` span in local ClickHouse. Raising the rate is
+completed `chunkies.intent` span in local ClickHouse. Raising the rate is
 expected to shrink both the next-tick queue and the client's six-tick cushion
 in milliseconds; journal commit and network RTT are not tick-rate work and
 should not be credited to it. `WUM_DEV_TICK_HZ` changes the startup baseline

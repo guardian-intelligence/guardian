@@ -23,14 +23,16 @@ import (
 	"github.com/guardian-intelligence/guardian/src/chunkies/mount"
 	"github.com/guardian-intelligence/guardian/src/chunkies/parkproxy"
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
-	"github.com/guardian-intelligence/guardian/src/games/wake-up-mythra/services/wum"
 	"github.com/guardian-intelligence/guardian/src/shared/go/telemetry"
 )
 
 // Run is the chunkies-park process: one configured park authority behind
 // the authenticated gateway transport.
 func Run() {
-	parkName := envStr("PARK_NAME", "park-mythra")
+	parkName := envStr("PARK_NAME", "")
+	if parkName == "" {
+		log.Fatal("PARK_NAME not set")
+	}
 	internalHost := envStr("INTERNAL_HOST", "127.0.0.1")
 	parkPort := envInt("PARK_PORT", 9632)
 	httpPort := envInt("HTTP_PORT", 9631)
@@ -44,6 +46,19 @@ func Run() {
 	if err != nil {
 		log.Fatalf("internal key: %v", err)
 	}
+	// The game arrives as content: modules through the behavior mount, and
+	// the genesis artifact plus vocabulary manifest as boot-read files.
+	vocab, err := loadVocab(os.Getenv("GAME_MANIFEST_FILE"))
+	if err != nil {
+		log.Fatalf("game manifest: %v", err)
+	}
+	var genesis []byte
+	if path := os.Getenv("GENESIS_FILE"); path != "" {
+		genesis, err = os.ReadFile(path)
+		if err != nil {
+			log.Fatalf("genesis artifact: %v", err)
+		}
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -54,7 +69,7 @@ func Run() {
 	}
 	defer traceShutdown(context.Background())
 
-	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/mythra/behavior")
+	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/chunkies/behavior")
 	client := mount.NewModule("client", mount.DefaultClient)
 	parkModule := mount.NewModule("park", mount.DefaultPark)
 	go mount.Watch(behaviorDir, acceptModule, client, parkModule)
@@ -85,7 +100,7 @@ func Run() {
 	}
 
 	mods := &modules{client: client, park: parkModule}
-	registry := newParks(func() []byte { b, _ := parkModule.Get(); return b }, wum.FixtureTerrain, j, mods, timing{hz: tickHz})
+	registry := newParks(func() []byte { b, _ := parkModule.Get(); return b }, genesis, vocab, j, mods, timing{hz: tickHz})
 	authority, err := registry.get(ctx, parkName)
 	if err != nil {
 		log.Fatalf("open park: %v", err)
@@ -112,8 +127,8 @@ func Run() {
 	}()
 
 	parkMux := http.NewServeMux()
-	parkMux.HandleFunc("/terrain/", terrainHandler(j, &ready))
-	if os.Getenv("WUM_DEV_LIVE_TICK_RATE") == "true" {
+	parkMux.HandleFunc("/terrain/", terrainHandler(j, &ready, genesis))
+	if os.Getenv("CHUNKIES_DEV_LIVE_TICK_RATE") == "true" {
 		parkMux.HandleFunc("/dev/tick-rate", devTickRateHandler(registry, map[string]bool{parkName: true}))
 	}
 	parkHTTPAddr := net.JoinHostPort(internalHost, strconv.Itoa(httpPort))
@@ -155,16 +170,18 @@ func Run() {
 	obs.Shutdown(shutdownCtx)
 }
 
-func terrainHandler(j journal.Journal, ready *atomic.Bool) http.HandlerFunc {
-	fixtureID := terrainID(wum.FixtureTerrain)
+func terrainHandler(j journal.Journal, ready *atomic.Bool, genesis []byte) http.HandlerFunc {
+	genesisID := terrainID(genesis)
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseUint(strings.TrimPrefix(r.URL.Path, "/terrain/"), 16, 64)
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
-		blob := wum.FixtureTerrain
-		if id != fixtureID {
+		// The genesis artifact serves from memory; every other content id
+		// is a journal read.
+		blob := genesis
+		if len(genesis) == 0 || id != genesisID {
 			if !ready.Load() {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
@@ -300,7 +317,7 @@ func handleParkConn(conn net.Conn, key []byte, park *authority, maxSessions int)
 			}
 			cs.s = &session{
 				sub: open.Sub, role: open.Role, park: park, out: make(chan []byte, 256),
-				dogID: wum.DogIDFor(open.Sub), openedAt: time.Now(),
+				dogID: codec.ActorFor(open.Sub), openedAt: time.Now(),
 				closeFn: func(why string) { cs.terminate(why, true) },
 			}
 			mu.Lock()
@@ -434,13 +451,13 @@ func (cs *connSession) handleFrame(payload []byte) {
 			return
 		}
 		if s.role != "player" {
-			s.sendReject(rec.Intent, wum.RejectReadOnly)
+			s.sendReject(rec.Intent, codec.RejectReadOnly)
 			return
 		}
 		// Game-blind binding: the envelope's actor must be the
 		// authenticated session's, for every kind.
 		if rec.Actor != s.dogID {
-			s.sendReject(rec.Intent, wum.RejectNotYours)
+			s.sendReject(rec.Intent, codec.RejectNotYours)
 			return
 		}
 		park.stageIntent(s, rec.Intent, rec.Kind, rec.Payload)
@@ -452,9 +469,10 @@ func (cs *connSession) handleFrame(payload []byte) {
 	}
 }
 
+// stageDeparture stages the game's departure event, if it declares one.
 func stageDeparture(park *authority, s *session) {
-	if s.role != "player" {
+	if s.role != "player" || park.vocab.DepartKind == 0 {
 		return
 	}
-	park.stageIntent(s, 0, wum.EvLeave, nil)
+	park.stageIntent(s, 0, park.vocab.DepartKind, nil)
 }
