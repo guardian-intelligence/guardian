@@ -104,19 +104,28 @@ func TestParkConnMultiplexesSessions(t *testing.T) {
 		}
 	}
 
-	// A session opened for the wrong park is refused without disturbing
-	// the connection's live sessions.
-	wrong, err := pool.Open(openCtx, l.Addr().String(), parkproxy.Open{Sub: "carol", Park: "park-elsewhere", Role: "player", SinceSeq: -1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-wrong.Done():
-		if reason, fromPark := wrong.CloseReason(); !fromPark || reason != "wrong park" {
-			t.Fatalf("close = %q fromPark=%v, want park-stated wrong park", reason, fromPark)
+	// A session opened for the wrong park — or with an open the park can't
+	// accept (the version-skew shape) — is refused without disturbing the
+	// connection's live sessions.
+	for _, tc := range []struct {
+		open   parkproxy.Open
+		reason string
+	}{
+		{parkproxy.Open{Sub: "carol", Park: "park-elsewhere", Role: "player", SinceSeq: -1}, "wrong park"},
+		{parkproxy.Open{Sub: "carol", Park: "park-test", Role: "admin", SinceSeq: -1}, "bad open"},
+	} {
+		refused, err := pool.Open(openCtx, l.Addr().String(), tc.open)
+		if err != nil {
+			t.Fatal(err)
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("wrong-park open was not refused")
+		select {
+		case <-refused.Done():
+			if reason, fromPark := refused.CloseReason(); !fromPark || reason != tc.reason {
+				t.Fatalf("close = %q fromPark=%v, want park-stated %q", reason, fromPark, tc.reason)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("open was not refused with %q", tc.reason)
+		}
 	}
 
 	// An intent staged by one session fans out to every attached session,

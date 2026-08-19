@@ -198,15 +198,25 @@ type connSession struct {
 	open    parkproxy.Open
 	inbound chan []byte
 	done    chan struct{}
+	reap    func()
 	once    sync.Once
 }
 
 // terminate ends this session only; the shared connection lives on for
-// the others, so it must never be closed from here.
+// the others. It is reached from the tick loop (a fan-out backlog kick
+// runs under the authority's lock), so it must never block on a network
+// write.
 func (cs *connSession) terminate(why string, notify bool) {
 	cs.once.Do(func() {
+		cs.reap()
 		if notify {
-			cs.pc.WriteClose(cs.sid, why)
+			go func() {
+				if cs.pc.WriteClose(cs.sid, why) != nil {
+					// A failed write may have left a partial frame; the
+					// framing cannot resync, so the connection is done.
+					cs.pc.Close()
+				}
+			}()
 		}
 		close(cs.done)
 	})
@@ -218,12 +228,24 @@ func handleParkConn(conn net.Conn, key []byte, park *authority, maxSessions int)
 		return
 	}
 	defer pc.Close()
-	// sessions is touched only by this demux loop; termination elsewhere
-	// closes a session's done channel and the loop prunes it on the next
-	// frame for that id.
+	// The demux loop is the only writer of the map's entries; terminate
+	// (reachable from the authority's goroutines) deletes through reap, so
+	// access is locked.
+	var mu sync.Mutex
 	sessions := map[uint64]*connSession{}
+	lookup := func(sid uint64) *connSession {
+		mu.Lock()
+		defer mu.Unlock()
+		return sessions[sid]
+	}
 	defer func() {
+		mu.Lock()
+		all := make([]*connSession, 0, len(sessions))
 		for _, cs := range sessions {
+			all = append(all, cs)
+		}
+		mu.Unlock()
+		for _, cs := range all {
 			cs.terminate("park unavailable", false)
 		}
 	}()
@@ -235,12 +257,19 @@ func handleParkConn(conn net.Conn, key []byte, park *authority, maxSessions int)
 		}
 		switch msg.Kind {
 		case parkproxy.KindOpen:
-			open, err := parkproxy.DecodeOpen(msg.Payload)
-			if err != nil || sessions[msg.SID] != nil {
-				// The gateway is the only authenticated peer; a malformed
-				// open or a reused id means the connection state is not to
-				// be trusted any further.
+			if lookup(msg.SID) != nil {
+				// The gateway is the only authenticated peer and never
+				// reuses an id; reuse means the connection state itself is
+				// not to be trusted any further.
 				return
+			}
+			open, err := parkproxy.DecodeOpen(msg.Payload)
+			if err != nil {
+				// A malformed open is that session's failure (a version-skew
+				// window during a rolling deploy), not grounds to drop every
+				// live session on the pair.
+				pc.WriteClose(msg.SID, "bad open")
+				continue
 			}
 			if open.Park != park.name {
 				pc.WriteClose(msg.SID, "wrong park")
@@ -253,37 +282,39 @@ func handleParkConn(conn net.Conn, key []byte, park *authority, maxSessions int)
 			}
 			cs := &connSession{
 				pc: pc, sid: msg.SID, open: open,
-				inbound: make(chan []byte, 64), done: make(chan struct{}),
+				inbound: make(chan []byte, 256), done: make(chan struct{}),
+			}
+			cs.reap = func() {
+				mu.Lock()
+				delete(sessions, cs.sid)
+				mu.Unlock()
 			}
 			cs.s = &session{
 				sub: open.Sub, role: open.Role, park: park, out: make(chan []byte, 256),
 				dogID: wum.DogIDFor(open.Sub), openedAt: time.Now(),
 				closeFn: func(why string) { cs.terminate(why, true) },
 			}
+			mu.Lock()
 			sessions[msg.SID] = cs
+			mu.Unlock()
 			go cs.run()
 		case parkproxy.KindStream:
-			cs := sessions[msg.SID]
+			cs := lookup(msg.SID)
 			if cs == nil {
 				continue
 			}
 			select {
-			case <-cs.done:
-				delete(sessions, msg.SID)
-				continue
-			default:
-			}
-			select {
 			case cs.inbound <- msg.Payload:
 			default:
-				// The gateway shapes intents to 20/s; a full buffer means
-				// this session's drain is wedged, not that the client is
-				// fast.
-				cs.terminate("intent backlog", true)
-				delete(sessions, msg.SID)
+				// A full buffer means the drain is stalled — usually behind
+				// the authority (an attach or journal wait), not the client.
+				// Shed the frame instead of the player: intents are
+				// idempotent by (actor, intent_id), so nothing is double
+				// applied and the disconnect is saved.
+				mInboundDropped.Inc()
 			}
 		case parkproxy.KindDatagram:
-			if sessions[msg.SID] == nil {
+			if lookup(msg.SID) == nil {
 				continue
 			}
 			if verdict, ok := checkVerdict(park, msg.Payload); ok {
@@ -292,9 +323,8 @@ func handleParkConn(conn net.Conn, key []byte, park *authority, maxSessions int)
 				}
 			}
 		case parkproxy.KindClose:
-			if cs := sessions[msg.SID]; cs != nil {
+			if cs := lookup(msg.SID); cs != nil {
 				cs.terminate("", false)
-				delete(sessions, msg.SID)
 			}
 		}
 	}
@@ -321,14 +351,22 @@ func (cs *connSession) run() {
 	defer stageDeparture(park, cs.s)
 
 	go func() {
-		write := func(b []byte) bool { return cs.pc.WriteStream(cs.sid, b) == nil }
+		// A failed write may have left a partial frame on the shared
+		// connection, which the framing cannot resync from: down the whole
+		// connection, not just this session.
+		write := func(b []byte) bool {
+			if err := cs.pc.WriteStream(cs.sid, b); err != nil {
+				cs.pc.Close()
+				cs.terminate("park unavailable", false)
+				return false
+			}
+			return true
+		}
 		if !write(res.welcome) {
-			cs.terminate("park unavailable", false)
 			return
 		}
 		for _, frame := range park.catchupFrames(cs.open.SinceSeq, cs.open.SinceTick, res) {
 			if !write(frame) {
-				cs.terminate("park unavailable", false)
 				return
 			}
 		}
@@ -336,7 +374,6 @@ func (cs *connSession) run() {
 			select {
 			case frame := <-cs.s.out:
 				if !write(frame) {
-					cs.terminate("park unavailable", false)
 					return
 				}
 			case <-cs.done:

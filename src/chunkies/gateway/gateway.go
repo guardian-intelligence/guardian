@@ -321,23 +321,41 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 		return err
 	}
 	go func() {
+		relay := func(ev parkproxy.Event) bool {
+			switch ev.Kind {
+			case parkproxy.KindStream:
+				if writeStream(ev.Payload) != nil {
+					park.Close("client stalled")
+					return false
+				}
+			case parkproxy.KindDatagram:
+				if sess.SendDatagram(ev.Payload) != nil {
+					mDgErrors.Inc()
+				} else {
+					mDgSent.Inc()
+				}
+			}
+			return true
+		}
 		for {
 			select {
 			case ev := <-park.Events():
-				switch ev.Kind {
-				case parkproxy.KindStream:
-					if writeStream(ev.Payload) != nil {
-						park.Close("client stalled")
-						return
-					}
-				case parkproxy.KindDatagram:
-					if sess.SendDatagram(ev.Payload) != nil {
-						mDgErrors.Inc()
-					} else {
-						mDgSent.Inc()
-					}
+				if !relay(ev) {
+					return
 				}
 			case <-park.Done():
+				// Flush frames the park sent ahead of its close (a final
+				// reject or goodbye) before closing the client.
+				for drained := false; !drained; {
+					select {
+					case ev := <-park.Events():
+						if !relay(ev) {
+							return
+						}
+					default:
+						drained = true
+					}
+				}
 				// A park-stated reason is meant for the client; a transport
 				// failure is not the client's fault and reads as outage.
 				if reason, fromPark := park.CloseReason(); fromPark {

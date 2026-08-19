@@ -337,6 +337,40 @@ func TestMuxBacklogClosesOnlyTheStalledSession(t *testing.T) {
 	}
 }
 
+func TestMuxIdleConnReaped(t *testing.T) {
+	park := newFakeParkServer(t, nil)
+	down := make(chan error, 1)
+	pool := NewPool(testKey, Hooks{ConnDown: func(_ string, err error) { down <- err }})
+	pool.PingEvery = 20 * time.Millisecond
+	pool.IdleAfter = 60 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s, err := pool.Open(ctx, park.addr(), Open{Sub: "alice", Park: "park-test", Role: "player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close("bye")
+	select {
+	case err := <-down:
+		if err == nil || err.Error() != "idle" {
+			t.Fatalf("conn down = %v, want idle reap", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a sessionless connection was never reaped")
+	}
+
+	// The pool dials fresh for the next session instead of reusing the
+	// reaped connection.
+	s2, err := pool.Open(ctx, park.addr(), Open{Sub: "bob", Park: "park-test", Role: "player"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close("")
+	if !waitFor(t, 5*time.Second, func() bool { return park.accepted.Load() == 2 }) {
+		t.Fatalf("connections = %d, want a fresh dial after the reap", park.accepted.Load())
+	}
+}
+
 func TestMuxRejectsWrongKey(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

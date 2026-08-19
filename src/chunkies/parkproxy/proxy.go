@@ -34,6 +34,15 @@ const (
 	KindClose    = 4
 	KindPing     = 5
 	KindPong     = 6
+
+	defaultPingEvery  = 5 * time.Second
+	defaultPongWithin = 15 * time.Second
+	defaultIdleAfter  = 60 * time.Second
+	// acceptReadTimeout is the accept side's silence budget. It treats a
+	// quiet connection as dead because the dial side's ping cadence
+	// guarantees traffic, so it must comfortably exceed defaultPingEvery;
+	// a Pool tuned to ping slower than this will lose idle connections.
+	acceptReadTimeout = 30 * time.Second
 )
 
 var errSessionClosed = errors.New("proxy session closed")
@@ -83,7 +92,7 @@ func ReadKey(path string) ([]byte, error) {
 
 // Accept authenticates an inbound gateway connection.
 func Accept(c net.Conn, key []byte, now time.Time) (*Conn, error) {
-	p := &Conn{c: c, readTimeout: 30 * time.Second}
+	p := &Conn{c: c, readTimeout: acceptReadTimeout}
 	if err := p.readHandshake(key, now); err != nil {
 		c.Close()
 		return nil, err
@@ -138,6 +147,9 @@ func (p *Conn) readHandshake(key []byte, now time.Time) error {
 	if string(body[:len(proxyMagic)]) != proxyMagic {
 		return errors.New("bad proxy magic")
 	}
+	// The freshness window bounds replay of a captured handshake. It now
+	// authenticates a whole connection rather than one session; the real
+	// boundary is key possession on the cluster network, as before.
 	ts := int64(binary.LittleEndian.Uint64(body[len(proxyMagic):]))
 	if d := now.Sub(time.Unix(ts, 0)); d < -30*time.Second || d > 30*time.Second {
 		return errors.New("stale proxy handshake")
@@ -282,9 +294,13 @@ type Pool struct {
 	key   []byte
 	hooks Hooks
 	// PingEvery and PongWithin pace the liveness probe each connection
-	// runs; the defaults suit production and tests shrink them.
+	// runs, and IdleAfter is how long a connection with zero sessions is
+	// kept before it is closed (backends leave the directory; their
+	// connections must not outlive them). The defaults suit production
+	// and tests shrink them.
 	PingEvery  time.Duration
 	PongWithin time.Duration
+	IdleAfter  time.Duration
 
 	mu    sync.Mutex
 	conns map[string]*poolEntry
@@ -298,9 +314,26 @@ type poolEntry struct {
 func NewPool(key []byte, hooks Hooks) *Pool {
 	return &Pool{
 		key: key, hooks: hooks,
-		PingEvery: 5 * time.Second, PongWithin: 15 * time.Second,
+		PingEvery: defaultPingEvery, PongWithin: defaultPongWithin, IdleAfter: defaultIdleAfter,
 		conns: map[string]*poolEntry{},
 	}
+}
+
+// forgetConn detaches a dead connection from its address entry so the
+// next Open dials fresh; the entry itself is the per-address dial lock
+// and stays.
+func (p *Pool) forgetConn(m *muxConn) {
+	p.mu.Lock()
+	e := p.conns[m.addr]
+	p.mu.Unlock()
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	if e.conn == m {
+		e.conn = nil
+	}
+	e.mu.Unlock()
 }
 
 // Open attaches a new session over addr's shared connection, dialing it if
@@ -345,8 +378,8 @@ func (p *Pool) dial(ctx context.Context, addr string) (*muxConn, error) {
 		return nil, err
 	}
 	mc := &muxConn{
-		Conn: &Conn{c: c}, addr: addr, hooks: p.hooks,
-		pingEvery: p.PingEvery, pongWithin: p.PongWithin,
+		Conn: &Conn{c: c}, addr: addr, pool: p, hooks: p.hooks,
+		pingEvery: p.PingEvery, pongWithin: p.PongWithin, idleAfter: p.IdleAfter,
 		sessions: map[uint64]*Session{}, deadCh: make(chan struct{}),
 	}
 	if err := mc.writeHandshake(p.key); err != nil {
@@ -365,16 +398,19 @@ func (p *Pool) dial(ctx context.Context, addr string) (*muxConn, error) {
 type muxConn struct {
 	*Conn
 	addr       string
+	pool       *Pool
 	hooks      Hooks
 	pingEvery  time.Duration
 	pongWithin time.Duration
+	idleAfter  time.Duration
 	lastPong   atomic.Int64
 
-	mu       sync.Mutex
-	sessions map[uint64]*Session
-	nextSID  uint64
-	deadCh   chan struct{}
-	deadOnce sync.Once
+	mu        sync.Mutex
+	sessions  map[uint64]*Session
+	nextSID   uint64
+	idleSince time.Time
+	deadCh    chan struct{}
+	deadOnce  sync.Once
 }
 
 func (m *muxConn) dead() bool {
@@ -460,6 +496,19 @@ func (m *muxConn) pingLoop() {
 				m.kill(errors.New("pong timeout"))
 				return
 			}
+			m.mu.Lock()
+			switch {
+			case len(m.sessions) > 0:
+				m.idleSince = time.Time{}
+			case m.idleSince.IsZero():
+				m.idleSince = time.Now()
+			}
+			idle := !m.idleSince.IsZero() && time.Since(m.idleSince) > m.idleAfter
+			m.mu.Unlock()
+			if idle {
+				m.kill(errors.New("idle"))
+				return
+			}
 			if err := m.WriteMessage(KindPing, uint64(time.Now().UnixNano()), nil); err != nil {
 				m.kill(err)
 				return
@@ -481,6 +530,9 @@ func (m *muxConn) kill(err error) {
 		for _, s := range sessions {
 			s.terminate("park unavailable", false, false)
 		}
+		// A goroutine because kill can run under a caller already holding
+		// the pool entry's lock (a failed open).
+		go m.pool.forgetConn(m)
 		if m.hooks.ConnDown != nil {
 			m.hooks.ConnDown(m.addr, err)
 		}
@@ -527,7 +579,13 @@ func (s *Session) send(kind byte, b []byte) error {
 		return errSessionClosed
 	default:
 	}
-	return s.conn.WriteMessage(kind, s.sid, b)
+	// A write error may have left a partial frame on the wire; the framing
+	// has no resync marker, so the connection is unusable for everyone.
+	if err := s.conn.WriteMessage(kind, s.sid, b); err != nil {
+		s.conn.kill(err)
+		return err
+	}
+	return nil
 }
 
 // Close ends the session and tells the park; the shared connection lives
@@ -539,7 +597,13 @@ func (s *Session) terminate(reason string, fromPark, notifyPark bool) {
 		s.reason, s.fromPark = reason, fromPark
 		s.conn.forget(s.sid)
 		if notifyPark {
-			s.conn.WriteClose(s.sid, reason)
+			// Asynchronous: terminate is called from relay and demux loops
+			// that must never block on a network write.
+			go func() {
+				if err := s.conn.WriteClose(s.sid, reason); err != nil {
+					s.conn.kill(err)
+				}
+			}()
 		}
 		close(s.done)
 	})
