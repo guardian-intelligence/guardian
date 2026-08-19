@@ -122,6 +122,19 @@ Power-cycle once after the wipe. Re-resolve both serials and confirm the staging
 disk exposes no partitions or filesystems. Never infer this from its old NVMe
 name.
 
+The `chunkies` user volume (WAL segments and checkpoints for the worlds this
+node serves) also lives on the staging serial and is destroyed by the
+reinstall. That is accepted: worlds re-seed from the control plane. Talos holds
+the volume pending while foreign data occupies the disk, so after the wipe and
+power-cycle, re-apply the machine config
+(`talm apply -f nodes/ash-worker0.yaml -f nodes/ash-worker0-overlay.yaml`) and
+confirm the volume provisions:
+
+```sh
+talosctl --endpoints 206.223.228.99 --nodes 206.223.228.99 \
+  get volumestatus u-chunkies
+```
+
 ## Readiness gates
 
 The rebuild is complete only when all of these pass after the full power cycle:
@@ -129,15 +142,18 @@ The rebuild is complete only when all of these pass after the full power cycle:
 - Authenticated `machinestatus` reports `stage: running` and `ready: true`.
 - Authenticated `securitystate` reports `secureBoot: false`; the kernel still
   reports module-signature enforcement.
-- The Talos system disk has serial `362510FCEFF6`; serial `362510FCEFD5` is
-  present but has no partitions or filesystem signatures.
+- The Talos system disk has serial `362510FCEFF6`; serial `362510FCEFD5`
+  carries the provisioned `chunkies` user volume (`talosctl get volumestatus
+  u-chunkies` reports ready; the disk shows a LUKS2 volume, never a bare or
+  foreign filesystem).
 - Kubernetes reports `ash-worker0` Ready with label
   `guardian.dev/dedicated=wum`, exactly the intended
   `guardian.dev/dedicated=wum:NoSchedule` taint, and no shutdown/network taints.
 - The node advertises `10.8.0.14` on VLAN 2140, reaches the private API VIP, and
   the Kube-OVN CNI, pinger, and OVS/OVN DaemonSets are Ready on the node.
 - The machine configuration contains no `RawVolumeConfig`, no
-  `r-guardian-data`, and no TPM encryption override for `STATE` or `EPHEMERAL`.
+  `r-guardian-data`, and no TPM encryption override for `STATE` or `EPHEMERAL`;
+  its only volume document is the `chunkies` `UserVolumeConfig`.
 - No etcd member, OpenBao static-seal label, LINSTOR `data` pool, or public-edge
   origin is assigned to the worker.
 - No failed or shutdown pods remain attributed to the node.

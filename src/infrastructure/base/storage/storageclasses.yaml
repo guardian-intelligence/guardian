@@ -149,3 +149,19 @@ parameters:
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 reclaimPolicy: Retain
+---
+# Statically-provisioned PVs on Talos user volumes (LUKS2, nodeID key).
+# No LINSTOR anywhere in the path: for workloads that own a whole disk
+# on one node and accept volume loss (chunkies WAL/checkpoints — the
+# netcode durability ruling), the storage orchestrator would add failure
+# modes and nothing else. PVs using this class pin their node.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: talos-user-volume
+  labels:
+    guardian.dev/encryption-at-rest: talos-luks2-user-volume
+    guardian.dev/linstor-encryption-at-rest: disabled
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain

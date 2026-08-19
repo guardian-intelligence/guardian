@@ -86,6 +86,36 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 		}
 	}
 
+	// The chunkies durability class: static node-local PVs on Talos user
+	// volumes, LUKS2 at the Talos layer, no LINSTOR in the path.
+	uv := classes["talos-user-volume"]
+	if uv == nil {
+		t.Fatalf("%s missing StorageClass talos-user-volume", path)
+	}
+	if got := stringValue(uv["provisioner"]); got != "kubernetes.io/no-provisioner" {
+		t.Errorf("StorageClass talos-user-volume provisioner = %q, want kubernetes.io/no-provisioner", got)
+	}
+	if got := stringValue(uv["reclaimPolicy"]); got != "Retain" {
+		t.Errorf("StorageClass talos-user-volume reclaimPolicy = %q, want Retain", got)
+	}
+	if got := stringValue(uv["volumeBindingMode"]); got != "WaitForFirstConsumer" {
+		t.Errorf("StorageClass talos-user-volume volumeBindingMode = %q, want WaitForFirstConsumer", got)
+	}
+	uvLabels := mapValue(mapValue(uv["metadata"])["labels"])
+	if got := stringValue(uvLabels["guardian.dev/encryption-at-rest"]); got != "talos-luks2-user-volume" {
+		t.Errorf("StorageClass talos-user-volume encryption label = %q, want talos-luks2-user-volume", got)
+	}
+	if got := stringValue(uvLabels["guardian.dev/linstor-encryption-at-rest"]); got != "disabled" {
+		t.Errorf("StorageClass talos-user-volume LINSTOR encryption label = %q, want disabled", got)
+	}
+
+	pvPath := runfilePath("src/infrastructure/base/storage/chunkies-wal-pv.yaml")
+	pv := readText(t, pvPath)
+	assertTextContains(t, pv, "storageClassName: talos-user-volume", pvPath)
+	assertTextContains(t, pv, "path: /var/mnt/chunkies", pvPath)
+	assertTextContains(t, pv, "kubernetes.io/hostname", pvPath)
+	assertTextContains(t, pv, "persistentVolumeReclaimPolicy: Retain", pvPath)
+
 	patchPath := runfilePath("src/infrastructure/base/storage/linstor-encryption.yaml")
 	patch := readText(t, patchPath)
 	assertTextContains(t, patch, "kind: LinstorCluster", patchPath)
