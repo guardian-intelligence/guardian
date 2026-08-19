@@ -24,6 +24,7 @@ package codec
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/crc32"
 )
 
@@ -38,6 +39,9 @@ var (
 	// mismatch, unknown type, or an impossible length. Recovery must not
 	// replay past it.
 	ErrCorrupt = errors.New("record is corrupt")
+	// ErrSegmentVersion reports an intact header from a different format
+	// era — a reader too old for the segment, not disk damage.
+	ErrSegmentVersion = errors.New("unsupported segment version")
 )
 
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)
@@ -141,6 +145,12 @@ func DecodeSegmentHeader(b []byte) (SegmentHeader, int, error) {
 	consumed := len(b) - len(c.b)
 	if crc32.Checksum(b[:consumed-4], castagnoli) != sum {
 		return SegmentHeader{}, 0, ErrCorrupt
+	}
+	// Version is judged only after the checksum proves the header whole:
+	// a foreign era must read as "reader too old", never as damage.
+	if h.Version != SegmentVersion {
+		return SegmentHeader{}, 0, fmt.Errorf("segment version %d, reader speaks %d: %w",
+			h.Version, SegmentVersion, ErrSegmentVersion)
 	}
 	return h, consumed, nil
 }

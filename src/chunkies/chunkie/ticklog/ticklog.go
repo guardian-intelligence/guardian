@@ -150,6 +150,14 @@ func Create(cfg Config) (*Log, error) {
 	if len(cfg.Chunks) == 0 || len(cfg.Chunks) > codec.MaxSegmentChunks {
 		return nil, fmt.Errorf("ticklog: %d chunks (want 1..%d)", len(cfg.Chunks), codec.MaxSegmentChunks)
 	}
+	// Names land in headers as u8-length rows; refusing here keeps the
+	// encoder's bound an assertion instead of a silent truncation that
+	// would break every name-keyed lookup at recovery.
+	for _, ch := range cfg.Chunks {
+		if len(ch.Name) == 0 || len(ch.Name) > 255 {
+			return nil, fmt.Errorf("ticklog: chunk name %q length %d (want 1..255)", ch.Name, len(ch.Name))
+		}
+	}
 	l := &Log{
 		cfg:        cfg,
 		fs:         cfg.fs,
