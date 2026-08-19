@@ -29,12 +29,12 @@ exports_files(
 # bytes the game's own package holds.
 diff_test(
     name = "game_manifest_lockstep_test",
-    file1 = "behavior/game.conf",
+    file1 = "content/game.conf",
     file2 = "//src/games/wake-up-mythra/services/wum:game.conf",
 )
 
 diff_test(
     name = "genesis_lockstep_test",
-    file1 = "behavior/genesis.bin",
+    file1 = "content/genesis.bin",
     file2 = "//src/games/wake-up-mythra/services/wum:fixture_park.bin",
 )

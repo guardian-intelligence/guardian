@@ -691,11 +691,13 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 		// content-free game (no genesis artifact) skips the dance; the
 		// blob's layout is the sim's business, so schema rides as zero.
 		if len(genesisTerrain) > 0 {
-			tid := terrainID(genesisTerrain)
-			if err := j.PutTerrain(ctx, tid, 0, genesisTerrain); err != nil {
+			// The sim validates the blob (content stage) before anything
+			// durable happens: a corrupt genesis must never become an
+			// immutable journal row.
+			if err := a.setTerrain(genesisTerrain); err != nil {
 				return fail(err)
 			}
-			if err := a.setTerrain(genesisTerrain); err != nil {
+			if err := j.PutTerrain(ctx, terrainID(genesisTerrain), 0, genesisTerrain); err != nil {
 				return fail(err)
 			}
 		}

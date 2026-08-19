@@ -48,7 +48,16 @@ func Run() {
 	}
 	// The game arrives as content: modules through the behavior mount, and
 	// the genesis artifact plus vocabulary manifest as boot-read files.
-	vocab, err := loadVocab(os.Getenv("GAME_MANIFEST_FILE"))
+	// The manifest is required and fails loud like every other identity
+	// env; a game that truly needs no vocabulary says so explicitly.
+	manifestFile := envStr("GAME_MANIFEST_FILE", "")
+	if manifestFile == "" {
+		log.Fatal("GAME_MANIFEST_FILE not set (GAME_MANIFEST_FILE=none declares a bare vocabulary)")
+	}
+	if manifestFile == "none" {
+		manifestFile = ""
+	}
+	vocab, err := loadVocab(manifestFile)
 	if err != nil {
 		log.Fatalf("game manifest: %v", err)
 	}

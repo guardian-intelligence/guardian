@@ -425,7 +425,7 @@ smoke() {
   fi
 
   # Run scoping: the trace lane is scoped by this run's unique player name
-  # (it rides the span as wum.sub); the events lane by the page id the
+  # (it rides the span as chunkies.sub); the events lane by the page id the
   # probe page minted (plus the sink's clock) — no other session's rows,
   # concurrent smoke, or localStorage replay of a stale queue can satisfy
   # either.
@@ -463,7 +463,7 @@ smoke() {
   poll_deadline=$((SECONDS + 60))
   while :; do
     events="$(ch_query "SELECT count() FROM guardian_analytics.events WHERE event_name = 'wum.connected' AND page_id = unhex('$page_id') AND toUnixTimestamp64Milli(server_ts) >= $t0")" || events=0
-    spans="$(ch_query "SELECT count() FROM guardian_analytics.otel_traces WHERE ServiceName = 'chunkies-gateway' AND SpanName = 'POST /session' AND SpanAttributes['wum.sub'] = '$player'")" || spans=0
+    spans="$(ch_query "SELECT count() FROM guardian_analytics.otel_traces WHERE ServiceName = 'chunkies-gateway' AND SpanName = 'POST /session' AND SpanAttributes['chunkies.sub'] = '$player'")" || spans=0
     if [ "$events" -ge 1 ] && [ "$spans" -ge 1 ]; then
       break
     fi

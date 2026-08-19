@@ -54,9 +54,9 @@
     - name: BEHAVIOR_DIR
       value: /etc/mythra/behavior
     - name: GAME_MANIFEST_FILE
-      value: /etc/mythra/behavior/game.conf
+      value: /etc/mythra/content/game.conf
     - name: GENESIS_FILE
-      value: /etc/mythra/behavior/genesis.bin
+      value: /etc/mythra/content/genesis.bin
     - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
       value: otel-collector.guardian-analytics.svc.cozy.local:4317
 - op: add
@@ -64,6 +64,9 @@
   value:
     - name: behavior
       mountPath: /etc/mythra/behavior
+      readOnly: true
+    - name: game-content
+      mountPath: /etc/mythra/content
       readOnly: true
     - name: internal-key
       mountPath: /etc/chunkies/internal
@@ -77,6 +80,9 @@
     - name: behavior
       configMap:
         name: mythra-behavior
+    - name: game-content
+      configMap:
+        name: mythra-game-content
     - name: internal-key
       secret:
         secretName: chunkies-internal-key

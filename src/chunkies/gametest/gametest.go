@@ -438,6 +438,20 @@ func runSystemEvents(t *testing.T, g Game) {
 	}
 
 	{
+		kind := codec.KindDayReset
+		t.Run("day_reset", func(t *testing.T) {
+			a := open(t, g, seeds[0])
+			defer a.close()
+			drive(t, []*host{a}, stream(g, rand.New(rand.NewSource(37)), 8))
+			// The host stages day_reset on every open and UTC rollover, so
+			// a module must accept it; what a day means is game business.
+			if code, err := a.apply(Event{Kind: kind, Payload: le32(20500)}); err != nil || code != 0 {
+				t.Fatalf("day_reset rejected (code=%d err=%v) — the host mints this on every open and UTC rollover", code, err)
+			}
+		})
+	}
+
+	{
 		kind := codec.KindEpochAdvance
 		t.Run("epoch_advance", func(t *testing.T) {
 			a, b := open(t, g, seeds[0]), open(t, g, seeds[0])

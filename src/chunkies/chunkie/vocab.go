@@ -62,7 +62,10 @@ func (v *Vocab) rejectName(code uint32) string {
 	case codec.RejectNotYours:
 		return "not_yours"
 	}
-	return strconv.FormatUint(uint64(code), 10)
+	// Codes outside the tables share the unknown bucket: a mounted module
+	// whose code space outgrew its manifest must not mint unbounded metric
+	// labels. Logs carry the numeric code alongside the name.
+	return "unknown"
 }
 
 // eventActor resolves a journal event to its SimEvent form across the two
@@ -72,6 +75,14 @@ func (v *Vocab) rejectName(code uint32) string {
 // are distinguished by payload length, which the two encodings never
 // share for any listed kind.
 func (v *Vocab) eventActor(kind uint16, actor string, payload []byte) (uint64, []byte) {
+	// Framework system events are authority-minted and never carry an
+	// actor, whatever a row's actor column says — a backfilled or rogue
+	// writer's name must not turn into an actor id the sim rejects.
+	switch kind {
+	case codec.KindDayReset, codec.KindEpochAdvance, codec.KindContentSet,
+		codec.KindClockSkip, codec.KindRateSet:
+		return 0, payload
+	}
 	if n, ok := v.LegacyActorPrefix[kind]; ok && len(payload) == n {
 		return binary.LittleEndian.Uint64(payload[:8]), payload[8:]
 	}
@@ -86,9 +97,9 @@ func parseVocab(r io.Reader) (Vocab, error) {
 	scanner := bufio.NewScanner(r)
 	line := 0
 	num := func(s string, bits int) (uint64, error) {
-		n, err := strconv.ParseUint(s, 0, bits)
+		n, err := strconv.ParseUint(s, 10, bits)
 		if err != nil {
-			return 0, fmt.Errorf("line %d: %q is not a u%d", line, s, bits)
+			return 0, fmt.Errorf("line %d: %q is not a base-10 u%d", line, s, bits)
 		}
 		return n, nil
 	}
