@@ -121,7 +121,9 @@ func Run() {
 	}
 
 	mods := &modules{client: client, sim: simModule}
-	bcast := newBroadcaster(game)
+	// One chunk per chunkie today; the queue depth scales with the
+	// served set when that changes.
+	bcast := newBroadcaster(game, tickHz, 1)
 	registry := newChunks(func() []byte { b, _ := simModule.Get(); return b }, genesis, vocab, j, mods, timing{hz: tickHz}, bcast.publish)
 	auth, err := registry.get(ctx, chunkName)
 	if err != nil {
@@ -240,19 +242,28 @@ func terrainHandler(j journal.Journal, ready *atomic.Bool, genesis []byte) http.
 // it, so an idle conn costs no tick writes.
 type broadcaster struct {
 	game string
-	// queueFrames bounds each conn's broadcast queue; a field only so
-	// tests can shrink it.
+	// queueFrames/queueBytes bound each conn's broadcast queue; fields
+	// so tests can shrink them.
 	queueFrames int
+	queueBytes  int64
 
 	mu    sync.Mutex
 	conns map[*broadcastConn]struct{}
 }
 
-// broadcastQueueFrames sizes the per-conn queue in ticks of frames: one
-// frame per subscribed chunk per tick, so 256 is ~64 ticks of headroom
-// for a four-chunk chunkie — 1.3s at 48Hz, 2.7s at 24Hz. A consumer
-// further behind than that is shed, not awaited.
-const broadcastQueueFrames = 256
+// Queue bounds. Depth is time-based — broadcastQueueSecs of frames at
+// the boot tick rate, one frame per subscribed chunk per tick — pinned
+// between two ceilings: comfortably above scheduler/GC hiccup scale,
+// and under the trunk's 10s write deadline, so a peer that stops
+// draining always surfaces as a deterministic queue-full shed rather
+// than a raced write error. The byte bound is the gateway splice
+// buffer's sibling: payloads are shared across conns, so it caps the
+// pathological large-frame case, not the steady state.
+const (
+	broadcastQueueSecs     = 5
+	broadcastQueueMinDepth = 64
+	broadcastQueueBytes    = 8 << 20
+)
 
 // broadcastWriter is what the broadcaster needs from a trunk conn — a
 // seam so tests can wedge the write side deterministically.
@@ -267,17 +278,22 @@ type broadcastConn struct {
 	mu   sync.Mutex
 	subs map[string]int
 
-	// queue feeds the conn's writer goroutine; stop ends that goroutine;
-	// dead removes the conn as a publish target. once makes teardown
-	// idempotent between the down paths and unregister.
-	queue chan []byte
-	stop  chan struct{}
-	once  sync.Once
-	dead  atomic.Bool
+	// queue feeds the conn's writer goroutine and queued counts its
+	// bytes; stop ends the writer. once makes teardown idempotent
+	// between the shed paths and unregister.
+	queue  chan []byte
+	queued atomic.Int64
+	stop   chan struct{}
+	once   sync.Once
 }
 
-func newBroadcaster(game string) *broadcaster {
-	return &broadcaster{game: game, queueFrames: broadcastQueueFrames, conns: map[*broadcastConn]struct{}{}}
+func newBroadcaster(game string, hz, chunks int) *broadcaster {
+	return &broadcaster{
+		game:        game,
+		queueFrames: max(broadcastQueueSecs*hz*chunks, broadcastQueueMinDepth),
+		queueBytes:  broadcastQueueBytes,
+		conns:       map[*broadcastConn]struct{}{},
+	}
 }
 
 func (b *broadcaster) register(pc broadcastWriter) *broadcastConn {
@@ -285,41 +301,53 @@ func (b *broadcaster) register(pc broadcastWriter) *broadcastConn {
 	b.mu.Lock()
 	b.conns[c] = struct{}{}
 	b.mu.Unlock()
-	go c.write()
+	go b.write(c)
 	return c
 }
 
-func (b *broadcaster) unregister(c *broadcastConn) {
+// remove tears a conn down: out of the publish registry synchronously,
+// writer stopped, conn closed — its sessions redial through the
+// gateway. shed marks the one countable cause, a full queue; read-side
+// teardown (unregister) and write errors stay uncounted, since both are
+// dominated by ordinary conn death and a genuinely wedged peer fills
+// the queue well before the write deadline expires.
+func (b *broadcaster) remove(c *broadcastConn, shed bool) {
 	b.mu.Lock()
 	delete(b.conns, c)
 	b.mu.Unlock()
-	// The read side owns the conn's close; here only the writer stops.
-	c.dead.Store(true)
-	c.once.Do(func() { close(c.stop) })
-}
-
-// down removes the conn as a publish target and closes it — its
-// sessions redial through the gateway. reason is the bounded metric
-// label: queue_full or write_error.
-func (c *broadcastConn) down(reason string) {
 	c.once.Do(func() {
-		c.dead.Store(true)
-		mBroadcastDowns.WithLabelValues(reason).Inc()
+		if shed {
+			mBroadcastSheds.Inc()
+		}
 		c.pc.Close()
 		close(c.stop)
 	})
 }
 
+func (b *broadcaster) unregister(c *broadcastConn) { b.remove(c, false) }
+
 // write is the conn's broadcast writer: the only goroutine putting tick
 // fan-out on this wire, so per-conn broadcast order is the queue's FIFO
-// order. A wedged peer blocks here — never the tick loop — until the
-// write deadline errors out or a queue overflow downs the conn.
-func (c *broadcastConn) write() {
+// order. A wedged peer blocks here — never the tick loop — until a
+// queue-full shed or a write-deadline error downs the conn.
+func (b *broadcaster) write(c *broadcastConn) {
+	// On exit, release whatever the queue still pins.
+	defer func() {
+		for {
+			select {
+			case p := <-c.queue:
+				c.queued.Add(-int64(len(p)))
+			default:
+				return
+			}
+		}
+	}()
 	for {
 		select {
 		case payload := <-c.queue:
+			c.queued.Add(-int64(len(payload)))
 			if c.pc.WriteMessage(trunk.KindBroadcast, 0, payload) != nil {
-				c.down("write_error")
+				b.remove(c, false)
 				return
 			}
 		case <-c.stop:
@@ -363,19 +391,28 @@ func (b *broadcaster) publish(chunk string, tick uint64, firstSeq int64, count u
 		// the same strings), so there is nothing to write.
 		return
 	}
+	// The snapshot is load-bearing: remove takes b.mu, so shedding from
+	// inside the range would deadlock.
 	b.mu.Lock()
 	targets := make([]*broadcastConn, 0, len(b.conns))
 	for c := range b.conns {
-		if !c.dead.Load() && c.subscribed(chunk) {
+		if c.subscribed(chunk) {
 			targets = append(targets, c)
 		}
 	}
 	b.mu.Unlock()
+	n := int64(len(payload))
 	for _, c := range targets {
+		if c.queued.Add(n) > b.queueBytes {
+			c.queued.Add(-n)
+			b.remove(c, true)
+			continue
+		}
 		select {
 		case c.queue <- payload:
 		default:
-			c.down("queue_full")
+			c.queued.Add(-n)
+			b.remove(c, true)
 		}
 	}
 }

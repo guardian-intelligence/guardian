@@ -58,9 +58,9 @@ var (
 		Name: "chunkies_catchup_total", Help: "Catch-up material served, by kind."}, []string{"kind"})
 	mDrops = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "chunkies_fanout_dropped_total", Help: "Sessions closed for stream backlog."})
-	mBroadcastDowns = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "chunkies_trunk_broadcast_downs_total",
-		Help: "Gateway conns downed for not draining tick fan-out, by reason (queue_full, write_error)."}, []string{"reason"})
+	mBroadcastSheds = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "chunkies_trunk_broadcast_sheds_total",
+		Help: "Gateway conns downed for a full broadcast queue — the network-consumer half of tick-stall attribution (pairs with the WAL durable-lag gauge)."})
 	mInboundDropped = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "chunkies_inbound_dropped_total", Help: "Uplink frames shed because a session's intent drain was stalled."})
 	mEpochSwaps = promauto.NewCounterVec(prometheus.CounterOpts{

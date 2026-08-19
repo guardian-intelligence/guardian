@@ -61,7 +61,7 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	mods := toyMods(toyModule(t))
-	bcast := newBroadcaster("wum")
+	bcast := newBroadcaster("wum", 24, 1)
 	registry := newChunks(func() []byte { b, _ := mods.sim.Get(); return b }, nil, toyVocab(), j, mods, timing{hz: 24}, bcast.publish)
 	auth, err := registry.get(ctx, "park-test")
 	if err != nil {
@@ -190,7 +190,7 @@ func TestPublishCopiesRunAndFansOutPerConn(t *testing.T) {
 		t.Fatal(err)
 	}
 	mods := toyMods(toyModule(t))
-	bcast := newBroadcaster("wum")
+	bcast := newBroadcaster("wum", 24, 1)
 	// A pinned clock keeps the run loop owing zero ticks, so the only
 	// broadcast on the wire is the one this test publishes.
 	registry := newChunks(func() []byte { b, _ := mods.sim.Get(); return b }, nil, toyVocab(), j, mods, fixedClock(wallEpoch), bcast.publish)
@@ -294,18 +294,15 @@ func (w *blockingWriter) Close() error { w.closed.Store(true); return nil }
 // DecodeTick expects — the unwrap the gateway does before delivery.
 func tickBody(t *testing.T, frame []byte) []byte {
 	t.Helper()
-	if len(frame) == 0 {
-		t.Fatal("empty frame")
+	kind, payload, err := codec.NewReader(bytes.NewReader(frame)).Next()
+	if err != nil || kind != codec.KindTick {
+		t.Fatalf("not a tick frame: kind=%d err=%v", kind, err)
 	}
-	prefix := 1 << (frame[0] >> 6)
-	if len(frame) < prefix+1 || frame[prefix] != codec.KindTick {
-		t.Fatalf("not a tick frame: % x", frame[:min(len(frame), 8)])
-	}
-	return frame[prefix+1:]
+	return payload
 }
 
 func TestPublishShedsWedgedConnOnly(t *testing.T) {
-	b := newBroadcaster("wum")
+	b := newBroadcaster("wum", 24, 1)
 	b.queueFrames = 2
 
 	healthy := &recordingWriter{frames: make(chan []byte, 64)}
@@ -348,13 +345,33 @@ func TestPublishShedsWedgedConnOnly(t *testing.T) {
 		}
 	}
 
-	if !wc.dead.Load() {
-		t.Fatal("wedged conn was not downed")
+	b.mu.Lock()
+	_, wcIn := b.conns[wc]
+	_, hcIn := b.conns[hc]
+	b.mu.Unlock()
+	if wcIn || !wedged.closed.Load() {
+		t.Fatal("wedged conn was not removed and closed")
 	}
-	if !wedged.closed.Load() {
-		t.Fatal("wedged conn was not closed")
-	}
-	if hc.dead.Load() || healthy.closed.Load() {
+	if !hcIn || healthy.closed.Load() {
 		t.Fatal("healthy conn was downed alongside the wedged one")
+	}
+}
+
+func TestPublishShedsOnByteBudget(t *testing.T) {
+	b := newBroadcaster("wum", 24, 1)
+	b.queueBytes = 1
+
+	w := &recordingWriter{frames: make(chan []byte, 4)}
+	c := b.register(w)
+	c.subscribe("park-test")
+
+	run := codec.AppendEventRecord(nil, 5, kMove, codec.ActorFor("alice"), move(9))
+	b.publish("park-test", 1, 1, 1, run)
+
+	b.mu.Lock()
+	_, in := b.conns[c]
+	b.mu.Unlock()
+	if in || !w.closed.Load() {
+		t.Fatal("conn over byte budget was not shed")
 	}
 }
