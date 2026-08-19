@@ -134,6 +134,15 @@ func Run() {
 				NextProtos: []string{http3.NextProtoH3},
 			},
 			QUICConfig: &quic.Config{
+				// QUIC v1 only. Offering v2 makes Apple's Network.framework
+				// (iOS 26.x, WebKit's network process) take the RFC 9368
+				// compatible-version upgrade mid-handshake and crash on a
+				// recursive unfair lock in nw_endpoint_flow_override_connected_on_path
+				// — every WebTransport dial from an iPhone died before its
+				// CONNECT reached us. v1-only servers (psylo.org:4433) work
+				// on the same devices, and Chrome/Firefox speak v1 anyway.
+				// Revisit when Apple fixes the re-entrancy (FB pending).
+				Versions: []quic.Version{quic.Version1},
 				// The protocol uses exactly one client-opened bidi stream
 				// (plus the WT session's own); uni streams are h3 plumbing
 				// (control + QPACK). 4 of each is protocol minimum plus
