@@ -83,8 +83,16 @@ func Run() {
 	defer traceShutdown(context.Background())
 
 	behaviorDir := envStr("BEHAVIOR_DIR", "/etc/chunkies/behavior")
-	client := mount.NewModule("client", mount.DefaultClient)
-	simModule := mount.NewModule("sim", mount.DefaultSim)
+	client := mount.NewModule("client")
+	simModule := mount.NewModule("sim")
+	// The game arrives entirely as mounted content, and the mount exists
+	// before the process does (a ConfigMap volume mounts before the
+	// container starts): one synchronous scan, then crash loudly if the
+	// pod was declared without its game.
+	mount.Load(behaviorDir, acceptModule, client, simModule)
+	if err := mount.Require(client, simModule); err != nil {
+		log.Fatalf("%v (BEHAVIOR_DIR=%s)", err, behaviorDir)
+	}
 	go mount.Watch(behaviorDir, acceptModule, client, simModule)
 
 	dsn, err := databaseURL()

@@ -256,7 +256,7 @@ EOF
       HTTP_PORT="$PARK_HTTP_PORT" \
       METRICS_PORT="$PARK_METRICS_PORT" \
       INTERNAL_KEY_FILE="$RUN_DIR/internal.key" \
-      BEHAVIOR_DIR="$ROOT/src/chunkies/behaviors" \
+      BEHAVIOR_DIR="$ROOT/src/games/wake-up-mythra/deploy/prod/behavior" \
       GAME_MANIFEST_FILE="$ROOT/src/games/wake-up-mythra/services/wum/game.conf" \
       GENESIS_FILE="$ROOT/src/games/wake-up-mythra/services/wum/fixture_park.bin" \
       TICK_HZ="$DEV_TICK_HZ" \
@@ -273,7 +273,7 @@ EOF
       OIDC_CLIENT_IDS=wake-up-mythra \
       GAME=wum \
       DEFAULT_CHUNK=park-mythra \
-      BEHAVIOR_DIR="$ROOT/src/chunkies/behaviors" \
+      BEHAVIOR_DIR="$ROOT/src/games/wake-up-mythra/deploy/prod/behavior" \
       ASSET_DIR="$ROOT/src/chunkies/assets" \
       PUBLIC_ADDR="${WUM_DEV_PUBLIC_ADDR:-127.0.0.1:${GATEWAY_WT_PORT}}" \
       HTTP_PORT="$GATEWAY_HTTP_PORT" \

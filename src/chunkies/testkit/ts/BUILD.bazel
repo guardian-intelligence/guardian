@@ -5,7 +5,7 @@ npm_link_all_packages()
 
 exports_files(
     ["goldens/records.json"],
-    visibility = ["//src/chunkies/sim:__pkg__"],
+    visibility = ["//src/games/wake-up-mythra/sim:__pkg__"],
 )
 
 exports_files(

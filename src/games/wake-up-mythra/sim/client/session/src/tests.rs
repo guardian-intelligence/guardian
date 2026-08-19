@@ -1290,11 +1290,11 @@ fn the_diagnostics_record_is_one_versioned_dump_of_live_state() {
     // clock crate's constants — no host mirrors them
     assert_eq!(
         u32::from_le_bytes(buf[40..44].try_into().unwrap()),
-        chunkies_clock::TRAIL_TARGET_TICKS as u32
+        wum_clock::TRAIL_TARGET_TICKS as u32
     );
     assert_eq!(
         u32::from_le_bytes(buf[44..48].try_into().unwrap()),
-        chunkies_clock::LAG_TICKS as u32
+        wum_clock::LAG_TICKS as u32
     );
     assert_eq!(
         u64::from_le_bytes(buf[48..56].try_into().unwrap()),

@@ -5,10 +5,10 @@
 //! language boundary rather than trusted. Committed and diff-tested like
 //! the wasm artifacts; refreshed by the same target.
 
-use chunkies_session::wire::{self, Snapshot, Verdict, Welcome};
-use chunkies_session::{Host, ROLE_SPECTATOR, Session};
 use mythra_sim_park as park;
 use mythra_sim_terrain::{BYTES_PER_CELL, Builder, HEADER, SWIM};
+use wum_session::wire::{self, Snapshot, Verdict, Welcome};
+use wum_session::{Host, ROLE_SPECTATOR, Session};
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()

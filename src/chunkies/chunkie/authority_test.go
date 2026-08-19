@@ -47,7 +47,13 @@ func move(d int32) []byte {
 }
 
 func toyMods(module []byte) *modules {
-	return &modules{client: mount.NewModule("client", mount.DefaultClient), sim: mount.NewModule("sim", module)}
+	// The toy has no client module; any bytes serve for the hash the
+	// verdict carries, and the sim slot is the module under test.
+	client := mount.NewModule("client")
+	client.Set(module)
+	sim := mount.NewModule("sim")
+	sim.Set(module)
+	return &modules{client: client, sim: sim}
 }
 
 // fixedClock pins the wall clock: at wallEpoch the anchored scheduler owes

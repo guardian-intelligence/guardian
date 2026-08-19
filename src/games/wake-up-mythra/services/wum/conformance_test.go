@@ -2,11 +2,23 @@ package wum
 
 import (
 	"encoding/binary"
+	"os"
 	"testing"
 
 	"github.com/guardian-intelligence/guardian/src/chunkies/gametest"
-	"github.com/guardian-intelligence/guardian/src/chunkies/mount"
 )
+
+// The committed behavior artifacts are the game: the same bytes the prod
+// ConfigMap mounts. The framework embeds nothing, so the conformance run
+// reads them from the deploy tree.
+func committedModule(t *testing.T, name string) []byte {
+	t.Helper()
+	b, err := os.ReadFile("../../deploy/prod/behavior/" + name)
+	if err != nil {
+		t.Fatalf("committed behavior artifact: %v", err)
+	}
+	return b
+}
 
 // The WUM park module through the game-blind conformance suite: the
 // committed artifacts, the genesis terrain, and a corpus of valid intents.
@@ -20,8 +32,8 @@ func TestWUMGameConformance(t *testing.T) {
 	alice, bob, carol := DogIDFor("alice"), DogIDFor("bob"), DogIDFor("carol")
 
 	gametest.Run(t, gametest.Game{
-		Sim:     mount.DefaultSim,
-		Modules: map[string][]byte{"client": mount.DefaultClient},
+		Sim:     committedModule(t, "sim.wasm"),
+		Modules: map[string][]byte{"client": committedModule(t, "client.wasm")},
 		Genesis: FixtureTerrain,
 		Corpus: []gametest.Event{
 			{Kind: EvJoin, Actor: alice},

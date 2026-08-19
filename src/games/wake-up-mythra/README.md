@@ -57,7 +57,7 @@ only trusts it because `OIDC_ISSUER` says so.
 - **Web (TypeScript/React)**: save; vite HMR applies it. The web app lives
   at `src/games/wake-up-mythra/web`, a member of the repo-rooted
   vite-plus workspace (see `docs/web-workspace.md`).
-- **Sim (Rust → wasm)**: `bazelisk run //src/chunkies/sim:refresh`
+- **Sim (Rust → wasm)**: `bazelisk run //src/games/wake-up-mythra/sim:refresh`
   while the stack runs. The new module lands in the behavior dir, the services
   hot-swap it, and connected clients follow the same update lane a
   production deploy uses.
