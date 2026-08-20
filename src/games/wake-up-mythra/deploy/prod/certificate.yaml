@@ -101,6 +101,11 @@ spec:
     kind: Issuer
   dnsNames:
     - wt.wakeupmythra.com
+    # Transport-lab scar discriminator: a fresh hostname on the same
+    # gateway, distinguishing per-host client-side state (WebKit's QUIC
+    # penalty cache) from server behavior. Remove with LAB_ENABLED, along
+    # with its hand-made grey-cloud A record in Cloudflare.
+    - wt2.wakeupmythra.com
   privateKey:
     algorithm: ECDSA
     size: 256
