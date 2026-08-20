@@ -28,8 +28,6 @@ var (
 		Name: "chunkies_datagrams_rejected_total", Help: "Client datagrams dropped at the gateway (not a well-formed check)."})
 	mUnknownFrames = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "chunkies_unknown_frames_total", Help: "Client stream frames of unknown kind dropped at the gateway."})
-	mTCPFallbackProbes = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "chunkies_wt_tcp_fallback_probes_total", Help: "TCP connections to the WT port's twin listener (WebKit h2-fallback race candidates), refused immediately."})
 	mTrunkConns = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "chunkies_trunk_conns", Help: "Live multiplexed gateway-to-chunk connections."})
 	mTrunkConnFailures = promauto.NewCounterVec(prometheus.CounterOpts{
