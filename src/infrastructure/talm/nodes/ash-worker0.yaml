@@ -181,6 +181,17 @@ ingress:
 ---
 apiVersion: v1alpha1
 kind: NetworkRuleConfig
+name: public-game-plane-tcp
+portSelector:
+  ports:
+    - 4433
+  protocol: tcp
+ingress:
+  - subnet: 0.0.0.0/0
+  - subnet: ::/0
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
 name: operator-talos-api
 portSelector:
   ports:

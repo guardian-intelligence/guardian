@@ -170,6 +170,13 @@ ingressFirewall:
   # certificate-hash contract served by the control plane.
   publicUDPPorts:
     - "4433"
+  # The TCP twins of the public UDP game ports. WebKit's WebTransport races
+  # an HTTP/2-over-TCP fallback candidate next to the QUIC dial and will not
+  # commit the session until that candidate resolves; the default silent
+  # drop left every WebKit dial stalled into its 10s deadline. Admitting TCP
+  # here lets the gateway's twin listener refuse the candidate immediately.
+  publicTCPPorts:
+    - "4433"
   operatorSubnets:
     - "148.113.198.223/32"
   cloudflareEdgeSubnets:

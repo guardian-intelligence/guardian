@@ -51,6 +51,9 @@ spec:
             - name: wt
               containerPort: 4433
               protocol: UDP
+            - name: wt-tcp
+              containerPort: 4433
+              protocol: TCP
             - name: http
               containerPort: 9634
               protocol: TCP
