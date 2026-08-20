@@ -170,12 +170,6 @@ ingressFirewall:
   # certificate-hash contract served by the control plane.
   publicUDPPorts:
     - "4433"
-    # Transport-lab WT variants (chunkies gateway lab.go); remove with LAB_ENABLED.
-    - "4601"
-    - "4602"
-    - "4603"
-    - "4604"
-    - "4605"
   # The TCP twins of the public UDP game ports. WebKit's WebTransport races
   # an HTTP/2-over-TCP fallback candidate next to the QUIC dial and will not
   # commit the session until that candidate resolves; the default silent
@@ -183,14 +177,6 @@ ingressFirewall:
   # here lets the gateway's twin listener refuse the candidate immediately.
   publicTCPPorts:
     - "4433"
-    # Transport-lab: page (4599), RST variant (4601 — nothing listens, the
-    # kernel refuses), accept-close variant (4602), h2 variant (4604).
-    # 4603 is deliberately absent: its TCP side must silently drop.
-    - "4599"
-    - "4601"
-    - "4602"
-    - "4604"
-    - "4605"
   operatorSubnets:
     - "148.113.198.223/32"
   cloudflareEdgeSubnets:

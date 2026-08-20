@@ -177,10 +177,6 @@ func Run() {
 		go gateway.handleSession(sess)
 	})
 
-	if os.Getenv("LAB_ENABLED") == "true" {
-		go runLab(getCertificate, wt.H3.QUICConfig)
-	}
-
 	certHash := func() (string, bool) {
 		if fc.loaded() {
 			return "", false

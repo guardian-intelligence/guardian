@@ -54,11 +54,6 @@
       value: /etc/chunkies/ticket/password
     - name: WT_PORT
       value: "4433"
-    # The transport lab (lab.go): controlled TCP-behavior variants and the
-    # harness page on :4599 for ground-truth dial matrices from real
-    # devices. Diagnostic; remove when the WebKit investigation closes.
-    - name: LAB_ENABLED
-      value: "true"
     - name: HTTP_PORT
       value: "9634"
     - name: METRICS_PORT
