@@ -14,6 +14,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math/rand"
+	"sort"
+	"time"
 	"testing"
 
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
@@ -38,6 +40,12 @@ type Game struct {
 	Modules map[string][]byte // other shipped modules: artifact gates only
 	Genesis []byte            // genesis content artifact
 	Corpus  []Event
+	// MaxWorld drives a fresh world to the game's declared maximum
+	// before the serialize budget is measured — the game's statement of
+	// how big a world it intends the framework to checkpoint. Nil
+	// measures a corpus-warmed world instead, which is the game
+	// asserting its worlds never grow past that.
+	MaxWorld []Event
 }
 
 const (
@@ -56,6 +64,7 @@ func Run(t *testing.T, g Game) {
 	t.Run("artifacts", func(t *testing.T) { runArtifacts(t, g) })
 	t.Run("determinism", func(t *testing.T) { runDeterminism(t, g) })
 	t.Run("snapshot_completeness", func(t *testing.T) { runSnapshotCompleteness(t, g) })
+	t.Run("serialize_budget", func(t *testing.T) { runSerializeBudget(t, g) })
 	t.Run("reject_purity", func(t *testing.T) { runRejectPurity(t, g) })
 	t.Run("restore_rejects_garbage", func(t *testing.T) { runRestoreGarbage(t, g) })
 	t.Run("content_identity", func(t *testing.T) { runContentIdentity(t, g) })
@@ -212,6 +221,49 @@ func drive(t *testing.T, hosts []*host, rounds [][]Event) {
 				t.Fatalf("round %d: instance %d diverged (hash %016x/%016x, tick %d/%d)", i, n+1, hh, h0, th, t0)
 			}
 		}
+	}
+}
+
+// The serialize budget: the framework schedules sim_snapshot inside a
+// tick barrier, and it can only schedule what it can bound. An
+// unboundably slow serialize is an undeclared need — rejected here at
+// conformance, not discovered stalling ticks every checkpoint cadence
+// in prod.
+const (
+	serializeCalls  = 64
+	serializeBudget = 2 * time.Millisecond // p99 over serializeCalls
+)
+
+func runSerializeBudget(t *testing.T, g Game) {
+	h := open(t, g, seeds[0])
+	defer h.close()
+	warm(t, h, g, 7, 64)
+	for i, ev := range g.MaxWorld {
+		if _, err := h.apply(ev); err != nil {
+			t.Fatalf("max-world event %d (kind %d): %v", i, ev.Kind, err)
+		}
+	}
+	if err := h.step(); err != nil {
+		t.Fatal(err)
+	}
+	durs := make([]time.Duration, serializeCalls)
+	var size int
+	for i := range durs {
+		start := time.Now()
+		snap, err := h.snapshot()
+		durs[i] = time.Since(start)
+		if err != nil {
+			t.Fatalf("sim_snapshot call %d: %v", i, err)
+		}
+		size = len(snap)
+	}
+	sort.Slice(durs, func(i, j int) bool { return durs[i] < durs[j] })
+	p99 := durs[len(durs)-1-len(durs)/100]
+	// Size is reported, never gated: the budget is time — a game may
+	// spend its 2ms on any number of bytes the smeared write can carry.
+	t.Logf("sim_snapshot at max world: %d bytes, p50 %s, p99 %s (budget %s)", size, durs[len(durs)/2], p99, serializeBudget)
+	if p99 > serializeBudget {
+		t.Fatalf("sim_snapshot p99 %s exceeds the %s tick-barrier budget at the declared max world — the checkpoint cadence cannot schedule this game", p99, serializeBudget)
 	}
 }
 

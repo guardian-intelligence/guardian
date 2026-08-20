@@ -74,4 +74,10 @@ var (
 		Name: "chunkies_inbound_dropped_total", Help: "Uplink frames shed because a session's intent drain was stalled."})
 	mEpochSwaps = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "chunkies_epoch_swaps_total", Help: "Chunk module epoch-swap lane outcomes."}, []string{"result"})
+	mRehearsals = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "chunkies_recovery_rehearsals_total",
+		Help: "Boot-time recovery-ladder rehearsals against the volume, by outcome. PG stays authority; 'failed' means the volume would not have recovered this world."}, []string{"outcome"})
+	mRehearsalLossTicks = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "chunkies_recovery_rehearsal_loss_ticks",
+		Help: "Ticks the last successful rehearsal's recovered tip trailed the PG tip — the crash drill's loss graph."})
 )

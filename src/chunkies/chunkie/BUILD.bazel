@@ -6,6 +6,7 @@ go_library(
         "config.go",
         "metrics.go",
         "chunkie.go",
+        "recover.go",
         "server.go",
         "session.go",
         "terrain.go",
@@ -15,6 +16,7 @@ go_library(
     importpath = "github.com/guardian-intelligence/guardian/src/chunkies/chunkie",
     visibility = ["//src/chunkies:__subpackages__"],
     deps = [
+        "//src/chunkies/chunkie/checkpoint",
         "//src/chunkies/chunkie/ticklog",
         "//src/chunkies/journal",
         "//src/chunkies/mount",
@@ -37,7 +39,9 @@ go_test(
     name = "chunkie_test",
     srcs = [
         "authority_test.go",
+        "recover_test.go",
         "server_test.go",
+        "vocab_test.go",
         "wal_test.go",
     ],
     data = [
@@ -48,6 +52,8 @@ go_test(
     embed = [":chunkie"],
     env = {"PGTEST_INITDB": "$(rootpath //src/tools/postgres:initdb)"},
     deps = [
+        "//src/chunkies/chunkie/checkpoint",
+        "//src/chunkies/chunkie/ticklog",
         "//src/chunkies/journal",
         "//src/chunkies/mount",
         "//src/chunkies/trunk",
