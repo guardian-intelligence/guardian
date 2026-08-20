@@ -596,6 +596,21 @@ ingress:
   - subnet: ::/0
 ---
 {{- end }}
+{{- if .Values.ingressFirewall.publicTCPPorts }}
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: public-game-plane-tcp
+portSelector:
+  ports:
+  {{- range $.Values.ingressFirewall.publicTCPPorts }}
+    - {{ . }}
+  {{- end }}
+  protocol: tcp
+ingress:
+  - subnet: 0.0.0.0/0
+  - subnet: ::/0
+---
+{{- end }}
 apiVersion: v1alpha1
 kind: NetworkRuleConfig
 name: operator-talos-api

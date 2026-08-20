@@ -249,6 +249,19 @@ func Run() {
 			stop()
 		}
 	}()
+	// The TCP twin of the WT port. WebKit's WebTransport races an
+	// HTTP/2-over-TCP fallback candidate next to the QUIC dial and will not
+	// commit the session until that candidate resolves; a silently dropped
+	// SYN leaves the race pending into the client's dial deadline, so every
+	// WebKit dial stalled for the full 10s while QUIC sat ready. This
+	// listener exists to say no, immediately — and to count how often the
+	// fallback knocks. (The node firewall must admit TCP on this port or
+	// the drop happens before the refusal can.)
+	wtTCP, err := net.Listen("tcp", fmt.Sprintf(":%d", wtPort))
+	if err != nil {
+		log.Fatalf("gateway wt tcp twin: %v", err)
+	}
+	go refuseTCP(wtTCP)
 	go func() {
 		if err := page.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("gateway http: %v", err)
@@ -450,5 +463,19 @@ func (g *chunkiesGateway) handleSession(sess *webtransport.Session) {
 			// but silence would hide a skewed client. Count and drop.
 			mUnknownFrames.Inc()
 		}
+	}
+}
+
+// refuseTCP answers the WT port's TCP twin: accept, count, close. The
+// point is the immediate FIN — a fallback racer needs the candidate to
+// resolve fast, and the counter is the only evidence the race exists.
+func refuseTCP(ln net.Listener) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		mTCPFallbackProbes.Inc()
+		conn.Close()
 	}
 }
