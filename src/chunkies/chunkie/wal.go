@@ -32,9 +32,11 @@ func newShadowFactory(dir string) shadowFunc {
 		if err != nil {
 			// Shadow policy: the world serves without its shadow rather
 			// than not at all. ErrHeld here means a predecessor's process
-			// is still dying; the next reopen acquires cleanly.
+			// is still dying; the next reopen acquires cleanly. Serving
+			// unshadowed IS the dead state — the gauge must say so.
 			log.Printf("chunk %s: shadow WAL acquire: %v — serving unshadowed", chunk, err)
 			mWALFaults.Inc()
+			mWALShadowDead.Set(1)
 			return nil
 		}
 		l, err := ticklog.Create(ticklog.Config{
@@ -48,6 +50,7 @@ func newShadowFactory(dir string) shadowFunc {
 		if err != nil {
 			log.Printf("chunk %s: shadow WAL create: %v — serving unshadowed", chunk, err)
 			mWALFaults.Inc()
+			mWALShadowDead.Set(1)
 			guard.Release()
 			return nil
 		}
@@ -76,7 +79,14 @@ func (w *shadowWAL) watch(chunk string) {
 		case err := <-w.log.Faults():
 			w.latch(chunk, err)
 		case <-t.C:
-			mWALLag.Set(w.log.DurableLag().Seconds())
+			// A poisoned engine's oldest-unsynced age freezes, so its
+			// DurableLag climbs forever: once dead, the lag is not a
+			// disk signal any more — the dead gauge carries the state.
+			if w.dead.Load() {
+				mWALLag.Set(0)
+			} else {
+				mWALLag.Set(w.log.DurableLag().Seconds())
+			}
 		case <-w.stop:
 			mWALLag.Set(0)
 			return
