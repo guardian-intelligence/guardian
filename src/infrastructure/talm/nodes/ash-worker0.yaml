@@ -174,11 +174,6 @@ name: public-game-plane-udp
 portSelector:
   ports:
     - 4433
-    - 4601
-    - 4602
-    - 4603
-    - 4604
-    - 4605
   protocol: udp
 ingress:
   - subnet: 0.0.0.0/0
@@ -190,11 +185,6 @@ name: public-game-plane-tcp
 portSelector:
   ports:
     - 4433
-    - 4599
-    - 4601
-    - 4602
-    - 4604
-    - 4605
   protocol: tcp
 ingress:
   - subnet: 0.0.0.0/0
