@@ -423,10 +423,12 @@ type authority struct {
 	// soak the swap commits as an epoch_advance journal event plus a
 	// synchronous boundary snapshot hashed by the new module. All fields
 	// are owned by the tick goroutine.
-	moduleHash string // display hash of the running module
+	moduleHash string   // display hash of the running module
+	simSum     [32]byte // full sha256 of the running module — the checkpoint manifest's PW pin
 	cand       *simHost
 	candHash   string
-	candSum    uint64 // first 8 bytes (LE) of the candidate's sha256
+	candSum    uint64   // first 8 bytes (LE) of the candidate's sha256
+	candSHA    [32]byte // the candidate's full sha256; becomes simSum on promote
 	soakLeft   int
 	badModule  string // last hash that failed soak; retried only on change
 
@@ -493,6 +495,7 @@ func (a *authority) swapPrelude() []stagedIntent {
 		a.cand, a.candHash, a.soakLeft = cand, hash, soakTicks(a.hz)
 		sum := sha256.Sum256(bytes)
 		a.candSum = binary.LittleEndian.Uint64(sum[:8])
+		a.candSHA = sum
 		// A content-free game has no blob to stage.
 		if len(a.terrainBlob) > 0 {
 			if err := cand.SetTerrainE(a.terrainBlob); err != nil {
@@ -566,6 +569,7 @@ func (a *authority) promote(t uint64) {
 	old.close()
 	prev := a.moduleHash
 	a.moduleHash = a.candHash
+	a.simSum = a.candSHA
 	a.mu.Lock()
 	// The ring entry for the boundary tick and any cached snapshot line
 	// were computed by the old module; re-anchor both.
@@ -634,6 +638,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 		publish:    publish,
 		tm:         tm,
 		moduleHash: displayHash(module),
+		simSum:     sha256.Sum256(module),
 		subs:       map[*session]bool{},
 		players:    map[uint64]*session{},
 		seen:       map[codec.DedupEntry]struct{}{},
@@ -1300,6 +1305,24 @@ func (a *authority) tickOnce() {
 		} else {
 			a.wal.watermark(tick)
 		}
+		if a.wal.dueCheckpoint(a.name, a.tm.now()) {
+			// The tick-barrier cost is exactly one sim_snapshot and the
+			// dedup-window copy; deflate, the smeared write, retention,
+			// and WAL trim run on the snapshotter's lane. Tick and WH
+			// match the WAL record above, so a scan keyed by this
+			// manifest resumes at the next record.
+			a.mu.Lock()
+			dedup := append([]codec.DedupEntry(nil), a.seenFifo...)
+			a.mu.Unlock()
+			a.wal.submitCheckpoint(codec.Checkpoint{
+				Version: 1, Game: a.wal.game, Chunk: a.name,
+				Lineage: 0, // pre-flip histories are lineage 0; rung 5 mints higher ones
+				Seq:     a.lastSeq, Tick: tick, Epoch: a.host.Epoch(),
+				WH: wh, Content: a.terrain,
+				CW: a.mods.client.Sum(), PW: a.simSum,
+				Dedup: dedup, State: a.host.Snapshot(),
+			})
+		}
 	}
 
 	if committing && a.cand != nil {
@@ -1512,7 +1535,9 @@ func (p *chunks) get(ctx context.Context, name string) (*authority, error) {
 		// clock repayment) has appended everything it will, and run() has
 		// not started. The discard path below closes through a.close(),
 		// which releases the shadow's lock and generation.
-		a.wal = p.shadow(name, a.host.Epoch(), a.host.Tick(), a.lastSeq)
+		a.wal = p.shadow(name, a.host.Epoch(), a.host.Tick(), a.lastSeq, shadowBoot{
+			module: p.module(), terrain: a.terrainBlob, clientSum: p.mods.client.Sum(),
+		})
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()

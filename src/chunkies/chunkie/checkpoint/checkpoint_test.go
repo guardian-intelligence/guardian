@@ -185,7 +185,7 @@ func TestSnapshotterSubmitAndForce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := inflate(m.State)
+	state, err := Inflate(m.State)
 	if err != nil || !bytes.Equal(state, raw) {
 		t.Fatalf("deflate round trip: %v", err)
 	}
