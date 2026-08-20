@@ -61,6 +61,11 @@
       value: /etc/mythra/content/genesis.bin
     - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
       value: otel-collector.guardian-analytics.svc.cozy.local:4317
+    # Slice B/C durability lanes: the shadow ticklog and checkpoint ring
+    # on the node-local NVMe. PG remains the recovery authority until
+    # the flip; unsetting this serves unshadowed, exactly as before.
+    - name: WAL_DIR
+      value: /var/lib/chunkies/wal
 - op: add
   path: /spec/template/spec/containers/0/volumeMounts
   value:
@@ -76,6 +81,8 @@
     - name: pg-credentials
       mountPath: /etc/mythra/pg
       readOnly: true
+    - name: wal
+      mountPath: /var/lib/chunkies/wal
 - op: add
   path: /spec/template/spec/volumes
   value:
@@ -94,3 +101,11 @@
         items:
           - key: mythra
             path: mythra
+    - name: wal
+      persistentVolumeClaim:
+        claimName: chunkies-wal
+# The volume arrives owned by root; fsGroup hands it to the pod's user
+# (the framework shape runs 65532) without an initContainer chown.
+- op: add
+  path: /spec/template/spec/securityContext/fsGroup
+  value: 65532

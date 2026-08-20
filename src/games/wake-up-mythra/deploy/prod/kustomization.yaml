@@ -8,6 +8,7 @@ resources:
   - agent-ops.yaml
   - behavior-configmap.yaml
   - certificate.yaml
+  - chunkies-wal-pvc.yaml
   - ingress.yaml
   - internal-keys.yaml
   - networkpolicy.yaml

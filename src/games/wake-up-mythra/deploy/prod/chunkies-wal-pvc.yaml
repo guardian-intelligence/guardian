@@ -1,0 +1,21 @@
+# The WUM chunkie's claim on the ash-worker0 durability volume. The PV
+# (src/infrastructure/base/storage/chunkies-wal-pv.yaml) claimRefs this
+# name, so the bind is exact and nothing else can take the disk. Static
+# provisioning end to end: no controller in the recovery path.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: chunkies-wal
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: chunkie
+    guardian.dev/product: mythra
+spec:
+  storageClassName: talos-user-volume
+  volumeName: ash-worker0-chunkies
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 850Gi
