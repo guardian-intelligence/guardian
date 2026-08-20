@@ -178,6 +178,7 @@ portSelector:
     - 4602
     - 4603
     - 4604
+    - 4605
   protocol: udp
 ingress:
   - subnet: 0.0.0.0/0
@@ -193,6 +194,7 @@ portSelector:
     - 4601
     - 4602
     - 4604
+    - 4605
   protocol: tcp
 ingress:
   - subnet: 0.0.0.0/0

@@ -175,6 +175,7 @@ ingressFirewall:
     - "4602"
     - "4603"
     - "4604"
+    - "4605"
   # The TCP twins of the public UDP game ports. WebKit's WebTransport races
   # an HTTP/2-over-TCP fallback candidate next to the QUIC dial and will not
   # commit the session until that candidate resolves; the default silent
@@ -189,6 +190,7 @@ ingressFirewall:
     - "4601"
     - "4602"
     - "4604"
+    - "4605"
   operatorSubnets:
     - "148.113.198.223/32"
   cloudflareEdgeSubnets:
