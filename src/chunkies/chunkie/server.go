@@ -124,7 +124,12 @@ func Run() {
 	// One chunk per chunkie today; the queue depth scales with the
 	// served set when that changes.
 	bcast := newBroadcaster(game, tickHz, 1)
-	registry := newChunks(func() []byte { b, _ := simModule.Get(); return b }, genesis, vocab, j, mods, timing{hz: tickHz}, bcast.publish)
+	var shadow shadowFunc
+	if dir := os.Getenv("WAL_DIR"); dir != "" {
+		shadow = newShadowFactory(dir)
+		log.Printf("shadow WAL enabled: %s (PG remains recovery authority)", dir)
+	}
+	registry := newChunks(func() []byte { b, _ := simModule.Get(); return b }, genesis, vocab, j, mods, timing{hz: tickHz}, bcast.publish, shadow)
 	auth, err := registry.get(ctx, chunkName)
 	if err != nil {
 		log.Fatalf("open chunk: %v", err)

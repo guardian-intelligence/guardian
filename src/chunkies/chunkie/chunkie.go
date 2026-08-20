@@ -444,6 +444,11 @@ type authority struct {
 	seen     map[codec.DedupEntry]struct{}
 	seenFifo []codec.DedupEntry
 
+	// wal is the slice-B shadow: it mirrors every journal seq to the
+	// node-local ticklog while PG remains the recovery authority. Set
+	// before run() starts, nil when the activation has no shadow.
+	wal *shadowWAL
+
 	attach chan attachReq
 	rate   chan rateChangeReq
 	stop   chan struct{}
@@ -571,6 +576,11 @@ func (a *authority) promote(t uint64) {
 	a.lastSnapAt = a.tm.now()
 	log.Printf("chunk %s: epoch %d — module %s live (was %s), wh %016x", a.name, a.host.Epoch(), a.moduleHash, prev, wh)
 	mEpochSwaps.WithLabelValues("committed").Inc()
+	if a.wal != nil {
+		// The epoch barrier: drain, sync, rotate — no segment ever spans
+		// a module promotion, so replay runs under exactly one pair.
+		a.wal.advanceEpoch(a.name, a.host.Epoch())
+	}
 }
 
 func chunkIDFor(name string) int64 {
@@ -782,6 +792,15 @@ func (a *authority) rateChange(ctx context.Context, hz int) error {
 	a.lastSeq = firstSeq
 	mEventsAppended.Inc()
 	mRateChanges.Inc()
+	if a.wal != nil {
+		// The shadow mirrors the journal row byte-for-byte with the
+		// catch-up frame's actor resolution. Ticks must be strictly
+		// increasing per record, so a second system event landing on the
+		// same tick latches the shadow — visible, and exactly the class
+		// of divergence the shadow window exists to surface.
+		run := codec.AppendEventRecord(nil, 0, codec.KindRateSet, 0, p[:])
+		a.wal.appendTick(a.name, tick, firstSeq, 1, run, a.host.Hash())
+	}
 	a.refreshSchedule(true)
 	t := a.host.Tick()
 	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: a.host.Hash()}
@@ -825,6 +844,10 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	a.lastSeq = firstSeq
 	mEventsAppended.Inc()
 	mClockSkips.Inc()
+	if a.wal != nil {
+		run := codec.AppendEventRecord(nil, 0, codec.KindClockSkip, 0, p[:])
+		a.wal.appendTick(a.name, tick, firstSeq, 1, run, a.host.Hash())
+	}
 	t := a.host.Tick()
 	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: a.host.Hash()}
 	a.ringHead = t
@@ -1133,6 +1156,10 @@ func (a *authority) tickOnce() {
 	prelude := a.swapPrelude()
 	committing := len(prelude) > 0
 
+	var walRun []byte
+	var walFirstSeq int64
+	var walCount uint16
+
 	a.mu.Lock()
 	staged := append(prelude, a.staged...)
 	a.staged = nil
@@ -1218,7 +1245,8 @@ func (a *authority) tickOnce() {
 		// bytes, seqs dense from the journal's first — the same bytes a
 		// client sent are the bytes every client receives. Publish carries
 		// it once per subscribed gateway connection; the gateway-side
-		// splice fans it out to attachments.
+		// splice fans it out to attachments. The shadow WAL appends the
+		// same verbatim run after step, once the post-step hash exists.
 		var run []byte
 		for i := range accepted {
 			accepted[i].Seq = firstSeq + int64(i)
@@ -1226,6 +1254,7 @@ func (a *authority) tickOnce() {
 				acceptedIntents[i].actorID, accepted[i].Payload)
 		}
 		a.publish(a.name, tick, firstSeq, uint16(len(accepted)), run)
+		walRun, walFirstSeq, walCount = run, firstSeq, uint16(len(accepted))
 		a.mu.Lock()
 		a.lastSeq = accepted[len(accepted)-1].Seq
 		a.mu.Unlock()
@@ -1264,6 +1293,14 @@ func (a *authority) tickOnce() {
 	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: wh}
 	a.ringHead = t
 	a.mu.Unlock()
+
+	if a.wal != nil {
+		if walCount > 0 {
+			a.wal.appendTick(a.name, tick, walFirstSeq, walCount, walRun, wh)
+		} else {
+			a.wal.watermark(tick)
+		}
+	}
 
 	if committing && a.cand != nil {
 		a.promote(t)
@@ -1430,6 +1467,7 @@ func (a *authority) close() {
 		s.closeSession("chunk reopening")
 	}
 	close(a.stop)
+	a.wal.close()
 }
 
 func (a *authority) isClosed() bool {
@@ -1449,10 +1487,11 @@ type chunks struct {
 	mods    *modules
 	tm      timing
 	publish publishFunc
+	shadow  shadowFunc
 }
 
-func newChunks(module func() []byte, genesis []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing, publish publishFunc) *chunks {
-	return &chunks{byName: map[string]*authority{}, module: module, genesis: genesis, vocab: vocab, j: j, mods: mods, tm: tm, publish: publish}
+func newChunks(module func() []byte, genesis []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing, publish publishFunc, shadow shadowFunc) *chunks {
+	return &chunks{byName: map[string]*authority{}, module: module, genesis: genesis, vocab: vocab, j: j, mods: mods, tm: tm, publish: publish, shadow: shadow}
 }
 
 func (p *chunks) get(ctx context.Context, name string) (*authority, error) {
@@ -1467,6 +1506,13 @@ func (p *chunks) get(ctx context.Context, name string) (*authority, error) {
 	a, err := openAuthority(ctx, name, p.module(), p.genesis, p.vocab, p.j, p.mods, p.tm, p.publish)
 	if err != nil {
 		return nil, err
+	}
+	if p.shadow != nil {
+		// The activation's journal tip is exact here: open (including its
+		// clock repayment) has appended everything it will, and run() has
+		// not started. The discard path below closes through a.close(),
+		// which releases the shadow's lock and generation.
+		a.wal = p.shadow(name, a.host.Epoch(), a.host.Tick(), a.lastSeq)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()

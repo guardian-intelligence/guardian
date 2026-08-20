@@ -61,6 +61,15 @@ var (
 	mBroadcastSheds = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "chunkies_trunk_broadcast_sheds_total",
 		Help: "Gateway conns downed for a full broadcast queue — the network-consumer half of tick-stall attribution (pairs with the WAL durable-lag gauge)."})
+	mWALLag = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "chunkies_wal_durable_lag_seconds",
+		Help: "Age of the oldest WAL record not yet durable — the disk half of tick-stall attribution."})
+	mWALFaults = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "chunkies_wal_faults_total",
+		Help: "WAL engine faults (stall, failed sync, refused create/acquire). In shadow mode each latches the shadow dead without touching serving."})
+	mWALShadowDead = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "chunkies_wal_shadow_dead",
+		Help: "1 while the shadow WAL is latched dead and PG alone carries recovery."})
 	mInboundDropped = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "chunkies_inbound_dropped_total", Help: "Uplink frames shed because a session's intent drain was stalled."})
 	mEpochSwaps = promauto.NewCounterVec(prometheus.CounterOpts{
