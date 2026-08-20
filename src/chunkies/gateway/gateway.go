@@ -119,19 +119,20 @@ func Run() {
 	rc := newRotatingCert(sans)
 	fc := newFileCert(envStr("TLS_CERT_FILE", ""), envStr("TLS_KEY_FILE", ""))
 
+	getCertificate := func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		if cert := fc.get(); cert != nil {
+			return cert, nil
+		}
+		cert, _ := rc.get()
+		return &cert, nil
+	}
 	wtMux := http.NewServeMux()
 	wt := webtransport.Server{
 		H3: &http3.Server{
 			Addr: fmt.Sprintf(":%d", wtPort),
 			TLSConfig: &tls.Config{
-				GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-					if cert := fc.get(); cert != nil {
-						return cert, nil
-					}
-					cert, _ := rc.get()
-					return &cert, nil
-				},
-				NextProtos: []string{http3.NextProtoH3},
+				GetCertificate: getCertificate,
+				NextProtos:     []string{http3.NextProtoH3},
 			},
 			QUICConfig: &quic.Config{
 				// QUIC v1 only. Offering v2 makes Apple's Network.framework
@@ -175,6 +176,10 @@ func Run() {
 		}
 		go gateway.handleSession(sess)
 	})
+
+	if os.Getenv("LAB_ENABLED") == "true" {
+		go runLab(getCertificate, wt.H3.QUICConfig)
+	}
 
 	certHash := func() (string, bool) {
 		if fc.loaded() {

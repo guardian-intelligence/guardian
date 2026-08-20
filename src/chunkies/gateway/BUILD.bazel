@@ -6,6 +6,7 @@ go_library(
         "auth.go",
         "directory.go",
         "gateway.go",
+        "lab.go",
         "metrics.go",
         "support.go",
     ],
