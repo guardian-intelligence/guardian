@@ -98,12 +98,12 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 	// openAuthority does not start the run loop: this test owns the host
 	// and drives tickOnce directly.
 	var pubs []publishCall
-	a, err := openAuthority(ctx, "park-test", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), recordPublishes(&pubs))
+	a, err := openAuthority(ctx, "chunk-test", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), recordPublishes(&pubs))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	s := &session{sub: "alice", dogID: codec.ActorFor("alice"), out: make(chan []byte, 16)}
+	s := &session{sub: "alice", actorID: codec.ActorFor("alice"), out: make(chan []byte, 16)}
 	a.stageIntent(s, 1, kJoin, nil)
 	a.tickOnce()
 	a.stageIntent(s, 2, kMove, move(5))
@@ -157,7 +157,7 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 	wantTick := a.host.Tick()
 	a.host.close()
 
-	b, err := openAuthority(ctx, "park-test", module, nil, toyVocab(), j, mods,
+	b, err := openAuthority(ctx, "chunk-test", module, nil, toyVocab(), j, mods,
 		timing{hz: 48, now: func() time.Time { return wallEpoch }}, nil)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
@@ -188,7 +188,7 @@ func TestAuthorityClosesOnAppendConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := toyModule(t)
-	a, err := openAuthority(ctx, "park-race", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), nil)
+	a, err := openAuthority(ctx, "chunk-race", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestAuthorityClosesOnAppendConflict(t *testing.T) {
 	if _, err := j.Append(ctx, a.id, 0, []journal.Event{{Tick: 0, Epoch: 1, Kind: codec.KindDayReset, Actor: "rogue", Payload: []byte{0, 0, 0, 0}}}); err != nil {
 		t.Fatal(err)
 	}
-	s := &session{sub: "bob", dogID: codec.ActorFor("bob"), out: make(chan []byte, 16)}
+	s := &session{sub: "bob", actorID: codec.ActorFor("bob"), out: make(chan []byte, 16)}
 	a.stageIntent(s, 1, kJoin, nil)
 	a.tickOnce()
 	if !a.isClosed() {
@@ -226,11 +226,11 @@ func TestModuleEpochSwapLane(t *testing.T) {
 	}
 	module := toyModule(t)
 	mods := toyMods(module)
-	a, err := openAuthority(ctx, "park-epoch", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil)
+	a, err := openAuthority(ctx, "chunk-epoch", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &session{sub: "dana", dogID: codec.ActorFor("dana"), out: make(chan []byte, 16)}
+	s := &session{sub: "dana", actorID: codec.ActorFor("dana"), out: make(chan []byte, 16)}
 	a.stageIntent(s, 1, kJoin, nil)
 	a.tickOnce()
 	epochBefore := a.host.Epoch()
@@ -271,7 +271,7 @@ func TestModuleEpochSwapLane(t *testing.T) {
 
 	// Reopen the chunk as a converged deploy would: the mount serves the
 	// new module, and the boundary snapshot must restore under it.
-	b, err := openAuthority(ctx, "park-epoch", variant, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil)
+	b, err := openAuthority(ctx, "chunk-epoch", variant, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil)
 	if err != nil {
 		t.Fatalf("reopen after epoch swap: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := toyModule(t)
-	a, err := openAuthority(ctx, "park-refresh", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), nil)
+	a, err := openAuthority(ctx, "chunk-refresh", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
 	// First page load: join, then the connection drops and the departure
 	// is staged with intent id 0. The first tick after any open also
 	// journals the day_reset that seeds the sim's day index (seq 2).
-	s1 := &session{sub: "carol", role: "player", chunk: a, dogID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
+	s1 := &session{sub: "carol", role: "player", chunk: a, actorID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
 	attach(s1)
 	a.stageIntent(s1, 1, kJoin, nil)
 	a.tickOnce()
@@ -339,7 +339,7 @@ func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
 
 	// Refreshed page: an intent for an absent actor is rejected, then the
 	// client rejoins and retries under the SAME intent id.
-	s2 := &session{sub: "carol", role: "player", chunk: a, dogID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
+	s2 := &session{sub: "carol", role: "player", chunk: a, actorID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
 	attach(s2)
 	a.stageIntent(s2, 42, kMove, move(2))
 	a.tickOnce()
@@ -372,7 +372,7 @@ func TestStaleSessionDepartureIsFenced(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := toyModule(t)
-	a, err := openAuthority(ctx, "park-fence", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), nil)
+	a, err := openAuthority(ctx, "chunk-fence", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +391,7 @@ func TestStaleSessionDepartureIsFenced(t *testing.T) {
 		}
 	}
 
-	s1 := &session{sub: "carol", role: "player", chunk: a, dogID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
+	s1 := &session{sub: "carol", role: "player", chunk: a, actorID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
 	attach(s1)
 	a.stageIntent(s1, 1, kJoin, nil)
 	a.tickOnce()
@@ -400,10 +400,10 @@ func TestStaleSessionDepartureIsFenced(t *testing.T) {
 	// The reload's session attaches while the zombie is still undetected;
 	// the zombie stays attached (the client host redials on any close, so
 	// evicting it would make two live tabs supersede each other forever).
-	s2 := &session{sub: "carol", role: "player", chunk: a, dogID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
+	s2 := &session{sub: "carol", role: "player", chunk: a, actorID: codec.ActorFor("carol"), out: make(chan []byte, 16)}
 	attach(s2)
 
-	// The zombie's reap stages nothing: the dog stays in the park.
+	// The zombie's reap stages nothing: the actor stays in the chunk.
 	stageDeparture(a, s1)
 	a.tickOnce()
 	seqAfter(2, "fenced stale departure")
@@ -430,7 +430,7 @@ func TestAuthorityPublishesOncePerCommittingTick(t *testing.T) {
 	}
 	module := toyModule(t)
 	var pubs []publishCall
-	a, err := openAuthority(ctx, "park-publish", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), recordPublishes(&pubs))
+	a, err := openAuthority(ctx, "chunk-publish", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), recordPublishes(&pubs))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +438,7 @@ func TestAuthorityPublishesOncePerCommittingTick(t *testing.T) {
 
 	// First tick: the staged join commits alongside the day_reset the
 	// clock stages — one batch, one publish.
-	s := &session{sub: "hana", dogID: codec.ActorFor("hana"), out: make(chan []byte, 16)}
+	s := &session{sub: "hana", actorID: codec.ActorFor("hana"), out: make(chan []byte, 16)}
 	a.stageIntent(s, 1, kJoin, nil)
 	tickAt := a.host.Tick()
 	a.tickOnce()
@@ -446,8 +446,8 @@ func TestAuthorityPublishesOncePerCommittingTick(t *testing.T) {
 		t.Fatalf("committing tick published %d times, want 1", len(pubs))
 	}
 	pub := pubs[0]
-	if pub.chunk != "park-publish" || pub.tick != tickAt || pub.firstSeq != 1 || pub.count != 2 {
-		t.Fatalf("publish = %+v, want chunk park-publish tick %d firstSeq 1 count 2", pub, tickAt)
+	if pub.chunk != "chunk-publish" || pub.tick != tickAt || pub.firstSeq != 1 || pub.count != 2 {
+		t.Fatalf("publish = %+v, want chunk chunk-publish tick %d firstSeq 1 count 2", pub, tickAt)
 	}
 	recs, err := codec.ParseRecords(pub.run, int(pub.count))
 	if err != nil {
@@ -503,11 +503,11 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	}
 	module := toyModule(t)
 	mods := toyMods(module)
-	a, err := openAuthority(ctx, "park-anchored", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil)
+	a, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &session{sub: "erin", dogID: codec.ActorFor("erin"), out: make(chan []byte, 16)}
+	s := &session{sub: "erin", actorID: codec.ActorFor("erin"), out: make(chan []byte, 16)}
 	a.stageIntent(s, 1, kJoin, nil)
 	for i := 0; i < 5; i++ {
 		a.tickOnce()
@@ -517,7 +517,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 
 	// Short gap: stepped through, tick-exact, journal untouched.
 	short := wallEpoch.Add(10 * time.Second)
-	b, err := openAuthority(ctx, "park-anchored", module, nil, toyVocab(), j, mods, fixedClock(short), nil)
+	b, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(short), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +527,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	if b.lastSeq != seqBefore {
 		t.Fatalf("short-gap repayment journaled events: lastSeq %d, want %d", b.lastSeq, seqBefore)
 	}
-	c, err := openAuthority(ctx, "park-anchored", module, nil, toyVocab(), j, mods, fixedClock(short), nil)
+	c, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(short), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -540,7 +540,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	// Long gap: one clock_skip journals, the snapshot floor moves to the
 	// jumped tick, and reopens past it restore deterministically.
 	long := wallEpoch.Add(24 * time.Hour)
-	d, err := openAuthority(ctx, "park-anchored", module, nil, toyVocab(), j, mods, fixedClock(long), nil)
+	d, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(long), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +563,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	d.host.close()
 
 	later := long.Add(10 * time.Second)
-	e, err := openAuthority(ctx, "park-anchored", module, nil, toyVocab(), j, mods, fixedClock(later), nil)
+	e, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(later), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,7 +571,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	if got, want := e.host.Tick(), e.targetTick(later); got != want {
 		t.Fatalf("post-skip reopen at tick %d, schedule says %d", got, want)
 	}
-	f, err := openAuthority(ctx, "park-anchored", module, nil, toyVocab(), j, mods, fixedClock(later), nil)
+	f, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(later), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -598,11 +598,11 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	}
 	module := toyModule(t)
 	mods := toyMods(module)
-	a, err := openAuthority(ctx, "park-rated", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil)
+	a, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &session{sub: "gale", dogID: codec.ActorFor("gale"), out: make(chan []byte, 16)}
+	s := &session{sub: "gale", actorID: codec.ActorFor("gale"), out: make(chan []byte, 16)}
 	a.stageIntent(s, 1, kJoin, nil)
 	for i := 0; i < 5; i++ {
 		a.tickOnce()
@@ -616,7 +616,7 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	// Reopen wanting 120Hz: repay the 10s gap under the stored 24Hz
 	// segment first, then exactly one rate_set re-anchors at that tick.
 	at120 := wallEpoch.Add(10 * time.Second)
-	b, err := openAuthority(ctx, "park-rated", module, nil, toyVocab(), j, mods, timing{hz: 120, now: func() time.Time { return at120 }}, nil)
+	b, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, timing{hz: 120, now: func() time.Time { return at120 }}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +649,7 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	// first (no stall — the mapping is piecewise, not global), then one
 	// rate_set back to 24.
 	at24 := wallEpoch.Add(20 * time.Second)
-	c, err := openAuthority(ctx, "park-rated", module, nil, toyVocab(), j, mods, timing{hz: 24, now: func() time.Time { return at24 }}, nil)
+	c, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, timing{hz: 24, now: func() time.Time { return at24 }}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,7 +665,7 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 		t.Fatalf("repaid %d ticks across the 120Hz segment, want ~1200", repaid)
 	}
 	// determinism across two rate boundaries
-	d, err := openAuthority(ctx, "park-rated", module, nil, toyVocab(), j, mods, timing{hz: 24, now: func() time.Time { return at24 }}, nil)
+	d, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, timing{hz: 24, now: func() time.Time { return at24 }}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

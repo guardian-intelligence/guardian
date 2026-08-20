@@ -35,7 +35,7 @@ func TestShadowWALMirrorsJournal(t *testing.T) {
 	// An hour past the epoch, so the attach tip is a real tick number —
 	// the frontier below is exclusive and cannot express "before tick 0".
 	clock := fixedClock(wallEpoch.Add(time.Hour))
-	a, err := openAuthority(ctx, "park-shadow", module, nil, toyVocab(), j, toyMods(module), clock, nil)
+	a, err := openAuthority(ctx, "chunk-shadow", module, nil, toyVocab(), j, toyMods(module), clock, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,12 +45,12 @@ func TestShadowWALMirrorsJournal(t *testing.T) {
 	// newer history, and its first record may land AT the attach tick —
 	// so the replay key's exclusive frontier is StartTick-1.
 	openSeq, openTick := a.lastSeq, a.host.Tick()
-	a.wal = newShadowFactory(dir)("park-shadow", a.host.Epoch(), openTick, openSeq)
+	a.wal = newShadowFactory(dir)("chunk-shadow", a.host.Epoch(), openTick, openSeq)
 	if a.wal == nil {
 		t.Fatal("shadow WAL failed to open")
 	}
 
-	s := &session{sub: "alice", dogID: codec.ActorFor("alice"), out: make(chan []byte, 16)}
+	s := &session{sub: "alice", actorID: codec.ActorFor("alice"), out: make(chan []byte, 16)}
 	a.stageIntent(s, 1, kJoin, nil)
 	a.tickOnce()
 	a.stageIntent(s, 2, kMove, move(5))
@@ -82,7 +82,7 @@ func TestShadowWALMirrorsJournal(t *testing.T) {
 		rec  codec.EventRecord
 	}
 	walBySeq := map[int64]walEvent{}
-	tips, err := ticklog.Scan(dir, []ticklog.ChunkKey{{Name: "park-shadow", Lineage: 0, AfterTick: openTick - 1, AfterSeq: openSeq}}, func(chunk string, r codec.Record) error {
+	tips, err := ticklog.Scan(dir, []ticklog.ChunkKey{{Name: "chunk-shadow", Lineage: 0, AfterTick: openTick - 1, AfterSeq: openSeq}}, func(chunk string, r codec.Record) error {
 		recs, err := codec.ParseRecords(r.Records, int(r.Count))
 		if err != nil {
 			return err
@@ -98,7 +98,7 @@ func TestShadowWALMirrorsJournal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	if tip := tips["park-shadow"]; tip.Seq != lastSeq {
+	if tip := tips["chunk-shadow"]; tip.Seq != lastSeq {
 		t.Fatalf("wal tip seq = %d, journal lastSeq = %d", tip.Seq, lastSeq)
 	}
 

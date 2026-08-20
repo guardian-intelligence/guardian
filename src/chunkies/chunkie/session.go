@@ -16,7 +16,7 @@ type session struct {
 	chunk     *authority
 	closeFn  func(string)
 	out      chan []byte
-	dogID    uint64
+	actorID    uint64
 	openedAt time.Time
 
 	closeOnce sync.Once

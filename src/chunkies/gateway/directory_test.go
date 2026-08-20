@@ -9,18 +9,18 @@ import (
 
 func TestParseChunkDirectory(t *testing.T) {
 	got, err := parseChunkDirectory(strings.NewReader(`
-# the WUM fleet
-wum park-mythra 127.0.0.1:9632
+# the toy fleet
+toy chunk-main 127.0.0.1:9632
 
-wum park-canary 127.0.0.1:9642
+toy chunk-canary 127.0.0.1:9642
 side pong-1 10.0.0.9:9632
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"wum/park-mythra": "127.0.0.1:9632",
-		"wum/park-canary": "127.0.0.1:9642",
+		"toy/chunk-main": "127.0.0.1:9632",
+		"toy/chunk-canary": "127.0.0.1:9642",
 		"side/pong-1":     "10.0.0.9:9632",
 	}
 	if len(got) != len(want) {
@@ -35,9 +35,9 @@ side pong-1 10.0.0.9:9632
 
 func TestParseChunkDirectoryRejectsMalformedLines(t *testing.T) {
 	for _, bad := range []string{
-		"wum park-mythra",                      // missing addr
-		"wum park-mythra 127.0.0.1:9632 huh",   // trailing field
-		"wum=park-mythra=127.0.0.1:9632 x y z", // wrong count either way
+		"toy chunk-main",                      // missing addr
+		"toy chunk-main 127.0.0.1:9632 huh",   // trailing field
+		"toy=chunk-main=127.0.0.1:9632 x y z", // wrong count either way
 	} {
 		if _, err := parseChunkDirectory(strings.NewReader(bad)); err == nil {
 			t.Fatalf("parse accepted %q", bad)
@@ -47,21 +47,21 @@ func TestParseChunkDirectoryRejectsMalformedLines(t *testing.T) {
 
 func TestLoadChunkDirectoryFailsClosed(t *testing.T) {
 	d := newChunkDirectory()
-	d.replace(map[string]string{"wum/park-old": "1.2.3.4:1"})
+	d.replace(map[string]string{"toy/chunk-old": "1.2.3.4:1"})
 
 	if err := loadChunkDirectory(filepath.Join(t.TempDir(), "missing"), d); err == nil {
 		t.Fatal("load of a missing file did not error")
 	}
-	if d.allowed("wum", "park-old") {
+	if d.allowed("toy", "chunk-old") {
 		t.Fatal("a failed load left stale chunks routable")
 	}
 
 	path := filepath.Join(t.TempDir(), "chunks.conf")
-	os.WriteFile(path, []byte("wum park-a 127.0.0.1:1\nbroken line\n"), 0o600)
+	os.WriteFile(path, []byte("toy chunk-a 127.0.0.1:1\nbroken line\n"), 0o600)
 	if err := loadChunkDirectory(path, d); err == nil {
 		t.Fatal("load of a malformed file did not error")
 	}
-	if d.allowed("wum", "park-a") {
+	if d.allowed("toy", "chunk-a") {
 		t.Fatal("a partially parsed file leaked entries")
 	}
 }

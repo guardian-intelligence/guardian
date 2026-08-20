@@ -54,7 +54,7 @@ func TestDialSideObservesRTTFromPong(t *testing.T) {
 	pool.IdleAfter = 20 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	a, err := pool.Open(ctx, chunk.addr(), Open{Game: "wum", Sub: "alice", Chunk: "park-test", Role: "player"})
+	a, err := pool.Open(ctx, chunk.addr(), Open{Game: "toy", Sub: "alice", Chunk: "chunk-test", Role: "player"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,13 +207,13 @@ func TestGaugesSettleOnConnLoss(t *testing.T) {
 	bufBefore := testutil.ToFloat64(mSpliceBufFrames)
 	chunk := welcomeServer(t)
 	pool := NewPool(testKey, Hooks{})
-	a := openAt(t, pool, chunk.addr(), "alice", "park-test", 5)
-	b := openAt(t, pool, chunk.addr(), "bob", "park-test", 5)
+	a := openAt(t, pool, chunk.addr(), "alice", "chunk-test", 5)
+	b := openAt(t, pool, chunk.addr(), "bob", "chunk-test", 5)
 	if d := testutil.ToFloat64(mAttachments) - attachBefore; d != 2 {
 		t.Fatalf("attachments delta = %v, want 2", d)
 	}
 	// Seq 6 never arrives, so 7 gaps past pos 5 and buffers on both.
-	sendBroadcast(t, chunk.conn(0), "wum", "park-test", tickFrameFor(7))
+	sendBroadcast(t, chunk.conn(0), "toy", "chunk-test", tickFrameFor(7))
 	if !waitFor(t, 5*time.Second, func() bool { return testutil.ToFloat64(mSpliceBufFrames)-bufBefore == 2 }) {
 		t.Fatalf("splice buffer delta = %v, want 2", testutil.ToFloat64(mSpliceBufFrames)-bufBefore)
 	}

@@ -11,8 +11,8 @@ func TestSegmentReplayAndTornTails(t *testing.T) {
 	seg := EncodeSegmentHeader(SegmentHeader{
 		Version: SegmentVersion, Generation: 3, Ordinal: 0,
 		Chunks: []SegmentChunk{
-			{Name: "park-a", Lineage: 7, Epoch: 1, FirstTick: 100},
-			{Name: "park-b", Lineage: 9, Epoch: 1, FirstTick: 150},
+			{Name: "chunk-a", Lineage: 7, Epoch: 1, FirstTick: 100},
+			{Name: "chunk-b", Lineage: 9, Epoch: 1, FirstTick: 150},
 		},
 	})
 	body := AppendTickRecord(nil, 0, 100, 0, 2, fxRun(), fxWH)
@@ -21,7 +21,7 @@ func TestSegmentReplayAndTornTails(t *testing.T) {
 
 	if h, hn, herr := DecodeSegmentHeader(seg); herr != nil || hn != len(seg) {
 		t.Fatalf("segment header: n=%d err=%v", hn, herr)
-	} else if len(h.Chunks) != 2 || h.Chunks[1] != (SegmentChunk{Name: "park-b", Lineage: 9, Epoch: 1, FirstTick: 150}) {
+	} else if len(h.Chunks) != 2 || h.Chunks[1] != (SegmentChunk{Name: "chunk-b", Lineage: 9, Epoch: 1, FirstTick: 150}) {
 		t.Fatalf("chunk table round trip: %+v", h.Chunks)
 	}
 	// A header with any byte flipped is corrupt, never misread.

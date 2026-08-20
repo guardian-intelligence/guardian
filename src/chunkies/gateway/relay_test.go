@@ -117,10 +117,10 @@ func newRelayHarness(t *testing.T) *relayHarness {
 		t.Fatal(err)
 	}
 	dir := newChunkDirectory()
-	dir.replace(map[string]string{"wum/park-test": backend.addr})
+	dir.replace(map[string]string{"toy/chunk-test": backend.addr})
 	gw := &chunkiesGateway{
-		admission: &gameHandlers{tickets: tickets, maxSessions: 16, directory: dir, game: "wum"},
-		game:      "wum",
+		admission: &gameHandlers{tickets: tickets, maxSessions: 16, directory: dir, game: "toy"},
+		game:      "toy",
 		trunks:    trunk.NewTrunks(key, dir, trunk.Hooks{}),
 	}
 
@@ -170,7 +170,7 @@ func newRelayHarness(t *testing.T) *relayHarness {
 		t.Cleanup(func() { sess.CloseWithError(0, "") })
 		return sess
 	}
-	return &relayHarness{backend: backend, tickets: tickets, dir: dir, chunk: "park-test", dial: dial}
+	return &relayHarness{backend: backend, tickets: tickets, dir: dir, chunk: "chunk-test", dial: dial}
 }
 
 // hello opens the bidi stream and completes admission for the given role.
@@ -316,7 +316,7 @@ func TestRelayRoutesChunksAddedAtRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := h.tickets.mint(ticket{Sub: "late-sub", Chunk: "park-late", Role: "player", Exp: time.Now().Add(time.Minute).Unix()})
+	raw := h.tickets.mint(ticket{Sub: "late-sub", Chunk: "chunk-late", Role: "player", Exp: time.Now().Add(time.Minute).Unix()})
 	if _, err := stream.Write(codec.EncodeHello(codec.Hello{Proto: codec.Proto, SinceSeq: -1, Ticket: raw})); err != nil {
 		t.Fatal(err)
 	}
@@ -330,14 +330,14 @@ func TestRelayRoutesChunksAddedAtRuntime(t *testing.T) {
 	// The same file-load path the watcher runs makes it routable with no
 	// process restart.
 	path := filepath.Join(t.TempDir(), "chunks.conf")
-	if err := os.WriteFile(path, []byte("wum park-late "+h.backend.addr+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("toy chunk-late "+h.backend.addr+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := loadChunkDirectory(path, h.dir); err != nil {
 		t.Fatal(err)
 	}
 
-	h.chunk = "park-late"
+	h.chunk = "chunk-late"
 	sess2 := h.dial(t)
 	stream2 := h.hello(t, sess2, "late-sub", "player")
 	if _, err := stream2.Write(moveIntent("late-sub", 5, 1)); err != nil {

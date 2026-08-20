@@ -114,11 +114,11 @@ func openTwo(t *testing.T, p *Pool, addr string) (*Attachment, *Attachment) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s1, err := p.Open(ctx, addr, Open{Game: "wum", Sub: "alice", Chunk: "park-test", Role: "player", SinceSeq: -1})
+	s1, err := p.Open(ctx, addr, Open{Game: "toy", Sub: "alice", Chunk: "chunk-test", Role: "player", SinceSeq: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s2, err := p.Open(ctx, addr, Open{Game: "wum", Sub: "bob", Chunk: "park-test", Role: "spectator", SinceSeq: 7, SinceTick: 90})
+	s2, err := p.Open(ctx, addr, Open{Game: "toy", Sub: "bob", Chunk: "chunk-test", Role: "spectator", SinceSeq: 7, SinceTick: 90})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestMuxSharesOneConnAcrossAttachments(t *testing.T) {
 		t.Fatalf("both attachments share sid %d", opens[0].SID)
 	}
 	o1, err := DecodeOpen(opens[0].Payload)
-	if err != nil || o1.Game != "wum" || o1.Sub != "alice" || o1.Chunk != "park-test" || o1.Role != "player" || o1.SinceSeq != -1 {
+	if err != nil || o1.Game != "toy" || o1.Sub != "alice" || o1.Chunk != "chunk-test" || o1.Role != "player" || o1.SinceSeq != -1 {
 		t.Fatalf("open 1 = %+v (err %v)", o1, err)
 	}
 	o2, err := DecodeOpen(opens[1].Payload)
@@ -251,7 +251,7 @@ func TestMuxConnLossFailsAllAttachmentsThenRedials(t *testing.T) {
 	// The next open pays one redial, not an error.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s3, err := pool.Open(ctx, chunk.addr(), Open{Game: "wum", Sub: "carol", Chunk: "park-test", Role: "player"})
+	s3, err := pool.Open(ctx, chunk.addr(), Open{Game: "toy", Sub: "carol", Chunk: "chunk-test", Role: "player"})
 	if err != nil {
 		t.Fatalf("open after conn loss: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestMuxPongTimeoutKillsConn(t *testing.T) {
 	pool.PongWithin = 100 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s, err := pool.Open(ctx, l.Addr().String(), Open{Game: "wum", Sub: "alice", Chunk: "park-test", Role: "player"})
+	s, err := pool.Open(ctx, l.Addr().String(), Open{Game: "toy", Sub: "alice", Chunk: "chunk-test", Role: "player"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestMuxIdleConnReaped(t *testing.T) {
 	pool.IdleAfter = 60 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s, err := pool.Open(ctx, chunk.addr(), Open{Game: "wum", Sub: "alice", Chunk: "park-test", Role: "player"})
+	s, err := pool.Open(ctx, chunk.addr(), Open{Game: "toy", Sub: "alice", Chunk: "chunk-test", Role: "player"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestMuxIdleConnReaped(t *testing.T) {
 
 	// The pool dials fresh for the next attachment instead of reusing the
 	// reaped connection.
-	s2, err := pool.Open(ctx, chunk.addr(), Open{Game: "wum", Sub: "bob", Chunk: "park-test", Role: "player"})
+	s2, err := pool.Open(ctx, chunk.addr(), Open{Game: "toy", Sub: "bob", Chunk: "chunk-test", Role: "player"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +435,7 @@ func openAt(t *testing.T, p *Pool, addr, sub, chunk string, sinceSeq int64) *Att
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	a, err := p.Open(ctx, addr, Open{Game: "wum", Sub: sub, Chunk: chunk, Role: "player", SinceSeq: sinceSeq})
+	a, err := p.Open(ctx, addr, Open{Game: "toy", Sub: sub, Chunk: chunk, Role: "player", SinceSeq: sinceSeq})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,14 +450,14 @@ func openAt(t *testing.T, p *Pool, addr, sub, chunk string, sinceSeq int64) *Att
 func TestBroadcastReplicatesToChunkAttachments(t *testing.T) {
 	chunk := welcomeServer(t)
 	pool := NewPool(testKey, Hooks{})
-	a1 := openAt(t, pool, chunk.addr(), "alice", "park-test", 5)
-	a2 := openAt(t, pool, chunk.addr(), "bob", "park-test", 5)
-	other := openAt(t, pool, chunk.addr(), "carol", "park-other", 5)
+	a1 := openAt(t, pool, chunk.addr(), "alice", "chunk-test", 5)
+	a2 := openAt(t, pool, chunk.addr(), "bob", "chunk-test", 5)
+	other := openAt(t, pool, chunk.addr(), "carol", "chunk-other", 5)
 	if got := chunk.accepted.Load(); got != 1 {
 		t.Fatalf("attachments cost %d connections, want 1", got)
 	}
 
-	sendBroadcast(t, chunk.conn(0), "wum", "park-test", tickFrameFor(6))
+	sendBroadcast(t, chunk.conn(0), "toy", "chunk-test", tickFrameFor(6))
 	for i, a := range []*Attachment{a1, a2} {
 		kind, p := nextStream(t, a)
 		if kind != codec.KindTick {
@@ -483,7 +483,7 @@ func TestLateAttachSplicesGaplessStream(t *testing.T) {
 	pool := NewPool(testKey, Hooks{})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	a, err := pool.Open(ctx, chunk.addr(), Open{Game: "wum", Sub: "alice", Chunk: "park-test", Role: "player", SinceSeq: 3})
+	a, err := pool.Open(ctx, chunk.addr(), Open{Game: "toy", Sub: "alice", Chunk: "chunk-test", Role: "player", SinceSeq: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,14 +497,14 @@ func TestLateAttachSplicesGaplessStream(t *testing.T) {
 	// Live fan-out outruns the catch-up: 6 and 7 arrive before the
 	// welcome, the unicast lane then repays 4 and 5, and 8 lands late. 6
 	// rides the wire twice — the dedup half of the gate.
-	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(6))
-	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(7))
-	c.WriteStream(sid, codec.EncodeWelcome(codec.Welcome{Seq: 5, Tick: 5, Hz: 24, Chunk: "park-test"}))
+	sendBroadcast(t, c, "toy", "chunk-test", tickFrameFor(6))
+	sendBroadcast(t, c, "toy", "chunk-test", tickFrameFor(7))
+	c.WriteStream(sid, codec.EncodeWelcome(codec.Welcome{Seq: 5, Tick: 5, Hz: 24, Chunk: "chunk-test"}))
 	c.WriteStream(sid, tickFrameFor(4))
 	c.WriteStream(sid, tickFrameFor(5))
-	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(8))
-	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(6))
-	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(9))
+	sendBroadcast(t, c, "toy", "chunk-test", tickFrameFor(8))
+	sendBroadcast(t, c, "toy", "chunk-test", tickFrameFor(6))
+	sendBroadcast(t, c, "toy", "chunk-test", tickFrameFor(9))
 
 	if kind, _ := nextStream(t, a); kind != codec.KindWelcome {
 		t.Fatalf("first frame kind = %d, want welcome", kind)
@@ -539,17 +539,17 @@ func TestLateAttachSplicesGaplessStream(t *testing.T) {
 func TestResyncSnapshotResetsSpliceAndDropsStale(t *testing.T) {
 	chunk := welcomeServer(t)
 	pool := NewPool(testKey, Hooks{})
-	a := openAt(t, pool, chunk.addr(), "alice", "park-test", 5)
+	a := openAt(t, pool, chunk.addr(), "alice", "chunk-test", 5)
 	c := chunk.conn(0)
 	sid := chunk.received(KindOpen)[0].SID
 	counts := broadcastCounts()
 
 	// 7 and 8 gap past pos 5 and buffer; the snapshot at 8 supersedes
 	// them both.
-	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(7))
-	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(8))
+	sendBroadcast(t, c, "toy", "chunk-test", tickFrameFor(7))
+	sendBroadcast(t, c, "toy", "chunk-test", tickFrameFor(8))
 	c.WriteStream(sid, codec.EncodeSnapshot(codec.Snapshot{Seq: 8, Tick: 8, Z: []byte{1}}))
-	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(9))
+	sendBroadcast(t, c, "toy", "chunk-test", tickFrameFor(9))
 
 	if kind, _ := nextStream(t, a); kind != codec.KindSnapshot {
 		t.Fatal("snapshot did not reach the client edge")
@@ -577,13 +577,13 @@ func TestResyncSnapshotResetsSpliceAndDropsStale(t *testing.T) {
 func TestSnapshotBehindDeliveredSeqClosesAttachment(t *testing.T) {
 	chunk := welcomeServer(t)
 	pool := NewPool(testKey, Hooks{})
-	a := openAt(t, pool, chunk.addr(), "alice", "park-test", 5)
+	a := openAt(t, pool, chunk.addr(), "alice", "chunk-test", 5)
 	c := chunk.conn(0)
 	sid := chunk.received(KindOpen)[0].SID
 
 	// Tick 6 passes the gate (pos moves to 6) before the snapshot at 5 —
 	// queued on the backend before that tick committed — reaches the wire.
-	sendBroadcast(t, c, "wum", "park-test", tickFrameFor(6))
+	sendBroadcast(t, c, "toy", "chunk-test", tickFrameFor(6))
 	if kind, _ := nextStream(t, a); kind != codec.KindTick {
 		t.Fatalf("frame kind = %d, want tick", kind)
 	}
@@ -603,14 +603,14 @@ func TestSnapshotBehindDeliveredSeqClosesAttachment(t *testing.T) {
 func TestSpliceOverflowClosesOnlyThatAttachment(t *testing.T) {
 	chunk := welcomeServer(t)
 	pool := NewPool(testKey, Hooks{})
-	stuck := openAt(t, pool, chunk.addr(), "alice", "park-test", 5)
-	healthy := openAt(t, pool, chunk.addr(), "bob", "park-other", 5)
+	stuck := openAt(t, pool, chunk.addr(), "alice", "chunk-test", 5)
+	healthy := openAt(t, pool, chunk.addr(), "bob", "chunk-other", 5)
 	c := chunk.conn(0)
 
 	// Seq 6 never arrives, so every later frame buffers; one past the
 	// frame bound must close the attachment.
 	for seq := int64(7); seq < 7+spliceMaxFrames+1; seq++ {
-		sendBroadcast(t, c, "wum", "park-test", tickFrameFor(seq))
+		sendBroadcast(t, c, "toy", "chunk-test", tickFrameFor(seq))
 	}
 	select {
 	case <-stuck.Done():
@@ -621,7 +621,7 @@ func TestSpliceOverflowClosesOnlyThatAttachment(t *testing.T) {
 		t.Fatal("overflowing attachment was never closed")
 	}
 
-	sendBroadcast(t, c, "wum", "park-other", tickFrameFor(6))
+	sendBroadcast(t, c, "toy", "chunk-other", tickFrameFor(6))
 	if kind, p := nextStream(t, healthy); kind != codec.KindTick {
 		t.Fatalf("neighbor frame kind = %d, want tick", kind)
 	} else if tk, _, err := codec.DecodeTick(p); err != nil || tk.FirstSeq != 6 {
