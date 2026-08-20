@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "checkpoint",
+    srcs = [
+        "checkpoint.go",
+        "metrics.go",
+        "retain.go",
+        "snapshotter.go",
+    ],
+    importpath = "github.com/guardian-intelligence/guardian/src/chunkies/chunkie/checkpoint",
+    visibility = ["//src/chunkies:__subpackages__"],
+    deps = [
+        "//src/chunkies/chunkie/ticklog",
+        "//src/chunkies/codec",
+        "@com_github_prometheus_client_golang//prometheus:go_default_library",
+        "@com_github_prometheus_client_golang//prometheus/promauto:go_default_library",
+    ],
+)
+
+go_test(
+    name = "checkpoint_test",
+    srcs = ["checkpoint_test.go"],
+    embed = [":checkpoint"],
+    deps = ["//src/chunkies/codec"],
+)
