@@ -25,6 +25,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
@@ -40,10 +41,11 @@ const (
 	labPortAcceptClose = 4602
 	labPortDrop        = 4603
 	labPortH2          = 4604
+	labPortHold        = 4605
 )
 
 func runLab(getCert func(*tls.ClientHelloInfo) (*tls.Certificate, error), quicConf *quic.Config) {
-	for _, port := range []int{labPortRST, labPortAcceptClose, labPortDrop, labPortH2} {
+	for _, port := range []int{labPortRST, labPortAcceptClose, labPortDrop, labPortH2, labPortHold} {
 		go labEchoServer(port, getCert, quicConf)
 	}
 
@@ -61,6 +63,28 @@ func runLab(getCert func(*tls.ClientHelloInfo) (*tls.Certificate, error), quicCo
 			}
 			log.Printf("wtlab: tcp accept-close probe from %s", conn.RemoteAddr())
 			conn.Close()
+		}
+	}()
+
+	// The tarpit: accept and hold the connection open, saying nothing.
+	// The TCP candidate stays pending indefinitely — maximal grace for the
+	// QUIC leg to win the race. (Held sockets are dropped after 60s.)
+	go func() {
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", labPortHold))
+		if err != nil {
+			log.Printf("wtlab: accept-hold listener: %v", err)
+			return
+		}
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			log.Printf("wtlab: tcp accept-hold probe from %s", conn.RemoteAddr())
+			go func(c net.Conn) {
+				time.Sleep(60 * time.Second)
+				c.Close()
+			}(conn)
 		}
 	}()
 
@@ -170,6 +194,7 @@ const TARGETS = [
   ["accept-close", "https://" + HOST + ":4602/wt"],
   ["drop",         "https://" + HOST + ":4603/wt"],
   ["h2-service",   "https://" + HOST + ":4604/wt"],
+  ["accept-hold",  "https://" + HOST + ":4605/wt"],
   ["prod",         "https://" + HOST + ":4433/wt"],
 ];
 const OPTIONS = [
