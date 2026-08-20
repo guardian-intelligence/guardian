@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
@@ -103,11 +104,22 @@ func NewDir(root string, writeBudget int64) (*Dir, error) {
 }
 
 func (d *Dir) Put(ctx context.Context, m codec.Checkpoint) (Ref, error) {
-	r := Ref{Chunk: m.Chunk, Lineage: m.Lineage, Seq: m.Seq, Tick: m.Tick, Generation: m.Generation, Epoch: m.Epoch}
-	dir := filepath.Join(d.root, m.Chunk)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := validName(m.Chunk); err != nil {
 		return Ref{}, err
 	}
+	r := Ref{Chunk: m.Chunk, Lineage: m.Lineage, Seq: m.Seq, Tick: m.Tick, Generation: m.Generation, Epoch: m.Epoch}
+	dir := filepath.Join(d.root, m.Chunk)
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return Ref{}, err
+		}
+		// The chunk directory itself must survive power loss, or the
+		// chunk's first checkpoint vanishes despite Put returning.
+		if err := syncDir(d.root); err != nil {
+			return Ref{}, err
+		}
+	}
+	sweepTmp(dir)
 	b := codec.EncodeCheckpoint(m)
 	tmp := r.path(d.root) + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
@@ -121,14 +133,36 @@ func (d *Dir) Put(ctx context.Context, m codec.Checkpoint) (Ref, error) {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
+	if err == nil {
+		err = os.Rename(tmp, r.path(d.root))
+	}
 	if err != nil {
 		os.Remove(tmp)
 		return Ref{}, err
 	}
-	if err := os.Rename(tmp, r.path(d.root)); err != nil {
-		return Ref{}, err
-	}
 	return r, syncDir(dir)
+}
+
+// sweepTmp clears crash leftovers: tmp names embed the seq and are
+// never reused, so an orphan would otherwise persist forever.
+func sweepTmp(dir string) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		if filepath.Ext(e.Name()) == ".tmp" {
+			os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
+}
+
+func validName(chunk string) error {
+	if chunk == "" || chunk == "." || chunk == ".." ||
+		strings.ContainsAny(chunk, "/\\") {
+		return fmt.Errorf("checkpoint: invalid chunk name %q", chunk)
+	}
+	return nil
 }
 
 // write smears the body under the byte budget: 1MiB slices with
@@ -154,6 +188,9 @@ func (d *Dir) write(ctx context.Context, f *os.File, b []byte) error {
 }
 
 func (d *Dir) List(chunk string) ([]Ref, error) {
+	if err := validName(chunk); err != nil {
+		return nil, err
+	}
 	ents, err := os.ReadDir(filepath.Join(d.root, chunk))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/flate"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -57,8 +56,11 @@ type Snapshotter struct {
 	next map[string]time.Time
 	busy map[string]bool
 
-	lane chan work
-	done chan struct{}
+	lane    chan work
+	done    chan struct{}
+	stopped chan struct{}
+	once    sync.Once
+	now     func() time.Time // test seam; nil = time.Now
 }
 
 type work struct{ m codec.Checkpoint }
@@ -67,7 +69,8 @@ func New(st Store, wal *ticklog.Log, cfg Config) *Snapshotter {
 	s := &Snapshotter{
 		st: st, wal: wal, cfg: cfg.withDefaults(),
 		next: map[string]time.Time{}, busy: map[string]bool{},
-		lane: make(chan work, 8), done: make(chan struct{}),
+		lane: make(chan work, 8), done: make(chan struct{}), stopped: make(chan struct{}),
+		now: time.Now,
 	}
 	go s.run()
 	return s
@@ -95,6 +98,12 @@ func (s *Snapshotter) Due(chunk string, now time.Time) bool {
 // immediately — the caller's tick-barrier cost is the sim_snapshot
 // call it already made.
 func (s *Snapshotter) Submit(m codec.Checkpoint) {
+	select {
+	case <-s.done:
+		mCkptSkipped.WithLabelValues("closed").Inc()
+		return
+	default:
+	}
 	s.mu.Lock()
 	if s.busy[m.Chunk] {
 		s.mu.Unlock()
@@ -102,7 +111,7 @@ func (s *Snapshotter) Submit(m codec.Checkpoint) {
 		return
 	}
 	s.busy[m.Chunk] = true
-	s.next[m.Chunk] = time.Now().Add(s.jittered())
+	s.next[m.Chunk] = s.now().Add(s.jittered())
 	s.mu.Unlock()
 	select {
 	case s.lane <- work{m: m}:
@@ -135,23 +144,31 @@ func (s *Snapshotter) Force(ctx context.Context, m codec.Checkpoint, prove Prove
 	if err != nil {
 		return Ref{}, err
 	}
+	// A checkpoint that fails its proof must not stay on disk: it would
+	// be the chunk's newest CRC-valid ref, exactly what naive recovery
+	// prefers.
 	back, err := s.st.Load(ref)
 	if err != nil {
+		s.st.Remove(ref)
 		return Ref{}, err
 	}
 	state, err := inflate(back.State)
 	if err != nil {
+		s.st.Remove(ref)
 		return Ref{}, err
 	}
 	if !bytes.Equal(state, raw) {
+		s.st.Remove(ref)
 		return Ref{}, fmt.Errorf("checkpoint %s: %w: state bytes changed across the disk round-trip", ref.name(), ErrMismatch)
 	}
 	if prove != nil {
 		if err := prove(state, back.WH); err != nil {
+			s.st.Remove(ref)
 			return Ref{}, fmt.Errorf("checkpoint %s refused proof: %w", ref.name(), err)
 		}
 	}
 	if err := s.st.MarkProven(ref); err != nil {
+		s.st.Remove(ref)
 		return Ref{}, err
 	}
 	ref.Proven = true
@@ -161,12 +178,14 @@ func (s *Snapshotter) Force(ctx context.Context, m codec.Checkpoint, prove Prove
 }
 
 func (s *Snapshotter) run() {
+	defer close(s.stopped)
 	for {
 		select {
 		case w := <-s.lane:
 			s.write(w.m)
 		case <-s.done:
-			// Drain what Submit already accepted, then stop.
+			// Drain what Submit already accepted, then stop; Close
+			// sweeps any straggler that races this drain.
 			for {
 				select {
 				case w := <-s.lane:
@@ -189,9 +208,12 @@ func (s *Snapshotter) write(m codec.Checkpoint) {
 	deflated, err := deflate(m.State)
 	if err == nil {
 		m.State = deflated
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		_, err = s.st.Put(ctx, m)
-		cancel()
+		// No deadline: the store's smear budget legitimately stretches a
+		// large blob past any fixed timeout, and aborting would retry the
+		// same abort every cadence forever. A wedged disk is observable —
+		// stale chunkies_ckpt_last_unix, busy skips — and latches the WAL
+		// watchdog on the same volume anyway.
+		_, err = s.st.Put(context.Background(), m)
 	}
 	if err != nil {
 		mCkptWrites.WithLabelValues("error").Inc()
@@ -207,16 +229,32 @@ func (s *Snapshotter) write(m codec.Checkpoint) {
 	}
 }
 
-// Close drains the lane. Pending work still lands; new Submits after
-// Close are the caller's bug (the authority closes its tick loop
-// first).
-func (s *Snapshotter) Close() {
-	close(s.done)
+// Close stops the lane and returns once accepted work has landed (or
+// ctx expires — the write is then abandoned to the dying process).
+// After the run loop exits, Close sweeps any straggler a racing Submit
+// buffered; Submits strictly after Close are dropped and counted.
+func (s *Snapshotter) Close(ctx context.Context) error {
+	s.once.Do(func() { close(s.done) })
+	select {
+	case <-s.stopped:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	for {
+		select {
+		case w := <-s.lane:
+			s.write(w.m)
+		default:
+			return nil
+		}
+	}
 }
 
 func deflate(b []byte) ([]byte, error) {
 	var z bytes.Buffer
-	w, err := flate.NewWriter(&z, flate.BestCompression)
+	// Default, not Best: the dense-grid game is the sizing case, and a
+	// max-effort deflate every cadence is CPU the tick loop shares.
+	w, err := flate.NewWriter(&z, flate.DefaultCompression)
 	if err != nil {
 		return nil, err
 	}
@@ -230,11 +268,10 @@ func deflate(b []byte) ([]byte, error) {
 }
 
 func inflate(b []byte) ([]byte, error) {
+	// Strict: a truncated stream must fail loudly. The manifest CRC
+	// cannot catch truncation that happened before encoding, and an
+	// amputated world restoring silently is the worst outcome here.
 	r := flate.NewReader(bytes.NewReader(b))
 	defer r.Close()
-	out, err := io.ReadAll(r)
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return nil, err
-	}
-	return out, nil
+	return io.ReadAll(r)
 }

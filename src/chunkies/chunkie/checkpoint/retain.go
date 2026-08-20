@@ -38,6 +38,12 @@ func Retain(st Store, wal *ticklog.Log, keep int) error {
 		if len(refs) == 0 {
 			continue
 		}
+		// Trim coverage must come from the lineage recovery would replay
+		// — the newest. An old-lineage checkpoint's tick can exceed the
+		// new lineage's frontier (a rewind starts behind), and publishing
+		// it would let Trim delete new-lineage segments replay still
+		// needs.
+		lineage := refs[0].Lineage
 		// The newest proven ref's position, if any (refs are newest-first).
 		proven := -1
 		for i, r := range refs {
@@ -49,8 +55,11 @@ func Retain(st Store, wal *ticklog.Log, keep int) error {
 		// Beyond the ring, a ref survives only as the newest of an epoch
 		// no proven ref has superseded — the crash-mid-promotion resume
 		// point. seen marks epochs already represented by a newer ref.
+		// Within one epoch the domination is deliberate: an unproven
+		// newer checkpoint outranks an older proven one — same module
+		// pair, more covered history, and the ring keeps fallbacks.
 		seen := map[uint32]bool{}
-		oldestKept := refs[0]
+		var oldestKept *Ref
 		for i, r := range refs {
 			removable := i >= keep &&
 				((proven >= 0 && proven < i) || seen[r.Epoch])
@@ -61,9 +70,14 @@ func Retain(st Store, wal *ticklog.Log, keep int) error {
 				}
 				continue
 			}
-			oldestKept = r
+			if r.Lineage == lineage {
+				kept := r
+				oldestKept = &kept
+			}
 		}
-		covered[chunk] = ticklog.Tip{Tick: oldestKept.Tick, Seq: oldestKept.Seq}
+		if oldestKept != nil {
+			covered[chunk] = ticklog.Tip{Tick: oldestKept.Tick, Seq: oldestKept.Seq}
+		}
 	}
 	if wal != nil && len(covered) > 0 {
 		if _, err := wal.Trim(covered, trimFloor); err != nil {

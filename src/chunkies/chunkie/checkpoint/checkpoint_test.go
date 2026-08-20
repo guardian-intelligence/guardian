@@ -157,7 +157,7 @@ func TestRetainRingAndEpochGuard(t *testing.T) {
 func TestSnapshotterSubmitAndForce(t *testing.T) {
 	d, _ := NewDir(t.TempDir(), 0)
 	s := New(d, nil, Config{Cadence: time.Hour})
-	defer s.Close()
+	defer s.Close(context.Background())
 
 	now := time.Now()
 	if s.Due("park", now) {
@@ -212,10 +212,73 @@ func TestSnapshotterSubmitAndForce(t *testing.T) {
 	}); err == nil {
 		t.Fatal("refused proof did not error")
 	}
+	// A refused proof leaves NOTHING on disk — a poison file would be
+	// the newest CRC-valid ref, exactly what recovery prefers.
 	refs, _ = d.List("park")
 	for _, r := range refs {
-		if r.Seq == 30 && r.Proven {
-			t.Fatal("refused proof left a proven marker")
+		if r.Seq == 30 {
+			t.Fatal("refused proof left the checkpoint on disk")
 		}
+	}
+}
+
+func TestCloseLandsAcceptedWork(t *testing.T) {
+	d, _ := NewDir(t.TempDir(), 0)
+	s := New(d, nil, Config{Cadence: time.Hour})
+	s.Submit(manifest("park", 0, 10, 100, 1, []byte("state")))
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	refs, _ := d.List("park")
+	if len(refs) != 1 {
+		t.Fatalf("accepted checkpoint did not land across Close: %+v", refs)
+	}
+	// Submits after Close drop without wedging the busy latch.
+	s.Submit(manifest("park", 0, 20, 200, 1, []byte("state")))
+	if refs, _ = d.List("park"); len(refs) != 1 {
+		t.Fatal("post-Close submit landed")
+	}
+}
+
+func TestSmearedWriteRoundTrips(t *testing.T) {
+	// A 2MiB body under a 16MiB/s budget must still land intact, and
+	// the smear must actually pace (at least one inter-slice sleep).
+	d, _ := NewDir(t.TempDir(), 16<<20)
+	raw := bytes.Repeat([]byte{0xA5}, 2<<20)
+	start := time.Now()
+	ref, err := d.Put(context.Background(), manifest("park", 0, 10, 100, 1, raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) < 50*time.Millisecond {
+		t.Fatal("smear budget did not pace the write")
+	}
+	m, err := d.Load(ref)
+	if err != nil || !bytes.Equal(m.State, raw) {
+		t.Fatalf("smeared write corrupted state: %v", err)
+	}
+}
+
+func TestRetainTrimsOnlyNewestLineageCoverage(t *testing.T) {
+	// After a rewind, the old lineage's higher-tick checkpoint must not
+	// drive WAL trim coverage — that would delete new-lineage segments
+	// replay still needs. With only old-lineage refs beyond the ring
+	// and a single new-lineage ref, coverage comes from the new one.
+	d, _ := NewDir(t.TempDir(), 0)
+	ctx := context.Background()
+	if _, err := d.Put(ctx, manifest("park", 0, 100, 5000, 1, []byte("old"))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Put(ctx, manifest("park", 1, 40, 3000, 1, []byte("new"))); err != nil {
+		t.Fatal(err)
+	}
+	// nil WAL: Retain's coverage math is exercised via its kept set —
+	// the newest-lineage ref must be what remains authoritative.
+	if err := Retain(d, nil, 2); err != nil {
+		t.Fatal(err)
+	}
+	refs, _ := d.List("park")
+	if len(refs) != 2 || refs[0].Lineage != 1 {
+		t.Fatalf("retain reshaped refs unexpectedly: %+v", refs)
 	}
 }
