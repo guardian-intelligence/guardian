@@ -94,7 +94,7 @@ type simHost struct {
 // misinterpreted event stream.
 const hostABIEra = 2
 
-// acceptModule is the mount's acceptance gate: park-slot bytes must
+// acceptModule is the mount's acceptance gate: sim-slot bytes must
 // instantiate under this host and declare its ABI era. The client slot
 // passes through — this process only distributes those bytes, and the
 // browser's own boot gate decides there.
@@ -941,11 +941,11 @@ func (a *authority) stageIntent(s *session, intentID uint64, kind uint16, payloa
 	// Intent id 0 marks connection-lifecycle intents (the departure staged
 	// on disconnect): every session of a sub uses the same id there, so
 	// idempotency bookkeeping would swallow every departure after the first.
-	// The window keys by dogID, not sub: it is exactly what a checkpoint
+	// The window keys by actorID, not sub: it is exactly what a checkpoint
 	// manifest persists (codec.DedupEntry), and nothing derived from the
 	// authenticated subject may reach node-local disk.
 	if intentID != 0 {
-		key := codec.DedupEntry{Actor: s.dogID, Intent: intentID}
+		key := codec.DedupEntry{Actor: s.actorID, Intent: intentID}
 		if _, dup := a.seen[key]; dup {
 			a.mu.Unlock()
 			mIntentsDeduped.Inc()
@@ -959,7 +959,7 @@ func (a *authority) stageIntent(s *session, intentID uint64, kind uint16, payloa
 		}
 	}
 	a.staged = append(a.staged, stagedIntent{
-		sess: s, actor: s.sub, actorID: s.dogID, intentID: intentID, kind: kind,
+		sess: s, actor: s.sub, actorID: s.actorID, intentID: intentID, kind: kind,
 		payload: payload, receivedAt: receivedAt,
 	})
 	a.mu.Unlock()
@@ -1373,7 +1373,7 @@ func (a *authority) handleAttach(req attachReq) attachResult {
 		// no longer remove the entity this session is standing on. The
 		// client host redials on any close, so evicting the old session
 		// here would make two live tabs supersede each other forever.
-		a.players[s.dogID] = s
+		a.players[s.actorID] = s
 	}
 	a.mu.Unlock()
 	return res

@@ -20,7 +20,7 @@ func TestTicketMintSharedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := ticket{Sub: "alice", Chunk: "park-mythra", Role: "player", Exp: time.Now().Add(time.Minute).Unix()}
+	want := ticket{Sub: "alice", Chunk: "chunk-main", Role: "player", Exp: time.Now().Add(time.Minute).Unix()}
 	got, err := right.check(left.mint(want))
 	if err != nil {
 		t.Fatal(err)

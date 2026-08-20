@@ -548,7 +548,7 @@ func handleTrunkConn(conn net.Conn, key []byte, game string, resolve func(chunk 
 			}
 			cs.s = &session{
 				sub: open.Sub, role: open.Role, chunk: chunk, out: make(chan []byte, 256),
-				dogID: codec.ActorFor(open.Sub), openedAt: time.Now(),
+				actorID: codec.ActorFor(open.Sub), openedAt: time.Now(),
 				closeFn: func(why string) { cs.terminate(why, true) },
 			}
 			mu.Lock()
@@ -688,7 +688,7 @@ func (cs *connSession) handleFrame(payload []byte) {
 		}
 		// Game-blind binding: the envelope's actor must be the
 		// authenticated session's, for every kind.
-		if rec.Actor != s.dogID {
+		if rec.Actor != s.actorID {
 			s.sendReject(rec.Intent, codec.RejectNotYours)
 			return
 		}
@@ -710,9 +710,9 @@ func stageDeparture(chunk *authority, s *session) {
 		return
 	}
 	chunk.mu.Lock()
-	current := chunk.players[s.dogID] == s
+	current := chunk.players[s.actorID] == s
 	if current {
-		delete(chunk.players, s.dogID)
+		delete(chunk.players, s.actorID)
 	}
 	chunk.mu.Unlock()
 	if !current {

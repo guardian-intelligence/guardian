@@ -61,9 +61,9 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	mods := toyMods(toyModule(t))
-	bcast := newBroadcaster("wum", 24, 1)
+	bcast := newBroadcaster("toy", 24, 1)
 	registry := newChunks(func() []byte { b, _ := mods.sim.Get(); return b }, nil, toyVocab(), j, mods, timing{hz: 24}, bcast.publish, nil)
-	auth, err := registry.get(ctx, "park-test")
+	auth, err := registry.get(ctx, "chunk-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 	}
 	t.Cleanup(func() { l.Close() })
 	resolve := func(name string) (*authority, bool) {
-		if name != "park-test" {
+		if name != "chunk-test" {
 			return nil, false
 		}
 		return auth, true
@@ -87,18 +87,18 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 			if err != nil {
 				return
 			}
-			go handleTrunkConn(conn, key, "wum", resolve, 16, bcast)
+			go handleTrunkConn(conn, key, "toy", resolve, 16, bcast)
 		}
 	}()
 
 	pool := trunk.NewPool(key, trunk.Hooks{})
 	openCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	alice, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Game: "wum", Sub: "alice", Chunk: "park-test", Role: "player", SinceSeq: -1})
+	alice, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Game: "toy", Sub: "alice", Chunk: "chunk-test", Role: "player", SinceSeq: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	bob, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Game: "wum", Sub: "bob", Chunk: "park-test", Role: "spectator", SinceSeq: -1})
+	bob, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Game: "toy", Sub: "bob", Chunk: "chunk-test", Role: "spectator", SinceSeq: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,9 +118,9 @@ func TestTrunkConnMultiplexesSessions(t *testing.T) {
 		open   trunk.Open
 		reason string
 	}{
-		{trunk.Open{Game: "wum", Sub: "carol", Chunk: "park-elsewhere", Role: "player", SinceSeq: -1}, "wrong chunk"},
-		{trunk.Open{Game: "elsewhere", Sub: "carol", Chunk: "park-test", Role: "player", SinceSeq: -1}, "wrong game"},
-		{trunk.Open{Game: "wum", Sub: "carol", Chunk: "park-test", Role: "admin", SinceSeq: -1}, "bad open"},
+		{trunk.Open{Game: "toy", Sub: "carol", Chunk: "chunk-elsewhere", Role: "player", SinceSeq: -1}, "wrong chunk"},
+		{trunk.Open{Game: "elsewhere", Sub: "carol", Chunk: "chunk-test", Role: "player", SinceSeq: -1}, "wrong game"},
+		{trunk.Open{Game: "toy", Sub: "carol", Chunk: "chunk-test", Role: "admin", SinceSeq: -1}, "bad open"},
 	} {
 		refused, err := pool.Open(openCtx, l.Addr().String(), tc.open)
 		if err != nil {
@@ -190,11 +190,11 @@ func TestPublishCopiesRunAndFansOutPerConn(t *testing.T) {
 		t.Fatal(err)
 	}
 	mods := toyMods(toyModule(t))
-	bcast := newBroadcaster("wum", 24, 1)
+	bcast := newBroadcaster("toy", 24, 1)
 	// A pinned clock keeps the run loop owing zero ticks, so the only
 	// broadcast on the wire is the one this test publishes.
 	registry := newChunks(func() []byte { b, _ := mods.sim.Get(); return b }, nil, toyVocab(), j, mods, fixedClock(wallEpoch), bcast.publish, nil)
-	auth, err := registry.get(ctx, "park-test")
+	auth, err := registry.get(ctx, "chunk-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestPublishCopiesRunAndFansOutPerConn(t *testing.T) {
 	}
 	t.Cleanup(func() { l.Close() })
 	resolve := func(name string) (*authority, bool) {
-		if name != "park-test" {
+		if name != "chunk-test" {
 			return nil, false
 		}
 		return auth, true
@@ -218,18 +218,18 @@ func TestPublishCopiesRunAndFansOutPerConn(t *testing.T) {
 			if err != nil {
 				return
 			}
-			go handleTrunkConn(conn, key, "wum", resolve, 16, bcast)
+			go handleTrunkConn(conn, key, "toy", resolve, 16, bcast)
 		}
 	}()
 
 	pool := trunk.NewPool(key, trunk.Hooks{})
 	openCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	alice, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Game: "wum", Sub: "alice", Chunk: "park-test", Role: "player", SinceSeq: -1})
+	alice, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Game: "toy", Sub: "alice", Chunk: "chunk-test", Role: "player", SinceSeq: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	bob, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Game: "wum", Sub: "bob", Chunk: "park-test", Role: "spectator", SinceSeq: -1})
+	bob, err := pool.Open(openCtx, l.Addr().String(), trunk.Open{Game: "toy", Sub: "bob", Chunk: "chunk-test", Role: "spectator", SinceSeq: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestPublishCopiesRunAndFansOutPerConn(t *testing.T) {
 
 	want := move(9)
 	run := codec.AppendEventRecord(nil, 5, kMove, codec.ActorFor("alice"), want)
-	bcast.publish("park-test", 1, 1, 1, run)
+	bcast.publish("chunk-test", 1, 1, 1, run)
 	for i := range run {
 		run[i] = 0xFF
 	}
@@ -302,7 +302,7 @@ func tickBody(t *testing.T, frame []byte) []byte {
 }
 
 func TestPublishShedsWedgedConnOnly(t *testing.T) {
-	b := newBroadcaster("wum", 24, 1)
+	b := newBroadcaster("toy", 24, 1)
 	b.queueFrames = 2
 
 	healthy := &recordingWriter{frames: make(chan []byte, 64)}
@@ -310,8 +310,8 @@ func TestPublishShedsWedgedConnOnly(t *testing.T) {
 	defer close(wedged.release)
 	hc := b.register(healthy)
 	wc := b.register(wedged)
-	hc.subscribe("park-test")
-	wc.subscribe("park-test")
+	hc.subscribe("chunk-test")
+	wc.subscribe("chunk-test")
 
 	// One frame may be in flight in the wedged writer plus queueFrames
 	// queued; anything past that must down the conn, not block publish.
@@ -322,7 +322,7 @@ func TestPublishShedsWedgedConnOnly(t *testing.T) {
 	for i := 1; i <= n; i++ {
 		done := make(chan struct{})
 		go func() {
-			b.publish("park-test", uint64(i), int64(i), 1, run)
+			b.publish("chunk-test", uint64(i), int64(i), 1, run)
 			close(done)
 		}()
 		select {
@@ -333,7 +333,7 @@ func TestPublishShedsWedgedConnOnly(t *testing.T) {
 		select {
 		case payload := <-healthy.frames:
 			game, chunk, frame, err := trunk.DecodeBroadcast(payload)
-			if err != nil || game != "wum" || chunk != "park-test" {
+			if err != nil || game != "toy" || chunk != "chunk-test" {
 				t.Fatalf("frame %d: game=%q chunk=%q err=%v", i, game, chunk, err)
 			}
 			tick, _, err := codec.DecodeTick(tickBody(t, frame))
@@ -358,15 +358,15 @@ func TestPublishShedsWedgedConnOnly(t *testing.T) {
 }
 
 func TestPublishShedsOnByteBudget(t *testing.T) {
-	b := newBroadcaster("wum", 24, 1)
+	b := newBroadcaster("toy", 24, 1)
 	b.queueBytes = 1
 
 	w := &recordingWriter{frames: make(chan []byte, 4)}
 	c := b.register(w)
-	c.subscribe("park-test")
+	c.subscribe("chunk-test")
 
 	run := codec.AppendEventRecord(nil, 5, kMove, codec.ActorFor("alice"), move(9))
-	b.publish("park-test", 1, 1, 1, run)
+	b.publish("chunk-test", 1, 1, 1, run)
 
 	b.mu.Lock()
 	_, in := b.conns[c]
