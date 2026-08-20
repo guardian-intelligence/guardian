@@ -45,7 +45,7 @@ func TestShadowWALMirrorsJournal(t *testing.T) {
 	// newer history, and its first record may land AT the attach tick —
 	// so the replay key's exclusive frontier is StartTick-1.
 	openSeq, openTick := a.lastSeq, a.host.Tick()
-	a.wal = newShadowFactory(dir)("chunk-shadow", a.host.Epoch(), openTick, openSeq)
+	a.wal = newShadowFactory(dir, nil, "toy")("chunk-shadow", a.host.Epoch(), openTick, openSeq, shadowBoot{})
 	if a.wal == nil {
 		t.Fatal("shadow WAL failed to open")
 	}

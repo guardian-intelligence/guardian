@@ -152,7 +152,7 @@ func (s *Snapshotter) Force(ctx context.Context, m codec.Checkpoint, prove Prove
 		s.st.Remove(ref)
 		return Ref{}, err
 	}
-	state, err := inflate(back.State)
+	state, err := Inflate(back.State)
 	if err != nil {
 		s.st.Remove(ref)
 		return Ref{}, err
@@ -267,7 +267,9 @@ func deflate(b []byte) ([]byte, error) {
 	return z.Bytes(), nil
 }
 
-func inflate(b []byte) ([]byte, error) {
+// Inflate decompresses a manifest's State field back to the raw bytes
+// sim_restore expects — the recovery ladder's half of Submit's deflate.
+func Inflate(b []byte) ([]byte, error) {
 	// Strict: a truncated stream must fail loudly. The manifest CRC
 	// cannot catch truncation that happened before encoding, and an
 	// amputated world restoring silently is the worst outcome here.

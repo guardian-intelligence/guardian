@@ -14,6 +14,10 @@ package chunkie
 //	legacy_actor <kind> <len> pre-v5 journal rows of <kind> whose payload is
 //	                          exactly <len> bytes carry the actor id as an
 //	                          8-byte prefix (dies with the Postgres journal)
+//	consequential <kind>     facts that must survive world loss: routed via
+//	                         the control-plane ledger and re-injected
+//	                         exactly-once by id during recovery rungs 5–6 —
+//	                         the game's one DR-visible declaration
 //
 // Boundedness matters: kind and code are client-controlled numbers, so
 // only names from these tables (plus one shared unknown bucket) may ever
@@ -42,6 +46,13 @@ type Vocab struct {
 	// payload has exactly the recorded length predates the v5 flag day and
 	// carries its actor id as a payload prefix.
 	LegacyActorPrefix map[uint16]int
+	// Consequential declares the kinds whose facts must survive world
+	// loss. The checkpoint owns everything the sim computed; the
+	// control-plane ledger owns consequential facts; the boundary
+	// between them is event re-injection, never shared state. A kind
+	// declared here is routed via the ledger and re-injected
+	// exactly-once by id when a recovery rewinds lineage.
+	Consequential map[uint16]bool
 }
 
 // actionName is deliberately bounded: unknown kinds share one bucket.
@@ -93,7 +104,7 @@ func (v *Vocab) eventActor(kind uint16, actor string, payload []byte) (uint64, [
 }
 
 func parseVocab(r io.Reader) (Vocab, error) {
-	v := Vocab{Actions: map[uint16]string{}, Rejects: map[uint32]string{}, LegacyActorPrefix: map[uint16]int{}}
+	v := Vocab{Actions: map[uint16]string{}, Rejects: map[uint32]string{}, LegacyActorPrefix: map[uint16]int{}, Consequential: map[uint16]bool{}}
 	scanner := bufio.NewScanner(r)
 	line := 0
 	num := func(s string, bits int) (uint64, error) {
@@ -141,6 +152,15 @@ func parseVocab(r io.Reader) (Vocab, error) {
 				return Vocab{}, err
 			}
 			v.Rejects[uint32(code)] = fields[2]
+		case "consequential":
+			if len(fields) != 2 {
+				return bad()
+			}
+			kind, err := num(fields[1], 16)
+			if err != nil {
+				return Vocab{}, err
+			}
+			v.Consequential[uint16(kind)] = true
 		case "legacy_actor":
 			if len(fields) != 3 {
 				return bad()
@@ -174,7 +194,7 @@ func parseVocab(r io.Reader) (Vocab, error) {
 // departures under the wrong kind and mislabel every metric.
 func loadVocab(path string) (Vocab, error) {
 	if path == "" {
-		return Vocab{Actions: map[uint16]string{}, Rejects: map[uint32]string{}, LegacyActorPrefix: map[uint16]int{}}, nil
+		return Vocab{Actions: map[uint16]string{}, Rejects: map[uint32]string{}, LegacyActorPrefix: map[uint16]int{}, Consequential: map[uint16]bool{}}, nil
 	}
 	f, err := os.Open(path)
 	if err != nil {
