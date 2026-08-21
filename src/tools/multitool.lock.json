@@ -56,16 +56,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/ClickHouse/ClickHouse/releases/download/v26.3.17.56-lts/clickhouse-common-static-26.3.17.56-amd64.tgz",
-        "sha256": "24b4b4814f51dda0e67e7bc5480a56a0d345bec4c72f007b5037a80d0e0fa2a2",
+        "url": "https://github.com/ClickHouse/ClickHouse/releases/download/v26.3.19.3-lts/clickhouse-common-static-26.3.19.3-amd64.tgz",
+        "sha256": "8c9886db49555efb6bef2ee08656af0d48bd07c83a08a729abb9d60e26bfff3d",
         "os": "linux",
         "cpu": "x86_64",
-        "file": "clickhouse-common-static-26.3.17.56/usr/bin/clickhouse"
+        "file": "clickhouse-common-static-26.3.19.3/usr/bin/clickhouse"
       },
       {
         "kind": "file",
-        "url": "https://github.com/ClickHouse/ClickHouse/releases/download/v26.3.17.56-lts/clickhouse-macos-aarch64",
-        "sha256": "35f2c5a99e224a4c61d03aebaba7f3ec72c87ae7009c8417ce4e5cc9231446bc",
+        "url": "https://github.com/ClickHouse/ClickHouse/releases/download/v26.3.19.3-lts/clickhouse-macos-aarch64",
+        "sha256": "9d0518c00ebbbdb798344233071ca400bd8837daa3f9b71893634d024c6c85ad",
         "os": "macos",
         "cpu": "arm64"
       }
