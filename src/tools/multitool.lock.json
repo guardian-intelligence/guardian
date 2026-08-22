@@ -191,16 +191,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/fluxcd/flux2/releases/download/v2.9.3/flux_2.9.3_linux_amd64.tar.gz",
-        "sha256": "eae4e8608c0ade2bf4e8dec1669dbb6b0c28b5822b252d97feccfb4fb1181fd2",
+        "url": "https://github.com/fluxcd/flux2/releases/download/v2.9.4/flux_2.9.4_linux_amd64.tar.gz",
+        "sha256": "c2c397a52930f52d2005c01d276116b059d062de379386d58e98115380a766a2",
         "os": "linux",
         "cpu": "x86_64",
         "file": "flux"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/fluxcd/flux2/releases/download/v2.9.3/flux_2.9.3_darwin_arm64.tar.gz",
-        "sha256": "59627ac109a59b2c7e94a9ce0e290a81906d0ea435d53806699385e9d54ec10a",
+        "url": "https://github.com/fluxcd/flux2/releases/download/v2.9.4/flux_2.9.4_darwin_arm64.tar.gz",
+        "sha256": "5350675411f1c8c20fb7fd827450933e939f7ab82a2cd92f8fa2abe497761911",
         "os": "macos",
         "cpu": "arm64",
         "file": "flux"
@@ -511,15 +511,15 @@
     "binaries": [
       {
         "kind": "file",
-        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.7/talosctl-linux-amd64",
-        "sha256": "97d08e5584e56114659f131e95e227910d1f3b427d26360dca2af3ed821b71f8",
+        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.9/talosctl-linux-amd64",
+        "sha256": "7e1d4b7d5846964bdcf63a794e3c8161bb6ef2983d5ace58ea5322f3bf32a27e",
         "os": "linux",
         "cpu": "x86_64"
       },
       {
         "kind": "file",
-        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.7/talosctl-darwin-arm64",
-        "sha256": "8965b026f416a25147b99530721c25fc2616c4fa655480673bcb63eb7f0de331",
+        "url": "https://github.com/siderolabs/talos/releases/download/v1.13.9/talosctl-darwin-arm64",
+        "sha256": "ab4c27a959ff6c52f62c6cc2af07b22ca86ed27f1a138ed57582fa67f7b50f98",
         "os": "macos",
         "cpu": "arm64"
       }
