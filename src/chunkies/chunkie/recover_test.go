@@ -7,6 +7,7 @@ package chunkie
 
 import (
 	"context"
+	"crypto/sha256"
 	"os"
 	"path/filepath"
 	"sort"
@@ -268,6 +269,100 @@ func TestRehearsalProvesOnReopen(t *testing.T) {
 	}
 	if len(refs) == 0 || !refs[0].Proven {
 		t.Fatalf("rehearsal did not prove the recovered checkpoint: %+v", refs)
+	}
+}
+
+// The promotion barrier's step 2: the instant a module swap commits,
+// the volume must already hold a proven checkpoint under the NEW pair —
+// otherwise every manifest is old-pair until the cadence next fires,
+// and a crash inside that window hits the ladder's pair refusal on a
+// world that was healthy.
+func TestPromotionBarrierCheckpointClosesPairWindow(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	j := journal.NewPg(pool)
+	if err := j.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	module := toyModule(t)
+	mods := toyMods(module)
+	dir := t.TempDir()
+	st, err := checkpoint.NewDir(filepath.Join(dir, "checkpoints"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := fixedClock(wallEpoch.Add(time.Hour))
+	a, err := openAuthority(ctx, "chunk-barrier", module, nil, toyVocab(), j, mods, clock, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.wal = newShadowFactory(dir, st, "toy")("chunk-barrier", a.host.Epoch(), a.host.Tick(), a.lastSeq, shadowBoot{
+		module: module, clientSum: a.mods.client.Sum(),
+	})
+	if a.wal == nil {
+		t.Fatal("shadow WAL failed to open")
+	}
+	cw := a.mods.client.Sum()
+
+	s := &session{sub: "alice", actorID: codec.ActorFor("alice"), out: make(chan []byte, 256)}
+	a.stageIntent(s, 1, kJoin, nil)
+	a.tickOnce()
+	a.stageIntent(s, 2, kMove, move(3))
+	a.tickOnce()
+
+	// Same behavior, different bytes (a wasm custom section), so the
+	// pair pin flips without changing the sim.
+	variant := append(append([]byte{}, module...), 0x00, 0x03, 0x01, 0x74, 0x00)
+	mods.sim.Set(variant)
+	for i := 0; i < soakTicks(a.hz)+5; i++ {
+		a.tickOnce()
+	}
+	if a.moduleHash != displayHash(variant) {
+		t.Fatal("swap never committed")
+	}
+	newPW := sha256.Sum256(variant)
+
+	refs, err := st.List("chunk-barrier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) == 0 {
+		t.Fatal("no checkpoint on the volume after the promotion barrier")
+	}
+	if !refs[0].Proven {
+		t.Fatalf("barrier checkpoint is not proven: %+v", refs[0])
+	}
+	m, err := st.Load(refs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.PW != newPW || m.CW != cw {
+		t.Fatalf("barrier checkpoint pair = (%x, %x), want (%x, %x)", m.CW, m.PW, cw, newPW)
+	}
+	if m.Epoch != a.host.Epoch() {
+		t.Fatalf("barrier checkpoint epoch = %d, want %d", m.Epoch, a.host.Epoch())
+	}
+
+	// Crash here — inside the old cadence window — and the ladder under
+	// the NEW pair must choose the barrier checkpoint, not refuse.
+	a.close()
+	a.host.close()
+	g := acquireFor(t, dir)
+	defer g.Release()
+	states, err := recoverWorld(g, st, dir, cw, newPW, []string{"chunk-barrier"})
+	if err != nil {
+		t.Fatalf("ladder refused inside the post-promote window: %v", err)
+	}
+	b := states["chunk-barrier"]
+	if b.ckpt.Version == 0 || b.ckpt.Tick != m.Tick {
+		t.Fatalf("ladder chose tick %d, want the barrier checkpoint at %d", b.ckpt.Tick, m.Tick)
+	}
+	if err := proveAndReplay(variant, nil, b); err != nil {
+		t.Fatalf("barrier checkpoint failed the ladder's proof: %v", err)
 	}
 }
 

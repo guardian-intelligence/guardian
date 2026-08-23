@@ -427,6 +427,7 @@ type authority struct {
 	simSum     [32]byte // full sha256 of the running module — the checkpoint manifest's PW pin
 	cand       *simHost
 	candHash   string
+	candBytes  []byte   // the candidate's module bytes; the promotion barrier's proof instance
 	candSum    uint64   // first 8 bytes (LE) of the candidate's sha256
 	candSHA    [32]byte // the candidate's full sha256; becomes simSum on promote
 	soakLeft   int
@@ -492,7 +493,7 @@ func (a *authority) swapPrelude() []stagedIntent {
 			mEpochSwaps.WithLabelValues("soak_abort").Inc()
 			return nil
 		}
-		a.cand, a.candHash, a.soakLeft = cand, hash, soakTicks(a.hz)
+		a.cand, a.candHash, a.candBytes, a.soakLeft = cand, hash, bytes, soakTicks(a.hz)
 		sum := sha256.Sum256(bytes)
 		a.candSum = binary.LittleEndian.Uint64(sum[:8])
 		a.candSHA = sum
@@ -527,6 +528,7 @@ func (a *authority) failSoak(hash string, err error) {
 	if a.cand != nil {
 		a.cand.close()
 		a.cand = nil
+		a.candBytes = nil
 	}
 	if hash != "" {
 		a.badModule = hash
@@ -564,8 +566,52 @@ func (a *authority) promote(t uint64) {
 		return
 	}
 	mSnapshots.Inc()
+	if a.wal != nil {
+		// The promotion barrier's step 2: a checkpoint under the NEW pair,
+		// durable and restore-proven, before the old epoch may die. Without
+		// it every manifest on the volume is old-pair until the cadence
+		// next fires, and a crash inside that window hits the ladder's
+		// pair refusal on a world that was healthy. Proof runs in a fresh
+		// instance of the candidate's bytes — the claim is about what
+		// recovery will find. Failure latches the shadow dead and never
+		// gates the swap: PG remains the promotion's authority.
+		modBytes, terrainBlob := a.candBytes, a.terrainBlob
+		a.mu.Lock()
+		dedup := append([]codec.DedupEntry(nil), a.seenFifo...)
+		a.mu.Unlock()
+		a.wal.forceCheckpoint(a.name, codec.Checkpoint{
+			Version: 1, Game: a.wal.game, Chunk: a.name,
+			Lineage: 0,
+			Seq:     a.lastSeq, Tick: t, Epoch: a.host.Epoch(),
+			WH: wh, Content: a.terrain,
+			CW: a.mods.client.Sum(), PW: a.candSHA,
+			Dedup: dedup, State: state,
+		}, func(raw []byte, wantWH uint64) error {
+			h, err := newSimHost(modBytes)
+			if err != nil {
+				return err
+			}
+			defer h.close()
+			if len(terrainBlob) > 0 {
+				if err := h.SetTerrainE(terrainBlob); err != nil {
+					return err
+				}
+			}
+			if err := h.RestoreE(raw); err != nil {
+				return err
+			}
+			got, err := h.HashE()
+			if err != nil {
+				return err
+			}
+			if got != wantWH {
+				return fmt.Errorf("barrier checkpoint restore hash %016x != %016x", got, wantWH)
+			}
+			return nil
+		})
+	}
 	old := a.host
-	a.host, a.cand = a.cand, nil
+	a.host, a.cand, a.candBytes = a.cand, nil, nil
 	old.close()
 	prev := a.moduleHash
 	a.moduleHash = a.candHash
@@ -1526,7 +1572,11 @@ func (p *chunks) get(ctx context.Context, name string) (*authority, error) {
 	p.mu.Unlock()
 	// Open outside the registry lock (journal replay takes a moment); the
 	// rare double-open race resolves to the first registered instance.
-	a, err := openAuthority(ctx, name, p.module(), p.genesis, p.vocab, p.j, p.mods, p.tm, p.publish)
+	// One module read serves both the authority and its shadow: a hot-swap
+	// landing between two reads would pin the rehearsal to a module the
+	// authority never ran.
+	mod := p.module()
+	a, err := openAuthority(ctx, name, mod, p.genesis, p.vocab, p.j, p.mods, p.tm, p.publish)
 	if err != nil {
 		return nil, err
 	}
@@ -1536,7 +1586,7 @@ func (p *chunks) get(ctx context.Context, name string) (*authority, error) {
 		// not started. The discard path below closes through a.close(),
 		// which releases the shadow's lock and generation.
 		a.wal = p.shadow(name, a.host.Epoch(), a.host.Tick(), a.lastSeq, shadowBoot{
-			module: p.module(), terrain: a.terrainBlob, clientSum: p.mods.client.Sum(),
+			module: mod, terrain: a.terrainBlob, clientSum: p.mods.client.Sum(),
 		})
 	}
 	p.mu.Lock()

@@ -167,6 +167,25 @@ func (w *shadowWAL) submitCheckpoint(m codec.Checkpoint) {
 	w.ckpt.Submit(m)
 }
 
+// forceCheckpoint writes one manifest synchronously — durable and
+// restore-proven — via the snapshotter's Force: the promotion barrier's
+// step 2. Failure latches the shadow dead; the swap it barriers is PG's
+// to gate, never the shadow's.
+func (w *shadowWAL) forceCheckpoint(chunk string, m codec.Checkpoint, prove checkpoint.ProveFunc) {
+	if w == nil || w.ckpt == nil || w.dead.Load() {
+		return
+	}
+	m.Generation = w.guard.Generation()
+	// Bounded, unlike the cadence lane: this runs on the tick goroutine.
+	// 30s covers the largest deflated manifest at the default 8MiB/s
+	// smear with an order of magnitude to spare.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := w.ckpt.Force(ctx, m, prove); err != nil {
+		w.latch(chunk, err)
+	}
+}
+
 // advanceEpoch is the epoch barrier: no segment ever spans a module
 // promotion. Synchronous by design — the swap path is already heavy.
 func (w *shadowWAL) advanceEpoch(chunk string, epoch uint32) {
