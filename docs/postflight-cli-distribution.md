@@ -4,8 +4,8 @@ Status: active as of 2026-07-27. Every user-facing channel has published:
 stable is `postflight-cli/v0.2.0`, and the npm, crates.io and Homebrew lanes
 all mirrored it.
 Complements `supply-chain-design.md` (trust model, canonical identities),
-`registry-design.md` (countersigner, release projector, the release
-manifest) and `canaries.md` (canary principles).
+`registry-design.md` (the in-cluster registry tier) and `canaries.md`
+(canary principles).
 
 The `postflight` binary is the only thing Guardian releases to users today.
 Everything below exists to make one sentence true: **the bytes a user runs
@@ -205,9 +205,8 @@ https://github.com/guardian-intelligence/guardian/.github/workflows/postflight-c
 ```
 
 with OIDC issuer `https://token.actions.githubusercontent.com`. It is the
-same string carried by `supply-chain-design.md`, the countersigner's
-identity map, the deep-test runner, the install canary, the installer script
-and every release's notes.
+same string carried by `supply-chain-design.md`, the deep-test runner, the
+install canary, the installer script and every release's notes.
 
 **Promotion never re-signs a build output.** The cutter `crane export`s the
 pinned artifact, copies the bundles out of the layer, re-verifies every one
@@ -270,14 +269,6 @@ something the release lane never signed.
 
 The install canary verifies this bundle every six hours, on any release whose
 notes offer the recipe.
-
-Guardian's own countersignature is a second, independent signature over the
-same digests. It is minted in-cluster from `openbao://guardian-images`, and
-the release projector copies subject and countersignature to ghcr — which is
-why the release manifest must move in lockstep with the channel pin (see
-below). The countersigner and projector are `registry-design.md`'s subject;
-what matters here is that neither of them touches the per-binary bundles a
-CLI user verifies.
 
 ## The install receipt
 
@@ -787,12 +778,11 @@ already report the version they carry.
    Both files, in one commit, for two reasons. Mechanically,
    `TestReleaseManifestCoversReleaseChannels` fails the PR if a channel pins
    a digest the manifest does not list, or if the manifest lists one no
-   channel pins. Substantively, the manifest is what puts the digest under
-   the countersigner and the release projector: a channel pin alone would
-   publish an artifact to users that carries no Guardian countersignature at
-   the public registry, which is the one invariant the publication boundary
-   holds. Kargo's nightly promotion template carries the second
-   `yaml-update` for exactly this reason; a hand cut has to do it by hand.
+   channel pins. Substantively, the manifest is the reviewable record of
+   what Guardian has released, and rendering it keeps every released digest
+   in the image union and the dark haul. Kargo's nightly promotion template
+   carries the second `yaml-update` for exactly this reason; a hand cut has
+   to do it by hand.
 
 3. **Merge.** The cutter publishes `postflight-cli/rc-<YYYYMMDD>` as a
    prerelease, from the same assets and the same signatures the nightly

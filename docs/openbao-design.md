@@ -120,16 +120,8 @@ called out explicitly.
   boundary.
 - Non-durable drill keys may be created imperatively during DR verification and
   deleted afterward.
-- The first durable key is `guardian-images` (ecdsa-p256), the Guardian
-  release-signing key the image countersigner signs with. Its stakes are
-  lower than an encryption key's —
-  loss means re-key and re-sign the estate, not data loss — but its material
-  must equally survive reinits (fresh material would orphan every existing
-  countersignature). The standing
-  `guardian-countersigner` policy grants sign plus public-key read only. The
-  key must never be casually rotated: cosign's transit verification assumes a
-  fixed key version, and old countersignatures verify only against the version
-  that made them.
+- No durable Transit keys exist today; the mount stands empty until an
+  approved consumer arrives.
 
 ## Auth & self-init config
 - Kubernetes auth method; ESO and the writer path authenticate via SA tokens validated
@@ -233,8 +225,6 @@ Created by the self-init `initialize` block and Ready in the current cluster:
 - Per-namespace `guardian-reader-<ns>`/`guardian-writer-<ns>` policies and Kubernetes auth
   roles (the scoped-namespace list lives in the self-init block, pinned by
   `TestOpenBaoOperationsInventoryConformance`).
-- The `guardian-countersigner` policy and role (transit sign + key read for the image
-  countersigner's SA).
 
 Declared alongside self-init:
 - `ClusterSecretStore/external-dns-openbao` and `ExternalSecret/cloudflare-external-dns`.

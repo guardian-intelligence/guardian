@@ -2,8 +2,9 @@ package tests
 
 // Tier-1 release-manifest conformance: the release manifest
 // (deployments/guardian/system/release-manifest.yaml) is the reviewable
-// definition of what Guardian releases to users (docs/registry-design.md) —
-// today, the postflight CLI's release channels. It must never drift from the
+// definition of what Guardian releases to users
+// (docs/postflight-cli-distribution.md) — today, the postflight CLI's release
+// channels. It must never drift from the
 // channel pins: for every released repository, the manifest's digest set
 // equals the digest set pinned in the CLI channels file. A channel bump that
 // forgets the manifest — or a manifest lane naming a digest no channel pins —
@@ -28,11 +29,9 @@ const (
 	firstPartyPrefix       = "ghcr.io/guardian-intelligence/"
 )
 
-// The projector and the countersigner both enumerate first-party refs with
-// the shell grammar ghcr.io/guardian-intelligence/[a-z0-9-]+@sha256:... — a
-// repo name outside that class would silently vanish from both loops'
-// estates while every gauge reads healthy. This test is what makes that
-// impossible: a nonconforming name fails CI at onboarding time instead.
+// Every first-party release ref is digest-pinned on a lowercase-hyphen repo
+// name — the grammar release tooling enumerates with. A nonconforming name
+// fails CI at onboarding time instead of misbehaving downstream.
 var firstPartyRefGrammar = regexp.MustCompile(`^ghcr\.io/guardian-intelligence/[a-z0-9-]+@sha256:[a-f0-9]{64}$`)
 
 func firstPartyRepoDigest(t *testing.T, file, ref string) (string, string) {
@@ -46,7 +45,7 @@ func firstPartyRepoDigest(t *testing.T, file, ref string) (string, string) {
 		name = name[:idx]
 	}
 	if !firstPartyRefGrammar.MatchString(name + "@" + digest) {
-		t.Fatalf("%s: first-party ref %q does not match the grammar the countersigner and release projector enumerate with (%s) — the signing and projection loops would silently skip it; rename the repo or widen both scripts' greps and this pattern together",
+		t.Fatalf("%s: first-party ref %q does not match the first-party ref grammar (%s): rename the repo or widen this pattern",
 			file, ref, firstPartyRefGrammar)
 	}
 	return name, digest

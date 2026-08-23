@@ -1,11 +1,8 @@
 # The release manifest: the reviewable definition of what Guardian releases
-# to public registries (docs/registry-design.md) — the artifacts users
-# consume, not the images the cluster happens to run. The release projector
-# verifies each digest's Guardian countersignature in zot against the
-# committed public key and projects it — signature included — to the ghcr
-# path in the ref. Lanes mirror the CLI release channels: the nightly
-# promotion PR bumps this lane in the same commit as
-# src/postflight/cli/release/channels.yaml, and
+# to public registries (docs/postflight-cli-distribution.md) — the artifacts
+# users consume, not the images the cluster happens to run. Lanes mirror the
+# CLI release channels: the nightly promotion PR bumps this lane in the same
+# commit as src/postflight/cli/release/channels.yaml, and
 # TestReleaseManifestCoversReleaseChannels holds every hand-made bump to the
 # same rule.
 #

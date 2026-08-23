@@ -17,9 +17,8 @@ from an allowlisted registry. Signatures exist where a consumer outside that
 loop needs them — the released postflight CLI: a cosign keyless signature
 bound to the GitHub Actions OIDC workload identity via Fulcio and logged in
 Rekor, attesting "the reviewed main history of
-guardian-intelligence/guardian built this", plus Guardian's own
-countersignature at the publication boundary. There are no signing keys in
-CI: nothing to store, rotate, leak, or custody. Registries (ghcr.io
+guardian-intelligence/guardian built this". There are no signing keys
+anywhere: nothing to store, rotate, leak, or custody. Registries (ghcr.io
 included) are untrusted distribution; a verifier checks the signature
 identity, not the registry it pulled from. The running system — a dark cold
 start included — only ever verifies. Bring-up needs no signing capability,
@@ -38,10 +37,7 @@ Verifiers MUST pin these exact identity strings (OIDC issuer
 - images.lock signature bundles:
   `https://github.com/guardian-intelligence/guardian/.github/workflows/images-lock-sign.yml@refs/heads/main`
 
-The in-cluster countersigner (`docs/registry-design.md`) carries the same
-list as its identity map: it refuses to countersign any digest that does not
-verify against its repo's canonical identity, so adding a released artifact
-means updating this list, the countersigner map, and creating the new
+Adding a released artifact means updating this list and creating the new
 workflow file together.
 
 Identities are per-workflow-file by construction — a new released artifact
@@ -53,7 +49,6 @@ identity can sign more than one artifact family.
 | Artifact | Producer | Signature/attestation | Location |
 |---|---|---|---|
 | `postflight-cli` binaries + OCI artifact | `postflight-cli-image` workflow on main | per-binary cosign keyless sign-blob bundles (travel inside the artifact layer), cosign keyless signature + SPDX SBOM attestation on the artifact digest | ghcr.io, attached to the digest; bundles republished with each GitHub Release |
-| every released digest (the release manifest) | in-cluster countersigner (`docs/registry-design.md`) | Guardian release countersignature (`openbao://guardian-images`, Rekor-logged, inclusion proof embedded in the bundle) as an OCI 1.1 referrer, minted only after the digest's Fulcio signature re-verifies | zot, attached to the digest; projected to ghcr by the release projector |
 | union images lock (generated) | `images-lock-sign` workflow on main pushes touching any union input (declared lock, manifest trees, the imageset tool) | derives the union with `//src/infrastructure/cmd/imageset`, then `cosign sign-blob --bundle` (embeds Fulcio cert + Rekor proof), pushed with `oras push` so the layer carries a filename title | `ghcr.io/guardian-intelligence/supply-chain:images.lock-<sha256>` (one tag per union hash, no floating tag; package stays private — only authenticated drive builds fetch it, dark bring-up reads it from the drive) |
 
 The artifact inventory itself is split and mostly generated:
@@ -205,31 +200,14 @@ openbao://…` is native). We deliberately keep it out of CI's signing path:
 3. **No benefit there**: CI signing wants a verifiable *builder identity*,
    and the builder is CI. Keyless binds exactly that.
 
-The in-cluster **countersigner** sits on the other side of all three
-reasons and is the deliberate exception: it runs inside the cluster (no CI
-coupling, no public-runner network path), and its signature states
-something keyless cannot — a Guardian-held key, under the custody model,
-vouches for the digest after re-verifying the Fulcio original. That second
-signature is Guardian's release signature: anything Guardian publishes
-verifies with stock cosign against a plain public key, every signing event
-is recorded in the Rekor transparency log, and the bundle embeds the
-inclusion proof — so fully offline verification (key plus the pinned
-trusted root) needs no GitHub identity or Sigstore-TUF freshness coupling.
-CI's signatures remain the merge-gate currency; the countersignature is
-the one Guardian owns outright.
-
 ## Exit path (sovereignty upgrade)
 
-Keyless signatures name GitHub identities. The countersigner is the first
-step off that dependency: every released first-party digest also carries a
-signature by a Guardian-held key. The invariant sits at the publication
-boundary — nothing Guardian releases to a public marketplace ships without
-a verified Guardian signature, held by the release projector
-(`docs/registry-design.md`). It is deliberately not
-a runtime invariant: no pod is required to run a Guardian-signed image,
+Keyless signatures name GitHub identities; Guardian leans on Fulcio keyless
+signing fully. Release signing is deliberately not
+a runtime invariant: no pod is required to run a specially-signed image,
 because what runs is already governed by the merge gate and the provenance
-VAP. If Guardian later self-hosts its factory, images born in-cluster sign
-with the same Transit-held key at build time and the countersigner's role
-collapses into the builder. Old signatures remain valid statements about
+VAP. If Guardian later self-hosts its factory, the builder identity moves
+with it, and images born in-cluster sign under whatever identity that
+factory holds. Old signatures remain valid statements about
 who built what. Until then, registries stay untrusted, Git stays the
 source of truth, and the dark bundle stays the registry-independence tier.

@@ -99,11 +99,7 @@ never leak the root of trust that rebuilds it.
 - Workloads never talk to OpenBao. External Secrets Operator materializes
   native Kubernetes Secrets (`creationPolicy: Orphan` /
   `deletionPolicy: Retain`, 1h refresh), so an OpenBao outage degrades secret
-  *rotation*, not running consumers. One deliberate exception: the image
-  countersigner signs with the `guardian-images` Transit key directly —
-  signing is an online operation whose whole point is that the private key
-  never leaves OpenBao, so ESO cannot materialize it. An OpenBao outage
-  pauses countersigning (its own alert covers the silence), nothing else.
+  *rotation*, not running consumers.
 
 ## Permission model
 
@@ -245,14 +241,12 @@ with org-owner approval, not by minting another credential. Inventory and
 scope boundaries: `docs/github-apps.md`.
 
 Installation tokens cover the API plane (pull requests, contents, statuses,
-checks) and ghcr *reads*. They cannot push ghcr organization packages, so
-the single standing exception is ghcr write: a classic PAT with
-`write:packages`, held by the machine account `guardian-projector`, stored
-in OpenBao like any integration secret, its expiry recorded in Git next to
-its consumer's wiring. The account only ever mints `write:packages` tokens —
-the token∩identity intersection keeps the credential packages-only. Re-test
-the App write path on GitHub feature announcements; the PAT exists only to
-be deleted.
+checks) and ghcr *reads*. They cannot push ghcr organization packages —
+if a workload ever needs ghcr write, the shape is a `write:packages`-scoped
+classic PAT on a dedicated machine account, stored in OpenBao like any
+integration secret with its expiry recorded in Git next to its consumer's
+wiring, re-tested against the App write path on GitHub feature
+announcements.
 
 Other App keys (the Kargo promotion bot, the Postflight runner App) follow
 the same handling. New GitHub automation joins `guardian-platform-app`

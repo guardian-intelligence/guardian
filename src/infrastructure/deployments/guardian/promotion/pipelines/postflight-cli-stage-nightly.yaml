@@ -60,9 +60,9 @@ spec:
               - key: channels.nightly.image
                 value: ${{ vars.imageRepo }}@${{ imageFrom(vars.imageRepo).Digest }}
         # The release manifest's lane moves in the same commit as the channel
-        # pin — that is what puts the digest under the countersigner and the
-        # release projector; TestReleaseManifestCoversReleaseChannels keeps
-        # the PR red otherwise.
+        # pin — that is what keeps the released digest in the reviewable
+        # release record and the image union;
+        # TestReleaseManifestCoversReleaseChannels keeps the PR red otherwise.
         - uses: yaml-update
           config:
             path: ./repo/src/infrastructure/deployments/guardian/system/release-manifest.yaml

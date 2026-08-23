@@ -95,13 +95,16 @@ func TestTalosctlTracksInstallerImage(t *testing.T) {
 	}
 }
 
-// The countersigner extracts its cosign binary from the pinned cosign image;
-// the multitool release binary is that image's trust anchor (verified
-// keyless at adoption) and the dark-drive copy verifies what the
-// countersigner signs — so all three cosign pins move together: a bump PR
-// for any one of them goes red until the others follow.
-func TestCountersignerCosignPinsMoveTogether(t *testing.T) {
-	countersignerYAML := "src/infrastructure/deployments/guardian/system/zot-countersigner.yaml"
+// The deep-test runner and the install canary extract their cosign binary
+// from the pinned cosign image; the multitool release binary is that image's
+// trust anchor (verified keyless at adoption) and the declared lock carries
+// what the pods fetch — so every cosign pin moves together: a bump PR for
+// any one of them goes red until the others follow.
+func TestCosignImagePinsMoveTogether(t *testing.T) {
+	manifests := []string{
+		"src/infrastructure/deployments/guardian/promotion/cli-deeptest-runner.yaml",
+		"src/infrastructure/deployments/guardian/promotion/cli-install-canary.yaml",
+	}
 	declaredLock := "src/infrastructure/bootstrap/bundle/images.declared.lock"
 
 	release := regexp.MustCompile(`sigstore/cosign/releases/download/(v\d+\.\d+\.\d+)/cosign-linux-amd64`).
@@ -109,104 +112,24 @@ func TestCountersignerCosignPinsMoveTogether(t *testing.T) {
 	if release == nil {
 		t.Fatalf("%s: no cosign release pin found", toolLockRunfile)
 	}
-	image := regexp.MustCompile(`ghcr\.io/sigstore/cosign/cosign:(v\d+\.\d+\.\d+)@(sha256:[a-f0-9]{64})`).
-		FindStringSubmatch(readText(t, runfilePath(countersignerYAML)))
-	if image == nil {
-		t.Fatalf("%s: no COSIGN_IMAGE tag@digest pin found", countersignerYAML)
-	}
 	declared := regexp.MustCompile(`ghcr\.io/sigstore/cosign/cosign@(sha256:[a-f0-9]{64})`).
 		FindStringSubmatch(readText(t, runfilePath(declaredLock)))
 	if declared == nil {
 		t.Fatalf("%s: no cosign image digest declared", declaredLock)
 	}
 
-	if image[1] != release[1] {
-		t.Fatalf("countersigner COSIGN_IMAGE is %s but the multitool cosign release pin is %s: move them together", image[1], release[1])
-	}
-	if image[2] != declared[1] {
-		t.Fatalf("countersigner COSIGN_IMAGE digest %s and the images.declared.lock entry %s differ: the dark haul would carry a different image than the countersigner fetches", image[2], declared[1])
-	}
-}
-
-// The release projector extracts cosign and regctl the same way the
-// countersigner extracts cosign, with the same anchoring: the multitool
-// regctl release binary is the regctl image's trust anchor, the declared
-// lock carries what the pod fetches, and the projector's cosign pin may
-// never drift from the countersigner's — one cosign verifies what the other
-// signs.
-func TestReleaseProjectorToolPinsMoveTogether(t *testing.T) {
-	projectorYAML := "src/infrastructure/deployments/guardian/system/release-projector.yaml"
-	countersignerYAML := "src/infrastructure/deployments/guardian/system/zot-countersigner.yaml"
-	declaredLock := "src/infrastructure/bootstrap/bundle/images.declared.lock"
-
-	release := regexp.MustCompile(`regclient/regclient/releases/download/(v\d+\.\d+\.\d+)/regctl-linux-amd64`).
-		FindStringSubmatch(readText(t, runfilePath(toolLockRunfile)))
-	if release == nil {
-		t.Fatalf("%s: no regctl release pin found", toolLockRunfile)
-	}
-	image := regexp.MustCompile(`ghcr\.io/regclient/regctl:(v\d+\.\d+\.\d+)@(sha256:[a-f0-9]{64})`).
-		FindStringSubmatch(readText(t, runfilePath(projectorYAML)))
-	if image == nil {
-		t.Fatalf("%s: no REGCTL_IMAGE tag@digest pin found", projectorYAML)
-	}
-	declared := regexp.MustCompile(`ghcr\.io/regclient/regctl@(sha256:[a-f0-9]{64})`).
-		FindStringSubmatch(readText(t, runfilePath(declaredLock)))
-	if declared == nil {
-		t.Fatalf("%s: no regctl image digest declared", declaredLock)
-	}
-	if image[1] != release[1] {
-		t.Fatalf("projector REGCTL_IMAGE is %s but the multitool regctl release pin is %s: move them together", image[1], release[1])
-	}
-	if image[2] != declared[1] {
-		t.Fatalf("projector REGCTL_IMAGE digest %s and the images.declared.lock entry %s differ: the dark haul would carry a different image than the projector fetches", image[2], declared[1])
-	}
-
-	cosignPin := regexp.MustCompile(`ghcr\.io/sigstore/cosign/cosign:v\d+\.\d+\.\d+@sha256:[a-f0-9]{64}`)
-	projectorCosign := cosignPin.FindString(readText(t, runfilePath(projectorYAML)))
-	countersignerCosign := cosignPin.FindString(readText(t, runfilePath(countersignerYAML)))
-	if projectorCosign == "" {
-		t.Fatalf("%s: no COSIGN_IMAGE tag@digest pin found", projectorYAML)
-	}
-	if projectorCosign != countersignerCosign {
-		t.Fatalf("projector COSIGN_IMAGE %s and countersigner COSIGN_IMAGE %s differ: move them together", projectorCosign, countersignerCosign)
-	}
-}
-
-// The CLI deep-test runner extracts cosign the same way and verifies the
-// same release lane's signatures, so its pin joins the countersigner's and
-// the projector's: one cosign may not judge what another cosign version
-// signed.
-func TestDeeptestRunnerCosignPinMatchesTheRegistryLane(t *testing.T) {
-	runnerYAML := "src/infrastructure/deployments/guardian/promotion/cli-deeptest-runner.yaml"
-	countersignerYAML := "src/infrastructure/deployments/guardian/system/zot-countersigner.yaml"
-
-	cosignPin := regexp.MustCompile(`ghcr\.io/sigstore/cosign/cosign:v\d+\.\d+\.\d+@sha256:[a-f0-9]{64}`)
-	runnerCosign := cosignPin.FindString(readText(t, runfilePath(runnerYAML)))
-	countersignerCosign := cosignPin.FindString(readText(t, runfilePath(countersignerYAML)))
-	if runnerCosign == "" {
-		t.Fatalf("%s: no COSIGN_IMAGE tag@digest pin found", runnerYAML)
-	}
-	if runnerCosign != countersignerCosign {
-		t.Fatalf("deep-test runner COSIGN_IMAGE %s and countersigner COSIGN_IMAGE %s differ: move them together", runnerCosign, countersignerCosign)
-	}
-}
-
-// The install canary verifies published release assets with a cosign
-// extracted from the same pinned image the countersigner signs with: the
-// cosign that checks a signature may never drift from the cosign that mints
-// it, so a bump PR for one goes red until the other follows.
-func TestInstallCanaryCosignPinMatchesCountersigner(t *testing.T) {
-	canaryYAML := "src/infrastructure/deployments/guardian/promotion/cli-install-canary.yaml"
-	countersignerYAML := "src/infrastructure/deployments/guardian/system/zot-countersigner.yaml"
-
-	cosignPin := regexp.MustCompile(`ghcr\.io/sigstore/cosign/cosign:v\d+\.\d+\.\d+@sha256:[a-f0-9]{64}`)
-	canaryCosign := cosignPin.FindString(readText(t, runfilePath(canaryYAML)))
-	countersignerCosign := cosignPin.FindString(readText(t, runfilePath(countersignerYAML)))
-	if canaryCosign == "" {
-		t.Fatalf("%s: no COSIGN_IMAGE tag@digest pin found", canaryYAML)
-	}
-	if canaryCosign != countersignerCosign {
-		t.Fatalf("install canary COSIGN_IMAGE %s and countersigner COSIGN_IMAGE %s differ: move them together", canaryCosign, countersignerCosign)
+	pinRE := regexp.MustCompile(`ghcr\.io/sigstore/cosign/cosign:(v\d+\.\d+\.\d+)@(sha256:[a-f0-9]{64})`)
+	for _, manifest := range manifests {
+		image := pinRE.FindStringSubmatch(readText(t, runfilePath(manifest)))
+		if image == nil {
+			t.Fatalf("%s: no COSIGN_IMAGE tag@digest pin found", manifest)
+		}
+		if image[1] != release[1] {
+			t.Fatalf("%s COSIGN_IMAGE is %s but the multitool cosign release pin is %s: move them together", manifest, image[1], release[1])
+		}
+		if image[2] != declared[1] {
+			t.Fatalf("%s COSIGN_IMAGE digest %s and the images.declared.lock entry %s differ: the dark haul would carry a different image than the pod fetches", manifest, image[2], declared[1])
+		}
 	}
 }
 
