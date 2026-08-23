@@ -147,19 +147,6 @@ prose mirror of it: its optional Keycloak writes are imported only when the
 env file carries that environment's values, and each entry's comment explains
 its consumer.
 
-Beyond the kv plan, the importer also owns the `guardian-images` transit
-signing key (the image countersigner's key). A reinit recreates the transit
-mount empty, and fresh key material would orphan every countersignature
-already attached in the registry, so custody is the source of truth: when
-`custody.env` carries `openbao_transit_images_signing_key_backup` the key is
-restored from that blob verbatim; on first run the importer creates the key
-(`exportable` + `allow_plaintext_backup`, required by the backup endpoint and
-irreversible) and exports its plaintext backup next to the env file, printing
-the custody-append instruction. The exported blob is private key material —
-fold it into `custody.env`, snapshot the bundle, and delete the exported
-file. Prove the blob restores (see the restore drill in
-`docs/openbao-design.md`) before anything relies on the key's signatures.
-
 GitHub App private keys live in custody as PEM files and travel in the env
 file base64-encoded (the file is line-oriented): the `guardian-promotions`
 key as `github_promotions_app_private_key_b64` and the Postflight Runner key as
@@ -296,23 +283,14 @@ printf 'github_runner_app_prod_private_key_b64=%s\n' \
   "$(base64 -w0 < "$B/keys/postflight-runner.private-key.pem")" >> "$B/import.env"
 # The reinit validates the importer's whole plan against import.env BEFORE
 # the raft wipe; a custody.env missing a newer required value (e.g.
-# zot_countersigner_password) fails fast here — mint it into custody first
+# guardian_alerting_ntfy_url) fails fast here — mint it into custody first
 # (aspect infra custody --action env-set, value on stdin) and rebuild
 # import.env.
 
 # 2. the whole reinit, unattended (consumes and deletes import.env)
 aspect infra openbao-reinit
 
-# 3. FIRST RUN OF THE guardian-images TRANSIT KEY ONLY: the importer exported
-#    the key's plaintext backup next to import.env and printed the
-#    instruction. Append it to custody.env (never echo it), snapshot, and
-#    delete the export before the wipe:
-#      printf 'openbao_transit_images_signing_key_backup=%s\n' \
-#        "$(cat "$B/openbao-transit-guardian-images.backup.b64")" >> "$B/custody.env"
-#      aspect infra custody --action create
-#      rm "$B/openbao-transit-guardian-images.backup.b64"
-
-# 4. wipe the plaintext bundle the moment the command succeeds
+# 3. wipe the plaintext bundle the moment the command succeeds
 aspect infra custody --action wipe
 ```
 

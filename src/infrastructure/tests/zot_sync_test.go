@@ -5,13 +5,11 @@ import (
 	"testing"
 )
 
-// A normal countersignature verification uses the OCI referrers API. zot's
-// on-demand sync defaults to enumerating legacy Cosign tags during that read,
-// then compares each signature manifest with its subject digest and recopies
-// it from upstream. That makes a local verification wait on ghcr and can hold
-// the shared registry path past both the countersigner and mirror-canary
-// deadlines. The countersigner fetches the exact legacy CI signature tag in a
-// separate verification step, so implicit legacy-tag discovery must stay off.
+// zot's on-demand sync defaults to enumerating legacy Cosign tags during an
+// OCI referrers read, then compares each signature manifest with its subject
+// digest and recopies it from upstream. That makes a local referrers read
+// wait on ghcr and can hold the shared registry path past the mirror-canary
+// deadline, so implicit legacy-tag discovery must stay off.
 func TestZotOnDemandSyncIsBoundedAndSkipsLegacyCosignTags(t *testing.T) {
 	const manifest = "src/infrastructure/deployments/guardian/system/zot-helmrelease.yaml"
 

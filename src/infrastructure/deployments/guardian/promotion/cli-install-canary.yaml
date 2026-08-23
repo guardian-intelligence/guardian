@@ -457,11 +457,9 @@ spec:
               command: ["/bin/sh", "/scripts/extract-cosign.sh"]
               env:
                 # An env value is invisible to the imageset extractor, so
-                # this pin rides the hand-declared images.declared.lock entry
-                # the countersigner's pin is anchored to;
-                # TestInstallCanaryCosignPinMatchesCountersigner holds the
-                # two together, so the cosign that verifies a release is the
-                # cosign that countersigned it.
+                # this pin is hand-declared in images.declared.lock, and it
+                # rides the same release as the multitool cosign pin —
+                # TestCosignImagePinsMoveTogether enforces both.
                 - name: COSIGN_IMAGE
                   value: "ghcr.io/sigstore/cosign/cosign:v3.1.2@sha256:d91bc4e7e95e8d2f549c747a72dc174f90579e410a1695f57f686674f84ce849"
               securityContext:

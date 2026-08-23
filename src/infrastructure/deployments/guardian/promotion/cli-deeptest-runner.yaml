@@ -28,8 +28,7 @@ data:
   # image: manifest by pinned digest, every layer blob verified against its
   # manifest digest before extraction. The image is never run as a container.
   # ghcr is read with an anonymous pull token — the same path this job's
-  # subject artifact is read over, and the same digest pin the countersigner
-  # and the release projector carry.
+  # subject artifact is read over.
   extract-cosign.sh: |
     #!/bin/sh
     set -eu
@@ -229,10 +228,9 @@ data:
     record binaries_digest "$binaries_ok"
 
     # --new-bundle-format=false is load-bearing: CI signatures live in legacy
-    # .sig tags, and once a digest carries any bundle referrer (the Guardian
-    # countersignature the release projector copies to ghcr for promoted
-    # digests) cosign's default discovery inspects only bundles and never
-    # finds the CI signature.
+    # .sig tags, and once a digest carries any bundle referrer cosign's
+    # default discovery inspects only bundles and never finds the CI
+    # signature.
     image_sig=1
     if ! "$COSIGN" verify --new-bundle-format=false \
       --certificate-identity "$BUILD_IDENTITY" \
@@ -290,9 +288,9 @@ data:
     done
     record structure "$structure"
 
-    # Never countersign what the canonical CI identity did not sign — applied
-    # to execution. Inspecting bytes is safe; running them is not, so an
-    # artifact whose chain did not close is a verdict and nothing more.
+    # Never run what the canonical CI identity did not sign. Inspecting bytes
+    # is safe; running them is not, so an artifact whose chain did not close
+    # is a verdict and nothing more.
     if [ "$image_sig" != 1 ] || [ "$blobs" != 1 ] || [ "$binaries_ok" != 1 ]; then
       echo "refusing to run $IMAGE_REPO@$digest: its signature chain did not verify"
       finish
@@ -484,10 +482,9 @@ spec:
               command: ["/bin/sh", "/scripts/extract-cosign.sh"]
               env:
                 # An env value is invisible to the imageset extractor, so
-                # this pin is hand-declared in images.declared.lock. It may
-                # never drift from the countersigner's and the projector's
-                # pin — TestDeeptestRunnerCosignPinMatchesTheRegistryLane
-                # enforces that.
+                # this pin is hand-declared in images.declared.lock, and it
+                # rides the same release as the multitool cosign pin —
+                # TestCosignImagePinsMoveTogether enforces both.
                 - name: COSIGN_IMAGE
                   value: "ghcr.io/sigstore/cosign/cosign:v3.1.2@sha256:d91bc4e7e95e8d2f549c747a72dc174f90579e410a1695f57f686674f84ce849"
               securityContext:

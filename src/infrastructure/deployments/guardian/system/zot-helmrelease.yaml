@@ -66,30 +66,15 @@ spec:
       # changes digests and would break every pinned ref and cosign signature
       # served through the mirror. Its default referrer sync also enumerates
       # legacy Cosign tags and compares each signature manifest with its subject
-      # digest, forcing a redundant upstream copy on every OCI referrers read.
-      # The countersigner explicitly requests the one legacy CI signature tag
-      # when needed, so referrer discovery must not sync those tags implicitly.
+      # digest, forcing a redundant upstream copy on every OCI referrers read
+      # that can hold the shared registry path past the mirror-canary deadline.
       # On-demand sync is bounded below the node pull deadline. zot otherwise
       # keeps a disconnected sync alive for three hours, so containerd exhausts
       # its request before it can fall back to the upstream registry.
       #
       # accessControl is the write lock, not an auth system: without it zot
-      # serves anonymous read-WRITE. The one writer is the countersigner's
-      # htpasswd user, scoped to create/update under guardian-intelligence/**
-      # (where its signature referrers land); everything else stays
-      # anonymous read-only. The write policy's tag condition bounds a
-      # leaked credential's blast radius: signature referrers are by-digest
-      # pushes, and digest content is self-addressing, so denying tag
-      # references denies the only write that could repoint what nodes
-      # actually pull. The read grant is a separate unconditioned entry —
-      # a condition binds to every action in its policy, and the
-      # countersigner must read legacy .sig TAGS to Fulcio-verify (proven
-      # in prod: a single conditioned policy denied those reads). htpasswd,
-      # not bearer OIDC, is deliberate: in this zot version enabling ANY
-      # bearer auth makes the bearer handler the exclusive authn middleware
-      # with no anonymous fallthrough, which would kill anonymous node
-      # pull-through. Bearer SA-token federation becomes the natural upgrade
-      # if node pulls ever authenticate (docs/registry-design.md).
+      # serves anonymous read-WRITE. The mirror has no writers; everything
+      # is anonymous read-only.
       #
       # The retention block is load-bearing, not optional: with gc enabled
       # and NO retention config, zot defaults to deleteUntagged=true — and
@@ -98,7 +83,7 @@ spec:
       # delete a by-digest-synced manifest on the first GC pass
       # ("reason":"deleteUntagged") in a local run of this exact image;
       # with this block the same manifest survived. deleteReferrers stays
-      # false so future countersignatures survive their subjects' churn.
+      # false so referrer artifacts survive their subjects' churn.
       config.json: |-
         {
           "distSpecVersion": "1.1.1",
@@ -122,35 +107,10 @@ spec:
             "address": "0.0.0.0",
             "port": "5000",
             "compat": ["docker2s2"],
-            "auth": {
-              "htpasswd": {
-                "path": "/secret/htpasswd"
-              },
-              "failDelay": 5
-            },
             "accessControl": {
               "repositories": {
                 "**": {
                   "anonymousPolicy": ["read"],
-                  "defaultPolicy": []
-                },
-                "guardian-intelligence/**": {
-                  "anonymousPolicy": ["read"],
-                  "policies": [
-                    {
-                      "users": ["countersigner"],
-                      "actions": ["read"]
-                    },
-                    {
-                      "users": ["countersigner"],
-                      "actions": ["create", "update"],
-                      "conditions": [
-                        {
-                          "expression": "req.referenceType != 'tag'"
-                        }
-                      ]
-                    }
-                  ],
                   "defaultPolicy": []
                 }
               },
@@ -204,21 +164,9 @@ spec:
     extraVolumes:
       - name: tmp
         emptyDir: {}
-      # The countersigner's htpasswd line, projected by ESO from the
-      # custody-held credential (zot-countersigner.yaml). zot re-reads the
-      # file per request, so ESO refreshes propagate without a pod roll.
-      - name: htpasswd
-        secret:
-          secretName: zot-countersigner-auth
-          items:
-            - key: htpasswd
-              path: htpasswd
     extraVolumeMounts:
       - name: tmp
         mountPath: /tmp
-      - name: htpasswd
-        mountPath: /secret
-        readOnly: true
     resources:
       requests:
         cpu: 100m
