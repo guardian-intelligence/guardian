@@ -104,9 +104,12 @@ steps 2 and 3 to prove the crash story.
    the soak, the epoch_advance, and `AdvanceEpoch`'s segment rotation
    (no segment spans the barrier — new segment ordinal at the swap).
 2. Re-run with a SIGKILL immediately after the swap commits but before
-   the next checkpoint cadence: the rehearsal must resume under the OLD
-   pair's newest checkpoint (pair-match skips any newer manifest the
-   dead epoch left) and replay cleanly across the barrier segments.
+   the next checkpoint cadence: the rehearsal must resume from the
+   promotion barrier's forced checkpoint under the NEW pair (step 2 of
+   the swap — durable and proven before the old epoch may die) and
+   replay cleanly across the barrier segments. Only if the mount has
+   regressed to the old bytes does pair-match skip that manifest and
+   resume the OLD pair's newest — never a refusal, never a splice.
 
 Expected additionally: `chunkies_epoch_swaps_total{result="committed"}`
 increments, spectator rides through both promotions without a reload.
