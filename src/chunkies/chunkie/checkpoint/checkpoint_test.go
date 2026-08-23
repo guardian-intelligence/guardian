@@ -22,7 +22,7 @@ func manifest(chunk string, lineage uint32, seq int64, tick uint64, epoch uint32
 }
 
 func TestDirRoundTripAndOrdering(t *testing.T) {
-	d, err := NewDir(t.TempDir(), 0)
+	d, err := NewDir(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestDirRoundTripAndOrdering(t *testing.T) {
 }
 
 func TestLoadRefusesRenamedAndCorrupt(t *testing.T) {
-	d, _ := NewDir(t.TempDir(), 0)
+	d, _ := NewDir(t.TempDir())
 	ctx := context.Background()
 	ref, err := d.Put(ctx, manifest("chunk-a", 0, 10, 100, 1, []byte("a")))
 	if err != nil {
@@ -100,7 +100,7 @@ func TestLoadRefusesRenamedAndCorrupt(t *testing.T) {
 }
 
 func TestRetainRingAndEpochGuard(t *testing.T) {
-	d, _ := NewDir(t.TempDir(), 0)
+	d, _ := NewDir(t.TempDir())
 	ctx := context.Background()
 	// Five same-epoch checkpoints: the ring keeps the newest three.
 	for seq := int64(1); seq <= 5; seq++ {
@@ -155,7 +155,7 @@ func TestRetainRingAndEpochGuard(t *testing.T) {
 }
 
 func TestSnapshotterSubmitAndForce(t *testing.T) {
-	d, _ := NewDir(t.TempDir(), 0)
+	d, _ := NewDir(t.TempDir())
 	s := New(d, nil, Config{Cadence: time.Hour})
 	defer s.Close(context.Background())
 
@@ -223,7 +223,7 @@ func TestSnapshotterSubmitAndForce(t *testing.T) {
 }
 
 func TestCloseLandsAcceptedWork(t *testing.T) {
-	d, _ := NewDir(t.TempDir(), 0)
+	d, _ := NewDir(t.TempDir())
 	s := New(d, nil, Config{Cadence: time.Hour})
 	s.Submit(manifest("chunk-a", 0, 10, 100, 1, []byte("state")))
 	if err := s.Close(context.Background()); err != nil {
@@ -240,22 +240,17 @@ func TestCloseLandsAcceptedWork(t *testing.T) {
 	}
 }
 
-func TestSmearedWriteRoundTrips(t *testing.T) {
-	// A 2MiB body under a 16MiB/s budget must still land intact, and
-	// the smear must actually pace (at least one inter-slice sleep).
-	d, _ := NewDir(t.TempDir(), 16<<20)
+func TestLargeWriteRoundTrips(t *testing.T) {
+	// A multi-megabyte body must land intact through tmp+rename.
+	d, _ := NewDir(t.TempDir())
 	raw := bytes.Repeat([]byte{0xA5}, 2<<20)
-	start := time.Now()
 	ref, err := d.Put(context.Background(), manifest("chunk-a", 0, 10, 100, 1, raw))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if time.Since(start) < 50*time.Millisecond {
-		t.Fatal("smear budget did not pace the write")
-	}
 	m, err := d.Load(ref)
 	if err != nil || !bytes.Equal(m.State, raw) {
-		t.Fatalf("smeared write corrupted state: %v", err)
+		t.Fatalf("large write corrupted state: %v", err)
 	}
 }
 
@@ -264,7 +259,7 @@ func TestRetainTrimsOnlyNewestLineageCoverage(t *testing.T) {
 	// drive WAL trim coverage — that would delete new-lineage segments
 	// replay still needs. With only old-lineage refs beyond the ring
 	// and a single new-lineage ref, coverage comes from the new one.
-	d, _ := NewDir(t.TempDir(), 0)
+	d, _ := NewDir(t.TempDir())
 	ctx := context.Background()
 	if _, err := d.Put(ctx, manifest("chunk-a", 0, 100, 5000, 1, []byte("old"))); err != nil {
 		t.Fatal(err)

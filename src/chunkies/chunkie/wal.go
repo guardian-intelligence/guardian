@@ -59,8 +59,16 @@ func newShadowFactory(dir string, st checkpoint.Store, game string) shadowFunc {
 		if st != nil {
 			// Between the lock and Create: the volume is quiescent and
 			// fenced, exactly what the ladder will see at the flip.
+			// nextTick is the tick the activation will execute next; the
+			// recovered tip speaks in last-completed ticks, so the loss
+			// graph compares against nextTick-1 or it reads one high
+			// forever.
 			pw := sha256.Sum256(boot.module)
-			rehearse(guard, st, dir, chunk, boot.module, boot.terrain, boot.clientSum, pw, ticklog.Tip{Tick: nextTick, Seq: lastSeq})
+			pgTick := nextTick
+			if pgTick > 0 {
+				pgTick--
+			}
+			rehearse(guard, st, dir, chunk, boot.module, boot.terrain, boot.clientSum, pw, ticklog.Tip{Tick: pgTick, Seq: lastSeq})
 		}
 		l, err := ticklog.Create(ticklog.Config{
 			Dir:        dir,
@@ -176,9 +184,10 @@ func (w *shadowWAL) forceCheckpoint(chunk string, m codec.Checkpoint, prove chec
 		return
 	}
 	m.Generation = w.guard.Generation()
-	// Bounded, unlike the cadence lane: this runs on the tick goroutine.
-	// 30s covers the largest deflated manifest at the default 8MiB/s
-	// smear with an order of magnitude to spare.
+	// Bounded, unlike the cadence lane: this runs on the tick goroutine,
+	// and the swap must fail loudly rather than freeze the world past
+	// the budget (30s covers the flat write, read-back, and the fresh-
+	// instance proof with room to spare).
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if _, err := w.ckpt.Force(ctx, m, prove); err != nil {

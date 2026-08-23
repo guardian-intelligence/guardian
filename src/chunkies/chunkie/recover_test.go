@@ -49,7 +49,7 @@ func buildShadowedWorld(t *testing.T) builtWorld {
 	}
 	module := toyModule(t)
 	dir := t.TempDir()
-	st, err := checkpoint.NewDir(filepath.Join(dir, "checkpoints"), 0)
+	st, err := checkpoint.NewDir(filepath.Join(dir, "checkpoints"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,14 +214,35 @@ func TestRecoverPairMismatchRefuses(t *testing.T) {
 	otherPW := w.pw
 	otherPW[0] ^= 0xFF
 	_, err := recoverWorld(g, w.st, w.dir, w.cw, otherPW, []string{"chunk-ladder"})
-	if err == nil || !strings.Contains(err.Error(), "module pair") {
-		t.Fatalf("a volume whose checkpoints all mismatch the mounted pair must refuse, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "mounted sim module") {
+		t.Fatalf("a volume whose checkpoints all mismatch the mounted sim module must refuse, got %v", err)
+	}
+}
+
+// CW is forensic, never fatal: the client module hot-swaps on the mount
+// with no tick barrier, so old-CW manifests are a routine deploy's
+// shape — recovery keys on the sim module alone.
+func TestRecoverToleratesClientModuleDrift(t *testing.T) {
+	w := buildShadowedWorld(t)
+	g := acquireFor(t, w.dir)
+	otherCW := w.cw
+	otherCW[0] ^= 0xFF
+	states, err := recoverWorld(g, w.st, w.dir, otherCW, w.pw, []string{"chunk-ladder"})
+	if err != nil {
+		t.Fatalf("client-module drift must recover, not refuse: %v", err)
+	}
+	b := states["chunk-ladder"]
+	if b.ckpt.Version == 0 {
+		t.Fatal("drift tolerance returned genesis for a lived world")
+	}
+	if err := proveAndReplay(w.module, nil, b); err != nil {
+		t.Fatalf("proof under client drift: %v", err)
 	}
 }
 
 func TestRecoverGenesisOnlyWhenBlank(t *testing.T) {
 	dir := t.TempDir()
-	st, err := checkpoint.NewDir(filepath.Join(dir, "checkpoints"), 0)
+	st, err := checkpoint.NewDir(filepath.Join(dir, "checkpoints"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,17 +259,30 @@ func TestRecoverGenesisOnlyWhenBlank(t *testing.T) {
 func TestRecoverRefusesHistoryWithoutCheckpoint(t *testing.T) {
 	w := buildShadowedWorld(t)
 	// Same WAL, empty store: as if the checkpoint directory was lost.
-	empty, err := checkpoint.NewDir(filepath.Join(t.TempDir(), "checkpoints"), 0)
+	empty, err := checkpoint.NewDir(filepath.Join(t.TempDir(), "checkpoints"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	g := acquireFor(t, w.dir)
-	// Either refusal is legal and loud: the genesis probe scans from seq
-	// 0 and a shadow-era WAL provably does not start there (ErrGap), or
-	// a post-flip WAL that does reach the explicit history check.
+	// The header-level trace sweep catches this first (segments name the
+	// chunk born mid-history); the record-level probe and ErrGap remain
+	// legal refusals behind it.
 	_, err = recoverWorld(g, empty, w.dir, w.cw, w.pw, []string{"chunk-ladder"})
-	if err == nil || !(strings.Contains(err.Error(), "without a restorable checkpoint") || strings.Contains(err.Error(), "seq gap")) {
+	if err == nil || !(strings.Contains(err.Error(), "lived history") || strings.Contains(err.Error(), "without a restorable checkpoint") || strings.Contains(err.Error(), "seq gap")) {
 		t.Fatalf("WAL history with no checkpoint must refuse to re-genesis, got %v", err)
+	}
+}
+
+func TestHasTraceSeesLivedHistory(t *testing.T) {
+	w := buildShadowedWorld(t)
+	if got, err := ticklog.HasTrace(w.dir, "chunk-ladder"); err != nil || !got {
+		t.Fatalf("a volume whose segments carry a mid-history birth must trace (got %v, %v)", got, err)
+	}
+	if got, err := ticklog.HasTrace(w.dir, "chunk-never"); err != nil || got {
+		t.Fatalf("an unknown chunk must not trace (got %v, %v)", got, err)
+	}
+	if got, err := ticklog.HasTrace(t.TempDir(), "chunk-ladder"); err != nil || got {
+		t.Fatalf("a blank volume must not trace (got %v, %v)", got, err)
 	}
 }
 
@@ -291,7 +325,7 @@ func TestPromotionBarrierCheckpointClosesPairWindow(t *testing.T) {
 	module := toyModule(t)
 	mods := toyMods(module)
 	dir := t.TempDir()
-	st, err := checkpoint.NewDir(filepath.Join(dir, "checkpoints"), 0)
+	st, err := checkpoint.NewDir(filepath.Join(dir, "checkpoints"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,12 +381,21 @@ func TestPromotionBarrierCheckpointClosesPairWindow(t *testing.T) {
 		t.Fatalf("barrier checkpoint epoch = %d, want %d", m.Epoch, a.host.Epoch())
 	}
 
+	// Post-swap traffic: the very next ticks' records sit exactly one
+	// past the barrier manifest, where an off-by-one in its Tick stamp
+	// would make the scan skip them into a false seq gap.
+	a.stageIntent(s, 3, kMove, move(-2))
+	a.tickOnce()
+	a.stageIntent(s, 4, kMove, move(1))
+	a.tickOnce()
+	wantTip := ticklog.Tip{Tick: a.host.Tick() - 1, Seq: a.lastSeq}
+
 	// Crash here — inside the old cadence window — and the ladder under
-	// the NEW pair must choose the barrier checkpoint, not refuse.
+	// the NEW pair must choose the barrier checkpoint, replay the
+	// post-swap tail, and never refuse.
 	a.close()
 	a.host.close()
 	g := acquireFor(t, dir)
-	defer g.Release()
 	states, err := recoverWorld(g, st, dir, cw, newPW, []string{"chunk-barrier"})
 	if err != nil {
 		t.Fatalf("ladder refused inside the post-promote window: %v", err)
@@ -360,6 +403,9 @@ func TestPromotionBarrierCheckpointClosesPairWindow(t *testing.T) {
 	b := states["chunk-barrier"]
 	if b.ckpt.Version == 0 || b.ckpt.Tick != m.Tick {
 		t.Fatalf("ladder chose tick %d, want the barrier checkpoint at %d", b.ckpt.Tick, m.Tick)
+	}
+	if len(b.runs) == 0 || b.tip.Seq != wantTip.Seq {
+		t.Fatalf("post-swap events lost across the barrier: tip %+v, want seq %d with replay material", b.tip, wantTip.Seq)
 	}
 	if err := proveAndReplay(variant, nil, b); err != nil {
 		t.Fatalf("barrier checkpoint failed the ladder's proof: %v", err)

@@ -129,14 +129,15 @@ func Run() {
 	var shadow shadowFunc
 	if dir := os.Getenv("WAL_DIR"); dir != "" {
 		// The checkpoint store lives beside the WAL segments on the same
-		// volume (the scan skips the subdirectory). Smear budget in
-		// bytes/sec: enough to land WUM-scale manifests inside a cadence
-		// without a burst the group commit would feel.
+		// volume (the scan skips the subdirectory).
 		var st checkpoint.Store
-		if d, err := checkpoint.NewDir(filepath.Join(dir, "checkpoints"), int64(envInt("CKPT_SMEAR_BPS", 8<<20))); err != nil {
+		if d, err := checkpoint.NewDir(filepath.Join(dir, "checkpoints")); err != nil {
 			// The volume is present but the checkpoint lane can't open:
-			// WAL-only shadow (slice B's shape) beats no shadow at all.
+			// WAL-only shadow (slice B's shape) beats no shadow at all —
+			// but it must page, not just log: recovery is checkpoint-less
+			// until someone looks.
 			log.Printf("checkpoint store: %v — shadow runs WAL-only", err)
+			mCkptLaneDown.Set(1)
 		} else {
 			st = d
 		}

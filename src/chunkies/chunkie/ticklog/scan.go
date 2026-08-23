@@ -114,6 +114,32 @@ func Scan(dir string, chunks []ChunkKey, apply func(chunk string, r codec.Record
 // ErrCorrupt: segment names only appear once their header is durable (the
 // create-rename protocol), so a bad one is disk damage, never a crash
 // artifact.
+// HasTrace reports whether any segment header on the volume names the
+// chunk with evidence of a lived world: a lineage above zero (only a
+// rewind mints those) or a first tick past genesis (a WAL born
+// mid-history). The genesis rung's record-level probe is lineage-
+// scoped; this header sweep sees the history a trimmed lineage-0
+// leaves behind on higher lineages. A missing directory is a blank
+// volume; an unreadable header propagates — it could be hiding
+// history, so the caller must refuse, not re-genesis.
+func HasTrace(dir, chunk string) (bool, error) {
+	segs, err := readSegmentHeaders(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, s := range segs {
+		for _, c := range s.header.Chunks {
+			if c.Name == chunk && (c.Lineage > 0 || c.FirstTick > 0) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func readSegmentHeaders(dir string) ([]segref, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

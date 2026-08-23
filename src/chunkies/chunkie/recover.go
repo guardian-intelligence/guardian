@@ -42,12 +42,16 @@ type bootState struct {
 }
 
 // recoverWorld walks the ladder for every chunk the deployment serves.
-// cw/pw are the mounted module pair; a checkpoint under any other pair
-// is skipped (a crash between promotion steps 2 and 3 leaves a newer
-// manifest under the pair that never mounted — the mounted pair resumes
-// its own newest, Figure 3), and a chunk with checkpoints but none
-// under the mounted pair refuses: that is the wrong module for this
-// volume, corruption-class, never compatibility.
+// cw/pw are the mounted module pair. Selection keys on PW alone — the
+// sim module is the only replay input: a checkpoint under another sim
+// module is skipped (a crash between promotion steps 2 and 3 leaves a
+// newer manifest under the module that never mounted — the mounted one
+// resumes its own newest, Figure 3), and a chunk with checkpoints but
+// none under the mounted sim module refuses: wrong module for this
+// volume, corruption-class, never compatibility. CW records the client
+// bundle for forensics; its drift is counted and logged, never refused
+// (the client hot-swaps with no tick barrier, so old-CW manifests are a
+// routine deploy's shape, not damage).
 func recoverWorld(g *ticklog.Guard, st checkpoint.Store, walDir string, cw, pw [32]byte, chunks []string) (map[string]bootState, error) {
 	if g == nil {
 		return nil, errors.New("recovery ladder without the writer lock")
@@ -78,26 +82,43 @@ func recoverWorld(g *ticklog.Guard, st checkpoint.Store, walDir string, cw, pw [
 				log.Printf("chunk %s: checkpoint lineage=%d seq=%d failed integrity (%v) — trying older", name, r.Lineage, r.Seq, err)
 				continue
 			}
-			if c.CW != cw || c.PW != pw {
+			if c.PW != pw {
 				mismatched++
 				continue
+			}
+			if c.CW != cw {
+				// Only the sim module (PW) decides replay determinism — the
+				// client module never touches world state, and it hot-swaps
+				// on the mount with no tick barrier, so a routine client
+				// deploy legitimately leaves every manifest old-CW for up
+				// to a cadence. Drift is observable, never refusable.
+				mRecoveryCWDrift.Inc()
+				log.Printf("chunk %s: checkpoint lineage=%d seq=%d carries CW %x (mounted %x) — client-module drift, recovering anyway", name, r.Lineage, r.Seq, c.CW[:4], cw[:4])
 			}
 			chosen, m = &refs[i], c
 			break
 		}
 		if chosen == nil {
 			if mismatched > 0 {
-				return nil, fmt.Errorf("chunk %s: no checkpoint matches the mounted module pair (%d under other pairs) — wrong module for this volume, refusing", name, mismatched)
+				return nil, fmt.Errorf("chunk %s: no checkpoint matches the mounted sim module (%d under other modules) — wrong module for this volume, refusing", name, mismatched)
 			}
 			if len(refs) > 0 {
 				return nil, fmt.Errorf("chunk %s: all %d checkpoints failed integrity — refusing", name, len(refs))
 			}
-			// No checkpoints: genesis candidate. The scan below must come
-			// back equally blank — WAL history without a restorable
-			// checkpoint refuses rather than silently re-genesis a lived
-			// world. (The blank-history probe scans lineage 0: every
-			// pre-flip writer is lineage 0, and post-flip a chunk always
-			// checkpoints before trim can erase its lineage evidence.)
+			// No checkpoints: genesis candidate. Two probes must both come
+			// back blank — WAL history without a restorable checkpoint
+			// refuses rather than silently re-genesis a lived world. The
+			// record-level scan below covers lineage 0; the header-level
+			// trace sweep covers what a lineage-0 scan cannot see (a
+			// rewound world whose lineage-0 segments were trimmed and
+			// whose checkpoint directory was then lost).
+			trace, terr := ticklog.HasTrace(walDir, name)
+			if terr != nil {
+				return nil, fmt.Errorf("chunk %s: probing the volume for history: %w", name, terr)
+			}
+			if trace {
+				return nil, fmt.Errorf("chunk %s: WAL segments carry lived history but no checkpoint survives — refusing to re-genesis a lived world", name)
+			}
 			keys = append(keys, ticklog.ChunkKey{Name: name, Lineage: 0, AfterTick: 0, AfterSeq: -1})
 			out[name] = bootState{}
 			continue
@@ -169,20 +190,51 @@ func recoverWorld(g *ticklog.Guard, st checkpoint.Store, walDir string, cw, pw [
 // boot path already proves that choreography today).
 var errContentSwap = errors.New("recovery replay crosses a content swap")
 
+// proveRestore is the restore half of the ladder's proof: a fresh
+// instance of module, the terrain if any, the raw state, the manifest's
+// world hash. E-variants throughout — a trap here is a failed proof and
+// must surface as one, never as a panic in the serving process. On
+// success the proven host is returned live for the caller to replay
+// into (or close immediately).
+func proveRestore(module, terrain, state []byte, wh uint64) (*simHost, error) {
+	host, err := newSimHost(module)
+	if err != nil {
+		return nil, err
+	}
+	if len(terrain) > 0 {
+		if err := host.SetTerrainE(terrain); err != nil {
+			host.close()
+			return nil, err
+		}
+	}
+	if err := host.RestoreE(state); err != nil {
+		host.close()
+		return nil, err
+	}
+	got, err := host.HashE()
+	if err != nil {
+		host.close()
+		return nil, err
+	}
+	if got != wh {
+		host.close()
+		return nil, fmt.Errorf("restore hash %016x != manifest %016x — refusing", got, wh)
+	}
+	return host, nil
+}
+
 // proveAndReplay is the expensive verb of the tiered verification:
 // restore the checkpoint into a fresh instance, demand the manifest's
 // world hash, then replay the WAL runs through the same apply path the
 // live tick uses and demand every tick record's post-step hash. The
 // throwaway host is closed before return; the caller owns MarkProven.
+// E-variants throughout: rehearsal outcomes are metrics and logs, and
+// a state that traps the module is a failed rehearsal, not a dead
+// chunkie in a deterministic crash loop.
 func proveAndReplay(module []byte, terrain []byte, b bootState) error {
 	if b.ckpt.Version == 0 {
 		return errors.New("nothing to prove: genesis bootState")
 	}
-	host, err := newSimHost(module)
-	if err != nil {
-		return err
-	}
-	defer host.close()
 	if b.ckpt.Content != 0 {
 		if terrainID(terrain) != b.ckpt.Content {
 			// The active blob moved past the checkpoint's content — the
@@ -190,45 +242,71 @@ func proveAndReplay(module []byte, terrain []byte, b bootState) error {
 			// current blob in hand.
 			return fmt.Errorf("%w: checkpoint content %016x, active %016x", errContentSwap, b.ckpt.Content, terrainID(terrain))
 		}
-		if err := host.SetTerrain(terrain); err != nil {
-			return err
-		}
+	} else {
+		terrain = nil
 	}
 	state, err := checkpoint.Inflate(b.ckpt.State)
 	if err != nil {
 		return fmt.Errorf("checkpoint state: %w", err)
 	}
-	if err := host.Restore(state); err != nil {
+	host, err := proveRestore(module, terrain, state, b.ckpt.WH)
+	if err != nil {
 		return err
 	}
-	if got := host.Hash(); got != b.ckpt.WH {
-		return fmt.Errorf("restore hash %016x != manifest %016x — refusing", got, b.ckpt.WH)
-	}
+	defer host.close()
 	for _, r := range b.runs {
 		recs, err := codec.ParseRecords(r.Records, int(r.Count))
 		if err != nil {
 			return fmt.Errorf("replay tick %d: %w", r.Tick, err)
 		}
-		for host.Tick() < r.Tick {
-			host.Step()
+		for {
+			tk, err := host.TickE()
+			if err != nil {
+				return err
+			}
+			if tk >= r.Tick {
+				break
+			}
+			if err := host.StepE(); err != nil {
+				return err
+			}
 		}
 		for _, rec := range recs {
 			if rec.Kind == codec.KindContentSet {
 				return errContentSwap
 			}
-			if code := host.Apply(rec.SimEvent); code != 0 {
+			code, err := host.ApplyE(rec.SimEvent)
+			if err != nil {
+				return err
+			}
+			if code != 0 {
 				return fmt.Errorf("replay: tick %d kind %d rejected with code %d", r.Tick, rec.Kind, code)
 			}
 		}
-		host.Step()
-		if got := host.Hash(); got != r.WH {
+		if err := host.StepE(); err != nil {
+			return err
+		}
+		got, err := host.HashE()
+		if err != nil {
+			return err
+		}
+		if got != r.WH {
 			return fmt.Errorf("replay diverged at tick %d: %016x != %016x", r.Tick, got, r.WH)
 		}
 	}
 	// Watermarks past the last event-carrying record are idle ticks;
 	// step through them so the proven world stands at the tip.
-	for host.Tick() <= b.tip.Tick {
-		host.Step()
+	for {
+		tk, err := host.TickE()
+		if err != nil {
+			return err
+		}
+		if tk > b.tip.Tick {
+			break
+		}
+		if err := host.StepE(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

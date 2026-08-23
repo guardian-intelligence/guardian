@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
 )
@@ -88,19 +87,34 @@ type Store interface {
 // with its filename — corruption, never compatibility.
 var ErrMismatch = errors.New("checkpoint: name/manifest mismatch")
 
-// Dir is the node-local store. Writes are optionally smeared:
-// WriteBudget caps bytes/sec so a checkpoint burst queues behind the
-// WAL's group commit as a trickle, not a spike.
+// Dir is the node-local store. Writes go to the device flat out: the
+// WAL's group commit is non-blocking and the volume is a dedicated
+// NVMe, so a manifest burst can only nudge durable-lag by the burst's
+// own transfer time — noise against the ruled 30s loss tolerance. If a
+// soak ever shows cadence-correlated lag spikes, pace with a rate
+// limiter behind that measurement; do not reintroduce ambient
+// throttling.
 type Dir struct {
-	root   string
-	budget int64
+	root string
 }
 
-func NewDir(root string, writeBudget int64) (*Dir, error) {
+func NewDir(root string) (*Dir, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
 	}
-	return &Dir{root: root, budget: writeBudget}, nil
+	// Sweep crash leftovers once, before any writer is live: a failed
+	// Put removes its own tmp, so an orphan can only be a dead process's
+	// — and sweeping from inside Put would race a concurrent writer's
+	// open tmp (the cadence lane and a promotion-barrier Force can
+	// legitimately overlap).
+	if ents, err := os.ReadDir(root); err == nil {
+		for _, e := range ents {
+			if e.IsDir() {
+				sweepTmp(filepath.Join(root, e.Name()))
+			}
+		}
+	}
+	return &Dir{root: root}, nil
 }
 
 func (d *Dir) Put(ctx context.Context, m codec.Checkpoint) (Ref, error) {
@@ -119,14 +133,13 @@ func (d *Dir) Put(ctx context.Context, m codec.Checkpoint) (Ref, error) {
 			return Ref{}, err
 		}
 	}
-	sweepTmp(dir)
 	b := codec.EncodeCheckpoint(m)
 	tmp := r.path(d.root) + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return Ref{}, err
 	}
-	err = d.write(ctx, f, b)
+	_, err = f.Write(b)
 	if err == nil {
 		err = f.Sync()
 	}
@@ -161,28 +174,6 @@ func validName(chunk string) error {
 	if chunk == "" || chunk == "." || chunk == ".." ||
 		strings.ContainsAny(chunk, "/\\") {
 		return fmt.Errorf("checkpoint: invalid chunk name %q", chunk)
-	}
-	return nil
-}
-
-// write smears the body under the byte budget: 1MiB slices with
-// proportional sleeps, so the device sees a trickle. ctx aborts a
-// smear mid-way (the tmp file is removed by the caller).
-func (d *Dir) write(ctx context.Context, f *os.File, b []byte) error {
-	const slice = 1 << 20
-	for len(b) > 0 {
-		n := min(len(b), slice)
-		if _, err := f.Write(b[:n]); err != nil {
-			return err
-		}
-		b = b[n:]
-		if d.budget > 0 && len(b) > 0 {
-			select {
-			case <-time.After(time.Duration(int64(n) * int64(time.Second) / d.budget)):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
 	}
 	return nil
 }

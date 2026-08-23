@@ -308,6 +308,7 @@ func (h *simHost) StepE() error {
 }
 
 func (h *simHost) HashE() (uint64, error) { return h.callE(h.fHash) }
+func (h *simHost) TickE() (uint64, error) { return h.callE(h.fTick) }
 
 // Apply runs one encoded event (kind u16 LE + payload) through sim_apply.
 // The module must not mutate on a nonzero return (pinned by its tests).
@@ -542,7 +543,7 @@ func (a *authority) failSoak(hash string, err error) {
 // validation instrument, not a lineage), the boundary snapshot goes
 // durable under the NEW module's hash — the anchor journal replay will
 // restore from — and only then does the candidate become the host.
-func (a *authority) promote(t uint64) {
+func (a *authority) promote(t uint64, dedup []codec.DedupEntry) {
 	state := a.host.Snapshot()
 	if err := a.cand.RestoreE(state); err != nil {
 		a.failSoak(a.candHash, fmt.Errorf("boundary restore: %w", err))
@@ -574,39 +575,24 @@ func (a *authority) promote(t uint64) {
 		// pair refusal on a world that was healthy. Proof runs in a fresh
 		// instance of the candidate's bytes — the claim is about what
 		// recovery will find. Failure latches the shadow dead and never
-		// gates the swap: PG remains the promotion's authority.
+		// gates the swap: PG remains the promotion's authority. Tick is
+		// the completed boundary tick (t names the next one) — the WAL
+		// record above carries the same number, and a scan keyed one high
+		// would skip the first post-swap record into a false gap.
 		modBytes, terrainBlob := a.candBytes, a.terrainBlob
-		a.mu.Lock()
-		dedup := append([]codec.DedupEntry(nil), a.seenFifo...)
-		a.mu.Unlock()
 		a.wal.forceCheckpoint(a.name, codec.Checkpoint{
 			Version: 1, Game: a.wal.game, Chunk: a.name,
 			Lineage: 0,
-			Seq:     a.lastSeq, Tick: t, Epoch: a.host.Epoch(),
+			Seq:     a.lastSeq, Tick: t - 1, Epoch: a.host.Epoch(),
 			WH: wh, Content: a.terrain,
 			CW: a.mods.client.Sum(), PW: a.candSHA,
 			Dedup: dedup, State: state,
 		}, func(raw []byte, wantWH uint64) error {
-			h, err := newSimHost(modBytes)
+			h, err := proveRestore(modBytes, terrainBlob, raw, wantWH)
 			if err != nil {
 				return err
 			}
-			defer h.close()
-			if len(terrainBlob) > 0 {
-				if err := h.SetTerrainE(terrainBlob); err != nil {
-					return err
-				}
-			}
-			if err := h.RestoreE(raw); err != nil {
-				return err
-			}
-			got, err := h.HashE()
-			if err != nil {
-				return err
-			}
-			if got != wantWH {
-				return fmt.Errorf("barrier checkpoint restore hash %016x != %016x", got, wantWH)
-			}
+			h.close()
 			return nil
 		})
 	}
@@ -1211,9 +1197,20 @@ func (a *authority) tickOnce() {
 	var walFirstSeq int64
 	var walCount uint16
 
+	// Decide whether this tick may mint a manifest BEFORE the drain, so
+	// the dedup window is captured in the same critical section that
+	// freezes the tick's intent batch: a copy taken later can name
+	// intents staged mid-tick whose events are absent from the
+	// manifest's state — and a recovered window that remembers an
+	// unjournaled intent drops its resend as a duplicate.
+	mayManifest := a.wal != nil && (committing || a.wal.dueCheckpoint(a.name, a.tm.now()))
+	var dedupSnap []codec.DedupEntry
 	a.mu.Lock()
 	staged := append(prelude, a.staged...)
 	a.staged = nil
+	if mayManifest {
+		dedupSnap = append([]codec.DedupEntry(nil), a.seenFifo...)
+	}
 	a.mu.Unlock()
 	dequeuedAt := a.tm.now()
 	for i := range staged {
@@ -1225,6 +1222,7 @@ func (a *authority) tickOnce() {
 
 	var accepted []journal.Event
 	var acceptedIntents []stagedIntent
+	var rejectedKeys []codec.DedupEntry
 	tick := a.host.Tick()
 	epoch := a.host.Epoch()
 	for _, in := range staged {
@@ -1234,10 +1232,21 @@ func (a *authority) tickOnce() {
 				in.sess.sendReject(in.intentID, code)
 				// A rejected intent produced no journal event, so it must
 				// not occupy the idempotency window: a corrected resend
-				// under the same id has to reach the sim.
+				// under the same id has to reach the sim. That means the
+				// FIFO too, not just the map — the FIFO is what the
+				// checkpoint manifest persists, and a rejected id living
+				// there resurrects as a false duplicate after recovery.
 				if in.intentID != 0 {
+					key := codec.DedupEntry{Actor: in.actorID, Intent: in.intentID}
+					rejectedKeys = append(rejectedKeys, key)
 					a.mu.Lock()
-					delete(a.seen, codec.DedupEntry{Actor: in.actorID, Intent: in.intentID})
+					delete(a.seen, key)
+					for i, e := range a.seenFifo {
+						if e == key {
+							a.seenFifo = append(a.seenFifo[:i], a.seenFifo[i+1:]...)
+							break
+						}
+					}
 					a.mu.Unlock()
 				}
 			}
@@ -1351,28 +1360,49 @@ func (a *authority) tickOnce() {
 		} else {
 			a.wal.watermark(tick)
 		}
-		if a.wal.dueCheckpoint(a.name, a.tm.now()) {
+		// This tick's rejects were still in the drain-time window copy;
+		// their events exist nowhere, so the persisted window must not
+		// remember them.
+		if len(rejectedKeys) > 0 && len(dedupSnap) > 0 {
+			kept := dedupSnap[:0]
+			for _, e := range dedupSnap {
+				drop := false
+				for _, r := range rejectedKeys {
+					if e == r {
+						drop = true
+						break
+					}
+				}
+				if !drop {
+					kept = append(kept, e)
+				}
+			}
+			dedupSnap = kept
+		}
+		promoting := committing && a.cand != nil
+		if mayManifest && !promoting && a.wal.dueCheckpoint(a.name, a.tm.now()) {
 			// The tick-barrier cost is exactly one sim_snapshot and the
-			// dedup-window copy; deflate, the smeared write, retention,
+			// dedup-window copy; deflate, the durable write, retention,
 			// and WAL trim run on the snapshotter's lane. Tick and WH
 			// match the WAL record above, so a scan keyed by this
-			// manifest resumes at the next record.
-			a.mu.Lock()
-			dedup := append([]codec.DedupEntry(nil), a.seenFifo...)
-			a.mu.Unlock()
+			// manifest resumes at the next record. A promoting tick
+			// skips the cadence: its barrier Force writes the same
+			// boundary under the new pair, and two manifests sharing one
+			// (lineage, seq, tick, generation, epoch) name must never
+			// race.
 			a.wal.submitCheckpoint(codec.Checkpoint{
 				Version: 1, Game: a.wal.game, Chunk: a.name,
 				Lineage: 0, // pre-flip histories are lineage 0; rung 5 mints higher ones
 				Seq:     a.lastSeq, Tick: tick, Epoch: a.host.Epoch(),
 				WH: wh, Content: a.terrain,
 				CW: a.mods.client.Sum(), PW: a.simSum,
-				Dedup: dedup, State: a.host.Snapshot(),
+				Dedup: dedupSnap, State: a.host.Snapshot(),
 			})
 		}
 	}
 
 	if committing && a.cand != nil {
-		a.promote(t)
+		a.promote(t, dedupSnap)
 	}
 
 	if a.eventsSinceSnap >= snapshotEvery || (a.eventsSinceSnap > 0 && a.tm.now().Sub(a.lastSnapAt) > snapshotMaxAge) {

@@ -230,7 +230,10 @@ func drive(t *testing.T, hosts []*host, rounds [][]Event) {
 // conformance, not discovered stalling ticks every checkpoint cadence
 // in prod.
 const (
-	serializeCalls  = 64
+	// 256 samples so the p99 index genuinely discards the top outliers —
+	// at 64, len-1-len/100 lands on the maximum, and one CI scheduler
+	// hiccup fails an unrelated PR as a "p99 regression".
+	serializeCalls  = 256
 	serializeBudget = 2 * time.Millisecond // p99 over serializeCalls
 )
 
@@ -239,8 +242,12 @@ func runSerializeBudget(t *testing.T, g Game) {
 	defer h.close()
 	warm(t, h, g, 7, 64)
 	for i, ev := range g.MaxWorld {
-		if _, err := h.apply(ev); err != nil {
+		code, err := h.apply(ev)
+		if err != nil {
 			t.Fatalf("max-world event %d (kind %d): %v", i, ev.Kind, err)
+		}
+		if code != 0 {
+			t.Fatalf("max-world event %d (kind %d) rejected with code %d — the declared max world must be constructible, or the budget is measured on a smaller world than prod will serve", i, ev.Kind, code)
 		}
 	}
 	if err := h.step(); err != nil {
@@ -260,7 +267,7 @@ func runSerializeBudget(t *testing.T, g Game) {
 	sort.Slice(durs, func(i, j int) bool { return durs[i] < durs[j] })
 	p99 := durs[len(durs)-1-len(durs)/100]
 	// Size is reported, never gated: the budget is time — a game may
-	// spend its 2ms on any number of bytes the smeared write can carry.
+	// spend its 2ms on any number of bytes the background write can carry.
 	t.Logf("sim_snapshot at max world: %d bytes, p50 %s, p99 %s (budget %s)", size, durs[len(durs)/2], p99, serializeBudget)
 	if p99 > serializeBudget {
 		t.Fatalf("sim_snapshot p99 %s exceeds the %s tick-barrier budget at the declared max world — the checkpoint cadence cannot schedule this game", p99, serializeBudget)
