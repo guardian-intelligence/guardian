@@ -2,7 +2,7 @@
 # 362510FCEFD5, Talos UserVolumeConfig "chunkies" in talm). Static and
 # node-pinned by design; the claimRef reserves it for the WUM chunkie's
 # PVC so no other claim can bind it. Capacity understates the 960GB disk
-# to leave room for LUKS2 and XFS overhead.
+# to leave room for XFS overhead.
 apiVersion: v1
 kind: PersistentVolume
 metadata:

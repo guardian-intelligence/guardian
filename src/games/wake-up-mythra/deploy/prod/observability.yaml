@@ -92,11 +92,3 @@ spec:
           annotations:
             summary: "chunkies-chunkie journal appends are failing"
             description: "The park closed authority after a journal append failure."
-        - alert: ChunkiesParkIntentRejectSpike
-          expr: sum(increase(chunkies_intents_rejected_total{job="chunkies-chunkie-metrics",reason!="target"}[15m])) by (reason) > 20
-          labels:
-            severity: warning
-            guardian_stage: prod
-          annotations:
-            summary: "chunkies-chunkie rejecting intents ({{ $labels.reason }})"
-            description: "More than 20 intents were rejected for one reason in 15 minutes."
