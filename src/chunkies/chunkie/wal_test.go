@@ -35,7 +35,7 @@ func TestShadowWALMirrorsJournal(t *testing.T) {
 	// An hour past the epoch, so the attach tip is a real tick number —
 	// the frontier below is exclusive and cannot express "before tick 0".
 	clock := fixedClock(wallEpoch.Add(time.Hour))
-	a, err := openAuthority(ctx, "chunk-shadow", module, nil, toyVocab(), j, toyMods(module), clock, nil)
+	a, err := openAuthority(ctx, "chunk-shadow", module, nil, toyVocab(), j, toyMods(module), clock, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

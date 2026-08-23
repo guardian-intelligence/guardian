@@ -27,6 +27,7 @@ import (
 type builtWorld struct {
 	dir    string
 	st     checkpoint.Store
+	j      journal.Journal
 	module []byte
 	cw, pw [32]byte
 	pgTip  ticklog.Tip // the journal's final frontier: what recovery chases
@@ -55,7 +56,7 @@ func buildShadowedWorld(t *testing.T) builtWorld {
 	}
 
 	clock := fixedClock(wallEpoch.Add(time.Hour))
-	a, err := openAuthority(ctx, "chunk-ladder", module, nil, toyVocab(), j, toyMods(module), clock, nil)
+	a, err := openAuthority(ctx, "chunk-ladder", module, nil, toyVocab(), j, toyMods(module), clock, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +98,62 @@ func buildShadowedWorld(t *testing.T) builtWorld {
 	tip := ticklog.Tip{Tick: a.host.Tick() - 1, Seq: a.lastSeq}
 	a.close()
 	a.host.close()
-	return builtWorld{dir: dir, st: st, module: module, cw: cw, pw: pw, pgTip: tip}
+	return builtWorld{dir: dir, st: st, j: j, module: module, cw: cw, pw: pw, pgTip: tip}
+}
+
+// TestReopenAcrossClockSkipReplays is drill 2's crash story on the
+// volume: a reopen after real downtime journals one clock_skip, and
+// that row must reach the WAL as a tick of its own — attached by open
+// between the restore and the repayment, stepped like any other tick —
+// or the next ladder run finds a seq hole where the skip should be and
+// refuses a world that was healthy.
+func TestReopenAcrossClockSkipReplays(t *testing.T) {
+	w := buildShadowedWorld(t)
+	ctx := context.Background()
+	factory := newShadowFactory(w.dir, w.st, "toy")
+	attach := func(a *authority) {
+		a.wal = factory("chunk-ladder", a.host.Epoch(), a.host.Tick(), a.lastSeq, shadowBoot{module: w.module, clientSum: w.cw})
+		if a.wal == nil {
+			t.Fatal("shadow failed to attach on reopen")
+		}
+	}
+	// Two hours dark: far past the dark-step window, so the repayment
+	// is a journaled clock_skip rather than stepped ticks.
+	later := wallEpoch.Add(3 * time.Hour)
+	a, err := openAuthority(ctx, "chunk-ladder", w.module, nil, toyVocab(), w.j, toyMods(w.module), fixedClock(later), nil, attach)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.wal == nil || a.wal.dead.Load() {
+		t.Fatal("the skip's WAL record latched the shadow")
+	}
+	if got := a.host.Tick(); got <= w.pgTip.Tick+uint64(24*60*60) {
+		t.Fatalf("reopen did not repay the gap: tick %d", got)
+	}
+	s := &session{sub: "alice", actorID: codec.ActorFor("alice"), out: make(chan []byte, 256)}
+	for i := 0; i < 6; i++ {
+		a.stageIntent(s, uint64(200+i), kMove, move(int32(i%3-1)))
+		a.tickOnce()
+	}
+	tip := ticklog.Tip{Tick: a.host.Tick() - 1, Seq: a.lastSeq}
+	a.close()
+	a.host.close()
+
+	g := acquireFor(t, w.dir)
+	states, err := recoverWorld(g, w.st, w.dir, w.cw, w.pw, []string{"chunk-ladder"})
+	if err != nil {
+		t.Fatalf("ladder across the skip: %v", err)
+	}
+	b := states["chunk-ladder"]
+	if b.rewound || b.tip.Seq != tip.Seq {
+		t.Fatalf("recovered seq %d (rewound=%v), journal seq %d — the skip did not reach the WAL", b.tip.Seq, b.rewound, tip.Seq)
+	}
+	if b.tip.Tick > tip.Tick {
+		t.Fatalf("recovered tip tick %d past the journal's %d", b.tip.Tick, tip.Tick)
+	}
+	if err := proveAndReplay(w.module, nil, b); err != nil {
+		t.Fatalf("replay across the skip diverged: %v", err)
+	}
 }
 
 func waitForRefs(t *testing.T, st checkpoint.Store, chunk string, n int) {
@@ -330,7 +386,7 @@ func TestPromotionBarrierCheckpointClosesPairWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock := fixedClock(wallEpoch.Add(time.Hour))
-	a, err := openAuthority(ctx, "chunk-barrier", module, nil, toyVocab(), j, mods, clock, nil)
+	a, err := openAuthority(ctx, "chunk-barrier", module, nil, toyVocab(), j, mods, clock, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

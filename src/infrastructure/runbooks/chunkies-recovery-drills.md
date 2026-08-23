@@ -30,7 +30,11 @@ The boot-time rehearsal is the observer for most drills: every chunkie
 activation runs the full ladder against the volume between the writer
 lock and its fresh WAL, and reports
 `chunkies_recovery_rehearsals_total{outcome}` plus
-`chunkies_recovery_rehearsal_loss_ticks`. A drill "passes" when the
+`chunkies_recovery_rehearsal_loss_ticks`. One outcome is expected
+noise exactly once: the first activation after the checkpoint lane is
+enabled over an already-shadowing volume rehearses `uncheckpointed`
+(WAL segments, no manifest yet) — gone after the first cadence, and
+never an acceptable outcome during a drill. A drill "passes" when the
 rehearsal after the induced failure lands on the expected rung with the
 expected loss, and the client sees what the wire promises.
 
@@ -52,9 +56,13 @@ Full ladder including flock re-acquisition and clock_skip repayment.
     talosctl -n <ash-worker0 ip> reboot
 
 Expected: pod reschedules onto the same node (node-pinned), rehearsal
-runs the full ladder on a cold volume, PG boot repays the frozen
-wall-clock as one journaled clock_skip, spectator reconnects to a world
-whose clock jumped once (no tick-by-tick catchup crawl).
+runs the full ladder on a cold volume and `rehearsal_loss_ticks` reads
+the crash (≤ one group commit), not the downtime — the shadow attaches
+before the repayment. PG boot then repays the frozen wall-clock as one
+journaled clock_skip, mirrored into the WAL as a tick of its own; the
+spectator reconnects to a world whose clock jumped once (no tick-by-tick
+catchup crawl). The activation after this one must rehearse `clean`
+across the skip record.
 
 ## Drill 3 — Fenced takeover
 

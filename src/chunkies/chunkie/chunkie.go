@@ -646,7 +646,12 @@ func (a *authority) setTerrain(blob []byte) error {
 // closed, and hands back an authority ready for run(). A chunk whose
 // snapshot does not replay to its recorded world hash is refused, never
 // served wrong.
-func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing, publish publishFunc) (*authority, error) {
+// openAuthority restores a chunk from its journal and settles it for
+// serving. shadow, when set, attaches the durability lane after the
+// restore and before the boot-time system events (clock repayment,
+// rate convergence): those events are journal rows like any other, and
+// the WAL must hold them or post-flip replay cannot cross a reboot.
+func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing, publish publishFunc, shadow func(*authority)) (*authority, error) {
 	if tm.hz == 0 {
 		tm.hz = 24
 	}
@@ -682,6 +687,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 		// a chunk that slept across midnight wakes with the right day.
 	}
 	fail := func(err error) (*authority, error) {
+		a.wal.close() // nil-safe: releases the lock if the shadow attached
 		host.close()
 		return nil, fmt.Errorf("chunk %s: %w", name, err)
 	}
@@ -748,6 +754,15 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 			}
 			a.lastSeq = ev.Seq
 		}
+		if len(tail) > 0 {
+			// A tick is apply-then-step (tickOnce), and the process that
+			// journaled the final tick's events stepped past them before
+			// it died. Replaying them leaves the host mid-tick; take that
+			// step so the restored world is tick-clean — the same point
+			// the WAL ladder recovers to — before any boot-time system
+			// event lands on it.
+			host.Step()
+		}
 	} else {
 		// Genesis: the content artifact becomes durable first, then the
 		// snapshot that references it — events alone cannot recreate a
@@ -780,18 +795,39 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 	// segment, then repay the gap between the stored tick and the wall
 	// clock before the doors open.
 	a.refreshSchedule(true)
-	if target := a.targetTick(tm.now()); target > host.Tick() {
-		if time.Duration(target-host.Tick())*a.tickDur <= darkStepWindow {
+	if shadow != nil {
+		// Between restore and repayment: the rehearsal's loss graph then
+		// reads what the crash cost (the volume's tip against the
+		// journal's), never the downtime the repayment is about to skip.
+		shadow(a)
+	}
+	// Boot-time system events are ticks like any other — apply, then
+	// step (systemTick) — so each one carries the world one tick past
+	// where it lands. A skip therefore aims one tick short and arrives
+	// on the schedule tick. A rate_set's closing step runs at the new
+	// rate, worth less wall time than the old tick it would displace,
+	// so it is not reserved for: the world may lead the schedule by one
+	// new-rate tick, and the run loop simply waits for it.
+	target := a.targetTick(tm.now())
+	skip := target > host.Tick() && time.Duration(target-host.Tick())*a.tickDur > darkStepWindow
+	goal := target
+	if skip {
+		goal--
+	}
+	if goal > host.Tick() {
+		if skip {
+			if err := a.clockSkip(ctx, goal); err != nil {
+				return fail(err)
+			}
+		} else {
 			// The world lives through a short restart: step it, filling
 			// the ring so rejoining clients keep their fast-forward lane.
-			for host.Tick() < target {
+			for host.Tick() < goal {
 				host.Step()
 				t := host.Tick()
 				a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: host.Hash()}
 			}
 			a.ringHead = host.Tick()
-		} else if err := a.clockSkip(ctx, target); err != nil {
-			return fail(err)
 		}
 	}
 	// Still dark: converge the world's rate toward the deployment's
@@ -829,15 +865,7 @@ func (a *authority) rateChange(ctx context.Context, hz int) error {
 	a.lastSeq = firstSeq
 	mEventsAppended.Inc()
 	mRateChanges.Inc()
-	if a.wal != nil {
-		// The shadow mirrors the journal row byte-for-byte with the
-		// catch-up frame's actor resolution. Ticks must be strictly
-		// increasing per record, so a second system event landing on the
-		// same tick latches the shadow — visible, and exactly the class
-		// of divergence the shadow window exists to surface.
-		run := codec.AppendEventRecord(nil, 0, codec.KindRateSet, 0, p[:])
-		a.wal.appendTick(a.name, tick, firstSeq, 1, run, a.host.Hash())
-	}
+	a.systemTick(tick, firstSeq, codec.KindRateSet, p[:])
 	a.refreshSchedule(true)
 	t := a.host.Tick()
 	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: a.host.Hash()}
@@ -856,7 +884,8 @@ func (a *authority) rateChange(ctx context.Context, hz int) error {
 }
 
 // clockSkip journals the repayment of a long gap: one event that jumps sim
-// time to target without stepping through it. What a skip means for the
+// time to target without stepping through it, then the step every tick
+// ends with — the world lands on target+1. What a skip means for the
 // world is the module's decision — the host only moves bytes.
 func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	tick, epoch := a.host.Tick(), a.host.Epoch()
@@ -881,10 +910,7 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	a.lastSeq = firstSeq
 	mEventsAppended.Inc()
 	mClockSkips.Inc()
-	if a.wal != nil {
-		run := codec.AppendEventRecord(nil, 0, codec.KindClockSkip, 0, p[:])
-		a.wal.appendTick(a.name, tick, firstSeq, 1, run, a.host.Hash())
-	}
+	a.systemTick(tick, firstSeq, codec.KindClockSkip, p[:])
 	t := a.host.Tick()
 	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: a.host.Hash()}
 	a.ringHead = t
@@ -902,6 +928,20 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	log.Printf("chunk %s: clock_skip %d -> %d (%s of downtime repaid)",
 		a.name, tick, t, time.Duration(t-tick)*a.tickDur)
 	return nil
+}
+
+// systemTick completes a boot-time system event the way tickOnce
+// completes a live tick: the event was applied at tick and journaled at
+// firstSeq; step past it and hand the shadow one record whose hash is
+// the post-step world — the only shape replay can prove. Each system
+// event therefore owns a tick, so two of them (repayment, then rate
+// convergence) never collide on one record.
+func (a *authority) systemTick(tick uint64, firstSeq int64, kind uint16, payload []byte) {
+	a.host.Step()
+	if a.wal != nil {
+		run := codec.AppendEventRecord(nil, 0, kind, 0, payload)
+		a.wal.appendTick(a.name, tick, firstSeq, 1, run, a.host.Hash())
+	}
 }
 
 // simEvent encodes an event for sim_apply: the module's own ABI (kind u16
@@ -1606,18 +1646,21 @@ func (p *chunks) get(ctx context.Context, name string) (*authority, error) {
 	// landing between two reads would pin the rehearsal to a module the
 	// authority never ran.
 	mod := p.module()
-	a, err := openAuthority(ctx, name, mod, p.genesis, p.vocab, p.j, p.mods, p.tm, p.publish)
+	var shadow func(*authority)
+	if p.shadow != nil {
+		// Attached by open itself, between the restore and the boot-time
+		// system events, so the repayment's journal row reaches the WAL.
+		// The discard path below closes through a.close(), which
+		// releases the shadow's lock and generation.
+		shadow = func(a *authority) {
+			a.wal = p.shadow(name, a.host.Epoch(), a.host.Tick(), a.lastSeq, shadowBoot{
+				module: mod, terrain: a.terrainBlob, clientSum: p.mods.client.Sum(),
+			})
+		}
+	}
+	a, err := openAuthority(ctx, name, mod, p.genesis, p.vocab, p.j, p.mods, p.tm, p.publish, shadow)
 	if err != nil {
 		return nil, err
-	}
-	if p.shadow != nil {
-		// The activation's journal tip is exact here: open (including its
-		// clock repayment) has appended everything it will, and run() has
-		// not started. The discard path below closes through a.close(),
-		// which releases the shadow's lock and generation.
-		a.wal = p.shadow(name, a.host.Epoch(), a.host.Tick(), a.lastSeq, shadowBoot{
-			module: mod, terrain: a.terrainBlob, clientSum: p.mods.client.Sum(),
-		})
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()

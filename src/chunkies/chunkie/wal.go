@@ -10,6 +10,7 @@ package chunkie
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"log"
 	"sync/atomic"
 	"time"
@@ -185,12 +186,25 @@ func (w *shadowWAL) forceCheckpoint(chunk string, m codec.Checkpoint, prove chec
 	}
 	m.Generation = w.guard.Generation()
 	// Bounded, unlike the cadence lane: this runs on the tick goroutine,
-	// and the swap must fail loudly rather than freeze the world past
-	// the budget (30s covers the flat write, read-back, and the fresh-
-	// instance proof with room to spare).
+	// and the swap must fail loudly rather than freeze the world. File
+	// I/O cannot be cancelled, so the bound is on the wait, not the
+	// work: past it the shadow latches dead and the swap proceeds on
+	// PG's word. An abandoned Force that later completes leaves at worst
+	// one more proven checkpoint on a lane nobody reads until reopen.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if _, err := w.ckpt.Force(ctx, m, prove); err != nil {
+	done := make(chan error, 1)
+	go func() {
+		_, err := w.ckpt.Force(ctx, m, prove)
+		done <- err
+	}()
+	var err error
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+		err = fmt.Errorf("promotion barrier checkpoint: %w", ctx.Err())
+	}
+	if err != nil {
 		w.latch(chunk, err)
 	}
 }

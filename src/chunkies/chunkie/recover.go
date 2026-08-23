@@ -117,7 +117,7 @@ func recoverWorld(g *ticklog.Guard, st checkpoint.Store, walDir string, cw, pw [
 				return nil, fmt.Errorf("chunk %s: probing the volume for history: %w", name, terr)
 			}
 			if trace {
-				return nil, fmt.Errorf("chunk %s: WAL segments carry lived history but no checkpoint survives — refusing to re-genesis a lived world", name)
+				return nil, fmt.Errorf("chunk %s: %w — segments name a lived world, refusing to re-genesis", name, errUncheckpointed)
 			}
 			keys = append(keys, ticklog.ChunkKey{Name: name, Lineage: 0, AfterTick: 0, AfterSeq: -1})
 			out[name] = bootState{}
@@ -173,7 +173,7 @@ func recoverWorld(g *ticklog.Guard, st checkpoint.Store, walDir string, cw, pw [
 		b := out[name]
 		if b.ckpt.Version == 0 {
 			if tip := tips[name]; len(runs[name]) > 0 || tip.Seq > -1 || tip.Tick > 0 {
-				return nil, fmt.Errorf("chunk %s: WAL history without a restorable checkpoint — refusing to re-genesis over a lived world", name)
+				return nil, fmt.Errorf("chunk %s: %w — refusing to re-genesis over a lived world", name, errUncheckpointed)
 			}
 			continue // true genesis: no trace on the volume
 		}
@@ -183,6 +183,15 @@ func recoverWorld(g *ticklog.Guard, st checkpoint.Store, walDir string, cw, pw [
 	}
 	return out, nil
 }
+
+// errUncheckpointed marks a volume that carries WAL history for a lived
+// world but no restorable checkpoint. Post-flip this refuses serving;
+// during the shadow window the rehearsal reports it as its own outcome,
+// because it is the guaranteed shape of the first activations after the
+// checkpoint lane is enabled over an already-shadowing volume — the
+// segments exist, the first cadence has not fired — and calling that
+// "refused" would poison the drill gate's metric with a non-event.
+var errUncheckpointed = errors.New("WAL history without a restorable checkpoint")
 
 // errContentSwap marks a replay window that crosses a terrain swap; the
 // rehearsal path reports it as skipped rather than failed (fetching
@@ -321,6 +330,15 @@ func rehearse(g *ticklog.Guard, st checkpoint.Store, walDir, chunk string, modul
 	start := time.Now()
 	states, err := recoverWorld(g, st, walDir, cw, pw, []string{chunk})
 	if err != nil {
+		if errors.Is(err, errUncheckpointed) {
+			// The first activations after enabling the checkpoint lane
+			// land here by construction: segments exist, no cadence has
+			// fired. Post-flip the serving ladder still refuses this
+			// shape — an uncheckpointed volume cannot recover its world.
+			mRehearsals.WithLabelValues("uncheckpointed").Inc()
+			log.Printf("chunk %s: recovery rehearsal: %v (expected until the first cadence checkpoint lands)", chunk, err)
+			return
+		}
 		mRehearsals.WithLabelValues("refused").Inc()
 		log.Printf("chunk %s: recovery rehearsal refused: %v", chunk, err)
 		return

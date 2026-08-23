@@ -98,7 +98,7 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 	// openAuthority does not start the run loop: this test owns the host
 	// and drives tickOnce directly.
 	var pubs []publishCall
-	a, err := openAuthority(ctx, "chunk-test", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), recordPublishes(&pubs))
+	a, err := openAuthority(ctx, "chunk-test", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), recordPublishes(&pubs), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 	a.host.close()
 
 	b, err := openAuthority(ctx, "chunk-test", module, nil, toyVocab(), j, mods,
-		timing{hz: 48, now: func() time.Time { return wallEpoch }}, nil)
+		timing{hz: 48, now: func() time.Time { return wallEpoch }}, nil, nil)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestAuthorityClosesOnAppendConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := toyModule(t)
-	a, err := openAuthority(ctx, "chunk-race", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), nil)
+	a, err := openAuthority(ctx, "chunk-race", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestModuleEpochSwapLane(t *testing.T) {
 	}
 	module := toyModule(t)
 	mods := toyMods(module)
-	a, err := openAuthority(ctx, "chunk-epoch", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil)
+	a, err := openAuthority(ctx, "chunk-epoch", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestModuleEpochSwapLane(t *testing.T) {
 
 	// Reopen the chunk as a converged deploy would: the mount serves the
 	// new module, and the boundary snapshot must restore under it.
-	b, err := openAuthority(ctx, "chunk-epoch", variant, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil)
+	b, err := openAuthority(ctx, "chunk-epoch", variant, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil, nil)
 	if err != nil {
 		t.Fatalf("reopen after epoch swap: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestRefreshRejoinAndRejectedIntentRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := toyModule(t)
-	a, err := openAuthority(ctx, "chunk-refresh", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), nil)
+	a, err := openAuthority(ctx, "chunk-refresh", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +372,7 @@ func TestStaleSessionDepartureIsFenced(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := toyModule(t)
-	a, err := openAuthority(ctx, "chunk-fence", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), nil)
+	a, err := openAuthority(ctx, "chunk-fence", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +430,7 @@ func TestAuthorityPublishesOncePerCommittingTick(t *testing.T) {
 	}
 	module := toyModule(t)
 	var pubs []publishCall
-	a, err := openAuthority(ctx, "chunk-publish", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), recordPublishes(&pubs))
+	a, err := openAuthority(ctx, "chunk-publish", module, nil, toyVocab(), j, toyMods(module), fixedClock(wallEpoch), recordPublishes(&pubs), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +503,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	}
 	module := toyModule(t)
 	mods := toyMods(module)
-	a, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil)
+	a, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,7 +517,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 
 	// Short gap: stepped through, tick-exact, journal untouched.
 	short := wallEpoch.Add(10 * time.Second)
-	b, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(short), nil)
+	b, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(short), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +527,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	if b.lastSeq != seqBefore {
 		t.Fatalf("short-gap repayment journaled events: lastSeq %d, want %d", b.lastSeq, seqBefore)
 	}
-	c, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(short), nil)
+	c, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(short), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -540,7 +540,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	// Long gap: one clock_skip journals, the snapshot floor moves to the
 	// jumped tick, and reopens past it restore deterministically.
 	long := wallEpoch.Add(24 * time.Hour)
-	d, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(long), nil)
+	d, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(long), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +563,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	d.host.close()
 
 	later := long.Add(10 * time.Second)
-	e, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(later), nil)
+	e, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(later), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,7 +571,7 @@ func TestReopenRepaysDowntime(t *testing.T) {
 	if got, want := e.host.Tick(), e.targetTick(later); got != want {
 		t.Fatalf("post-skip reopen at tick %d, schedule says %d", got, want)
 	}
-	f, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(later), nil)
+	f, err := openAuthority(ctx, "chunk-anchored", module, nil, toyVocab(), j, mods, fixedClock(later), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -598,7 +598,7 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	}
 	module := toyModule(t)
 	mods := toyMods(module)
-	a, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil)
+	a, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, fixedClock(wallEpoch), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,7 +616,7 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	// Reopen wanting 120Hz: repay the 10s gap under the stored 24Hz
 	// segment first, then exactly one rate_set re-anchors at that tick.
 	at120 := wallEpoch.Add(10 * time.Second)
-	b, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, timing{hz: 120, now: func() time.Time { return at120 }}, nil)
+	b, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, timing{hz: 120, now: func() time.Time { return at120 }}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -626,14 +626,19 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	if b.lastSeq != seqBefore+1 {
 		t.Fatalf("rate convergence journaled %d events, want exactly one rate_set", b.lastSeq-seqBefore)
 	}
-	if got, want := b.host.AnchorTick(), b.host.Tick(); got != want {
-		t.Fatalf("segment anchored at tick %d, want the boundary tick %d", got, want)
+	// The rate_set is a tick like any other: anchored where it landed,
+	// with the world stepped once past it — the same shape a live
+	// rate_set leaves behind in tickOnce.
+	if got, want := b.host.AnchorTick(), b.host.Tick()-1; got != want {
+		t.Fatalf("segment anchored at tick %d, want the rate_set tick %d", got, want)
 	}
 	// The repayment ran at 24Hz granularity, so up to one old tick of
 	// wall time (5 ticks at 120Hz) is still owed at the boundary — the
-	// live loop's first catch-up burst repays it. Anything larger would
-	// be a real discontinuity.
-	if got, want := b.targetTick(at120), b.host.Tick(); got < want || got > want+5 {
+	// live loop's first catch-up burst repays it — while the rate_set's
+	// own closing step, at the new rate, may lead the schedule by one
+	// tick the loop waits for. Anything larger would be a real
+	// discontinuity.
+	if got, want := b.targetTick(at120), b.host.Tick(); got+1 < want || got > want+5 {
 		t.Fatalf("schedule discontinuity: target %d vs tick %d at the boundary", got, want)
 	}
 	if len(b.ring) != ringSeconds*120 {
@@ -649,7 +654,7 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	// first (no stall — the mapping is piecewise, not global), then one
 	// rate_set back to 24.
 	at24 := wallEpoch.Add(20 * time.Second)
-	c, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, timing{hz: 24, now: func() time.Time { return at24 }}, nil)
+	c, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, timing{hz: 24, now: func() time.Time { return at24 }}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -657,15 +662,17 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	if c.hz != 24 || c.host.Rate() != 24 {
 		t.Fatalf("rate = %d/%d after lowering, want 24", c.hz, c.host.Rate())
 	}
-	if got, want := c.targetTick(at24), c.host.Tick(); got != want {
-		t.Fatalf("lowering the rate stalled the schedule: target %d != tick %d", got, want)
+	// Same shape as the raise: the rate_set's closing step may lead the
+	// schedule by one new-rate tick, never trail it.
+	if got, want := c.targetTick(at24), c.host.Tick(); got+1 < want || got > want {
+		t.Fatalf("lowering the rate stalled the schedule: target %d vs tick %d", got, want)
 	}
 	// ~10s repaid at 120Hz between the two segment boundaries
 	if repaid := c.host.AnchorTick() - snap.Tick; repaid < 1100 || repaid > 1300 {
 		t.Fatalf("repaid %d ticks across the 120Hz segment, want ~1200", repaid)
 	}
 	// determinism across two rate boundaries
-	d, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, timing{hz: 24, now: func() time.Time { return at24 }}, nil)
+	d, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, timing{hz: 24, now: func() time.Time { return at24 }}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
