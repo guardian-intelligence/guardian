@@ -47,7 +47,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: chunkie
-          image: ghcr.io/guardian-intelligence/chunkies-chunkie:edge@sha256:6e854e7773bcc1348b2dea2db35be42a16cbff5c279332c8f49a3cc722230779 # {"$imagepolicy": "guardian-imageops:chunkies-chunkie"}
+          image: ghcr.io/guardian-intelligence/chunkies-chunkie:edge@sha256:7931866af3a4955808a26344ea991b9a6a2bbea33cfe2eea8bbf62a6ae8c2d0b # {"$imagepolicy": "guardian-imageops:chunkies-chunkie"}
           ports:
             - name: metrics
               containerPort: 9637
