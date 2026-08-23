@@ -881,7 +881,7 @@ impl Session {
         // a new one resets this same clock through the resync it forces.
         // Welcome also doubles as the first sample: same-ms echo, rtt
         // unknown.
-        self.clock.set_rate(self.hz);
+        self.clock.set_rate(self.hz, now_ms);
         self.clock.sample(now_ms, now_ms, tick);
         h.emit(T_WELCOME, epoch as u64, self.hz | ((role as u64) << 32));
         if content != self.terrain_id {
@@ -1485,7 +1485,7 @@ impl Session {
                         if hz != self.hz {
                             let old = self.hz;
                             self.hz = hz;
-                            self.clock.set_rate(hz);
+                            self.clock.set_rate(hz, now_ms);
                             h.emit(T_RATE_CHANGED, e.tick, (old << 32) | hz);
                         }
                     }

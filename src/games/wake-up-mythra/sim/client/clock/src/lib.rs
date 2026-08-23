@@ -109,10 +109,21 @@ impl Clock {
     }
 
     /// The park's tick rate: from the welcome line before the first
-    /// sample, and from an epoch advance carrying a new one — the resync
-    /// that follows re-seeds the model through `reset`.
-    pub fn set_rate(&mut self, hz: u64) {
-        self.hz = hz.clamp(1, 1000);
+    /// sample, and from an epoch advance carrying a new one. A locked
+    /// model stays continuous across the change — the reference moves to
+    /// `now_ms` under the old rate, so the new rate extrapolates from a
+    /// fresh anchor instead of re-pricing the interval since the last
+    /// verdict — and the resync the epoch forces re-seeds it via `reset`.
+    pub fn set_rate(&mut self, hz: u64, now_ms: u64) {
+        let next = hz.clamp(1, 1000);
+        if next == self.hz {
+            return;
+        }
+        if self.state != State::Acquiring {
+            self.ref_tick_q16 += self.ticks_q16(now_ms.saturating_sub(self.ref_ms));
+            self.ref_ms = now_ms;
+        }
+        self.hz = next;
     }
 
     pub fn rate(&self) -> u64 {
@@ -302,7 +313,7 @@ mod tests {
                 last_check: 0,
                 snapshots: 0,
             };
-            h.clock.set_rate(hz);
+            h.clock.set_rate(hz, 0);
             // welcome sample seeds the model
             h.clock
                 .sample(0, h.rtt_ms, h.server_tick(0).saturating_sub(0));
@@ -468,6 +479,22 @@ mod tests {
         assert_eq!(f.snapshots, 0, "inside the ring must not resync");
         assert_eq!(f.clock.state(), State::Locked);
         assert!(f.err_ticks().abs() <= 5, "err={} ticks", f.err_ticks());
+    }
+
+    #[test]
+    fn a_rate_change_keeps_the_locked_model_continuous() {
+        let mut c = Clock::NEW;
+        c.set_rate(24, 0);
+        c.sample(0, 0, 10_000);
+        // 250ms on: the model says six ticks past the sample. Adopting
+        // 48Hz here must not re-price those 250ms as twelve ticks — the
+        // authority's world did not jump, only its future cadence did.
+        let before = c.error_q16(250, 10_006);
+        c.set_rate(48, 250);
+        assert_eq!(c.rate(), 48);
+        assert_eq!(c.error_q16(250, 10_006), before);
+        // ...and from here it advances at the new rate.
+        assert_eq!(c.trail_q16(500, 10_006), 12 * ONE);
     }
 
     #[test]

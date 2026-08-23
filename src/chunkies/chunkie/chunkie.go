@@ -501,13 +501,19 @@ func (a *authority) epochPrelude() []stagedIntent {
 	if a.candReady {
 		sum = a.candSum
 	}
-	var p [16]byte
+	// Append-only means the tail is written only when it says something:
+	// a module-only advance keeps the 12-byte shape, so a module from
+	// before the rate rode here (mount skew during a rollout) still
+	// accepts the very advance that replaces it.
+	p := make([]byte, 12, 16)
 	binary.LittleEndian.PutUint32(p[:4], a.host.Epoch()+1)
 	binary.LittleEndian.PutUint64(p[4:12], sum)
-	binary.LittleEndian.PutUint32(p[12:], uint32(hz))
+	if hz != a.hz {
+		p = binary.LittleEndian.AppendUint32(p, uint32(hz))
+	}
 	done := a.wantDone
 	a.wantDone = nil
-	return []stagedIntent{{actor: "system", kind: codec.KindEpochAdvance, payload: p[:], done: done}}
+	return []stagedIntent{{actor: "system", kind: codec.KindEpochAdvance, payload: p, done: done}}
 }
 
 // soakModule runs the module-update lane: when the behavior mount serves
@@ -565,6 +571,9 @@ func (a *authority) failSoak(hash string, err error) {
 		a.cand = nil
 		a.candBytes = nil
 	}
+	// A soak can fail mid-tick, after the prelude declared it ready:
+	// commitEpoch must not find a swap without a candidate.
+	a.candReady = false
 	if hash != "" {
 		a.badModule = hash
 	}
@@ -619,6 +628,8 @@ func (a *authority) commitEpoch(t uint64, dedup []codec.DedupEntry) {
 		}
 	} else {
 		mSnapshots.Inc()
+		a.eventsSinceSnap = 0
+		a.lastSnapAt = a.tm.now()
 	}
 	if a.wal != nil {
 		// The barrier's step 2: a checkpoint under the pair that will
@@ -679,8 +690,6 @@ func (a *authority) commitEpoch(t uint64, dedup []codec.DedupEntry) {
 	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: wh}
 	a.snapCache = snapCacheEntry{}
 	a.mu.Unlock()
-	a.eventsSinceSnap = 0
-	a.lastSnapAt = a.tm.now()
 	if a.wal != nil {
 		// The epoch barrier: drain, sync, rotate — no segment ever spans
 		// an epoch, so replay runs under exactly one era.
