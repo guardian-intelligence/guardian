@@ -15,7 +15,6 @@ const PARK_B: u32 = 0x2222_2222;
 /// Park ABI values the core does not name for itself, so the mock can
 /// stand in for the two events that move the world sideways.
 const EV_CLOCK_SKIP: u16 = 9;
-const EV_RATE_SET: u16 = 10;
 const ERR_TICK: u32 = 11;
 const ERR_NOOP: u32 = 10;
 
@@ -887,18 +886,16 @@ fn the_welcome_telemetry_carries_the_granted_role() {
 }
 
 #[test]
-fn a_connected_session_adopts_a_journaled_rate_without_resyncing() {
+fn an_epoch_carrying_a_rate_adopts_it_and_resyncs_without_a_fetch() {
     let mut r = Rig::boot(ROLE_PLAYER, 1008);
     let boundary = r.s.tick();
     r.m.clear();
-    r.event(
-        r.s.seq() + 1,
-        boundary,
-        EV_RATE_SET,
-        0,
-        0,
-        &48u32.to_le_bytes(),
-    );
+    let mut p = [0u8; 16];
+    p[..4].copy_from_slice(&2u32.to_le_bytes());
+    p[4..12].copy_from_slice(&(PARK_A as u64).to_le_bytes());
+    p[12..].copy_from_slice(&48u32.to_le_bytes());
+    let seq = r.s.seq() + 1;
+    r.event(seq, boundary, EV_EPOCH_ADVANCE, 0, 0, &p);
     r.pump();
 
     assert_eq!(r.s.hz, 48);
@@ -907,15 +904,29 @@ fn a_connected_session_adopts_a_journaled_rate_without_resyncing() {
         r.m.emits_of(T_RATE_CHANGED),
         vec![(boundary, (HZ << 32) | 48)]
     );
-    assert!(r.m.reqs.is_empty(), "rate adoption requested a repair");
-
-    let before = r.s.tick();
-    r.advance(500);
-    assert!(r.s.tick() >= before + 15, "the 48Hz clock did not advance");
-    assert!(r.m.emits_of(T_CONNECTED).is_empty(), "session reconnected");
+    // Same module: no fetch, but the era changed, so the world is rebuilt
+    // from a snapshot taken under it — the one boundary every era change
+    // shares.
     assert!(
-        r.m.emits_of(T_RESYNC_REQUESTED).is_empty(),
-        "session resynced"
+        r.m.reqs_of(REQ_NEED_MODULE).is_empty(),
+        "same module fetched"
+    );
+    assert_eq!(
+        r.m.emits_of(T_RESYNC_REQUESTED),
+        vec![(R_EPOCH as u64, seq as u64)]
+    );
+    assert!(r.m.emits_of(T_CONNECTED).is_empty(), "session reconnected");
+
+    // A 12-byte epoch advance (the pre-rate shape) is a plain era change.
+    r.snapshot(seq, boundary, 0, TERRAIN);
+    r.m.clear();
+    r.event(seq + 1, r.s.tick(), EV_EPOCH_ADVANCE, 0, 0, &p[..12]);
+    r.pump();
+    assert_eq!(r.s.hz, 48, "a rate-less epoch changed the rate");
+    assert!(r.m.emits_of(T_RATE_CHANGED).is_empty());
+    assert_eq!(
+        r.m.emits_of(T_RESYNC_REQUESTED),
+        vec![(R_EPOCH as u64, (seq + 1) as u64)]
     );
 }
 
@@ -1097,7 +1108,7 @@ fn an_epoch_event_asks_for_the_module_once() {
     assert_eq!(r.m.emits_of(T_MODULE_SWAP_WANTED), vec![(PARK_B as u64, 0)]);
     assert_eq!(
         r.m.emits_of(T_RESYNC_REQUESTED),
-        vec![(R_MODULE_EPOCH as u64, 101)]
+        vec![(R_EPOCH as u64, 101)]
     );
     // a second epoch event before the swap lands must not re-ask
     r.event(102, r.s.tick(), EV_EPOCH_ADVANCE, 0, 0, &p);

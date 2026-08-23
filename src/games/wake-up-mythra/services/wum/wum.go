@@ -16,8 +16,8 @@ import (
 // the SimEvent envelope; these numbers predate the framework kind-range
 // convention (0x0100+ for game kinds) and are grandfathered — the
 // journal's history is written in them. The system kinds (day_reset,
-// epoch_advance, content_set, clock_skip, rate_set = 5..7, 9, 10) are
-// framework constants now: codec.Kind*.
+// epoch_advance, content_set, clock_skip = 5..7, 9) are framework
+// constants now: codec.Kind*.
 const (
 	EvJoin         = 1
 	EvLeave        = 2
@@ -28,7 +28,6 @@ const (
 	EvTerrainSet   = codec.KindContentSet
 	EvBoostSet     = 8
 	EvClockSkip    = codec.KindClockSkip
-	EvRateSet      = codec.KindRateSet
 )
 
 // FixtureTerrain is the world every brand-new park is born with until

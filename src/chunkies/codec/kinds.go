@@ -10,14 +10,18 @@ const (
 	// KindDayReset carries the UTC day index {day u32}. Wall clock enters
 	// the sim only as this journaled event, never as a module read.
 	KindDayReset uint16 = 5
-	// KindEpochAdvance commits a module swap {epoch u32, module_hash u64}.
+	// KindEpochAdvance opens a new era {epoch u32, module_hash u64, hz u32}:
+	// the module pair and tick rate replay and the schedule run under.
+	// Payloads are append-only — a consumer reads what it knows from the
+	// front and ignores the tail; rows from before hz rode here are 12
+	// bytes and mean "rate unchanged".
 	KindEpochAdvance uint16 = 6
 	// KindContentSet swaps the active content artifact {schema u32, id u64}.
 	KindContentSet uint16 = 7
 	// KindClockSkip repays authority downtime {to_tick u64}, forward only.
 	KindClockSkip uint16 = 9
-	// KindRateSet converges the world to a tick rate {hz u32}.
-	KindRateSet uint16 = 10
+	// 10 was rate_set, retired when the rate began riding epoch_advance;
+	// the number stays reserved.
 )
 
 // Doorman-level reject reasons, minted by the framework (gateway and

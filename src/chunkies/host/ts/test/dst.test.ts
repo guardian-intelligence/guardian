@@ -117,7 +117,7 @@ describe("boot and handshake", () => {
     expect(r.state.role).toBe("spectator");
   });
 
-  it("adopts a journaled live rate on the same connection and world", async () => {
+  it("adopts a rate carried by an epoch advance on the same connection", async () => {
     const r = await rig();
     await r.establish();
     await r.run(500);
@@ -126,10 +126,10 @@ describe("boot and handshake", () => {
     const resynced = r.count(Emit.resyncRequested);
     const before = r.state.tick;
     const boundary = r.authority.tick;
-    const payload = new Uint8Array(4);
-    new DataView(payload.buffer).setUint32(0, 48, true);
 
-    r.deliver([r.authority.apply(Ev.rateSet, payload)]);
+    // Same module (sum 0 names none), new rate: the era changed, so the
+    // replica resyncs across it — no module fetch, no redial.
+    r.deliver([r.authority.apply(Ev.epochAdvance, epochAdvancePayload(2, 0n, 48))]);
     expect(await r.until(() => r.state.seq === r.authority.seq)).toBe(true);
     expect(r.state.hz).toBe(48);
     expect(r.count(Emit.rateChanged)).toBe(1);
@@ -137,12 +137,13 @@ describe("boot and handshake", () => {
       a: boundary,
       b: (24n << 32n) | 48n,
     });
+    expect(r.count(Emit.resyncRequested)).toBe(resynced + 1);
+    expect(r.answerResyncs()).toBe(1);
+    expect(await r.until(() => r.count(Emit.snapshotRestored) === restored + 1, 2000)).toBe(true);
 
     await r.run(500);
     expect(r.state.tick).toBeGreaterThan(before);
     expect(r.count(Emit.connectedHelloSent)).toBe(connected);
-    expect(r.count(Emit.snapshotRestored)).toBe(restored);
-    expect(r.count(Emit.resyncRequested)).toBe(resynced);
     expect(r.harness.logs).toContain(`rate: 24Hz -> 48Hz at tick ${boundary}`);
   });
 });
@@ -591,7 +592,7 @@ describe("invariant 7: module epoch", () => {
     const reasons = r.harness.emitted
       .filter((e) => e.code === Emit.resyncRequested)
       .map((e) => Number(e.a));
-    expect(reasons).toContain(ResyncReason.moduleEpoch);
+    expect(reasons).toContain(ResyncReason.epoch);
     expect(reasons).toContain(ResyncReason.moduleSwapped);
     r.authority.epoch = 2;
     r.deliver([r.authority.snapshot()]);

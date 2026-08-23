@@ -67,9 +67,9 @@ only trusts it because `OIDC_ISSUER` says so.
 ### Tick-rate latency drill
 
 The local stack starts at 24Hz by default. Its server exposes a
-development-only control that journals a live `rate_set`; it is server-side
-truth, not a browser override. The connected client must consume that event,
-re-anchor its clock at the event tick, and keep the same world and transport.
+development-only control that journals a live epoch advance carrying the new
+rate; it is server-side truth, not a browser override. The connected client
+must consume that event, resync across the epoch, and keep the same transport.
 
 ```sh
 aspect mythra dev latency

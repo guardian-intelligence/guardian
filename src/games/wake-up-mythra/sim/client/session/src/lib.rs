@@ -185,7 +185,9 @@ pub const R_LATE_EVENT: u32 = 2;
 pub const R_EVENT_REJECTED: u32 = 3;
 pub const R_HASH_MISMATCH: u32 = 4;
 pub const R_CHECK_AGED_OUT: u32 = 5;
-pub const R_MODULE_EPOCH: u32 = 6;
+/// An epoch advance — the one boundary both sides share. Whatever the
+/// era changed (module, rate, both), the replica resyncs across it.
+pub const R_EPOCH: u32 = 6;
 pub const R_TERRAIN_FETCH: u32 = 7;
 pub const R_RESTORE_FAILED: u32 = 8;
 pub const R_QUEUE_OVERFLOW: u32 = 9;
@@ -259,7 +261,6 @@ const EV_EPOCH_ADVANCE: u16 = 6;
 /// blob cannot stand on is put back on the nearest ground it can.
 const EV_TERRAIN_SET: u16 = 7;
 const EV_BOOST_SET: u16 = 8;
-const EV_RATE_SET: u16 = 10;
 const ERR_PRESENT: u32 = 2;
 const ERR_ABSENT: u32 = 3;
 const ERR_NOOP: u32 = 10;
@@ -876,9 +877,10 @@ impl Session {
         self.sub = sub;
         self.hz = hz.clamp(1, 1000) as u64;
         self.role = role as u32;
-        // Welcome establishes the current rate. A later journaled rate_set
-        // re-anchors this same clock; welcome also doubles as the first
-        // sample: same-ms echo, rtt unknown.
+        // Welcome establishes the current rate; an epoch advance carrying
+        // a new one resets this same clock through the resync it forces.
+        // Welcome also doubles as the first sample: same-ms echo, rtt
+        // unknown.
         self.clock.set_rate(self.hz);
         self.clock.sample(now_ms, now_ms, tick);
         h.emit(T_WELCOME, epoch as u64, self.hz | ((role as u64) << 32));
@@ -1454,17 +1456,6 @@ impl Session {
                     self.tick = park_tick;
                     self.clock.reset(park_tick, now_ms);
                 }
-                if e.kind == EV_RATE_SET && e.plen == 4 {
-                    let mut b = [0u8; 4];
-                    b.copy_from_slice(&e.p[..4]);
-                    let next = u32::from_le_bytes(b).clamp(1, 1000) as u64;
-                    let old = self.hz;
-                    if next != old {
-                        self.hz = next;
-                        self.clock.change_rate(next, e.tick, now_ms);
-                        h.emit(T_RATE_CHANGED, e.tick, (old << 32) | next);
-                    }
-                }
                 self.stats[STAT_EVENTS as usize - 1] += 1;
                 if let Some(it) = self.intent_take(e.intent) {
                     h.emit(
@@ -1481,10 +1472,24 @@ impl Session {
                     self.confirm_presence(h, PRESENCE_JOURNAL, now_ms);
                 }
                 h.emit(T_EVENT_APPLIED, e.seq as u64, e.tick);
-                if e.kind == EV_EPOCH_ADVANCE && e.plen == 12 {
+                if e.kind == EV_EPOCH_ADVANCE && e.plen >= 12 {
+                    // {epoch u32, module_hash u64, hz u32}, append-only:
+                    // read what this core knows from the front and ignore
+                    // the tail; hz absent means unchanged.
                     let mut b = [0u8; 8];
                     b.copy_from_slice(&e.p[4..12]);
-                    self.want_module(h, u64::from_le_bytes(b) as u32, now_ms);
+                    let pw = u64::from_le_bytes(b) as u32;
+                    if e.plen >= 16 {
+                        let hz = u32::from_le_bytes([e.p[12], e.p[13], e.p[14], e.p[15]])
+                            .clamp(1, 1000) as u64;
+                        if hz != self.hz {
+                            let old = self.hz;
+                            self.hz = hz;
+                            self.clock.set_rate(hz);
+                            h.emit(T_RATE_CHANGED, e.tick, (old << 32) | hz);
+                        }
+                    }
+                    self.on_epoch(h, pw, now_ms);
                 }
             }
             if self.tick >= resume {
@@ -1696,7 +1701,19 @@ impl Session {
         self.module_latch = true;
         h.emit(T_MODULE_SWAP_WANTED, pw as u64, 0);
         h.request(REQ_NEED_MODULE, pw as u64);
-        self.request_resync(h, R_MODULE_EPOCH, now_ms);
+        self.request_resync(h, R_EPOCH, now_ms);
+    }
+
+    /// The epoch boundary on the replica: a module it does not hold is
+    /// fetched first (the swap resyncs on landing); otherwise the resync
+    /// is immediate. Either way the world is rebuilt from a snapshot the
+    /// authority took under the new era.
+    fn on_epoch<H: Host>(&mut self, h: &mut H, pw: u32, now_ms: u64) {
+        if pw != 0 && pw != self.park_pw {
+            self.want_module(h, pw, now_ms);
+        } else {
+            self.request_resync(h, R_EPOCH, now_ms);
+        }
     }
 
     // ---- fixed-capacity collections ----

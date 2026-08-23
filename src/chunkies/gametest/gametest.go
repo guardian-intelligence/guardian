@@ -447,37 +447,6 @@ func runSystemEvents(t *testing.T, g Game) {
 	le64 := func(v uint64) []byte { b := make([]byte, 8); binary.LittleEndian.PutUint64(b, v); return b }
 
 	{
-		kind := codec.KindRateSet
-		t.Run("rate_set", func(t *testing.T) {
-			a, b := open(t, g, seeds[0]), open(t, g, seeds[0])
-			defer a.close()
-			defer b.close()
-			drive(t, []*host{a, b}, stream(g, rand.New(rand.NewSource(23)), 8))
-			at, _ := a.tick()
-			ev := []Event{{Kind: kind, Payload: le32(48)}}
-			drive(t, []*host{a, b}, [][]Event{ev})
-			if rate, err := a.rate(); err != nil || rate != 48 {
-				t.Fatalf("sim_rate = %d after rate_set 48 (err %v)", rate, err)
-			}
-			if anchor, err := a.anchorTick(); err != nil || anchor != at {
-				t.Fatalf("sim_anchor_tick = %d after rate_set at tick %d (err %v)", anchor, at, err)
-			}
-			snap, err := a.snapshot()
-			if err != nil {
-				t.Fatal(err)
-			}
-			c := open(t, g, seeds[0])
-			defer c.close()
-			if code, err := c.restore(snap); err != nil || code != 0 {
-				t.Fatalf("restore across rate boundary: code=%d err=%v", code, err)
-			}
-			if rate, err := c.rate(); err != nil || rate != 48 {
-				t.Fatalf("restored sim_rate = %d, want 48 (err %v)", rate, err)
-			}
-		})
-	}
-
-	{
 		kind := codec.KindClockSkip
 		t.Run("clock_skip", func(t *testing.T) {
 			a, b := open(t, g, seeds[0]), open(t, g, seeds[0])
@@ -513,15 +482,46 @@ func runSystemEvents(t *testing.T, g Game) {
 	{
 		kind := codec.KindEpochAdvance
 		t.Run("epoch_advance", func(t *testing.T) {
+			// {epoch u32, module_hash u64, hz u32}: the era the module pair
+			// and tick rate run under. A new rate re-anchors the piecewise
+			// mapping at this tick; the 12-byte pre-rate shape must still
+			// advance the era with the rate untouched (journal history).
 			a, b := open(t, g, seeds[0]), open(t, g, seeds[0])
 			defer a.close()
 			defer b.close()
 			drive(t, []*host{a, b}, stream(g, rand.New(rand.NewSource(31)), 8))
 			e, _ := a.epoch()
-			payload := append(le32(e+1), le64(0xD06F00D)...)
+			at, _ := a.tick()
+			payload := append(append(le32(e+1), le64(0xD06F00D)...), le32(48)...)
 			drive(t, []*host{a, b}, [][]Event{{{Kind: kind, Payload: payload}}})
 			if now, err := a.epoch(); err != nil || now != e+1 {
 				t.Fatalf("sim_epoch = %d after epoch_advance to %d (err %v)", now, e+1, err)
+			}
+			if rate, err := a.rate(); err != nil || rate != 48 {
+				t.Fatalf("sim_rate = %d after epoch_advance carrying 48Hz (err %v)", rate, err)
+			}
+			if anchor, err := a.anchorTick(); err != nil || anchor != at {
+				t.Fatalf("sim_anchor_tick = %d after a rate epoch at tick %d (err %v)", anchor, at, err)
+			}
+			snap, err := a.snapshot()
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := open(t, g, seeds[0])
+			defer c.close()
+			if code, err := c.restore(snap); err != nil || code != 0 {
+				t.Fatalf("restore across rate boundary: code=%d err=%v", code, err)
+			}
+			if rate, err := c.rate(); err != nil || rate != 48 {
+				t.Fatalf("restored sim_rate = %d, want 48 (err %v)", rate, err)
+			}
+			legacy := append(le32(e+2), le64(0xD06F00D)...)
+			drive(t, []*host{a, b}, [][]Event{{{Kind: kind, Payload: legacy}}})
+			if now, err := a.epoch(); err != nil || now != e+2 {
+				t.Fatalf("sim_epoch = %d after a 12-byte epoch_advance to %d (err %v)", now, e+2, err)
+			}
+			if rate, err := a.rate(); err != nil || rate != 48 {
+				t.Fatalf("a 12-byte epoch_advance changed the rate to %d (err %v)", rate, err)
 			}
 		})
 	}

@@ -56,7 +56,7 @@ const TABLES: &[Table] = &[
             ("eventRejected", s::R_EVENT_REJECTED as u64),
             ("hashMismatch", s::R_HASH_MISMATCH as u64),
             ("checkAgedOut", s::R_CHECK_AGED_OUT as u64),
-            ("moduleEpoch", s::R_MODULE_EPOCH as u64),
+            ("epoch", s::R_EPOCH as u64),
             ("terrainFetch", s::R_TERRAIN_FETCH as u64),
             ("restoreFailed", s::R_RESTORE_FAILED as u64),
             ("queueOverflow", s::R_QUEUE_OVERFLOW as u64),

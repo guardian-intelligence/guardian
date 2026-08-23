@@ -56,7 +56,15 @@
 //!   3 check_in      { id u64 }            once per day index per dog
 //!   4 move_to       { id u64, node u16 }  set the dog's movement target
 //!   5 day_reset     { day u32 }           system event; re-arms check-ins
-//!   6 epoch_advance { epoch u32, module_hash u64 }  system event
+//!   6 epoch_advance { epoch u32, module_hash u64, hz u32 }  system
+//!                                         event; opens the era the module
+//!                                         pair and tick rate run under. A
+//!                                         new hz re-anchors the piecewise
+//!                                         tick<->wall mapping at this tick
+//!                                         (the rate is world state so every
+//!                                         pod generation derives the same
+//!                                         schedule). Append-only: a 12-byte
+//!                                         row leaves the rate unchanged
 //!   7 terrain_set   { schema u32, terrain_id u64 }  system event; the
 //!                                         loaded blob must already match
 //!   8 boost_set     { id u64, on u8 }     held-button 2x speed; only
@@ -67,12 +75,6 @@
 //!                                         journaled repayment of authority
 //!                                         downtime. Dogs, energy, and day
 //!                                         are untouched; forward only
-//!  10 rate_set      { hz u32 }            system event; changes the tick
-//!                                         rate and re-anchors the piecewise
-//!                                         tick<->wall mapping at this tick.
-//!                                         The rate is world state so every
-//!                                         pod generation (and rollback)
-//!                                         derives the same schedule
 //!
 //! Snapshot encoding (canonical; dogs strictly sorted by id; park energy
 //! is cumulative — departed dogs' contributions persist — so it is state,
@@ -124,7 +126,6 @@ pub const EV_EPOCH_ADVANCE: u16 = 6;
 pub const EV_TERRAIN_SET: u16 = 7;
 pub const EV_BOOST_SET: u16 = 8;
 pub const EV_CLOCK_SKIP: u16 = 9;
-pub const EV_RATE_SET: u16 = 10;
 
 pub const OK: u32 = 0;
 pub const ERR_ENCODING: u32 = 1;
@@ -615,35 +616,35 @@ fn apply_event(p: &mut Park, kind: u16, actor: u64, payload: &[u8]) -> u32 {
             p.tick = to;
             OK
         }
-        EV_RATE_SET => {
-            let Some(hz) = read_u32_exact(payload, actor) else {
-                return ERR_ENCODING;
-            };
-            if !(MIN_HZ..=MAX_HZ).contains(&hz) {
-                return ERR_ENCODING;
-            }
-            if hz == p.rate_hz {
-                return ERR_NOOP;
-            }
-            // Close the old rate segment: the elapsed wall time of its
-            // ticks folds into the anchor, so the mapping stays piecewise
-            // exact. u128 keeps tick*1e9 from overflowing; integer ns
-            // division is the canonical rounding every replica shares.
-            let elapsed = (p.tick - p.anchor_tick) as u128;
-            p.anchor_ns += (elapsed * 1_000_000_000u128 / p.rate_hz as u128) as u64;
-            p.anchor_tick = p.tick;
-            p.rate_hz = hz;
-            OK
-        }
         EV_EPOCH_ADVANCE => {
-            if payload.len() != 12 || actor != 0 {
+            // Append-only payload: read what this module knows from the
+            // front and ignore the tail. hz absent means unchanged.
+            if payload.len() < 12 || actor != 0 {
                 return ERR_ENCODING;
             }
             let epoch = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+            let mut hz = p.rate_hz;
+            if payload.len() >= 16 {
+                hz = u32::from_le_bytes([payload[12], payload[13], payload[14], payload[15]]);
+                if !(MIN_HZ..=MAX_HZ).contains(&hz) {
+                    return ERR_ENCODING;
+                }
+            }
             if epoch <= p.epoch {
                 return ERR_EPOCH;
             }
             p.epoch = epoch;
+            if hz != p.rate_hz {
+                // Close the old rate segment: the elapsed wall time of its
+                // ticks folds into the anchor, so the mapping stays
+                // piecewise exact. u128 keeps tick*1e9 from overflowing;
+                // integer ns division is the canonical rounding every
+                // replica shares.
+                let elapsed = (p.tick - p.anchor_tick) as u128;
+                p.anchor_ns += (elapsed * 1_000_000_000u128 / p.rate_hz as u128) as u64;
+                p.anchor_tick = p.tick;
+                p.rate_hz = hz;
+            }
             OK
         }
         EV_TERRAIN_SET => {
@@ -1124,6 +1125,20 @@ mod tests {
         ev_as(kind, id, &[])
     }
 
+    /// An epoch advance carrying a rate: {epoch, module 0, hz}.
+    fn ev_epoch(epoch: u32, hz: u32) -> u32 {
+        let mut p = epoch.to_le_bytes().to_vec();
+        p.extend_from_slice(&0u64.to_le_bytes());
+        p.extend_from_slice(&hz.to_le_bytes());
+        ev(EV_EPOCH_ADVANCE, &p)
+    }
+
+    /// The next epoch, carrying `hz` — how the authority changes a rate.
+    fn ev_rate(hz: u32) -> u32 {
+        let next = park().epoch + 1;
+        ev_epoch(next, hz)
+    }
+
     fn ev_move(id: u64, node: u16) -> u32 {
         ev_as(EV_MOVE_TO, id, &node.to_le_bytes())
     }
@@ -1157,8 +1172,9 @@ mod tests {
             let code = match kind {
                 EV_DAY_RESET => ev(EV_DAY_RESET, &(a as u32).to_le_bytes()),
                 EV_CLOCK_SKIP => ev(EV_CLOCK_SKIP, &a.to_le_bytes()),
-                EV_RATE_SET => ev(EV_RATE_SET, &(a as u32).to_le_bytes()),
+                EV_EPOCH_ADVANCE if b != 0 => ev_epoch(a as u32, b as u32),
                 EV_EPOCH_ADVANCE => {
+                    // The 12-byte history shape: rate unchanged.
                     let mut p = (a as u32).to_le_bytes().to_vec();
                     p.extend_from_slice(&0u64.to_le_bytes());
                     ev(EV_EPOCH_ADVANCE, &p)
@@ -1248,32 +1264,42 @@ mod tests {
     }
 
     #[test]
-    fn rate_set_reanchors_the_piecewise_mapping() {
+    fn epoch_advance_carries_the_rate_and_reanchors_the_mapping() {
         let _g = setup(3);
         for _ in 0..48 {
             sim_step(); // 2s at the genesis 24Hz
         }
-        assert_eq!(ev(EV_RATE_SET, &0u32.to_le_bytes()), ERR_ENCODING);
-        assert_eq!(ev(EV_RATE_SET, &(MIN_HZ - 1).to_le_bytes()), ERR_ENCODING);
-        assert_eq!(ev(EV_RATE_SET, &2000u32.to_le_bytes()), ERR_ENCODING);
-        assert_eq!(ev(EV_RATE_SET, &24u32.to_le_bytes()), ERR_NOOP);
-        assert_eq!(ev(EV_RATE_SET, &120u32.to_le_bytes()), OK);
+        assert_eq!(ev_epoch(2, 0), ERR_ENCODING);
+        assert_eq!(ev_epoch(2, MIN_HZ - 1), ERR_ENCODING);
+        assert_eq!(ev_epoch(2, 2000), ERR_ENCODING);
+        assert_eq!(ev_epoch(1, 120), ERR_EPOCH, "the era must advance");
+        // Same rate: the epoch advances, the segment does not close.
+        assert_eq!(ev_epoch(2, 24), OK);
+        assert_eq!(sim_rate(), 24);
+        assert_eq!(sim_anchor_tick(), 0);
+        assert_eq!(ev_epoch(3, 120), OK);
         assert_eq!(sim_rate(), 120);
         assert_eq!(sim_anchor_tick(), 48);
         assert_eq!(sim_anchor_ns(), 2_000_000_000);
         for _ in 0..120 {
             sim_step(); // 1s at the new rate
         }
-        assert_eq!(ev(EV_RATE_SET, &24u32.to_le_bytes()), OK);
+        assert_eq!(ev_epoch(4, 24), OK);
         assert_eq!(sim_anchor_tick(), 168);
         assert_eq!(sim_anchor_ns(), 3_000_000_000);
+        // The 12-byte history shape still advances the era, rate untouched.
+        let mut p = 5u32.to_le_bytes().to_vec();
+        p.extend_from_slice(&0u64.to_le_bytes());
+        assert_eq!(ev(EV_EPOCH_ADVANCE, &p), OK);
+        assert_eq!(sim_rate(), 24);
+        assert_eq!(sim_anchor_tick(), 168);
     }
 
     #[test]
-    fn replay_across_rate_set_is_deterministic() {
+    fn replay_across_a_rate_epoch_is_deterministic() {
         let _g = setup(47);
         let mut j = journal();
-        j.push((320, EV_RATE_SET, 120, 0));
+        j.push((320, EV_EPOCH_ADVANCE, 3, 120));
         j.push((400, EV_JOIN, 21, 0));
         run_journal(&j, 700);
         let h1 = sim_hash();
@@ -1468,7 +1494,7 @@ mod tests {
                 p.dogs[i].y = y;
             }
             if hz != GENESIS_HZ {
-                assert_eq!(ev(EV_RATE_SET, &hz.to_le_bytes()), OK);
+                assert_eq!(ev_rate(hz), OK);
             }
             if boosted {
                 assert_eq!(ev_boost(8, 1), OK);
@@ -1502,7 +1528,7 @@ mod tests {
         for _ in 0..12 {
             sim_step();
         }
-        assert_eq!(ev(EV_RATE_SET, &48u32.to_le_bytes()), OK);
+        assert_eq!(ev_rate(48), OK);
         for _ in 0..24 {
             sim_step();
         }
@@ -1840,7 +1866,7 @@ mod tests {
         check(EV_MOVE_TO, ev_move(3, Node::ground(t.idx(10, 2)).0));
         check(EV_BOOST_SET, ev_boost(3, 1));
         check(EV_DAY_RESET, ev(EV_DAY_RESET, &1u32.to_le_bytes()));
-        check(EV_RATE_SET, ev(EV_RATE_SET, &48u32.to_le_bytes()));
+        check(EV_EPOCH_ADVANCE, ev_rate(48));
         check(EV_CLOCK_SKIP, ev(EV_CLOCK_SKIP, &10_000u64.to_le_bytes()));
         check(EV_LEAVE, ev_id(EV_LEAVE, 7));
         let mut p = 9u32.to_le_bytes().to_vec();

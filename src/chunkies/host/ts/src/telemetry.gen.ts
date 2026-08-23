@@ -46,7 +46,7 @@ export const ResyncReason = {
   eventRejected: 3,
   hashMismatch: 4,
   checkAgedOut: 5,
-  moduleEpoch: 6,
+  epoch: 6,
   terrainFetch: 7,
   restoreFailed: 8,
   queueOverflow: 9,

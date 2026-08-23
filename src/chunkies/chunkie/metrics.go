@@ -22,7 +22,7 @@ var (
 	mClockSkips = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "chunkies_clock_skips_total", Help: "clock_skip events journaled to repay authority downtime."})
 	mRateChanges = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "chunkies_rate_changes_total", Help: "rate_set events journaled to converge a chunk to the deployment's tick rate."})
+		Name: "chunkies_rate_changes_total", Help: "epoch advances that changed a chunk's tick rate."})
 	mAppendDur = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "chunkies_journal_append_seconds",
 		Help:    "Tick-batched journal append commit time (the Append call alone).",
@@ -73,7 +73,7 @@ var (
 	mInboundDropped = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "chunkies_inbound_dropped_total", Help: "Uplink frames shed because a session's intent drain was stalled."})
 	mEpochSwaps = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "chunkies_epoch_swaps_total", Help: "Chunk module epoch-swap lane outcomes."}, []string{"result"})
+		Name: "chunkies_epoch_swaps_total", Help: "Chunk epoch lane outcomes: module swaps and rate changes."}, []string{"result"})
 	mRehearsals = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "chunkies_recovery_rehearsals_total",
 		Help: "Boot-time recovery-ladder rehearsals against the volume, by outcome. PG stays authority; 'failed' means the volume would not have recovered this world."}, []string{"outcome"})

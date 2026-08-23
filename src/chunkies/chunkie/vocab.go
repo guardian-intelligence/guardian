@@ -91,7 +91,7 @@ func (v *Vocab) eventActor(kind uint16, actor string, payload []byte) (uint64, [
 	// writer's name must not turn into an actor id the sim rejects.
 	switch kind {
 	case codec.KindDayReset, codec.KindEpochAdvance, codec.KindContentSet,
-		codec.KindClockSkip, codec.KindRateSet:
+		codec.KindClockSkip:
 		return 0, payload
 	}
 	if n, ok := v.LegacyActorPrefix[kind]; ok && len(payload) == n {
