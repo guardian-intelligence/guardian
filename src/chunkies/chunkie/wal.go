@@ -9,25 +9,43 @@ package chunkie
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"log"
 	"sync/atomic"
 	"time"
 
+	"github.com/guardian-intelligence/guardian/src/chunkies/chunkie/checkpoint"
 	"github.com/guardian-intelligence/guardian/src/chunkies/chunkie/ticklog"
+	"github.com/guardian-intelligence/guardian/src/chunkies/codec"
 )
+
+// shadowBoot is the activation-time material only the caller has in
+// hand: the running sim module and active terrain (the rehearsal's
+// proof inputs) and the distributed client module's identity (half the
+// checkpoint manifest's pair pin).
+type shadowBoot struct {
+	module    []byte
+	terrain   []byte
+	clientSum [32]byte
+}
 
 // shadowFunc opens the shadow for one chunk activation at its exact
 // journal tip; nil disables the shadow entirely (dark authorities,
 // tests, prod before the volume lands).
-type shadowFunc func(chunk string, epoch uint32, nextTick uint64, lastSeq int64) *shadowWAL
+type shadowFunc func(chunk string, epoch uint32, nextTick uint64, lastSeq int64, boot shadowBoot) *shadowWAL
 
 // newShadowFactory wires one activation volume directory. Each call of
 // the returned shadowFunc is one activation: it takes the writer lock,
-// mints a generation, and creates a fresh log; the authority's close
-// releases both, so an authority reopen is a new activation by
-// construction.
-func newShadowFactory(dir string) shadowFunc {
-	return func(chunk string, epoch uint32, nextTick uint64, lastSeq int64) *shadowWAL {
+// rehearses the recovery ladder against whatever the volume holds
+// (slice C: PG is still the authority — a failed rehearsal costs a
+// graph, not a world), mints a generation, and creates a fresh log plus
+// the checkpoint cadence lane; the authority's close releases all of
+// it, so an authority reopen is a new activation by construction.
+// st nil disables the checkpoint lane and the rehearsal (WAL-only,
+// slice B's shape).
+func newShadowFactory(dir string, st checkpoint.Store, game string) shadowFunc {
+	return func(chunk string, epoch uint32, nextTick uint64, lastSeq int64, boot shadowBoot) *shadowWAL {
 		guard, err := ticklog.Acquire(dir)
 		if err != nil {
 			// Shadow policy: the world serves without its shadow rather
@@ -38,6 +56,20 @@ func newShadowFactory(dir string) shadowFunc {
 			mWALFaults.Inc()
 			mWALShadowDead.Set(1)
 			return nil
+		}
+		if st != nil {
+			// Between the lock and Create: the volume is quiescent and
+			// fenced, exactly what the ladder will see at the flip.
+			// nextTick is the tick the activation will execute next; the
+			// recovered tip speaks in last-completed ticks, so the loss
+			// graph compares against nextTick-1 or it reads one high
+			// forever.
+			pw := sha256.Sum256(boot.module)
+			pgTick := nextTick
+			if pgTick > 0 {
+				pgTick--
+			}
+			rehearse(guard, st, dir, chunk, boot.module, boot.terrain, boot.clientSum, pw, ticklog.Tip{Tick: pgTick, Seq: lastSeq})
 		}
 		l, err := ticklog.Create(ticklog.Config{
 			Dir:        dir,
@@ -54,7 +86,10 @@ func newShadowFactory(dir string) shadowFunc {
 			guard.Release()
 			return nil
 		}
-		w := &shadowWAL{guard: guard, log: l, stop: make(chan struct{})}
+		w := &shadowWAL{guard: guard, log: l, game: game, stop: make(chan struct{})}
+		if st != nil {
+			w.ckpt = checkpoint.New(st, l, checkpoint.Config{})
+		}
 		mWALShadowDead.Set(0)
 		go w.watch(chunk)
 		return w
@@ -64,6 +99,8 @@ func newShadowFactory(dir string) shadowFunc {
 type shadowWAL struct {
 	guard *ticklog.Guard
 	log   *ticklog.Log
+	ckpt  *checkpoint.Snapshotter // nil in WAL-only wiring
+	game  string
 	dead  atomic.Bool
 	stop  chan struct{}
 }
@@ -121,6 +158,57 @@ func (w *shadowWAL) watermark(tick uint64) {
 	w.log.Watermark(0, tick)
 }
 
+// dueCheckpoint gates the tick loop's only checkpoint cost: when it
+// returns true the caller pays one sim_snapshot and hands the bytes to
+// submitCheckpoint; everything else happens on the snapshotter's lane.
+// A dead shadow stops checkpointing too — its WAL can no longer cover
+// the gap between checkpoints, so a fresher checkpoint would narrate a
+// history the volume cannot replay.
+func (w *shadowWAL) dueCheckpoint(chunk string, now time.Time) bool {
+	return w != nil && w.ckpt != nil && !w.dead.Load() && w.ckpt.Due(chunk, now)
+}
+
+func (w *shadowWAL) submitCheckpoint(m codec.Checkpoint) {
+	if w == nil || w.ckpt == nil || w.dead.Load() {
+		return
+	}
+	m.Generation = w.guard.Generation()
+	w.ckpt.Submit(m)
+}
+
+// forceCheckpoint writes one manifest synchronously — durable and
+// restore-proven — via the snapshotter's Force: the promotion barrier's
+// step 2. Failure latches the shadow dead; the swap it barriers is PG's
+// to gate, never the shadow's.
+func (w *shadowWAL) forceCheckpoint(chunk string, m codec.Checkpoint, prove checkpoint.ProveFunc) {
+	if w == nil || w.ckpt == nil || w.dead.Load() {
+		return
+	}
+	m.Generation = w.guard.Generation()
+	// Bounded, unlike the cadence lane: this runs on the tick goroutine,
+	// and the swap must fail loudly rather than freeze the world. File
+	// I/O cannot be cancelled, so the bound is on the wait, not the
+	// work: past it the shadow latches dead and the swap proceeds on
+	// PG's word. An abandoned Force that later completes leaves at worst
+	// one more proven checkpoint on a lane nobody reads until reopen.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := w.ckpt.Force(ctx, m, prove)
+		done <- err
+	}()
+	var err error
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+		err = fmt.Errorf("promotion barrier checkpoint: %w", ctx.Err())
+	}
+	if err != nil {
+		w.latch(chunk, err)
+	}
+}
+
 // advanceEpoch is the epoch barrier: no segment ever spans a module
 // promotion. Synchronous by design — the swap path is already heavy.
 func (w *shadowWAL) advanceEpoch(chunk string, epoch uint32) {
@@ -140,6 +228,15 @@ func (w *shadowWAL) close() {
 	}
 	w.dead.Store(true)
 	close(w.stop)
+	if w.ckpt != nil {
+		// The snapshotter first: its retention pass trims through the
+		// log, which must still be open under it.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := w.ckpt.Close(ctx); err != nil {
+			log.Printf("checkpoint lane close: %v", err)
+		}
+		cancel()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	if err := w.log.Barrier(ctx); err != nil {
 		log.Printf("shadow WAL close barrier: %v", err)

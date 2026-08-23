@@ -44,7 +44,7 @@ type ProveFunc func(state []byte, wh uint64) error
 
 // Snapshotter is the per-activation cadence engine. The tick loop pays
 // only for the sim_snapshot call and hands the bytes to Submit;
-// deflate, the smeared write, retention, and WAL trimming all run on
+// deflate, the durable write, retention, and WAL trimming all run on
 // one background lane. One manifest in flight per chunk — a lane still
 // busy at the next cadence skips (and counts), never queues.
 type Snapshotter struct {
@@ -134,6 +134,12 @@ func (s *Snapshotter) jittered() time.Duration {
 // discontinuity sites' floor. Proving reads back from disk: the claim
 // is about what recovery will find, not what the caller handed in.
 func (s *Snapshotter) Force(ctx context.Context, m codec.Checkpoint, prove ProveFunc) (Ref, error) {
+	// A forced manifest is the chunk's freshest possible state: re-arm
+	// the cadence so the lane does not pay for a near-duplicate a tick
+	// later.
+	s.mu.Lock()
+	s.next[m.Chunk] = s.now().Add(s.jittered())
+	s.mu.Unlock()
 	deflated, err := deflate(m.State)
 	if err != nil {
 		return Ref{}, err
@@ -152,7 +158,7 @@ func (s *Snapshotter) Force(ctx context.Context, m codec.Checkpoint, prove Prove
 		s.st.Remove(ref)
 		return Ref{}, err
 	}
-	state, err := inflate(back.State)
+	state, err := Inflate(back.State)
 	if err != nil {
 		s.st.Remove(ref)
 		return Ref{}, err
@@ -208,10 +214,9 @@ func (s *Snapshotter) write(m codec.Checkpoint) {
 	deflated, err := deflate(m.State)
 	if err == nil {
 		m.State = deflated
-		// No deadline: the store's smear budget legitimately stretches a
-		// large blob past any fixed timeout, and aborting would retry the
-		// same abort every cadence forever. A wedged disk is observable —
-		// stale chunkies_ckpt_last_unix, busy skips — and latches the WAL
+		// No deadline: aborting a slow write would retry the same abort
+		// every cadence forever. A wedged disk is observable — stale
+		// chunkies_ckpt_last_unix, busy skips — and latches the WAL
 		// watchdog on the same volume anyway.
 		_, err = s.st.Put(context.Background(), m)
 	}
@@ -267,7 +272,9 @@ func deflate(b []byte) ([]byte, error) {
 	return z.Bytes(), nil
 }
 
-func inflate(b []byte) ([]byte, error) {
+// Inflate decompresses a manifest's State field back to the raw bytes
+// sim_restore expects — the recovery ladder's half of Submit's deflate.
+func Inflate(b []byte) ([]byte, error) {
 	// Strict: a truncated stream must fail loudly. The manifest CRC
 	// cannot catch truncation that happened before encoding, and an
 	// amputated world restoring silently is the worst outcome here.

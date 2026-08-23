@@ -308,6 +308,7 @@ func (h *simHost) StepE() error {
 }
 
 func (h *simHost) HashE() (uint64, error) { return h.callE(h.fHash) }
+func (h *simHost) TickE() (uint64, error) { return h.callE(h.fTick) }
 
 // Apply runs one encoded event (kind u16 LE + payload) through sim_apply.
 // The module must not mutate on a nonzero return (pinned by its tests).
@@ -423,10 +424,13 @@ type authority struct {
 	// soak the swap commits as an epoch_advance journal event plus a
 	// synchronous boundary snapshot hashed by the new module. All fields
 	// are owned by the tick goroutine.
-	moduleHash string // display hash of the running module
+	moduleHash string   // display hash of the running module
+	simSum     [32]byte // full sha256 of the running module — the checkpoint manifest's PW pin
 	cand       *simHost
 	candHash   string
-	candSum    uint64 // first 8 bytes (LE) of the candidate's sha256
+	candBytes  []byte   // the candidate's module bytes; the promotion barrier's proof instance
+	candSum    uint64   // first 8 bytes (LE) of the candidate's sha256
+	candSHA    [32]byte // the candidate's full sha256; becomes simSum on promote
 	soakLeft   int
 	badModule  string // last hash that failed soak; retried only on change
 
@@ -490,9 +494,10 @@ func (a *authority) swapPrelude() []stagedIntent {
 			mEpochSwaps.WithLabelValues("soak_abort").Inc()
 			return nil
 		}
-		a.cand, a.candHash, a.soakLeft = cand, hash, soakTicks(a.hz)
+		a.cand, a.candHash, a.candBytes, a.soakLeft = cand, hash, bytes, soakTicks(a.hz)
 		sum := sha256.Sum256(bytes)
 		a.candSum = binary.LittleEndian.Uint64(sum[:8])
+		a.candSHA = sum
 		// A content-free game has no blob to stage.
 		if len(a.terrainBlob) > 0 {
 			if err := cand.SetTerrainE(a.terrainBlob); err != nil {
@@ -524,6 +529,7 @@ func (a *authority) failSoak(hash string, err error) {
 	if a.cand != nil {
 		a.cand.close()
 		a.cand = nil
+		a.candBytes = nil
 	}
 	if hash != "" {
 		a.badModule = hash
@@ -537,7 +543,7 @@ func (a *authority) failSoak(hash string, err error) {
 // validation instrument, not a lineage), the boundary snapshot goes
 // durable under the NEW module's hash — the anchor journal replay will
 // restore from — and only then does the candidate become the host.
-func (a *authority) promote(t uint64) {
+func (a *authority) promote(t uint64, dedup []codec.DedupEntry) {
 	state := a.host.Snapshot()
 	if err := a.cand.RestoreE(state); err != nil {
 		a.failSoak(a.candHash, fmt.Errorf("boundary restore: %w", err))
@@ -561,11 +567,41 @@ func (a *authority) promote(t uint64) {
 		return
 	}
 	mSnapshots.Inc()
+	if a.wal != nil {
+		// The promotion barrier's step 2: a checkpoint under the NEW pair,
+		// durable and restore-proven, before the old epoch may die. Without
+		// it every manifest on the volume is old-pair until the cadence
+		// next fires, and a crash inside that window hits the ladder's
+		// pair refusal on a world that was healthy. Proof runs in a fresh
+		// instance of the candidate's bytes — the claim is about what
+		// recovery will find. Failure latches the shadow dead and never
+		// gates the swap: PG remains the promotion's authority. Tick is
+		// the completed boundary tick (t names the next one) — the WAL
+		// record above carries the same number, and a scan keyed one high
+		// would skip the first post-swap record into a false gap.
+		modBytes, terrainBlob := a.candBytes, a.terrainBlob
+		a.wal.forceCheckpoint(a.name, codec.Checkpoint{
+			Version: 1, Game: a.wal.game, Chunk: a.name,
+			Lineage: 0,
+			Seq:     a.lastSeq, Tick: t - 1, Epoch: a.host.Epoch(),
+			WH: wh, Content: a.terrain,
+			CW: a.mods.client.Sum(), PW: a.candSHA,
+			Dedup: dedup, State: state,
+		}, func(raw []byte, wantWH uint64) error {
+			h, err := proveRestore(modBytes, terrainBlob, raw, wantWH)
+			if err != nil {
+				return err
+			}
+			h.close()
+			return nil
+		})
+	}
 	old := a.host
-	a.host, a.cand = a.cand, nil
+	a.host, a.cand, a.candBytes = a.cand, nil, nil
 	old.close()
 	prev := a.moduleHash
 	a.moduleHash = a.candHash
+	a.simSum = a.candSHA
 	a.mu.Lock()
 	// The ring entry for the boundary tick and any cached snapshot line
 	// were computed by the old module; re-anchor both.
@@ -610,7 +646,12 @@ func (a *authority) setTerrain(blob []byte) error {
 // closed, and hands back an authority ready for run(). A chunk whose
 // snapshot does not replay to its recorded world hash is refused, never
 // served wrong.
-func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing, publish publishFunc) (*authority, error) {
+// openAuthority restores a chunk from its journal and settles it for
+// serving. shadow, when set, attaches the durability lane after the
+// restore and before the boot-time system events (clock repayment,
+// rate convergence): those events are journal rows like any other, and
+// the WAL must hold them or post-flip replay cannot cross a reboot.
+func openAuthority(ctx context.Context, name string, module []byte, genesisTerrain []byte, vocab Vocab, j journal.Journal, mods *modules, tm timing, publish publishFunc, shadow func(*authority)) (*authority, error) {
 	if tm.hz == 0 {
 		tm.hz = 24
 	}
@@ -634,6 +675,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 		publish:    publish,
 		tm:         tm,
 		moduleHash: displayHash(module),
+		simSum:     sha256.Sum256(module),
 		subs:       map[*session]bool{},
 		players:    map[uint64]*session{},
 		seen:       map[codec.DedupEntry]struct{}{},
@@ -645,6 +687,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 		// a chunk that slept across midnight wakes with the right day.
 	}
 	fail := func(err error) (*authority, error) {
+		a.wal.close() // nil-safe: releases the lock if the shadow attached
 		host.close()
 		return nil, fmt.Errorf("chunk %s: %w", name, err)
 	}
@@ -711,6 +754,15 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 			}
 			a.lastSeq = ev.Seq
 		}
+		if len(tail) > 0 {
+			// A tick is apply-then-step (tickOnce), and the process that
+			// journaled the final tick's events stepped past them before
+			// it died. Replaying them leaves the host mid-tick; take that
+			// step so the restored world is tick-clean — the same point
+			// the WAL ladder recovers to — before any boot-time system
+			// event lands on it.
+			host.Step()
+		}
 	} else {
 		// Genesis: the content artifact becomes durable first, then the
 		// snapshot that references it — events alone cannot recreate a
@@ -743,18 +795,39 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 	// segment, then repay the gap between the stored tick and the wall
 	// clock before the doors open.
 	a.refreshSchedule(true)
-	if target := a.targetTick(tm.now()); target > host.Tick() {
-		if time.Duration(target-host.Tick())*a.tickDur <= darkStepWindow {
+	if shadow != nil {
+		// Between restore and repayment: the rehearsal's loss graph then
+		// reads what the crash cost (the volume's tip against the
+		// journal's), never the downtime the repayment is about to skip.
+		shadow(a)
+	}
+	// Boot-time system events are ticks like any other — apply, then
+	// step (systemTick) — so each one carries the world one tick past
+	// where it lands. A skip therefore aims one tick short and arrives
+	// on the schedule tick. A rate_set's closing step runs at the new
+	// rate, worth less wall time than the old tick it would displace,
+	// so it is not reserved for: the world may lead the schedule by one
+	// new-rate tick, and the run loop simply waits for it.
+	target := a.targetTick(tm.now())
+	skip := target > host.Tick() && time.Duration(target-host.Tick())*a.tickDur > darkStepWindow
+	goal := target
+	if skip {
+		goal--
+	}
+	if goal > host.Tick() {
+		if skip {
+			if err := a.clockSkip(ctx, goal); err != nil {
+				return fail(err)
+			}
+		} else {
 			// The world lives through a short restart: step it, filling
 			// the ring so rejoining clients keep their fast-forward lane.
-			for host.Tick() < target {
+			for host.Tick() < goal {
 				host.Step()
 				t := host.Tick()
 				a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: host.Hash()}
 			}
 			a.ringHead = host.Tick()
-		} else if err := a.clockSkip(ctx, target); err != nil {
-			return fail(err)
 		}
 	}
 	// Still dark: converge the world's rate toward the deployment's
@@ -792,15 +865,7 @@ func (a *authority) rateChange(ctx context.Context, hz int) error {
 	a.lastSeq = firstSeq
 	mEventsAppended.Inc()
 	mRateChanges.Inc()
-	if a.wal != nil {
-		// The shadow mirrors the journal row byte-for-byte with the
-		// catch-up frame's actor resolution. Ticks must be strictly
-		// increasing per record, so a second system event landing on the
-		// same tick latches the shadow — visible, and exactly the class
-		// of divergence the shadow window exists to surface.
-		run := codec.AppendEventRecord(nil, 0, codec.KindRateSet, 0, p[:])
-		a.wal.appendTick(a.name, tick, firstSeq, 1, run, a.host.Hash())
-	}
+	a.systemTick(tick, firstSeq, codec.KindRateSet, p[:])
 	a.refreshSchedule(true)
 	t := a.host.Tick()
 	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: a.host.Hash()}
@@ -819,7 +884,8 @@ func (a *authority) rateChange(ctx context.Context, hz int) error {
 }
 
 // clockSkip journals the repayment of a long gap: one event that jumps sim
-// time to target without stepping through it. What a skip means for the
+// time to target without stepping through it, then the step every tick
+// ends with — the world lands on target+1. What a skip means for the
 // world is the module's decision — the host only moves bytes.
 func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	tick, epoch := a.host.Tick(), a.host.Epoch()
@@ -844,10 +910,7 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	a.lastSeq = firstSeq
 	mEventsAppended.Inc()
 	mClockSkips.Inc()
-	if a.wal != nil {
-		run := codec.AppendEventRecord(nil, 0, codec.KindClockSkip, 0, p[:])
-		a.wal.appendTick(a.name, tick, firstSeq, 1, run, a.host.Hash())
-	}
+	a.systemTick(tick, firstSeq, codec.KindClockSkip, p[:])
 	t := a.host.Tick()
 	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: a.host.Hash()}
 	a.ringHead = t
@@ -865,6 +928,20 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	log.Printf("chunk %s: clock_skip %d -> %d (%s of downtime repaid)",
 		a.name, tick, t, time.Duration(t-tick)*a.tickDur)
 	return nil
+}
+
+// systemTick completes a boot-time system event the way tickOnce
+// completes a live tick: the event was applied at tick and journaled at
+// firstSeq; step past it and hand the shadow one record whose hash is
+// the post-step world — the only shape replay can prove. Each system
+// event therefore owns a tick, so two of them (repayment, then rate
+// convergence) never collide on one record.
+func (a *authority) systemTick(tick uint64, firstSeq int64, kind uint16, payload []byte) {
+	a.host.Step()
+	if a.wal != nil {
+		run := codec.AppendEventRecord(nil, 0, kind, 0, payload)
+		a.wal.appendTick(a.name, tick, firstSeq, 1, run, a.host.Hash())
+	}
 }
 
 // simEvent encodes an event for sim_apply: the module's own ABI (kind u16
@@ -1160,9 +1237,20 @@ func (a *authority) tickOnce() {
 	var walFirstSeq int64
 	var walCount uint16
 
+	// Decide whether this tick may mint a manifest BEFORE the drain, so
+	// the dedup window is captured in the same critical section that
+	// freezes the tick's intent batch: a copy taken later can name
+	// intents staged mid-tick whose events are absent from the
+	// manifest's state — and a recovered window that remembers an
+	// unjournaled intent drops its resend as a duplicate.
+	mayManifest := a.wal != nil && (committing || a.wal.dueCheckpoint(a.name, a.tm.now()))
+	var dedupSnap []codec.DedupEntry
 	a.mu.Lock()
 	staged := append(prelude, a.staged...)
 	a.staged = nil
+	if mayManifest {
+		dedupSnap = append([]codec.DedupEntry(nil), a.seenFifo...)
+	}
 	a.mu.Unlock()
 	dequeuedAt := a.tm.now()
 	for i := range staged {
@@ -1174,6 +1262,7 @@ func (a *authority) tickOnce() {
 
 	var accepted []journal.Event
 	var acceptedIntents []stagedIntent
+	var rejectedKeys []codec.DedupEntry
 	tick := a.host.Tick()
 	epoch := a.host.Epoch()
 	for _, in := range staged {
@@ -1183,10 +1272,21 @@ func (a *authority) tickOnce() {
 				in.sess.sendReject(in.intentID, code)
 				// A rejected intent produced no journal event, so it must
 				// not occupy the idempotency window: a corrected resend
-				// under the same id has to reach the sim.
+				// under the same id has to reach the sim. That means the
+				// FIFO too, not just the map — the FIFO is what the
+				// checkpoint manifest persists, and a rejected id living
+				// there resurrects as a false duplicate after recovery.
 				if in.intentID != 0 {
+					key := codec.DedupEntry{Actor: in.actorID, Intent: in.intentID}
+					rejectedKeys = append(rejectedKeys, key)
 					a.mu.Lock()
-					delete(a.seen, codec.DedupEntry{Actor: in.actorID, Intent: in.intentID})
+					delete(a.seen, key)
+					for i, e := range a.seenFifo {
+						if e == key {
+							a.seenFifo = append(a.seenFifo[:i], a.seenFifo[i+1:]...)
+							break
+						}
+					}
 					a.mu.Unlock()
 				}
 			}
@@ -1300,10 +1400,49 @@ func (a *authority) tickOnce() {
 		} else {
 			a.wal.watermark(tick)
 		}
+		// This tick's rejects were still in the drain-time window copy;
+		// their events exist nowhere, so the persisted window must not
+		// remember them.
+		if len(rejectedKeys) > 0 && len(dedupSnap) > 0 {
+			kept := dedupSnap[:0]
+			for _, e := range dedupSnap {
+				drop := false
+				for _, r := range rejectedKeys {
+					if e == r {
+						drop = true
+						break
+					}
+				}
+				if !drop {
+					kept = append(kept, e)
+				}
+			}
+			dedupSnap = kept
+		}
+		promoting := committing && a.cand != nil
+		if mayManifest && !promoting && a.wal.dueCheckpoint(a.name, a.tm.now()) {
+			// The tick-barrier cost is exactly one sim_snapshot and the
+			// dedup-window copy; deflate, the durable write, retention,
+			// and WAL trim run on the snapshotter's lane. Tick and WH
+			// match the WAL record above, so a scan keyed by this
+			// manifest resumes at the next record. A promoting tick
+			// skips the cadence: its barrier Force writes the same
+			// boundary under the new pair, and two manifests sharing one
+			// (lineage, seq, tick, generation, epoch) name must never
+			// race.
+			a.wal.submitCheckpoint(codec.Checkpoint{
+				Version: 1, Game: a.wal.game, Chunk: a.name,
+				Lineage: 0, // pre-flip histories are lineage 0; rung 5 mints higher ones
+				Seq:     a.lastSeq, Tick: tick, Epoch: a.host.Epoch(),
+				WH: wh, Content: a.terrain,
+				CW: a.mods.client.Sum(), PW: a.simSum,
+				Dedup: dedupSnap, State: a.host.Snapshot(),
+			})
+		}
 	}
 
 	if committing && a.cand != nil {
-		a.promote(t)
+		a.promote(t, dedupSnap)
 	}
 
 	if a.eventsSinceSnap >= snapshotEvery || (a.eventsSinceSnap > 0 && a.tm.now().Sub(a.lastSnapAt) > snapshotMaxAge) {
@@ -1503,16 +1642,25 @@ func (p *chunks) get(ctx context.Context, name string) (*authority, error) {
 	p.mu.Unlock()
 	// Open outside the registry lock (journal replay takes a moment); the
 	// rare double-open race resolves to the first registered instance.
-	a, err := openAuthority(ctx, name, p.module(), p.genesis, p.vocab, p.j, p.mods, p.tm, p.publish)
+	// One module read serves both the authority and its shadow: a hot-swap
+	// landing between two reads would pin the rehearsal to a module the
+	// authority never ran.
+	mod := p.module()
+	var shadow func(*authority)
+	if p.shadow != nil {
+		// Attached by open itself, between the restore and the boot-time
+		// system events, so the repayment's journal row reaches the WAL.
+		// The discard path below closes through a.close(), which
+		// releases the shadow's lock and generation.
+		shadow = func(a *authority) {
+			a.wal = p.shadow(name, a.host.Epoch(), a.host.Tick(), a.lastSeq, shadowBoot{
+				module: mod, terrain: a.terrainBlob, clientSum: p.mods.client.Sum(),
+			})
+		}
+	}
+	a, err := openAuthority(ctx, name, mod, p.genesis, p.vocab, p.j, p.mods, p.tm, p.publish, shadow)
 	if err != nil {
 		return nil, err
-	}
-	if p.shadow != nil {
-		// The activation's journal tip is exact here: open (including its
-		// clock repayment) has appended everything it will, and run() has
-		// not started. The discard path below closes through a.close(),
-		// which releases the shadow's lock and generation.
-		a.wal = p.shadow(name, a.host.Epoch(), a.host.Tick(), a.lastSeq)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/guardian-intelligence/guardian/src/chunkies/chunkie/checkpoint"
 	"github.com/guardian-intelligence/guardian/src/chunkies/journal"
 	"github.com/guardian-intelligence/guardian/src/chunkies/mount"
 	"github.com/guardian-intelligence/guardian/src/chunkies/trunk"
@@ -126,7 +128,20 @@ func Run() {
 	bcast := newBroadcaster(game, tickHz, 1)
 	var shadow shadowFunc
 	if dir := os.Getenv("WAL_DIR"); dir != "" {
-		shadow = newShadowFactory(dir)
+		// The checkpoint store lives beside the WAL segments on the same
+		// volume (the scan skips the subdirectory).
+		var st checkpoint.Store
+		if d, err := checkpoint.NewDir(filepath.Join(dir, "checkpoints")); err != nil {
+			// The volume is present but the checkpoint lane can't open:
+			// WAL-only shadow (slice B's shape) beats no shadow at all —
+			// but it must page, not just log: recovery is checkpoint-less
+			// until someone looks.
+			log.Printf("checkpoint store: %v — shadow runs WAL-only", err)
+			mCkptLaneDown.Set(1)
+		} else {
+			st = d
+		}
+		shadow = newShadowFactory(dir, st, game)
 		log.Printf("shadow WAL enabled: %s (PG remains recovery authority)", dir)
 	}
 	registry := newChunks(func() []byte { b, _ := simModule.Get(); return b }, genesis, vocab, j, mods, timing{hz: tickHz}, bcast.publish, shadow)

@@ -35,7 +35,7 @@ func TestShadowWALMirrorsJournal(t *testing.T) {
 	// An hour past the epoch, so the attach tip is a real tick number —
 	// the frontier below is exclusive and cannot express "before tick 0".
 	clock := fixedClock(wallEpoch.Add(time.Hour))
-	a, err := openAuthority(ctx, "chunk-shadow", module, nil, toyVocab(), j, toyMods(module), clock, nil)
+	a, err := openAuthority(ctx, "chunk-shadow", module, nil, toyVocab(), j, toyMods(module), clock, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestShadowWALMirrorsJournal(t *testing.T) {
 	// newer history, and its first record may land AT the attach tick —
 	// so the replay key's exclusive frontier is StartTick-1.
 	openSeq, openTick := a.lastSeq, a.host.Tick()
-	a.wal = newShadowFactory(dir)("chunk-shadow", a.host.Epoch(), openTick, openSeq)
+	a.wal = newShadowFactory(dir, nil, "toy")("chunk-shadow", a.host.Epoch(), openTick, openSeq, shadowBoot{})
 	if a.wal == nil {
 		t.Fatal("shadow WAL failed to open")
 	}

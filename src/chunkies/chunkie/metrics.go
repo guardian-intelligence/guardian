@@ -74,4 +74,16 @@ var (
 		Name: "chunkies_inbound_dropped_total", Help: "Uplink frames shed because a session's intent drain was stalled."})
 	mEpochSwaps = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "chunkies_epoch_swaps_total", Help: "Chunk module epoch-swap lane outcomes."}, []string{"result"})
+	mRehearsals = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "chunkies_recovery_rehearsals_total",
+		Help: "Boot-time recovery-ladder rehearsals against the volume, by outcome. PG stays authority; 'failed' means the volume would not have recovered this world."}, []string{"outcome"})
+	mRehearsalLossTicks = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "chunkies_recovery_rehearsal_loss_ticks",
+		Help: "Ticks the last successful rehearsal's recovered tip trailed the PG tip — the crash drill's loss graph."})
+	mRecoveryCWDrift = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "chunkies_recovery_cw_drift_total",
+		Help: "Recoveries whose chosen checkpoint carried a different client-module hash than the mounted one — a routine client deploy's shape, tolerated and counted."})
+	mCkptLaneDown = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "chunkies_ckpt_lane_down",
+		Help: "1 while the shadow runs WAL-only because the checkpoint store failed to open — recovery is checkpoint-less until fixed."})
 )
