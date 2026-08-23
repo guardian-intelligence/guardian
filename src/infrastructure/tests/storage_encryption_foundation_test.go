@@ -87,7 +87,9 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 	}
 
 	// The chunkies durability class: static node-local PVs on Talos user
-	// volumes, LUKS2 at the Talos layer, no LINSTOR in the path.
+	// volumes, no LINSTOR in the path. Deliberately unencrypted: worker
+	// nodes are fungible cattle holding non-sensitive world state; only
+	// control-plane volumes carry customer data and LUKS2.
 	uv := classes["talos-user-volume"]
 	if uv == nil {
 		t.Fatalf("%s missing StorageClass talos-user-volume", path)
@@ -102,8 +104,8 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 		t.Errorf("StorageClass talos-user-volume volumeBindingMode = %q, want WaitForFirstConsumer", got)
 	}
 	uvLabels := mapValue(mapValue(uv["metadata"])["labels"])
-	if got := stringValue(uvLabels["guardian.dev/encryption-at-rest"]); got != "talos-luks2-user-volume" {
-		t.Errorf("StorageClass talos-user-volume encryption label = %q, want talos-luks2-user-volume", got)
+	if got := stringValue(uvLabels["guardian.dev/encryption-at-rest"]); got != "none" {
+		t.Errorf("StorageClass talos-user-volume encryption label = %q, want none", got)
 	}
 	if got := stringValue(uvLabels["guardian.dev/linstor-encryption-at-rest"]); got != "disabled" {
 		t.Errorf("StorageClass talos-user-volume LINSTOR encryption label = %q, want disabled", got)
@@ -279,7 +281,7 @@ func TestTalosBootAndVolumeEncryptionConformance(t *testing.T) {
 	} {
 		assertTextContains(t, workerOverlay, want, workerOverlayPath)
 	}
-	for _, forbidden := range []string{"kind: RawVolumeConfig", "r-guardian-data"} {
+	for _, forbidden := range []string{"kind: RawVolumeConfig", "r-guardian-data", "provider: luks2"} {
 		assertTextNotContains(t, workerOverlay, forbidden, workerOverlayPath)
 	}
 }

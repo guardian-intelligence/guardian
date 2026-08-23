@@ -22,8 +22,11 @@ machine:
 # worlds this node serves (design of record: netcode spec, slices B-D).
 # Node-local by ruling — deliberately NOT in the LINSTOR mesh; contents
 # are expendable on reinstall (recovery re-seeds from the control
-# plane). During a node rebuild FD5 is also the staging disk: the volume
-# stays pending until the staging wipe, then provisions on reconcile.
+# plane). Unencrypted by ruling: workers are fungible cattle holding
+# non-sensitive world state; only control-plane volumes carry customer
+# data and LUKS2. During a node rebuild FD5 is also the staging disk:
+# the volume stays pending until the staging wipe, then provisions on
+# reconcile.
 apiVersion: v1alpha1
 kind: UserVolumeConfig
 name: chunkies
@@ -34,11 +37,6 @@ provisioning:
   grow: true
 filesystem:
   type: xfs
-encryption:
-  provider: luks2
-  keys:
-    - slot: 0
-      nodeID: {}
 ---
 apiVersion: v1alpha1
 kind: HostnameConfig

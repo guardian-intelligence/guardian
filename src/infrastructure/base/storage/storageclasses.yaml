@@ -160,7 +160,7 @@ kind: StorageClass
 metadata:
   name: talos-user-volume
   labels:
-    guardian.dev/encryption-at-rest: talos-luks2-user-volume
+    guardian.dev/encryption-at-rest: none
     guardian.dev/linstor-encryption-at-rest: disabled
 provisioner: kubernetes.io/no-provisioner
 volumeBindingMode: WaitForFirstConsumer

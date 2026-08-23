@@ -144,7 +144,8 @@ The rebuild is complete only when all of these pass after the full power cycle:
   reports module-signature enforcement.
 - The Talos system disk has serial `362510FCEFF6`; serial `362510FCEFD5`
   carries the provisioned `chunkies` user volume (`talosctl get volumestatus
-  u-chunkies` reports ready; the disk shows a LUKS2 volume, never a bare or
+  u-chunkies` reports ready; the disk shows the Talos-provisioned XFS user
+  volume — unencrypted by ruling, workers hold no sensitive data — never a
   foreign filesystem).
 - Kubernetes reports `ash-worker0` Ready with label
   `guardian.dev/dedicated=wum`, exactly the intended
