@@ -178,19 +178,23 @@ try {
   await exercise(TO_RATE);
   await pull();
 
+  // A rate change is an epoch advance: the same page and transport carry
+  // on, and the world is rebuilt once from a snapshot taken under the new
+  // era — exactly one resync and one restore, never a redial or teardown.
   const afterTransition = spans.slice(transitionAt);
-  const forbidden = new Set([
-    "wum.connected",
-    "wum.redial",
-    "wum.netcode_resync",
-    "wum.netcode_teardown",
-    "wum.netcode_restore",
-  ]);
+  const forbidden = new Set(["wum.connected", "wum.redial", "wum.netcode_teardown"]);
   const disruptions = afterTransition.filter((span) => forbidden.has(span.name));
+  const resyncSpans = afterTransition.filter((span) => span.name === "wum.netcode_resync").length;
+  const restoreSpans = afterTransition.filter((span) => span.name === "wum.netcode_restore").length;
   const resyncsAfter = await page.evaluate(() => globalThis.__mythraDiag.resyncs);
-  if (disruptions.length !== 0 || resyncsAfter !== resyncsBefore) {
+  if (disruptions.length !== 0) {
     throw new Error(
       `rate boundary disrupted the session: ${disruptions.map((span) => span.name).join(",")}`,
+    );
+  }
+  if (resyncsAfter !== resyncsBefore + 1 || resyncSpans !== 1 || restoreSpans !== 1) {
+    throw new Error(
+      `rate boundary must resync exactly once across the epoch: diag ${resyncsBefore}->${resyncsAfter}, spans resync=${resyncSpans} restore=${restoreSpans}`,
     );
   }
 
@@ -209,7 +213,7 @@ try {
   console.log(
     `RATE_CHANGE from_hz=${FROM_RATE} to_hz=${TO_RATE}` +
       ` tick=${rateChange.attrs["wum.tick"]} page_id=${pageIdAfter}` +
-      ` world_tick=${tickBefore}->${tickAfter} redials=0 resyncs=0 restores=0`,
+      ` world_tick=${tickBefore}->${tickAfter} redials=0 resyncs=1 restores=1`,
   );
   console.log(
     `LATENCY_JOURNEY rates=${FROM_RATE},${TO_RATE} actions=${completed.length} player=${PLAYER}`,

@@ -124,8 +124,8 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 	}
 
 	// The live drill's server half: an already-running authority journals
-	// and fans out a rate boundary, keeps its verification history, and
-	// continues serving under the new schedule.
+	// and fans out a rate change as an epoch advance, keeps its
+	// verification history, and continues serving under the new schedule.
 	boundary, boundaryHash := a.host.Tick(), a.host.Hash()
 	pubsBefore := len(pubs)
 	done := make(chan error, 1)
@@ -147,11 +147,17 @@ func TestAuthorityJournalRoundTrip(t *testing.T) {
 	}
 	pub := pubs[len(pubs)-1]
 	recs, err := codec.ParseRecords(pub.run, int(pub.count))
-	if err != nil || len(recs) != 1 || recs[0].Kind != codec.KindRateSet || pub.tick != boundary {
+	if err != nil || len(recs) != 1 || recs[0].Kind != codec.KindEpochAdvance || pub.tick != boundary {
 		t.Fatalf("rate fanout publish: %+v recs=%v err=%v", pub, recs, err)
 	}
 	if recs[0].Actor != 0 {
-		t.Fatalf("rate_set record: actor=%d — system events are authority-minted", recs[0].Actor)
+		t.Fatalf("epoch_advance record: actor=%d — system events are authority-minted", recs[0].Actor)
+	}
+	if len(recs[0].Payload) != 16 || binary.LittleEndian.Uint32(recs[0].Payload[12:]) != 48 {
+		t.Fatalf("epoch_advance payload %x does not carry 48Hz", recs[0].Payload)
+	}
+	if a.host.Epoch() != 2 {
+		t.Fatalf("epoch = %d after the rate change, want 2 — a rate change is an era change", a.host.Epoch())
 	}
 	wantHash := a.host.Hash()
 	wantTick := a.host.Tick()
@@ -582,9 +588,9 @@ func TestReopenRepaysDowntime(t *testing.T) {
 }
 
 // The rate lane end to end: the deployment's desired rate converges the
-// world via one journaled rate_set in the dark, the schedule re-anchors
-// piecewise (so lowering the rate later never stalls the chunk), and
-// reopens across rate boundaries stay deterministic.
+// world via one epoch advance on its first live tick, the schedule
+// re-anchors piecewise (so lowering the rate later never stalls the
+// chunk), and reopens across rate boundaries stay deterministic.
 func TestReopenConvergesToDesiredRate(t *testing.T) {
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, pgtest.Start(t))
@@ -613,28 +619,37 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	}
 	a.host.close()
 
-	// Reopen wanting 120Hz: repay the 10s gap under the stored 24Hz
-	// segment first, then exactly one rate_set re-anchors at that tick.
+	// Reopen wanting 120Hz: the open repays the 10s gap under the stored
+	// 24Hz segment and only asks; the first live tick journals exactly
+	// one epoch advance carrying the rate, re-anchored at that tick.
 	at120 := wallEpoch.Add(10 * time.Second)
 	b, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, timing{hz: 120, now: func() time.Time { return at120 }}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if b.hz != 24 || b.lastSeq != seqBefore {
+		t.Fatalf("open journaled the rate itself (hz %d, seq %d → %d); the epoch lane owns it", b.hz, seqBefore, b.lastSeq)
+	}
+	b.tickOnce()
 	if b.hz != 120 || b.host.Rate() != 120 {
-		t.Fatalf("rate = %d/%d after reopen, want 120", b.hz, b.host.Rate())
+		t.Fatalf("rate = %d/%d after the first tick, want 120", b.hz, b.host.Rate())
 	}
-	if b.lastSeq != seqBefore+1 {
-		t.Fatalf("rate convergence journaled %d events, want exactly one rate_set", b.lastSeq-seqBefore)
+	// Two rows: the epoch advance leading the batch, then the day_reset
+	// every open's first tick stages.
+	if b.lastSeq != seqBefore+2 {
+		t.Fatalf("rate convergence journaled %d events, want the epoch_advance and the open's day_reset", b.lastSeq-seqBefore)
 	}
-	// The rate_set is a tick like any other: anchored where it landed,
-	// with the world stepped once past it — the same shape a live
-	// rate_set leaves behind in tickOnce.
+	if b.host.Epoch() != 2 {
+		t.Fatalf("epoch = %d after the rate change, want 2", b.host.Epoch())
+	}
+	// The epoch tick is a tick like any other: anchored where it landed,
+	// with the world stepped once past it.
 	if got, want := b.host.AnchorTick(), b.host.Tick()-1; got != want {
-		t.Fatalf("segment anchored at tick %d, want the rate_set tick %d", got, want)
+		t.Fatalf("segment anchored at tick %d, want the epoch tick %d", got, want)
 	}
 	// The repayment ran at 24Hz granularity, so up to one old tick of
 	// wall time (5 ticks at 120Hz) is still owed at the boundary — the
-	// live loop's first catch-up burst repays it — while the rate_set's
+	// live loop's first catch-up burst repays it — while the epoch tick's
 	// own closing step, at the new rate, may lead the schedule by one
 	// tick the loop waits for. Anything larger would be a real
 	// discontinuity.
@@ -652,17 +667,18 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 
 	// Lower the rate back at +20s: the 120Hz segment repays ~10s of gap
 	// first (no stall — the mapping is piecewise, not global), then one
-	// rate_set back to 24.
+	// epoch advance back to 24 on the first live tick.
 	at24 := wallEpoch.Add(20 * time.Second)
 	c, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, timing{hz: 24, now: func() time.Time { return at24 }}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.host.close()
-	if c.hz != 24 || c.host.Rate() != 24 {
-		t.Fatalf("rate = %d/%d after lowering, want 24", c.hz, c.host.Rate())
+	c.tickOnce()
+	if c.hz != 24 || c.host.Rate() != 24 || c.host.Epoch() != 3 {
+		t.Fatalf("rate = %d/%d epoch %d after lowering, want 24 at epoch 3", c.hz, c.host.Rate(), c.host.Epoch())
 	}
-	// Same shape as the raise: the rate_set's closing step may lead the
+	// Same shape as the raise: the epoch tick's closing step may lead the
 	// schedule by one new-rate tick, never trail it.
 	if got, want := c.targetTick(at24), c.host.Tick(); got+1 < want || got > want {
 		t.Fatalf("lowering the rate stalled the schedule: target %d vs tick %d", got, want)
@@ -671,13 +687,15 @@ func TestReopenConvergesToDesiredRate(t *testing.T) {
 	if repaid := c.host.AnchorTick() - snap.Tick; repaid < 1100 || repaid > 1300 {
 		t.Fatalf("repaid %d ticks across the 120Hz segment, want ~1200", repaid)
 	}
-	// determinism across two rate boundaries
+	// determinism across two rate boundaries: the reopen restores c's
+	// boundary snapshot and finds the rate already converged, so it
+	// journals nothing and lands on the same world.
 	d, err := openAuthority(ctx, "chunk-rated", module, nil, toyVocab(), j, mods, timing{hz: 24, now: func() time.Time { return at24 }}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer d.host.close()
-	if c.host.Hash() != d.host.Hash() {
-		t.Fatal("two reopens at the same instant diverged (across rate boundaries)")
+	if d.lastSeq != c.lastSeq || c.host.Hash() != d.host.Hash() {
+		t.Fatalf("two reopens at the same instant diverged (across rate boundaries): seq %d vs %d", c.lastSeq, d.lastSeq)
 	}
 }

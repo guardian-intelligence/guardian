@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { wire5 } from "@guardian/chunkies-testkit";
 
 const goldens = (name: string): string =>
-  readFileSync(new URL(`../../chunkies-testkit/goldens/${name}`, import.meta.url), "utf8");
+  readFileSync(new URL(`../../../testkit/ts/goldens/${name}`, import.meta.url), "utf8");
 
 const unhex = (s: string): Uint8Array =>
   Uint8Array.from(s.match(/.{2}/g) ?? [], (b) => Number.parseInt(b, 16));

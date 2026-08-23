@@ -489,8 +489,9 @@ smoke() {
 }
 
 # Measures the actions the product exposes today on both sides of one live
-# 24->48Hz journal boundary. The same browser page must observe rate_set and
-# continue without redial, resync, restore, or reload. Client facts cover first
+# 24->48Hz journal boundary. The same browser page must observe the epoch
+# advance carrying the rate and continue without redial or reload — one
+# resync across the epoch, nothing more. Client facts cover first
 # wire write -> local apply; authority spans split receipt -> next tick from the
 # rest of durable fan-out.
 latency() {

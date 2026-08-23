@@ -22,7 +22,6 @@ pub const K_LEAVE: u16 = 0x0102;
 pub const K_DAY_RESET: u16 = 0x0005;
 pub const K_CLOCK_SKIP: u16 = 0x0009;
 pub const K_EPOCH_ADVANCE: u16 = 0x0006;
-pub const K_RATE_SET: u16 = 0x000A;
 
 /// Game reject codes (must stay below the framework range).
 pub const ERR_ENCODING: u32 = 1;
@@ -190,26 +189,30 @@ impl Simulation for Toy {
                 OK
             }
             K_EPOCH_ADVANCE => {
-                if payload.len() != 12 || actor != 0 {
+                // {epoch u32, module_hash u64, hz u32}: append-only, so a
+                // 12-byte row from before the rate rode here means "rate
+                // unchanged". An epoch is the era whose module pair and
+                // tick rate replay runs under; a new rate closes the old
+                // segment of the piecewise tick<->wall mapping here.
+                if payload.len() < 12 || actor != 0 {
                     return ERR_ENCODING;
+                }
+                let mut hz = self.rate_hz;
+                if payload.len() >= 16 {
+                    hz = u32::from_le_bytes([payload[12], payload[13], payload[14], payload[15]]);
+                    if hz == 0 {
+                        return ERR_ENCODING;
+                    }
                 }
                 self.epoch = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-                OK
-            }
-            K_RATE_SET => {
-                if payload.len() != 4 || actor != 0 {
-                    return ERR_ENCODING;
+                if hz != self.rate_hz {
+                    self.anchor_ns = self.anchor_ns.wrapping_add(
+                        (self.tick - self.anchor_tick).wrapping_mul(1_000_000_000)
+                            / self.rate_hz as u64,
+                    );
+                    self.anchor_tick = self.tick;
+                    self.rate_hz = hz;
                 }
-                let hz = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
-                if hz == 0 || hz == self.rate_hz {
-                    return ERR_NOOP;
-                }
-                self.anchor_ns = self.anchor_ns.wrapping_add(
-                    (self.tick - self.anchor_tick).wrapping_mul(1_000_000_000)
-                        / self.rate_hz as u64,
-                );
-                self.anchor_tick = self.tick;
-                self.rate_hz = hz;
                 OK
             }
             _ => ERR_KIND,

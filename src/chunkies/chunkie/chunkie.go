@@ -48,9 +48,9 @@ const (
 	darkStepWindow = 60 * time.Second
 
 	// The host's own scheduling bounds. A game's module may impose a
-	// stricter floor through its rate_set validation — a rejected rate_set
-	// holds the world's current rate — so these only keep ring sizes and
-	// tick math sane.
+	// stricter floor when it validates the rate an epoch_advance carries
+	// — a rejected advance holds the world's current era — so these only
+	// keep ring sizes and tick math sane.
 	minTickHz = 12
 	maxTickHz = 1000
 )
@@ -62,9 +62,9 @@ const (
 var wallEpoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // timing carries the desired tick rate (the actual rate is world state:
-// the sim's journaled rate segment, which the dark phase converges toward
-// hz via rate_set) and the wall clock, injectable so tests and simulation
-// harnesses own time.
+// the sim's journaled rate segment, which the first live tick converges
+// toward hz through an epoch advance) and the wall clock, injectable so
+// tests and simulation harnesses own time.
 type timing struct {
 	hz  int
 	now func() time.Time
@@ -421,9 +421,8 @@ type authority struct {
 	// behavior mount serves a sim module whose hash differs from the
 	// running one, a candidate instance soaks in the dark — fed the same
 	// events, stepped in lockstep, fanning out nothing — and on a clean
-	// soak the swap commits as an epoch_advance journal event plus a
-	// synchronous boundary snapshot hashed by the new module. All fields
-	// are owned by the tick goroutine.
+	// soak the swap commits through the epoch lane (epochPrelude /
+	// commitEpoch). All fields are owned by the tick goroutine.
 	moduleHash string   // display hash of the running module
 	simSum     [32]byte // full sha256 of the running module — the checkpoint manifest's PW pin
 	cand       *simHost
@@ -433,6 +432,15 @@ type authority struct {
 	candSHA    [32]byte // the candidate's full sha256; becomes simSum on promote
 	soakLeft   int
 	badModule  string // last hash that failed soak; retried only on change
+	candReady  bool   // the soak completed: this tick's epoch_advance commits the swap
+	modBytes   []byte // the running module's bytes; the barrier's proof instance when nothing swaps
+
+	// The rate lane. An epoch is the era whose parameters replay and the
+	// schedule depend on — the module pair and the tick rate — so a rate
+	// change is an epoch advance: the deployment (at open) or the local-
+	// dev control asks, and the next tick's epoch_advance carries it.
+	wantHz   int
+	wantDone chan error
 
 	mu       sync.Mutex
 	staged   []stagedIntent
@@ -474,25 +482,60 @@ func displayHash(b []byte) string {
 	return hex.EncodeToString(sum[:4])
 }
 
-// swapPrelude advances the module-update lane at the top of a tick. When a
-// candidate's soak has just completed it returns the epoch_advance intent
-// that must lead this tick's batch — the journaled boundary between the
-// old module's ticks and the new one's.
-func (a *authority) swapPrelude() []stagedIntent {
+// epochPrelude advances the epoch lane at the top of a tick. One
+// journaled epoch_advance {epoch, module_hash, hz} leads the batch
+// whenever an era parameter is about to change: a candidate module whose
+// soak just completed, a tick rate the deployment or the local-dev
+// control asked for, or both at once. Clients treat every epoch advance
+// the same way — resync — so this is the one boundary both sides share.
+func (a *authority) epochPrelude() []stagedIntent {
+	a.candReady = a.soakModule()
+	hz := a.hz
+	if a.wantHz != 0 && a.wantHz != a.hz {
+		hz = a.wantHz
+	}
+	if !a.candReady && hz == a.hz {
+		return nil
+	}
+	sum := binary.LittleEndian.Uint64(a.simSum[:8])
+	if a.candReady {
+		sum = a.candSum
+	}
+	// Append-only means the tail is written only when it says something:
+	// a module-only advance keeps the 12-byte shape, so a module from
+	// before the rate rode here (mount skew during a rollout) still
+	// accepts the very advance that replaces it.
+	p := make([]byte, 12, 16)
+	binary.LittleEndian.PutUint32(p[:4], a.host.Epoch()+1)
+	binary.LittleEndian.PutUint64(p[4:12], sum)
+	if hz != a.hz {
+		p = binary.LittleEndian.AppendUint32(p, uint32(hz))
+	}
+	done := a.wantDone
+	a.wantDone = nil
+	return []stagedIntent{{actor: "system", kind: codec.KindEpochAdvance, payload: p, done: done}}
+}
+
+// soakModule runs the module-update lane: when the behavior mount serves
+// a sim module whose hash differs from the running one, a candidate
+// instance soaks in the dark — fed the same events, stepped in lockstep,
+// fanning out nothing. It reports true on the tick the soak completes,
+// which is the tick whose epoch_advance commits the swap.
+func (a *authority) soakModule() bool {
 	bytes, hash := a.mods.sim.Get()
 	if a.cand != nil && hash != a.candHash {
 		a.failSoak("", errors.New("superseded by a newer module"))
 	}
 	if a.cand == nil {
 		if len(bytes) == 0 || hash == a.moduleHash || hash == a.badModule {
-			return nil
+			return false
 		}
 		cand, err := newSimHost(bytes)
 		if err != nil {
 			a.badModule = hash
 			log.Printf("chunk %s: module %s rejected: %v", a.name, hash, err)
 			mEpochSwaps.WithLabelValues("soak_abort").Inc()
-			return nil
+			return false
 		}
 		a.cand, a.candHash, a.candBytes, a.soakLeft = cand, hash, bytes, soakTicks(a.hz)
 		sum := sha256.Sum256(bytes)
@@ -502,25 +545,22 @@ func (a *authority) swapPrelude() []stagedIntent {
 		if len(a.terrainBlob) > 0 {
 			if err := cand.SetTerrainE(a.terrainBlob); err != nil {
 				a.failSoak(hash, err)
-				return nil
+				return false
 			}
 		}
 		if err := cand.RestoreE(a.host.Snapshot()); err != nil {
 			a.failSoak(hash, err)
-			return nil
+			return false
 		}
 		log.Printf("chunk %s: module %s soaking for %s / %d ticks at %dHz (live %s)",
 			a.name, hash, soakDuration, a.soakLeft, a.hz, a.moduleHash)
-		return nil
+		return false
 	}
 	if a.soakLeft > 0 {
 		a.soakLeft--
-		return nil
+		return false
 	}
-	var p [12]byte
-	binary.LittleEndian.PutUint32(p[:4], a.host.Epoch()+1)
-	binary.LittleEndian.PutUint64(p[4:], a.candSum)
-	return []stagedIntent{{actor: "system", kind: codec.KindEpochAdvance, payload: p[:]}}
+	return true
 }
 
 // failSoak rejects the candidate. A non-empty hash pins it as bad so the
@@ -531,6 +571,9 @@ func (a *authority) failSoak(hash string, err error) {
 		a.cand = nil
 		a.candBytes = nil
 	}
+	// A soak can fail mid-tick, after the prelude declared it ready:
+	// commitEpoch must not find a swap without a candidate.
+	a.candReady = false
 	if hash != "" {
 		a.badModule = hash
 	}
@@ -543,49 +586,75 @@ func (a *authority) failSoak(hash string, err error) {
 // validation instrument, not a lineage), the boundary snapshot goes
 // durable under the NEW module's hash — the anchor journal replay will
 // restore from — and only then does the candidate become the host.
-func (a *authority) promote(t uint64, dedup []codec.DedupEntry) {
+// commitEpoch is the epoch barrier, run once the tick that journaled an
+// epoch_advance has applied and stepped: the boundary snapshot re-floors
+// PG replay under the new epoch; the WAL gets a checkpoint proven under
+// the pair that will serve it, durable before the old epoch may die; the
+// segment rotates so no segment spans the boundary; and when a soaked
+// candidate is ready, the host swaps. A rate change is already world
+// state by now (the sim re-anchored on apply) — the schedule re-reads it.
+func (a *authority) commitEpoch(t uint64, dedup []codec.DedupEntry) {
 	state := a.host.Snapshot()
-	if err := a.cand.RestoreE(state); err != nil {
-		a.failSoak(a.candHash, fmt.Errorf("boundary restore: %w", err))
-		return
-	}
-	wh, err := a.cand.HashE()
-	if err != nil {
-		a.failSoak(a.candHash, fmt.Errorf("boundary hash: %w", err))
-		return
+	wh := a.host.Hash()
+	swap := a.candReady
+	a.candReady = false
+	if swap {
+		if err := a.cand.RestoreE(state); err != nil {
+			a.failSoak(a.candHash, fmt.Errorf("boundary restore: %w", err))
+			swap = false
+		} else if h, err := a.cand.HashE(); err != nil {
+			a.failSoak(a.candHash, fmt.Errorf("boundary hash: %w", err))
+			swap = false
+		} else {
+			wh = h
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	err = a.j.PutSnapshot(ctx, a.id, journal.Snapshot{
+	err := a.j.PutSnapshot(ctx, a.id, journal.Snapshot{
 		Seq: a.lastSeq, Tick: t, Epoch: a.host.Epoch(), WH: wh,
 		TerrainID: a.host.TerrainID(), State: state,
 	})
 	cancel()
 	if err != nil {
-		// The epoch advanced in state and journal but the module stays — a
-		// loud no-op. The lane retries when the mount serves new bytes.
-		a.failSoak(a.candHash, fmt.Errorf("boundary snapshot: %w", err))
-		return
+		// The epoch advanced in state and journal; replay re-floors at
+		// the next snapshot. A module swap needs the boundary durable
+		// under PG first — the lane retries when the mount serves new
+		// bytes — so it stays a loud no-op.
+		log.Printf("chunk %s: epoch %d boundary snapshot failed: %v", a.name, a.host.Epoch(), err)
+		if swap {
+			a.failSoak(a.candHash, fmt.Errorf("boundary snapshot: %w", err))
+			swap = false
+			wh = a.host.Hash()
+		}
+	} else {
+		mSnapshots.Inc()
+		a.eventsSinceSnap = 0
+		a.lastSnapAt = a.tm.now()
 	}
-	mSnapshots.Inc()
 	if a.wal != nil {
-		// The promotion barrier's step 2: a checkpoint under the NEW pair,
-		// durable and restore-proven, before the old epoch may die. Without
-		// it every manifest on the volume is old-pair until the cadence
-		// next fires, and a crash inside that window hits the ladder's
-		// pair refusal on a world that was healthy. Proof runs in a fresh
-		// instance of the candidate's bytes — the claim is about what
-		// recovery will find. Failure latches the shadow dead and never
-		// gates the swap: PG remains the promotion's authority. Tick is
-		// the completed boundary tick (t names the next one) — the WAL
-		// record above carries the same number, and a scan keyed one high
-		// would skip the first post-swap record into a false gap.
-		modBytes, terrainBlob := a.candBytes, a.terrainBlob
+		// The barrier's step 2: a checkpoint under the pair that will
+		// serve the new epoch, durable and restore-proven, before the old
+		// epoch may die. Without it every manifest on the volume is
+		// old-epoch until the cadence next fires, and a crash inside that
+		// window hits the ladder's pair refusal on a world that was
+		// healthy. Proof runs in a fresh instance of the serving module's
+		// bytes — the claim is about what recovery will find. Failure
+		// latches the shadow dead and never gates the commit: PG remains
+		// the authority. Tick is the completed boundary tick (t names the
+		// next one) — the WAL record above carries the same number, and a
+		// scan keyed one high would skip the first post-barrier record
+		// into a false gap.
+		modBytes, pw := a.modBytes, a.simSum
+		if swap {
+			modBytes, pw = a.candBytes, a.candSHA
+		}
+		terrainBlob := a.terrainBlob
 		a.wal.forceCheckpoint(a.name, codec.Checkpoint{
 			Version: 1, Game: a.wal.game, Chunk: a.name,
 			Lineage: 0,
 			Seq:     a.lastSeq, Tick: t - 1, Epoch: a.host.Epoch(),
 			WH: wh, Content: a.terrain,
-			CW: a.mods.client.Sum(), PW: a.candSHA,
+			CW: a.mods.client.Sum(), PW: pw,
 			Dedup: dedup, State: state,
 		}, func(raw []byte, wantWH uint64) error {
 			h, err := proveRestore(modBytes, terrainBlob, raw, wantWH)
@@ -596,25 +665,34 @@ func (a *authority) promote(t uint64, dedup []codec.DedupEntry) {
 			return nil
 		})
 	}
-	old := a.host
-	a.host, a.cand, a.candBytes = a.cand, nil, nil
-	old.close()
-	prev := a.moduleHash
-	a.moduleHash = a.candHash
-	a.simSum = a.candSHA
+	if swap {
+		old := a.host
+		a.host, a.modBytes, a.cand, a.candBytes = a.cand, a.candBytes, nil, nil
+		old.close()
+		prev := a.moduleHash
+		a.moduleHash = a.candHash
+		a.simSum = a.candSHA
+		log.Printf("chunk %s: epoch %d — module %s live (was %s), wh %016x", a.name, a.host.Epoch(), a.moduleHash, prev, wh)
+		mEpochSwaps.WithLabelValues("committed").Inc()
+	}
+	if hz := a.host.Rate(); hz != a.hz {
+		old := a.hz
+		a.refreshSchedule(false)
+		log.Printf("chunk %s: epoch %d — rate %dHz -> %dHz at tick %d", a.name, a.host.Epoch(), old, a.hz, t)
+		mRateChanges.Inc()
+		mEpochSwaps.WithLabelValues("rate").Inc()
+	}
+	// The request was journaled; the rate is whatever the sim made of it.
+	a.wantHz = 0
 	a.mu.Lock()
 	// The ring entry for the boundary tick and any cached snapshot line
-	// were computed by the old module; re-anchor both.
+	// were computed under the old era; re-anchor both.
 	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: wh}
 	a.snapCache = snapCacheEntry{}
 	a.mu.Unlock()
-	a.eventsSinceSnap = 0
-	a.lastSnapAt = a.tm.now()
-	log.Printf("chunk %s: epoch %d — module %s live (was %s), wh %016x", a.name, a.host.Epoch(), a.moduleHash, prev, wh)
-	mEpochSwaps.WithLabelValues("committed").Inc()
 	if a.wal != nil {
 		// The epoch barrier: drain, sync, rotate — no segment ever spans
-		// a module promotion, so replay runs under exactly one pair.
+		// an epoch, so replay runs under exactly one era.
 		a.wal.advanceEpoch(a.name, a.host.Epoch())
 	}
 }
@@ -675,6 +753,7 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 		publish:    publish,
 		tm:         tm,
 		moduleHash: displayHash(module),
+		modBytes:   module,
 		simSum:     sha256.Sum256(module),
 		subs:       map[*session]bool{},
 		players:    map[uint64]*session{},
@@ -801,13 +880,9 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 		// journal's), never the downtime the repayment is about to skip.
 		shadow(a)
 	}
-	// Boot-time system events are ticks like any other — apply, then
-	// step (systemTick) — so each one carries the world one tick past
-	// where it lands. A skip therefore aims one tick short and arrives
-	// on the schedule tick. A rate_set's closing step runs at the new
-	// rate, worth less wall time than the old tick it would displace,
-	// so it is not reserved for: the world may lead the schedule by one
-	// new-rate tick, and the run loop simply waits for it.
+	// The clock repayment is a tick like any other — apply, then step
+	// (systemTick) — so it carries the world one tick past where it
+	// lands: aim one tick short and arrive on the schedule tick.
 	target := a.targetTick(tm.now())
 	skip := target > host.Tick() && time.Duration(target-host.Tick())*a.tickDur > darkStepWindow
 	goal := target
@@ -830,57 +905,14 @@ func openAuthority(ctx context.Context, name string, module []byte, genesisTerra
 			a.ringHead = host.Tick()
 		}
 	}
-	// Still dark: converge the world's rate toward the deployment's
-	// desired rate, so a rate change is a reopen and no live session
-	// ever straddles two rates.
+	// The deployment's rate converges through the epoch lane: the first
+	// live tick journals one epoch_advance carrying it, and any session
+	// attached by then resyncs across the boundary like any other epoch.
 	if tm.hz != a.hz {
-		if err := a.rateChange(ctx, tm.hz); err != nil {
-			return fail(err)
-		}
+		a.wantHz = tm.hz
 	}
 	// The caller starts run(); tests drive tickOnce directly instead.
 	return a, nil
-}
-
-// rateChange journals the desired tick rate as a rate_set at the current
-// tick. The sim re-anchors the piecewise mapping; the boundary snapshot
-// re-floors replay under the new segment.
-func (a *authority) rateChange(ctx context.Context, hz int) error {
-	tick, epoch := a.host.Tick(), a.host.Epoch()
-	var p [4]byte
-	binary.LittleEndian.PutUint32(p[:], uint32(hz))
-	if code := a.host.Apply(simEvent(codec.KindRateSet, 0, p[:])); code != 0 {
-		// A module from before rates existed (mount skew during a
-		// deploy): hold the world's rate; the desired rate lands on the
-		// first reopen under a rate-capable module.
-		log.Printf("chunk %s: module rejected rate_set %dHz (code %d) — holding %dHz", a.name, hz, code, a.hz)
-		return nil
-	}
-	ev := journal.Event{Tick: tick, Epoch: epoch, Kind: codec.KindRateSet, Actor: "system", Payload: p[:]}
-	firstSeq, err := a.j.Append(ctx, a.id, a.lastSeq, []journal.Event{ev})
-	if err != nil {
-		// State is ahead of the journal: never serve it.
-		return fmt.Errorf("rate_set append: %w", err)
-	}
-	a.lastSeq = firstSeq
-	mEventsAppended.Inc()
-	mRateChanges.Inc()
-	a.systemTick(tick, firstSeq, codec.KindRateSet, p[:])
-	a.refreshSchedule(true)
-	t := a.host.Tick()
-	a.ring[t%uint64(len(a.ring))] = ringEntry{tick: t, wh: a.host.Hash()}
-	a.ringHead = t
-	if err := a.j.PutSnapshot(ctx, a.id, journal.Snapshot{
-		Seq: a.lastSeq, Tick: t, Epoch: epoch, WH: a.host.Hash(),
-		TerrainID: a.host.TerrainID(), State: a.host.Snapshot(),
-	}); err != nil {
-		log.Printf("chunk %s: snapshot after rate_set failed: %v", a.name, err)
-	} else {
-		mSnapshots.Inc()
-		a.lastSnapAt = a.tm.now()
-	}
-	log.Printf("chunk %s: rate_set %dHz at tick %d", a.name, hz, t)
-	return nil
 }
 
 // clockSkip journals the repayment of a long gap: one event that jumps sim
@@ -930,12 +962,10 @@ func (a *authority) clockSkip(ctx context.Context, target uint64) error {
 	return nil
 }
 
-// systemTick completes a boot-time system event the way tickOnce
+// systemTick completes the boot-time clock repayment the way tickOnce
 // completes a live tick: the event was applied at tick and journaled at
 // firstSeq; step past it and hand the shadow one record whose hash is
-// the post-step world — the only shape replay can prove. Each system
-// event therefore owns a tick, so two of them (repayment, then rate
-// convergence) never collide on one record.
+// the post-step world — the only shape replay can prove.
 func (a *authority) systemTick(tick uint64, firstSeq int64, kind uint16, payload []byte) {
 	a.host.Step()
 	if a.wal != nil {
@@ -1048,9 +1078,10 @@ func (a *authority) stageSystem(kind uint16, payload []byte) {
 	a.mu.Unlock()
 }
 
-// requestRate journals a live rate boundary on the authority goroutine and
-// returns only after durable fan-out. It is wired only by the local-dev HTTP
-// control; production rate policy remains Git/deployment state.
+// requestRate asks the authority goroutine for a tick rate and returns
+// once the epoch_advance carrying it is journaled. It is wired only by
+// the local-dev HTTP control; production rate policy remains Git/
+// deployment state until the CPU controller lands on this same verb.
 func (a *authority) requestRate(ctx context.Context, hz int) error {
 	done := make(chan error, 1)
 	select {
@@ -1081,18 +1112,10 @@ func (a *authority) stageRateChange(req rateChangeReq) error {
 		req.done <- nil
 		return nil
 	}
-	var payload [4]byte
-	binary.LittleEndian.PutUint32(payload[:], uint32(req.hz))
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for _, in := range a.staged {
-		if in.kind == codec.KindRateSet {
-			return errors.New("another tick-rate change is pending")
-		}
+	if a.wantDone != nil {
+		return errors.New("another tick-rate change is pending")
 	}
-	a.staged = append(a.staged, stagedIntent{
-		actor: "system", kind: codec.KindRateSet, payload: payload[:], done: req.done,
-	})
+	a.wantHz, a.wantDone = req.hz, req.done
 	return nil
 }
 
@@ -1230,7 +1253,7 @@ func (a *authority) tickOnce() {
 		a.stageSystem(codec.KindDayReset, p[:])
 	}
 
-	prelude := a.swapPrelude()
+	prelude := a.epochPrelude()
 	committing := len(prelude) > 0
 
 	var walRun []byte
@@ -1294,8 +1317,17 @@ func (a *authority) tickOnce() {
 				a.name, in.actor, in.kind, in.intentID, a.vocab.rejectName(code), code)
 			mIntentsRejected.WithLabelValues(a.vocab.rejectName(code)).Inc()
 			a.recordIntent(in, "rejected", code, a.tm.now())
+			if in.kind == codec.KindEpochAdvance {
+				// The era did not advance: drop the request rather than
+				// re-stage it every tick, and fail a candidate's soak.
+				a.wantHz = 0
+				if a.candReady {
+					a.candReady = false
+					a.failSoak(a.candHash, fmt.Errorf("epoch_advance rejected with code %d", code))
+				}
+			}
 			if in.done != nil {
-				in.done <- fmt.Errorf("rate_set rejected: %s (%d)", a.vocab.rejectName(code), code)
+				in.done <- fmt.Errorf("epoch_advance rejected: %s (%d)", a.vocab.rejectName(code), code)
 			}
 			continue
 		}
@@ -1333,7 +1365,7 @@ func (a *authority) tickOnce() {
 			for _, in := range acceptedIntents {
 				a.recordIntent(in, "append_error", 0, finished)
 				if in.done != nil {
-					in.done <- fmt.Errorf("rate_set append: %w", err)
+					in.done <- fmt.Errorf("epoch_advance append: %w", err)
 				}
 			}
 			log.Printf("chunk %s: journal append failed (%v) — closing for a journal-clean reopen", a.name, err)
@@ -1358,19 +1390,6 @@ func (a *authority) tickOnce() {
 		a.mu.Lock()
 		a.lastSeq = accepted[len(accepted)-1].Seq
 		a.mu.Unlock()
-		for _, in := range acceptedIntents {
-			if in.kind != codec.KindRateSet || len(in.payload) != 4 {
-				continue
-			}
-			oldHz := a.hz
-			a.refreshSchedule(false)
-			a.mu.Lock()
-			a.snapCache = snapCacheEntry{}
-			a.mu.Unlock()
-			mRateChanges.Inc()
-			log.Printf("chunk %s: live rate_set %dHz -> %dHz at tick %d",
-				a.name, oldHz, a.hz, tick)
-		}
 		finished := a.tm.now()
 		for _, in := range acceptedIntents {
 			a.recordIntent(in, "accepted", 0, finished)
@@ -1419,15 +1438,14 @@ func (a *authority) tickOnce() {
 			}
 			dedupSnap = kept
 		}
-		promoting := committing && a.cand != nil
-		if mayManifest && !promoting && a.wal.dueCheckpoint(a.name, a.tm.now()) {
+		if mayManifest && !committing && a.wal.dueCheckpoint(a.name, a.tm.now()) {
 			// The tick-barrier cost is exactly one sim_snapshot and the
 			// dedup-window copy; deflate, the durable write, retention,
 			// and WAL trim run on the snapshotter's lane. Tick and WH
 			// match the WAL record above, so a scan keyed by this
-			// manifest resumes at the next record. A promoting tick
+			// manifest resumes at the next record. A committing tick
 			// skips the cadence: its barrier Force writes the same
-			// boundary under the new pair, and two manifests sharing one
+			// boundary under the new epoch, and two manifests sharing one
 			// (lineage, seq, tick, generation, epoch) name must never
 			// race.
 			a.wal.submitCheckpoint(codec.Checkpoint{
@@ -1441,8 +1459,8 @@ func (a *authority) tickOnce() {
 		}
 	}
 
-	if committing && a.cand != nil {
-		a.promote(t, dedupSnap)
+	if committing && a.host.Epoch() != epoch {
+		a.commitEpoch(t, dedupSnap)
 	}
 
 	if a.eventsSinceSnap >= snapshotEvery || (a.eventsSinceSnap > 0 && a.tm.now().Sub(a.lastSnapAt) > snapshotMaxAge) {

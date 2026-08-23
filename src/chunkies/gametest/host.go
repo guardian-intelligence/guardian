@@ -33,8 +33,9 @@ var requiredExportsV2 = []string{
 }
 
 // requiredExports returns the surface a module of the given generation
-// owes. The system events (rate_set included) are framework contract, so
-// the rate surface is mandatory for every generation.
+// owes. The system events (the rate riding epoch_advance included) are
+// framework contract, so the rate surface is mandatory for every
+// generation.
 func requiredExports(abi uint32) []string {
 	if abi >= 2 {
 		return requiredExportsV2

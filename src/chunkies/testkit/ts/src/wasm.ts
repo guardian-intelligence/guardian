@@ -37,7 +37,8 @@ function repoFile(rel: string): Uint8Array {
   );
 }
 
-const BEHAVIORS = "src/chunkies/mount/behaviors/";
+/** The committed prod behavior artifacts — refreshed by `bazel run //src/games/wake-up-mythra/sim:refresh`. */
+const BEHAVIORS = "src/games/wake-up-mythra/deploy/prod/behavior/";
 
 type Modules = {
   client: Uint8Array;
@@ -62,7 +63,7 @@ let cached: Modules | null = null;
 export function modules(): Modules {
   cached ??= {
     client: repoFile(`${BEHAVIORS}client.wasm`),
-    park: repoFile(`${BEHAVIORS}park.wasm`),
+    park: repoFile(`${BEHAVIORS}sim.wasm`),
     terrain: repoFile("src/games/wake-up-mythra/services/wum/fixture_park.bin"),
   };
   return cached;
@@ -76,7 +77,6 @@ export const Ev = {
   moveTo: 4,
   epochAdvance: 6,
   boostSet: 8,
-  rateSet: 10,
 } as const;
 
 /** Sim reject codes the session core gives special treatment. */
@@ -269,9 +269,10 @@ export class Authority {
     const at = this.tick;
     const code = applyTo(this.park, kind, payload);
     if (code !== 0) throw new Error(`authority refused kind ${kind} (code ${code})`);
-    if (kind === Ev.rateSet && payload.length === 4) {
+    if (kind === Ev.epochAdvance && payload.length >= 16) {
+      // The rate rides the epoch: {epoch u32, module_hash u64, hz u32}.
       this.hz = new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getUint32(
-        0,
+        12,
         true,
       );
     }
@@ -510,12 +511,17 @@ export type Rig = DrivenSession & {
   count(code: number): number;
 };
 
-/** The 12-byte epoch_advance payload: new epoch u32, then the module sum u64. */
-export function epochAdvancePayload(epoch: number, moduleSum: bigint): Uint8Array {
-  const p = new Uint8Array(12);
+/**
+ * The epoch_advance payload: new epoch u32, the module sum u64, and — when
+ * the era changes the tick rate — hz u32. Append-only: the 12-byte form is
+ * what pre-rate journal rows hold and means "rate unchanged".
+ */
+export function epochAdvancePayload(epoch: number, moduleSum: bigint, hz?: number): Uint8Array {
+  const p = new Uint8Array(hz === undefined ? 12 : 16);
   const dv = new DataView(p.buffer);
   dv.setUint32(0, epoch, true);
   dv.setBigUint64(4, moduleSum, true);
+  if (hz !== undefined) dv.setUint32(12, hz, true);
   return p;
 }
 

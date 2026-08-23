@@ -23,7 +23,7 @@ const RESYNC_WHY: Record<number, string> = {
   [ResyncReason.eventRejected]: "event rejected locally",
   [ResyncReason.hashMismatch]: "world hash mismatch",
   [ResyncReason.checkAgedOut]: "check aged out of the server ring",
-  [ResyncReason.moduleEpoch]: "module epoch",
+  [ResyncReason.epoch]: "epoch advance",
   [ResyncReason.terrainFetch]: "terrain fetch failed",
   [ResyncReason.restoreFailed]: "snapshot restore failed",
   [ResyncReason.queueOverflow]: "event queue overflow",
