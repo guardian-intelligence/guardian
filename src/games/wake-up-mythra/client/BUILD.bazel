@@ -41,4 +41,8 @@ vitest_test(
         "//src/games/wake-up-mythra/services/wum:fixture_park.bin",
     ],
     package_dir = "src/games/wake-up-mythra/client",
+    deps = [
+        "//src/chunkies/host/ts:node_modules",
+        "//src/chunkies/testkit/ts:node_modules",
+    ],
 )
