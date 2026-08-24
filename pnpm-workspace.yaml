@@ -42,7 +42,7 @@ catalog:
   # control plane, so version drift is a supply-chain surface, not a
   # convenience.
   "@openfeature/core": 1.12.0
-  "@openfeature/ofrep-web-provider": 0.4.2
+  "@openfeature/ofrep-web-provider": 0.4.3
   "@openfeature/react-sdk": 1.4.1
   "@openfeature/web-sdk": 1.10.0
   # Exact TanStack pins are intentional. Move them as a reviewed set with
