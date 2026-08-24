@@ -1,5 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("//tools/js:defs.bzl", "vitest_test")
 
 npm_link_all_packages()
 
@@ -11,7 +12,9 @@ exports_files(
 CHUNKIES_SRCS = glob([
     "package.json",
     "src/**/*",
+    "test/**/*",
     "tsconfig.json",
+    "vitest.config.ts",
 ])
 
 filegroup(
@@ -30,4 +33,18 @@ js_library(
     name = "pkg",
     srcs = CHUNKIES_SRCS,
     visibility = ["//visibility:public"],
+)
+
+# The DST suites drive the committed modules; the conformance suite reads
+# the testkit goldens, which ride in with the testkit's workspace sources.
+vitest_test(
+    name = "vitest",
+    size = "large",
+    data = [
+        "//src/games/wake-up-mythra/deploy/prod:behavior/client.wasm",
+        "//src/games/wake-up-mythra/deploy/prod:behavior/sim.wasm",
+        "//src/games/wake-up-mythra/services/wum:fixture_park.bin",
+    ],
+    package_dir = "src/chunkies/host/ts",
+    deps = ["//src/chunkies/testkit/ts:node_modules"],
 )

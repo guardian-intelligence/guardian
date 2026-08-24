@@ -3,6 +3,8 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 exports_files(
     ["fixture_park.bin"],
     visibility = [
+        "//src/chunkies/host/ts:__pkg__",
+        "//src/games/wake-up-mythra/client:__pkg__",
         "//src/games/wake-up-mythra/deploy/prod:__pkg__",
         "//src/games/wake-up-mythra/sim:__pkg__",
     ],

@@ -1,0 +1,4 @@
+exports_files(
+    ["vitest_test.sh"],
+    visibility = ["//visibility:public"],
+)

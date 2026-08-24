@@ -23,6 +23,8 @@ exports_files(
         "behavior/sim.wasm",
     ],
     visibility = [
+        "//src/chunkies/host/ts:__pkg__",
+        "//src/games/wake-up-mythra/client:__pkg__",
         "//src/games/wake-up-mythra/services/wum:__pkg__",
         "//src/games/wake-up-mythra/sim:__pkg__",
     ],

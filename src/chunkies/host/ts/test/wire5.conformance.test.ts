@@ -23,6 +23,7 @@ for (const line of goldens("vectors.txt").split("\n")) {
   const trimmed = line.trim();
   if (trimmed === "" || trimmed.startsWith("#")) continue;
   const [name, hexStr] = trimmed.split(" = ");
+  if (name === undefined || hexStr === undefined) throw new Error(`malformed vector: ${trimmed}`);
   (name.startsWith("!") ? bad : good).set(name.replace(/^!/, ""), unhex(hexStr));
 }
 
@@ -139,19 +140,25 @@ describe("wire5 conformance", () => {
 
   for (const [name, want] of good) {
     if (goOnly.has(name)) continue;
+    const encode = encoders[name];
+    const decode = decoders[name];
+    if (encode === undefined || decode === undefined)
+      throw new Error(`no codec for vector ${name}`);
     it(`encodes ${name} byte-identically`, () => {
-      expect(hex(encoders[name]())).toBe(hex(want));
+      expect(hex(encode())).toBe(hex(want));
     });
     it(`decodes ${name}`, () => {
-      expect(() => decoders[name](want)).not.toThrow();
+      expect(() => decode(want)).not.toThrow();
     });
   }
 
   for (const [name, raw] of bad) {
-    const base = name.split("-")[0];
+    const base = name.split("-")[0] ?? name;
     if (goOnly.has(base)) continue;
+    const decode = decoders[base];
+    if (decode === undefined) throw new Error(`no decoder for vector !${name}`);
     it(`refuses !${name}`, () => {
-      expect(() => decoders[base](raw)).toThrow();
+      expect(() => decode(raw)).toThrow();
     });
   }
 
@@ -166,6 +173,7 @@ describe("wire5 conformance", () => {
       const trimmed = line.trim();
       if (trimmed === "" || trimmed.startsWith("#")) continue;
       const [name, val] = trimmed.split("=");
+      if (name === undefined || val === undefined) throw new Error(`malformed cap: ${trimmed}`);
       if (name === "WAL_MAX_RECORD" || name === "WAL_MAX_CHUNKS") continue; // Go-only, with the records
       expect(mine, name).toHaveProperty(name);
       expect(mine[name], name).toBe(Number(val));
@@ -187,10 +195,13 @@ describe("wire5 conformance", () => {
     if (tick === undefined) throw new Error("spec vector missing");
     const { records } = wire5.decodeTick(wire5.splitFrame(tick).payload);
     expect(records).toHaveLength(2);
-    expect(records[0].intent).toBe(fx.intent);
-    expect(records[0].actor).toBe(fx.actor);
-    expect(hex(records[0].payload)).toBe("deadbeef");
-    expect(records[1].intent).toBe(wire5.SYSTEM_INTENT);
-    expect(records[1].kind).toBe(fx.sysKind);
+    const [first, second] = records;
+    if (first === undefined || second === undefined)
+      throw new Error("tick vector lost its records");
+    expect(first.intent).toBe(fx.intent);
+    expect(first.actor).toBe(fx.actor);
+    expect(hex(first.payload)).toBe("deadbeef");
+    expect(second.intent).toBe(wire5.SYSTEM_INTENT);
+    expect(second.kind).toBe(fx.sysKind);
   });
 });

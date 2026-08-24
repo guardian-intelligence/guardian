@@ -1,12 +1,15 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("//tools/js:defs.bzl", "vitest_test")
 
 npm_link_all_packages()
 
 WUM_CLIENT_SRCS = glob([
     "package.json",
     "src/**/*",
+    "test/**/*",
     "tsconfig.json",
+    "vitest.config.ts",
 ])
 
 filegroup(
@@ -25,4 +28,21 @@ js_library(
     name = "pkg",
     srcs = WUM_CLIENT_SRCS,
     visibility = ["//visibility:public"],
+)
+
+# The player journeys run the committed modules in lockstep with a fake
+# authority (test/rig.ts), so the suite reads the prod behavior artifacts.
+vitest_test(
+    name = "vitest",
+    size = "large",
+    data = [
+        "//src/games/wake-up-mythra/deploy/prod:behavior/client.wasm",
+        "//src/games/wake-up-mythra/deploy/prod:behavior/sim.wasm",
+        "//src/games/wake-up-mythra/services/wum:fixture_park.bin",
+    ],
+    package_dir = "src/games/wake-up-mythra/client",
+    deps = [
+        "//src/chunkies/host/ts:node_modules",
+        "//src/chunkies/testkit/ts:node_modules",
+    ],
 )
