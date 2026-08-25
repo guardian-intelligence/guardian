@@ -39,6 +39,7 @@ WORKSPACE_ROOT_FILES = [
 
 exports_files([
     ".aspect/config.axl",
+    ".aspect/lib/helpers.axl",
     ".aspect/tasks/infra.axl",
     ".aspect/tasks/mythra.axl",
     ".aspect/tasks/tools.axl",

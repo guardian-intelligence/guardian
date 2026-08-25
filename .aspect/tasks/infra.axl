@@ -8,7 +8,7 @@ load(
     ".aspect/lib/helpers.axl",
     "bazel_output_file",
     "checked_spawn",
-    "install_bazel_tool_shims",
+    "install_standalone_tool_shim",
     "ws_path",
 )
 
@@ -1939,8 +1939,11 @@ def _auth_oidc_persona(ctx, guardian_auth, persona, command_args):
 
     # The kubeconfig stores this path and outlives the workspace that minted
     # it, so the shim lives under HOME: a workspace-relative shim dies with
-    # its worktree and takes standing cluster access with it.
-    bin_dir = install_bazel_tool_shims(ctx, [("kubectl-oidc_login", KUBELOGIN_TARGET)], home + "/.guardian/tools/bin")
+    # its worktree and takes standing cluster access with it. It is a copy
+    # rather than a symlink for the same reason — a link into the minting
+    # workspace's Bazel output_base dies with that output_base, which puts the
+    # shim right back inside the lifetime it was moved to HOME to escape.
+    bin_dir = install_standalone_tool_shim(ctx, "kubectl-oidc_login", KUBELOGIN_TARGET, home + "/.guardian/tools/bin")
     if bin_dir == "":
         return 1
 

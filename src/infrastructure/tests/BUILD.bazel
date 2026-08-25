@@ -36,6 +36,7 @@ go_test(
         "postflight_cli_targets_lockstep_test.go",
         "privileged_identity_prune_test.go",
         "release_manifest_test.go",
+        "standing_kubelogin_shim_test.go",
         "storage_encryption_foundation_test.go",
         "text_format_test.go",
         "version_skew_test.go",
@@ -45,6 +46,7 @@ go_test(
     ],
     data = glob(["fixtures/**"]) + [
         "//:.aspect/config.axl",
+        "//:.aspect/lib/helpers.axl",
         "//:.aspect/tasks/infra.axl",
         "//:.aspect/tasks/tools.axl",
         "//:.cursor/environment.json",

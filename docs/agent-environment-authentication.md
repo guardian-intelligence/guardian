@@ -30,6 +30,23 @@ the shim under `~/.guardian/tools/bin` for exactly that reason: a
 workspace-relative shim disappears with its worktree and takes standing cluster
 access with it.
 
+That shim is a **copy** of the binary, not a symlink into Bazel's output tree,
+because the HOME location alone does not buy the lifetime it looks like it
+does. Bazel derives `output_base` from a hash of the workspace path, so a
+worktree owns its own and takes any symlink target with it when it is removed;
+`bazel clean --expunge` and external-repo eviction do the same to any
+workspace. The resulting failure reads as a puzzle — the dangling link still
+lists in the directory, so every cluster call dies with
+
+```
+exec: fork/exec /home/…/.guardian/tools/bin/kubectl-oidc_login: no such file or directory
+```
+
+for a file that is plainly there. If you hit it on an older checkout, `aspect
+tools install` repairs the copy in place; it only ever refreshes a shim that
+already exists, since minting the credential plugin is `aspect infra auth`'s
+job.
+
 A launchd agent gets none of the Terminal's privacy grants, so if the checkout
 lives under `~/Documents`, `~/Desktop`, or `~/Downloads`, macOS withholds it
 from the agent: every git call fails with `Operation not permitted`. Grant Full
