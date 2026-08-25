@@ -3,6 +3,7 @@
 load(
     ".aspect/lib/helpers.axl",
     "install_bazel_tool_shims",
+    "refresh_standalone_tool_shim",
     "uninstall_bazel_tool_shims",
 )
 
@@ -67,6 +68,13 @@ CODEX_CLOUD_SHIMS = AGENT_CLOUD_SHIMS + [
     ("kubectl-oidc_login", "@multitool//tools/kubectl-oidc_login"),
 ]
 
+def _shim_target(name):
+    """The Bazel target a shim name resolves to, read off the one table."""
+    for shim_name, target in DEBUG_CLI_SHIMS:
+        if shim_name == name:
+            return target
+    fail("no shim named " + name + " in DEBUG_CLI_SHIMS")
+
 def _path_export(bin_dir):
     return "export PATH=\"" + bin_dir + ":${PATH}\"\n"
 
@@ -110,6 +118,16 @@ def _install_impl(ctx):
     bin_dir = install_bazel_tool_shims(ctx, _install_shims(ctx), ctx.args.bin_dir)
     if bin_dir == "":
         return 1
+
+    # `aspect infra auth` owns the standing kubelogin copy under HOME, but a
+    # wiped output_base breaks cluster access long before anyone thinks to
+    # re-auth, and this is the command a developer reaches for. Refresh it
+    # where one already exists; never mint one here.
+    home = ctx.std.env.var("HOME") or ""
+    if home != "":
+        if not refresh_standalone_tool_shim(ctx, "kubectl-oidc_login", _shim_target("kubectl-oidc_login"), home + "/.guardian/tools/bin"):
+            return 1
+
     if ctx.args.print_path:
         ctx.std.io.stdout.write(bin_dir + ":" + (ctx.std.env.var("PATH") or "") + "\n")
     return 0

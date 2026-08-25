@@ -134,6 +134,61 @@ def install_bazel_tool_shims(ctx, shims, bin_dir):
             return ""
     return out_dir
 
+def install_standalone_tool_shim(ctx, name, target, bin_dir):
+    """Install one Bazel-resolved executable as a *copy*, not a symlink.
+
+    For shims whose recorded path must outlive the workspace that minted it —
+    the kubeconfig's kubelogin credential plugin is the whole reason this
+    exists. A symlink into the Bazel output_base does not survive that:
+    Bazel derives output_base from a hash of the workspace path, so a worktree
+    owns its own output_base and takes the symlink target with it when it goes.
+    `bazel clean --expunge` and external-repo eviction have the same effect.
+
+    The failure is silent and cryptic — the dangling link still lists in the
+    directory, so kubectl reports `fork/exec ...: no such file or directory`
+    for a file the operator can plainly see — and it strands standing cluster
+    access until someone re-runs `aspect infra auth`. Copying the binary costs
+    a few MB once and removes the dependency entirely.
+    """
+    out_dir = _absolute_or_workspace_path(ctx, bin_dir)
+    rc = checked_spawn(ctx, "mkdir", ["-p", out_dir], label = "mkdir -p " + out_dir)
+    if rc != 0:
+        return ""
+    tool = bazel_output_file(ctx, target)
+    if tool == "":
+        return ""
+    resolved = _capture_stdout(ctx, "readlink", ["-f", tool], label = "readlink -f " + name)
+    if resolved == None or resolved == "":
+        return ""
+
+    # install(1) unlinks the destination before writing, so replacing a copy
+    # that is currently executing does not fail with ETXTBSY.
+    rc = checked_spawn(
+        ctx,
+        "install",
+        ["-m", "0755", resolved, out_dir + "/" + name],
+        label = "install " + name + " -> " + out_dir,
+    )
+    if rc != 0:
+        return ""
+    return out_dir
+
+def refresh_standalone_tool_shim(ctx, name, target, bin_dir):
+    """Re-copy a standalone shim, but only where one was already installed.
+
+    Lets an ordinary `aspect tools install` heal a credential plugin broken by
+    a wiped output_base, without minting one for someone who never authed —
+    installing a credential plugin is `aspect infra auth`'s call, not this one.
+    """
+    out_dir = _absolute_or_workspace_path(ctx, bin_dir)
+
+    # Test the directory, not the shim: a dangling symlink is precisely the
+    # case worth healing, and an exists() that resolves through the link
+    # would report the broken shim as absent and skip it.
+    if not ctx.std.fs.exists(out_dir):
+        return True
+    return install_standalone_tool_shim(ctx, name, target, out_dir) != ""
+
 def uninstall_bazel_tool_shims(ctx, shims, bin_dir):
     """Remove only the known shim names from a local bin directory."""
     out_dir = _absolute_or_workspace_path(ctx, bin_dir)
