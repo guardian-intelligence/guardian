@@ -497,6 +497,18 @@ data:
         Match talos
         Add log_source talos_service
 
+    # Talos runs auditd on every node and forwards its service log with the
+    # rest. With SELinux permissive it is a firehose of `permissive=1` AVC
+    # denials plus the kernel's SYSCALL/PATH/CWD/PROCTITLE/EOE companion
+    # records for each (no audit rules of ours, key=(null)) — ~1 GB/h raw,
+    # three quarters of everything VictoriaLogs ingested, and nothing
+    # consumes it. Drop it at the bridge so the 15Gi log volume holds
+    # weeks instead of days.
+    [FILTER]
+        Name grep
+        Match talos
+        Exclude talos-service ^auditd$
+
     [FILTER]
         Name lua
         Alias guardian_redactor
@@ -534,7 +546,7 @@ spec:
   template:
     metadata:
       annotations:
-        guardian.dev/config-checksum: "sha256:029b5d31fe7f25dcba47423af4fc581eaeb6a9f4bc5f80f06cdca640bb1e24e7"
+        guardian.dev/config-checksum: "sha256:e9946d6ad8750e73aafe4889793ed7e6c5135c10b5b15fb2b807d213c481c87c"
       labels:
         app.kubernetes.io/name: talos-log-receiver
         app.kubernetes.io/part-of: guardian

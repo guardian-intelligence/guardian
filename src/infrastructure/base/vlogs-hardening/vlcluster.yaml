@@ -23,4 +23,9 @@ spec:
     useStrictSecurity: true
     disableAutomountServiceAccountToken: true
     extraArgs:
-      retention.maxDiskUsagePercent: "80"
+      # VictoriaLogs measures this against the filesystem's total size, but
+      # KubePersistentVolumeFillingUp measures kubelet's available bytes,
+      # which exclude ext4's 5% reserved blocks: a cap of 80 parks steady
+      # state at ~14.4% available, inside the alert's 15% band. 70 leaves
+      # ~25% available at the top of the per-day partition sawtooth.
+      retention.maxDiskUsagePercent: "70"
