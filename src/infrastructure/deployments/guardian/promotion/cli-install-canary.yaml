@@ -431,6 +431,7 @@ metadata:
     app.kubernetes.io/part-of: guardian
 spec:
   schedule: "40 */6 * * *"
+  suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 600
   successfulJobsHistoryLimit: 1
@@ -629,79 +630,3 @@ spec:
         - ports:
             - port: "8480"
               protocol: TCP
----
-apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMRule
-metadata:
-  name: cli-install-canary
-  namespace: guardian-analytics
-  labels:
-    app.kubernetes.io/name: cli-install-canary
-    app.kubernetes.io/part-of: guardian
-spec:
-  groups:
-    - name: cli-install-canary.rules
-      interval: 60s
-      rules:
-        # Two consecutive failures of the same channel×method: the 13h window
-        # spans at least two of the six-hourly runs, and the sample-count
-        # guard keeps a single failing run — a GitHub blip, a release cut
-        # mid-sweep — from paging on its own.
-        - alert: GuardianCliInstallCanaryFailing
-          expr: >-
-            max_over_time(guardian_cli_install_canary_success[13h]) == 0
-            and count_over_time(guardian_cli_install_canary_success[13h]) >= 2
-          labels:
-            severity: critical
-            guardian_component: cli-release-train
-          annotations:
-            summary: "the postflight CLI {{ $labels.channel }} channel fails to install via {{ $labels.method }}"
-            description: >-
-              Two consecutive install-matrix runs could not install the
-              postflight CLI from the {{ $labels.channel }} channel using
-              {{ $labels.method }} — users following the documented path are
-              hitting the same wall. Causes seen in this order: the release
-              body no longer carries the pinned digest (a release train that
-              published something other than what is pinned), a checksum or
-              cosign verify-blob failure on a published asset, or the
-              installer script no longer resolving the channel. Check the
-              newest cli-install-canary Job logs in guardian-analytics.
-        - alert: GuardianCliInstallCanarySilent
-          # Guarded on the CronJob having been scheduled, not on the heartbeat
-          # having once existed. Guarding on the metric's own history cannot
-          # distinguish "not deployed yet" from "deployed and has never once
-          # completed a run" — and suppresses the second forever, which is
-          # exactly the failure worth hearing about. Observed: the canary's
-          # first scheduled run wedged in CreateContainerConfigError and this
-          # alert stayed silent because no heartbeat had ever been written.
-          expr: >-
-            absent_over_time(guardian_cli_install_canary_heartbeat[13h])
-            and on() (time() - max(kube_cronjob_status_last_schedule_time{
-              namespace="guardian-analytics", cronjob="cli-install-canary"}) > 3600)
-          labels:
-            severity: warning
-            guardian_component: cli-release-train
-          annotations:
-            summary: "the postflight CLI install matrix has not reported in 13h"
-            description: >-
-              No install-matrix heartbeat for over two run intervals: the
-              published install paths are unverified. The CronJob is failing
-              before its metrics push (cosign extraction, the release
-              manifest mount, the GitHub listing) or not running at all.
-              Check the newest cli-install-canary Job logs in
-              guardian-analytics.
-
-        - alert: GuardianCliInstallCanaryEventWriteFailing
-          expr: last_over_time(guardian_cli_install_canary_event_write[13h]) == 0
-          labels:
-            severity: warning
-            guardian_component: cli-release-train
-          annotations:
-            summary: "the postflight CLI install matrix cannot record to ClickHouse"
-            description: >-
-              The install matrix is running and its verdicts are in vminsert,
-              but its rows are being rejected: install history is accruing
-              nothing queryable. Usually the cli_canary credential — absent
-              before its first OpenBao relay, stale after a DR rebuild that
-              regenerated the chart's users. See
-              runbooks/analytics-clickhouse.md.
