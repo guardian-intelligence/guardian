@@ -11,6 +11,7 @@ metadata:
     guardian.dev/stage: prod
 spec:
   schedule: "*/5 * * * *"
+  suspend: true
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 1

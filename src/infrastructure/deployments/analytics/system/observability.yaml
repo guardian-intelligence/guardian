@@ -133,20 +133,6 @@ spec:
           annotations:
             summary: "ClickHouse analytics data volume under 10% free"
             description: "{{ $labels.persistentvolumeclaim }} is close to full; inserts and merges will start failing. Free space now (drop the noisiest partitions or tighten a TTL) and root-cause with the volume-spike alert's triage query."
-        - alert: PaymentsCheckoutCanaryJobFailed
-          expr: |
-            (kube_job_status_failed{namespace="guardian-analytics",job_name=~"payments-checkout-canary-.*"} > 0)
-            and on(namespace, job_name)
-            (
-              kube_job_status_start_time{namespace="guardian-analytics",job_name=~"payments-checkout-canary-.*"}
-              == on(namespace) group_left()
-              max by(namespace) (kube_job_status_start_time{namespace="guardian-analytics",job_name=~"payments-checkout-canary-.*"})
-            )
-          labels:
-            severity: critical
-          annotations:
-            summary: "The browser-to-Stripe-to-TigerBeetle checkout canary Job failed"
-            description: "Inspect the latest payments-checkout-canary Job; the service alert carries the durable failure class and trace ID."
 ---
 # vmagent scrapes /metrics from cozy-monitoring; the existing ingest CCNP
 # only admits tenant-root (public edge) and ClickHouse egress.

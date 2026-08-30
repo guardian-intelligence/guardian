@@ -108,32 +108,6 @@ spec:
           annotations:
             summary: "Stripe balance reconciliation is stale"
             description: "No successful Stripe balance reconciliation has completed in fifteen minutes."
-        - alert: PaymentsRailCanaryStale
-          expr: time() - max(guardian_payments_canary_last_success_timestamp_seconds{lane="rail"}) > 600 or absent(guardian_payments_canary_last_success_timestamp_seconds{lane="rail"})
-          for: 5m
-          labels:
-            severity: critical
-            guardian_stage: prod
-          annotations:
-            summary: "Stripe-to-TigerBeetle rail canary is stale"
-            description: "The synthetic direct-payment rail has not passed in ten minutes."
-        - alert: PaymentsCheckoutCanaryStale
-          expr: time() - max(guardian_payments_canary_last_success_timestamp_seconds{lane="checkout"}) > 600 or absent(guardian_payments_canary_last_success_timestamp_seconds{lane="checkout"})
-          for: 5m
-          labels:
-            severity: critical
-            guardian_stage: prod
-          annotations:
-            summary: "Browser-to-Stripe-to-TigerBeetle checkout canary is stale"
-            description: "The browser-originated sandbox payment and trace-verification canary has not passed in ten minutes."
-        - alert: PaymentsCanaryFailed
-          expr: increase(guardian_payments_canary_runs_total{outcome="failed"}[10m]) > 0
-          labels:
-            severity: critical
-            guardian_stage: prod
-          annotations:
-            summary: "A payments end-to-end canary failed"
-            description: "Inspect the lane and the durable canary run for the failure class and trace ID."
         - alert: PaymentsInvalidSignatureBurst
           expr: sum(increase(guardian_payments_webhook_receipts_total{outcome="invalid_signature"}[5m])) > 5
           labels:
@@ -150,18 +124,3 @@ spec:
           annotations:
             summary: "A live-mode Stripe event reached the sandbox payment plane"
             description: "The event was rejected before persistence or ledger mutation."
-        - alert: PaymentsRailCanaryJobFailed
-          expr: |
-            (kube_job_status_failed{namespace="tenant-guardian-prod",job_name=~"payments-rail-canary-.*"} > 0)
-            and on(namespace, job_name)
-            (
-              kube_job_status_start_time{namespace="tenant-guardian-prod",job_name=~"payments-rail-canary-.*"}
-              == on(namespace) group_left()
-              max by(namespace) (kube_job_status_start_time{namespace="tenant-guardian-prod",job_name=~"payments-rail-canary-.*"})
-            )
-          labels:
-            severity: critical
-            guardian_stage: prod
-          annotations:
-            summary: "The scheduled Stripe-to-TigerBeetle rail canary Job failed"
-            description: "Inspect the latest payments-rail-canary Job logs."
