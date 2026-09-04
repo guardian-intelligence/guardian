@@ -11,6 +11,7 @@ resources:
   - secrets/backup-storage-credentials.yaml
   - secrets/cloudflare-origin-tls.yaml
   - backup/etcd-snapshots.yaml
+  - backup/postgres-backup-class.yaml
   - networking/metallb.yaml
   - networking/subnet-mtu.yaml
   - observability/talos-log-receiver.yaml

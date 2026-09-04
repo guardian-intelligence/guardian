@@ -62,7 +62,27 @@ spec:
     apiGroup: apps.cozystack.io
     kind: Postgres
     name: postflight-controlplane
-  backupClassName: cozy-default
+  # guardian-r2 (base/backup/postgres-backup-class.yaml): cozy-default's CNPG
+  # strategy with bzip2 base backups, because R2 refuses barman's gzip
+  # multipart uploads at certain sizes.
+  backupClassName: guardian-r2
   schedule:
     type: cron
     cron: "0 2 * * *"
+---
+# One-shot base backup fired with the merge that moved the Plans to
+# guardian-r2: the 2026-09-04 02:00 nightly failed against R2 (InvalidPart,
+# see the class), so this restores same-day coverage and proves the bzip2
+# path end to end instead of waiting for the next cron tick. Kept in git
+# like the other ad-hoc BackupJobs so the inventory stays declarative.
+apiVersion: backups.cozystack.io/v1alpha1
+kind: BackupJob
+metadata:
+  name: postflight-controlplane-postgres-r2-bzip2-20260904
+  namespace: tenant-root
+spec:
+  applicationRef:
+    apiGroup: apps.cozystack.io
+    kind: Postgres
+    name: postflight-controlplane
+  backupClassName: guardian-r2

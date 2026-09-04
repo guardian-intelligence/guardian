@@ -11,7 +11,8 @@ run against the storage system directly, never only against the tool that
 wrote the backups (the writer lying to you is the failure mode).
 
 What this covers: the `guardian-backups` R2 bucket fed by Cozystack's
-`cozy-default` BackupClass — CNPG/barman for
+backup machinery — the `guardian-r2` BackupClass (CNPG/barman, bzip2 base
+backups; `postgres-backup-restore.md` explains the R2 multipart rule) for
 `tenant-root/postflight-controlplane` and `tenant-guardian-prod/keycloak`
 Postgres (continuous WAL + nightly base), clickhouse-backup for
 `tenant-root/analytics` (nightly archive), and talos-backup for

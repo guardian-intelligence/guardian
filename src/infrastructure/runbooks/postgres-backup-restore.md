@@ -1,21 +1,65 @@
 # Postgres Backup And Restore (Cozystack → Cloudflare R2)
 
 Postgres backups run through Cozystack's platform backup machinery: the
-`cozy-default` BackupClass routes `apps.cozystack.io/Postgres` to the CNPG
-strategy (barman: continuous WAL archiving + base backups, true PITR),
-targeting the external `guardian-backups` R2 bucket configured in
-`base/cozystack/platform.yaml` (`provisionBucket: false`). Credentials flow
+`guardian-r2` BackupClass (`base/backup/postgres-backup-class.yaml`, a
+sibling of the platform's `cozy-default` with bzip2 base backups — see
+[R2 multipart rule](#r2-multipart-rule-why-base-backups-are-bzip2)) routes
+`apps.cozystack.io/Postgres` to the CNPG strategy (barman: continuous WAL
+archiving + base backups, true PITR), targeting the external
+`guardian-backups` R2 bucket configured in `base/cozystack/platform.yaml`
+(`provisionBucket: false`). Credentials flow
 OpenBao → ESO (`Secret/guardian-backups-creds` in `tenant-root`, see
 `base/secrets/backup-storage-credentials.yaml`) → the controller's
 credentials projector (`cozy-backups-creds` per consumer namespace).
 
 Layout in R2: `s3://guardian-backups/<namespace>/<app>/<namespace>-<app>/`
-with `base/` (barman base backups, 30d retention, gzip) and `wals/`.
+with `base/` (barman base backups, 30d retention, bzip2 since 2026-09-04,
+gzip before) and `wals/` (gzip).
 The bucket carries a 7-day Age bucket lock (< barman's 30d retention, so
 pruning still works); deletes of anything younger are refused at the bucket
 layer. First proven end to end 2026-07-05 (bot-verified restore with a
 post-backup marker row arriving via WAL replay; RestoreJob apply →
 Succeeded in 68s, restored cluster healthy ≈ 2min).
+
+## R2 multipart rule: why base backups are bzip2
+
+R2 rejects a multipart upload whose non-trailing parts differ in size
+(`CompleteMultipartUpload` → `InvalidPart: All non-trailing parts must have
+the same length`); S3 proper does not care. barman's `CloudTarUploader`
+(≤ 3.17) never sizes parts deliberately: Python's `tarfile` feeds it fixed
+64KiB blocks and it flushes a part on the first write after the buffer
+passes `chunk_size` (≈21.5MiB for the default 100GB `--max-archive-size`).
+With gzip, `tarfile.close()` writes the compressed remainder and then the
+8-byte gzip trailer as separate writes, so whenever the remainder tips the
+buffer over `chunk_size` an unaligned part is flushed before the trailer and
+R2 refuses the whole backup. That is a ~20KiB band of compressed sizes per
+21.5MiB of growth: `postflight-controlplane` hit it on 2026-09-04 (parts
+21495808 / 21492286 / 8 bytes; `PGBackupFailed`). bzip2 and uncompressed
+tars make one final write after the remainder, so every non-trailing part is
+a whole number of 64KiB blocks by construction.
+
+Consequences and checks:
+
+- `guardian-r2-cnpg` is byte-for-byte `cozy-default-cnpg` except
+  `data.compression: bzip2`; serverName/destinationPath are unchanged, so
+  gzip-era and bzip2-era backups share one barman catalog and either
+  restores (barman reads the compression from each `backup.info`).
+- WAL segments stay gzip: `barman-cloud-wal-archive` uploads through
+  boto3's managed transfer with fixed 8MiB parts.
+- Symptom in the instance log (`kubectl logs <pod> -c postgres | grep
+  barman-cloud-backup`): `Upload error: An error occurred (InvalidPart) when
+  calling the CompleteMultipartUpload operation`. The operator also logs
+  `Instance manager was restarted, marking backup as failed` on **every**
+  backup, successful or not — that is the CNPG 1.27.3 operator vs older CRD
+  skew (`status.instanceID.sessionID` pruned) that Cozystack fixes with the
+  CNPG 1.28.1 bump; ignore it and read the barman lines.
+- A failed attempt leaves a `FAILED` entry in `barman-cloud-backup-list`
+  plus an open multipart upload under `base/<id>/data.tar.gz`; R2's
+  default lifecycle aborts incomplete uploads after 7 days and barman's
+  retention prunes the entry.
+- Upstream: EnterpriseDB/barman#954 (closed, not planned) and the open fix
+  EnterpriseDB/barman#1161 (uniform-size parts). Once a CNPG image ships
+  that barman, gzip becomes safe again; bzip2 is fine to keep either way.
 
 ## In scope
 
@@ -53,7 +97,7 @@ kind: BackupJob
 metadata: {name: <app>-initial, namespace: <ns>}
 spec:
   applicationRef: {apiGroup: apps.cozystack.io, kind: Postgres, name: <app>}
-  backupClassName: cozy-default
+  backupClassName: guardian-r2
 EOF
 # 3. Second ad-hoc BackupJob after #1 succeeds — its WAL range lies entirely
 #    inside the real-archiving era; this is the first restorable backup.

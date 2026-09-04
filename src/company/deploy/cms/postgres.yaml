@@ -100,7 +100,7 @@ spec:
     apiGroup: apps.cozystack.io
     kind: Postgres
     name: products
-  backupClassName: cozy-default
+  backupClassName: guardian-r2
   schedule:
     type: cron
     cron: "0 6 * * *"
