@@ -2,6 +2,7 @@ filegroup(
     name = "manifests",
     srcs = [
         "etcd-snapshots.yaml",
+        "postgres-backup-class.yaml",
     ],
     visibility = ["//visibility:public"],
 )

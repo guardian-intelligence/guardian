@@ -1,0 +1,75 @@
+# Guardian's Postgres BackupClass. It is the platform's `cozy-default` CNPG
+# strategy with one deliberate difference: base backups are bzip2-compressed
+# instead of gzip.
+#
+# Why: Cloudflare R2 rejects a multipart upload whose non-trailing parts differ
+# in size (CompleteMultipartUpload → InvalidPart "All non-trailing parts must
+# have the same length"), a constraint AWS S3 does not have. barman's
+# CloudTarUploader (barman ≤ 3.17) only guarantees uniform parts by accident:
+# Python's tarfile hands it fixed 64KiB blocks, and it flushes a part on the
+# first write after the buffer exceeds chunk_size. With gzip, tarfile.close()
+# writes the compressed remainder and THEN the 8-byte gzip trailer as separate
+# writes; whenever the remainder pushes the buffer over chunk_size, that
+# unaligned buffer is flushed as a non-trailing part and R2 refuses the
+# upload. Every ~21.5MiB of compressed growth there is a ~20KiB band of sizes
+# that fails; postflight-controlplane landed in it on 2026-09-04 (parts
+# 21495808 / 21492286 / 8). bzip2 (and no compression) emit a single final
+# write after the remainder, so every non-trailing part is a whole number of
+# 64KiB blocks and the upload is structurally uniform. Upstream fix pending in
+# EnterpriseDB/barman#1161; until it ships in the CNPG image this class is the
+# fix, not a workaround for one night.
+#
+# Everything else (bucket, endpoint, serverName, destinationPath, retention,
+# WAL compression) matches `cozy-default-cnpg` so the barman catalog under
+# s3://guardian-backups/<ns>/<app>/<ns>-<app>/ stays one continuous chain:
+# barman records each base backup's compression in its backup.info, and
+# restores of gzip-era backups keep working. Keep the bucket and endpoint in
+# lockstep with `backupStorage` in ../cozystack/platform.yaml. WAL segments
+# stay gzip: barman-cloud-wal-archive uploads them through boto3's managed
+# transfer (fixed 8MiB parts), which R2 accepts.
+#
+# `cozy-backups-creds` is projected into the tenant namespace by the
+# backupstrategy-controller on every BackupJob/RestoreJob reconcile
+# regardless of BackupClass, so a sibling class needs no credential wiring.
+# Cozystack's docs name a sibling BackupClass as the supported override path:
+# the chart-owned `cozy-default*` objects are reverted on helm reconcile.
+apiVersion: strategy.backups.cozystack.io/v1alpha1
+kind: CNPG
+metadata:
+  name: guardian-r2-cnpg
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: backup
+spec:
+  template:
+    serverName: "{{ .Application.metadata.namespace }}-{{ .Application.metadata.name }}"
+    barmanObjectStore:
+      destinationPath: "s3://guardian-backups/{{ .Application.metadata.namespace }}/{{ .Application.metadata.name }}/"
+      endpointURL: https://c3eaeffaadf7d4847684d4775c16d598.r2.cloudflarestorage.com
+      retentionPolicy: 30d
+      s3Credentials:
+        secretRef:
+          name: cozy-backups-creds
+      data:
+        compression: bzip2
+      wal:
+        compression: gzip
+---
+# Only Postgres is bound. ClickHouse keeps using `cozy-default` (Altinity
+# strategy, unaffected: clickhouse-backup uploads with fixed part sizes).
+apiVersion: backups.cozystack.io/v1alpha1
+kind: BackupClass
+metadata:
+  name: guardian-r2
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: backup
+spec:
+  strategies:
+    - application:
+        apiGroup: apps.cozystack.io
+        kind: Postgres
+      strategyRef:
+        apiGroup: strategy.backups.cozystack.io
+        kind: CNPG
+        name: guardian-r2-cnpg
