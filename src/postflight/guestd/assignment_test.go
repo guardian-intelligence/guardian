@@ -1,7 +1,9 @@
 package guestd
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -230,7 +232,7 @@ func TestAppendJobEnvironmentPreservesEmptyValue(t *testing.T) {
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := appendJobEnvironment(path, map[string]string{"RUNNER_TRACKING_ID": ""}); err != nil {
+	if err := appendJobEnvironment(path, map[string]string{"RUNNER_TRACKING_ID": ""}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(path)
@@ -239,6 +241,78 @@ func TestAppendJobEnvironmentPreservesEmptyValue(t *testing.T) {
 	}
 	if string(raw) != "RUNNER_TRACKING_ID=\n" {
 		t.Fatalf("job environment = %q", raw)
+	}
+}
+
+type jobCommandWriter func([]byte) (int, error)
+
+func (write jobCommandWriter) Write(data []byte) (int, error) { return write(data) }
+
+func TestAppendJobEnvironmentMasksBeforePublishingCredential(t *testing.T) {
+	for _, token := range []string{"test-checkout-token", "literal%0A%25credential"} {
+		t.Run(token, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "github-env")
+			initial := []byte("EXISTING=value\n")
+			if err := os.WriteFile(path, initial, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			commands := jobCommandWriter(func(data []byte) (int, error) {
+				raw, err := os.ReadFile(path)
+				if err != nil || !bytes.Equal(raw, initial) {
+					t.Fatal("job environment was published before the secret mask")
+				}
+				return output.Write(data)
+			})
+			env := map[string]string{"POSTFLIGHT_CHECKOUT_TOKEN": token, "RUNNER_TRACKING_ID": ""}
+			if err := appendJobEnvironment(path, env, commands); err != nil {
+				t.Fatal(err)
+			}
+			command := strings.TrimSuffix(output.String(), "\n")
+			if !strings.HasPrefix(command, "::add-mask::") || strings.Contains(command, "\n") {
+				t.Fatal("credential was not emitted as one add-mask command")
+			}
+			// Decode in the same order as pinned actions/runner ActionCommand:
+			// encoded CR/LF first, then percent, without recursive decoding.
+			masked := strings.NewReplacer("%0D", "\r", "%0A", "\n", "%25", "%").Replace(strings.TrimPrefix(command, "::add-mask::"))
+			if masked != token {
+				t.Fatal("workflow command did not register the exact credential")
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil || string(raw) != string(initial)+"POSTFLIGHT_CHECKOUT_TOKEN="+token+"\nRUNNER_TRACKING_ID=\n" {
+				t.Fatal("legitimate job environment was not preserved")
+			}
+			if strings.Contains(strings.ReplaceAll("env:\n  POSTFLIGHT_CHECKOUT_TOKEN: "+token, masked, "***"), token) {
+				t.Fatal("registered mask did not cover the later step environment header")
+			}
+		})
+	}
+}
+
+func TestAppendJobEnvironmentFailsClosedBeforeCredentialPublication(t *testing.T) {
+	for _, invalidValue := range []string{"", "line\nbreak", "line\rbreak"} {
+		t.Run(invalidValue, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "github-env")
+			if err := os.WriteFile(path, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var calls int
+			commands := jobCommandWriter(func([]byte) (int, error) {
+				calls++
+				return 0, errors.New("closed hook stdout")
+			})
+			env := map[string]string{"POSTFLIGHT_CHECKOUT_TOKEN": "test-checkout-token", "OTHER": invalidValue}
+			if err := appendJobEnvironment(path, env, commands); err == nil {
+				t.Fatal("unsafe or unmasked environment was accepted")
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil || len(raw) != 0 {
+				t.Fatal("job environment changed after a failed mask or validation")
+			}
+			if invalidValue != "" && calls != 0 {
+				t.Fatal("workflow command emitted before environment validation")
+			}
+		})
 	}
 }
 
