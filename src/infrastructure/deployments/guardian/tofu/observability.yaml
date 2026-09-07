@@ -126,7 +126,7 @@ spec:
         # a root that has never succeeded. Counting present series against
         # the fixed root count covers that hole.
         - alert: TofuRootNeverSucceeded
-          expr: count(kube_cronjob_status_last_successful_time{namespace="tofu-system"}) < 6
+          expr: count(kube_cronjob_status_last_successful_time{namespace="tofu-system", cronjob!="tofu-guardian-codeql"}) < 6
           for: 90m
           labels:
             severity: warning
@@ -138,6 +138,23 @@ spec:
               CronJob that has never completed successfully is invisible to
               TofuReconcileStale; compare kube_cronjob_status_last_successful_time
               series in tofu-system against the six CronJobs to find it.
+        # CodeQL shares the image, not a Tofu root or provider state. Its
+        # initial suspension is intentional until the new image converges.
+        - alert: CodeQLRoutingNeverObserved
+          expr: >-
+            (kube_cronjob_spec_suspend{namespace="tofu-system", cronjob="tofu-guardian-codeql"} == 0)
+              unless on(namespace, cronjob)
+                kube_cronjob_status_last_successful_time{namespace="tofu-system", cronjob="tofu-guardian-codeql"}
+          for: 90m
+          labels:
+            severity: warning
+            guardian_component: iac
+          annotations:
+            summary: 'CodeQL routing has never been observed by its enabled reconciler'
+            description: >-
+              Inspect the CodeQL Job log, promoted tofu-runner image, and
+              GitHub API permissions. A successful plan proves observation,
+              not routing application. See codeql-runner-operations.md.
         - alert: TofuMinterReconcileStale
           expr: time() - kube_cronjob_status_last_successful_time{namespace="tofu-system", cronjob="tofu-guardian-mgmt-cloudflare-tokens"} > 3600
           for: 15m

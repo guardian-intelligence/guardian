@@ -1,0 +1,84 @@
+# Read-only drift observation until real Turbo CI and CodeQL validation pass.
+# MODE=apply is a separately reviewed rollout; only three routing fields are
+# owned. This pod has no Tofu backend, state passphrase, or customer token.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tofu-guardian-codeql
+  namespace: tofu-system
+  labels:
+    app.kubernetes.io/name: tofu-runner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tofu-root: guardian-codeql
+spec:
+  # First unpause only after image automation pins a build with codeql.go.
+  suspend: true
+  schedule: "47 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # An async conflict is observed on the next tick, never retried blindly.
+      backoffLimit: 0
+      activeDeadlineSeconds: 3000
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: tofu-runner
+            guardian.dev/tofu-root: guardian-codeql
+        spec:
+          serviceAccountName: tofu-runner
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: tofu
+              image: ghcr.io/guardian-intelligence/tofu-runner:edge@sha256:937a7839ebe4a4dd7e4dadb84eab7b5c46494555a31f3f484d402a87c3cd05d3 # {"$imagepolicy": "guardian-imageops:tofu-runner"}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              env:
+                - name: RECONCILER
+                  value: codeql
+                - name: MODE
+                  value: plan
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: tofu-github
+                      key: GITHUB_TOKEN
+                - name: ROOT_NAME
+                  value: guardian-codeql
+                - name: ROOT_PATH
+                  value: ./src/infrastructure/bootstrap/guardian-github
+                - name: SOURCE_KIND
+                  value: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+                - name: SOURCE_NAME
+                  value: ${GUARDIAN_SOURCE_NAME:=guardian}
+              volumeMounts:
+                - name: workspace
+                  mountPath: /workspace
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: "1"
+                  memory: 1Gi
+          volumes:
+            - name: workspace
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}

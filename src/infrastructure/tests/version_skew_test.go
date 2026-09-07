@@ -191,7 +191,7 @@ const (
 )
 
 // Every per-root CronJob pins the tofu-runner image by digest and carries the
-// image-automation marker, so Flux moves all six to a new digest in one
+// image-automation marker, so Flux moves all seven to a new digest in one
 // commit and never leaves a root running a stale runner.
 var tofuRunnerImageRe = regexp.MustCompile(
 	`image:\s*(ghcr\.io/guardian-intelligence/tofu-runner:edge@sha256:[0-9a-f]{64})\s*#\s*\{"\$imagepolicy":\s*"guardian-imageops:tofu-runner"\}`)
@@ -202,8 +202,8 @@ func TestTofuRunnerImagePinsAgree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 6 {
-		t.Fatalf("expected 6 tofu-runner CronJob manifests, found %d", len(files))
+	if len(files) != 7 {
+		t.Fatalf("expected 7 tofu-runner CronJob manifests, found %d", len(files))
 	}
 	var want string
 	for _, f := range files {
@@ -260,6 +260,24 @@ func tofuRootNames(t *testing.T) []string {
 	}
 	var roots []string
 	for _, f := range files {
+		doc := singleYAMLDoc(t, f)
+		containers := sliceValue(nestedValue(t, doc, "spec", "jobTemplate", "spec", "template", "spec", "containers"))
+		if len(containers) != 1 {
+			t.Fatalf("%s: expected one reconcile container", f)
+		}
+		reconciler := "tofu"
+		for _, raw := range sliceValue(mapValue(containers[0])["env"]) {
+			env := mapValue(raw)
+			if env["name"] == "RECONCILER" {
+				reconciler, _ = env["value"].(string)
+			}
+		}
+		if reconciler == "codeql" {
+			continue // The shared image also runs CodeQL; it has no provider state.
+		}
+		if reconciler != "tofu" {
+			t.Fatalf("%s: unrecognized reconciler %q", f, reconciler)
+		}
 		roots = append(roots, strings.TrimSuffix(strings.TrimPrefix(filepath.Base(f), "cronjob-"), ".yaml"))
 	}
 	return roots
@@ -395,7 +413,7 @@ func TestTofuRunnerProviderMirrorTracksRootLockfiles(t *testing.T) {
 // CronJob count so the manifest add and the rule bump are one PR.
 func TestTofuRootNeverSucceededRuleCountsAllRoots(t *testing.T) {
 	observability := filepath.Join(filepath.Dir(runfilePath(tofuManifestDirRunfile)), "observability.yaml")
-	m := regexp.MustCompile(`count\(kube_cronjob_status_last_successful_time\{namespace="tofu-system"\}\) < ([0-9]+)`).
+	m := regexp.MustCompile(`count\(kube_cronjob_status_last_successful_time\{namespace="tofu-system", cronjob!="tofu-guardian-codeql"\}\) < ([0-9]+)`).
 		FindStringSubmatch(readText(t, observability))
 	if m == nil {
 		t.Fatalf("%s: no TofuRootNeverSucceeded count threshold found", observability)
@@ -423,4 +441,47 @@ func TestTalmChartTalosVersionAgreesWithInstallerImage(t *testing.T) {
 	if chart != installer {
 		t.Fatalf("talm Chart.yaml talosVersion v%s and the Talos installer image v%s state different substrate versions: they move together in the Talos upgrade runbook", chart, installer)
 	}
+}
+
+// CodeQL is a separate non-Tofu reconciler in the existing image. Its plan
+// pod must not inherit provider/backend/customer credentials from the root.
+func TestCodeQLCronJobCredentialAndActivationBoundary(t *testing.T) {
+	path := "src/infrastructure/deployments/guardian/tofu/cronjob-guardian-codeql.yaml"
+	doc := singleYAMLDoc(t, runfilePath(path))
+	assertNestedBool(t, doc, true, "spec", "suspend")
+	pod := nestedMap(t, doc, "spec", "jobTemplate", "spec", "template", "spec")
+	assertNestedString(t, pod, "tofu-runner", "serviceAccountName")
+	containers := sliceValue(pod["containers"])
+	if len(containers) != 1 {
+		t.Fatal("CodeQL must have one reconcile container")
+	}
+	container := mapValue(containers[0])
+	if _, exists := container["envFrom"]; exists {
+		t.Fatal("CodeQL must not mount whole credential Secrets")
+	}
+	values := map[string]map[string]interface{}{}
+	secrets := 0
+	for _, raw := range sliceValue(container["env"]) {
+		env := mapValue(raw)
+		name, _ := env["name"].(string)
+		values[name] = env
+		if _, exists := env["valueFrom"]; exists {
+			secrets++
+			if name != "GITHUB_TOKEN" {
+				t.Fatalf("unexpected credential %s", name)
+			}
+			assertNestedString(t, env, "tofu-github", "valueFrom", "secretKeyRef", "name")
+			assertNestedString(t, env, "GITHUB_TOKEN", "valueFrom", "secretKeyRef", "key")
+		}
+	}
+	if secrets != 1 || values["MODE"]["value"] != "plan" || values["RECONCILER"]["value"] != "codeql" {
+		t.Fatal("CodeQL must begin in suspended plan mode with only GITHUB_TOKEN")
+	}
+	for _, raw := range sliceValue(pod["volumes"]) {
+		if _, exists := mapValue(raw)["emptyDir"]; !exists {
+			t.Fatal("CodeQL volumes must not add credentials")
+		}
+	}
+	observability := readText(t, runfilePath("src/infrastructure/deployments/guardian/tofu/observability.yaml"))
+	assertTextContains(t, observability, `kube_cronjob_spec_suspend{namespace="tofu-system", cronjob="tofu-guardian-codeql"} == 0`, "CodeQL never-observed alert suspension gate")
 }
