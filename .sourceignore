@@ -1,0 +1,5 @@
+# OpenTofu reads the same Actions allowlist that the merge gate checks.
+# Flux excludes .github/ by default; retain only this declarative policy.
+!.github/
+.github/*
+!.github/actions-allowlist.json
