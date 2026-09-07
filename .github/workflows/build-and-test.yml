@@ -77,7 +77,11 @@ jobs:
 
       - name: Build
         # Temporary dispatch-only lifecycle probe; this branch is never merged.
-        run: bazelisk build --config=ci //postflight-lifecycle-probe:intentional-missing-target
+        run: |
+          printf '%s\n' 'POSTFLIGHT_CANCELLATION_PROBE_READY'
+          sleep 600
+          printf '%s\n' 'POSTFLIGHT_CANCELLATION_PROBE_TIMEOUT'
+          exit 1
 
       - name: Test
         run: bazelisk test --config=ci //...
