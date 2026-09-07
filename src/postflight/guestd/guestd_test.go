@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -313,12 +315,13 @@ func newWorld(t *testing.T, configure func(*Config), runner RunRunner) *world {
 		}
 	}
 	cfg := Config{
-		System:        w.system,
-		RunRunner:     runner,
-		MountDeadline: 2 * time.Second,
-		RetryInterval: time.Millisecond,
-		HookDeadline:  2 * time.Second,
-		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		System:         w.system,
+		RunRunner:      runner,
+		CapsulePIDPath: filepath.Join(t.TempDir(), "capsule.pid"),
+		MountDeadline:  2 * time.Second,
+		RetryInterval:  time.Millisecond,
+		HookDeadline:   2 * time.Second,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	if configure != nil {
 		configure(&cfg)
@@ -422,6 +425,83 @@ func TestColdWorkspaceLifecycle(t *testing.T) {
 		if entries[i] != want[i] {
 			t.Fatalf("journal %v, want %v", entries, want)
 		}
+	}
+}
+
+func TestWorkspaceAuthorizationClearsOnlyItsCapsulePID(t *testing.T) {
+	w := newWorld(t, nil, nil)
+	w.system.devices["workspace"] = "/dev/sdb"
+	pidPath := w.server.cfg.CapsulePIDPath
+	if err := os.WriteFile(pidPath, []byte("12345\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(filepath.Dir(pidPath), "unrelated.pid")
+	if err := os.WriteFile(other, []byte("67890\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	host := w.listener.dial(t)
+	host.expect(guestproto.KindHello)
+	sendRendezvousLifecycle(host)
+	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != 0 {
+		t.Fatalf("exit code %d", status.ExitCode)
+	}
+	if _, err := os.Stat(pidPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale capsule PID remains: %v", err)
+	}
+	if raw, err := os.ReadFile(other); err != nil || string(raw) != "67890\n" {
+		t.Fatalf("unrelated runtime state changed: %q, %v", raw, err)
+	}
+}
+
+func TestCapsuleAuthorizationPublishesToItsRuntimeState(t *testing.T) {
+	w := newWorld(t, func(cfg *Config) {
+		cfg.Checkpoints = &ProcessCheckpoints{Capsules: &fakeCapsules{}}
+	}, nil)
+	w.system.devices["workspace"] = "/dev/sdb"
+	host := w.listener.dial(t)
+	host.expect(guestproto.KindHello)
+	sendRendezvousLifecycle(host)
+	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != 0 {
+		t.Fatalf("exit code %d", status.ExitCode)
+	}
+	if raw, err := os.ReadFile(w.server.cfg.CapsulePIDPath); err != nil || string(raw) != "123\n" {
+		t.Fatalf("worker capsule PID was not published: %q, %v", raw, err)
+	}
+}
+
+func TestWorkspaceAuthorizationFailsClosedWhenCapsulePIDCannotBeCleared(t *testing.T) {
+	w := newWorld(t, nil, nil)
+	w.system.devices["workspace"] = "/dev/sdb"
+	pidPath := w.server.cfg.CapsulePIDPath
+	// A nonempty directory cannot be removed even when tests run as root.
+	// This exercises the actual failed filesystem operation without depending
+	// on the caller's uid, umask, or the host's /run/postflight permissions.
+	if err := os.Mkdir(pidPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(pidPath, "retained")
+	if err := os.WriteFile(child, []byte("retain\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	host := w.listener.dial(t)
+	host.expect(guestproto.KindHello)
+	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: ptr(testPrepare())})
+	host.expectStatus(guestproto.RunnerRegistered)
+	host.expect(guestproto.KindAssignment)
+	host.send(guestproto.Message{Kind: guestproto.KindRendezvous, Rendezvous: ptr(testRendezvous())})
+	host.expectStatus(guestproto.RunnerMountsReady)
+	host.send(guestproto.Message{Kind: guestproto.KindAuthorize, Authorize: ptr(testAuthorize())})
+	if status := host.expectStatus(guestproto.RunnerExited); status.ExitCode != SyntheticFailureExitCode {
+		t.Fatalf("exit code %d", status.ExitCode)
+	}
+	w.server.mu.Lock()
+	gateErr := w.server.gateErr
+	w.server.mu.Unlock()
+	if gateErr == nil || !strings.Contains(gateErr.Error(), "selecting workspace-only worker") {
+		t.Fatalf("filesystem failure did not close the worker gate: %v", gateErr)
+	}
+	if raw, err := os.ReadFile(child); err != nil || string(raw) != "retain\n" {
+		t.Fatalf("failed cleanup changed runtime state: %q, %v", raw, err)
 	}
 }
 
