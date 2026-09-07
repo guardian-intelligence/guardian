@@ -34,6 +34,11 @@ def load_manifest(path):
         raise ValueError("bridge exceeds IFNAMSIZ")
     if m["class"] != "postflight-4vcpu-ubuntu24-turbo":
         raise ValueError("this provisioner only serves the first-party Turbo class")
+    # These persistent UFW rules have a fixed first-party interface identity.
+    # Reject a rename instead of leaving stale allows on an unguarded bridge.
+    if m.get("host_firewall") != "ufw" or (m["bridge"], m["subnet"], m["gateway"]) != (
+            "pfbr0", "10.77.0.0/24", "10.77.0.1"):
+        raise ValueError("unsupported first-party host firewall identity")
     for key in ("slots", "cpus", "memory_mib", "vdev_gib"):
         if type(m[key]) is not int or m[key] <= 0:
             raise ValueError(f"invalid {key}")
@@ -105,6 +110,42 @@ table bridge postflight_ci {{
 """
 
 
+def ufw_rules(m):
+    bridge, subnet, gateway = m["bridge"], m["subnet"], m["gateway"]
+    # Explicit IPv4 wildcards avoid also adding IPv6 rules. DHCP must include
+    # source 0.0.0.0 before the guest has a lease. Never allow all host input.
+    rules = [
+        ("allow", "in", "on", bridge, "proto", "udp", "from", "0.0.0.0/0", "port", "68",
+         "to", "0.0.0.0/0", "port", "67", "comment", "postflight-ci-dhcp"),
+    ]
+    for protocol, port, name in (("udp", "53", "dns-udp"), ("tcp", "53", "dns-tcp"), ("tcp", "8480", "checkout")):
+        rules.append(("allow", "in", "on", bridge, "proto", protocol, "from", subnet,
+                      "to", gateway, "port", port, "comment", "postflight-ci-" + name))
+    # Our earlier nft hook already rejects private/reserved destinations,
+    # spoofed sources, guest-to-guest traffic, and non-established ingress.
+    # UFW's later default DROP must permit the surviving IPv4 packets too.
+    rules.extend([
+        ("route", "allow", "in", "on", bridge, "from", subnet, "to", "0.0.0.0/0",
+         "comment", "postflight-ci-egress"),
+        ("route", "allow", "out", "on", bridge, "from", "0.0.0.0/0", "to", subnet,
+         "comment", "postflight-ci-return"),
+    ])
+    return rules
+
+
+def ensure_ufw(m):
+    if not shutil.which("ufw"):
+        raise ValueError("missing provisioned ufw; no unpinned package installation is attempted")
+    result = command("ufw", "status", env={**os.environ, "LC_ALL": "C"})
+    if "Status: active" not in result.stdout.splitlines():
+        raise ValueError("declared UFW firewall is not active; refusing to enable or replace host policy")
+    for rule in ufw_rules(m):
+        # UFW deduplicates equivalent rules and persists them itself. Do not
+        # reset/reload UFW or change any default or existing rule; UFW owns
+        # the update to its tables.
+        command("ufw", *rule)
+
+
 def render(m, image_id, criu_version):
     if not re.fullmatch(r"noble-turbo-[a-z0-9-]+", image_id):
         raise ValueError("image must be a secretless noble-turbo golden image")
@@ -154,7 +195,7 @@ WantedBy=multi-user.target
     files["postflight-network.service"] = """[Unit]
 Description=Postflight guest bridge and egress firewall
 Wants=network-online.target
-After=network-online.target
+After=network-online.target ufw.service
 Before=postflight-dnsmasq.service hostd.service
 [Service]
 Type=oneshot
@@ -303,6 +344,9 @@ def ensure_network(m):
     rules = nft_rules(m, existing)
     command("nft", "--check", "-f", "-", input=rules)
     command("nft", "-f", "-", input=rules)
+    # An ACCEPT in our base chain cannot override UFW's later DROP. Install
+    # the complete deny boundary before adding the scoped UFW exceptions.
+    ensure_ufw(m)
 
 
 def install(args, m):

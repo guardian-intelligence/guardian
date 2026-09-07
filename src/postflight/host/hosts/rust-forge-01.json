@@ -8,6 +8,7 @@
   "vdev_file": "/var/lib/postflight-pool/pool.img",
   "vdev_gib": 384,
   "bridge": "pfbr0",
+  "host_firewall": "ufw",
   "subnet": "10.77.0.0/24",
   "gateway": "10.77.0.1",
   "dhcp_start": "10.77.0.32",

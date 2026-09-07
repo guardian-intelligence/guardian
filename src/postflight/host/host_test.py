@@ -56,7 +56,7 @@ class HostTest(unittest.TestCase):
         for key, value in (("bridge", 'pfbr0"; accept'), ("dhcp_start", "192.168.0.32"),
                            ("dhcp_start", "10.77.0.1"), ("control_plane", "https://attacker.invalid"),
                            ("vdev_file", "/dev/sda"), ("firmware", "/usr/share/OVMF/OVMF_CODE_4M.fd"),
-                           ("slots", True), ("cpus", 8)):
+                           ("slots", True), ("cpus", 8), ("host_firewall", "none"), ("bridge", "pfbr1")):
             with self.subTest(key=key, value=value), tempfile.TemporaryDirectory() as temp:
                 changed = copy.deepcopy(self.manifest)
                 changed[key] = value
@@ -66,6 +66,66 @@ class HostTest(unittest.TestCase):
                     host.load_manifest(path)
         with self.assertRaises(ValueError):
             host.render(self.manifest, "noble-confidential-test", "4.2")
+
+    def test_ufw_is_ipv4_scoped_to_dhcp_dns_checkout_and_guarded_forwarding(self):
+        rules = host.ufw_rules(self.manifest)
+        self.assertEqual(len(rules), 6)
+        input_rules = [rule for rule in rules if rule[0] == "allow"]
+        self.assertEqual(len(input_rules), 4)
+        self.assertEqual({(rule[rule.index("proto") + 1], rule[-3]) for rule in input_rules},
+                         {("udp", "67"), ("udp", "53"), ("tcp", "53"), ("tcp", "8480")})
+        dhcp = input_rules[0]
+        self.assertEqual(dhcp[dhcp.index("from") + 1:dhcp.index("to")], ("0.0.0.0/0", "port", "68"))
+        for rule in rules:
+            self.assertEqual(rule[rule.index("on") + 1], "pfbr0")
+            self.assertNotIn("any", rule)  # An IPv4 wildcard must not expand into IPv6.
+            self.assertTrue(rule[-1].startswith("postflight-ci-"))
+        for rule in input_rules[1:]:
+            self.assertEqual(rule[rule.index("from") + 1], "10.77.0.0/24")
+            self.assertEqual(rule[rule.index("to") + 1], "10.77.0.1")
+        nft = host.nft_rules(self.manifest)
+        self.assertIn("hook forward priority -20", nft)
+        nft_lines = [line.strip() for line in nft.splitlines()]
+        self.assertLess(nft_lines.index('oifname "pfbr0" ct state established,related accept'),
+                        nft_lines.index('oifname "pfbr0" drop'))
+        self.assertEqual([rule[2] for rule in rules if rule[0] == "route"], ["in", "out"])
+
+    def test_ufw_is_never_relaxed_before_nft_guard_commit(self):
+        for failure in (None, "check", "apply"):
+            calls = []
+
+            def run(*args, **kwargs):
+                calls.append(args)
+                if args[:3] == ("ip", "-j", "-d"):
+                    return SimpleNamespace(returncode=0, stdout='[{"linkinfo":{"info_kind":"bridge"}}]')
+                if args[0] == "nft" and ((failure == "check" and "--check" in args) or
+                                        (failure == "apply" and args[1] == "-f")):
+                    raise subprocess.CalledProcessError(1, args)
+                return SimpleNamespace(returncode=0, stdout="Status: active\n")
+
+            with self.subTest(failure=failure), patch.object(host, "command", side_effect=run), \
+                    patch.object(host.shutil, "which", return_value="/usr/sbin/ufw"):
+                if failure:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        host.ensure_network(self.manifest)
+                    self.assertFalse(any(call[0] == "ufw" for call in calls))
+                else:
+                    host.ensure_network(self.manifest)
+                    first_ufw = next(i for i, call in enumerate(calls) if call[0] == "ufw")
+                    self.assertLess(calls.index(("nft", "-f", "-")), first_ufw)
+                    self.assertEqual([call[1:] for call in calls if call[0] == "ufw"],
+                                     [("status",), *host.ufw_rules(self.manifest)])
+
+    def test_ufw_preserves_inactive_or_missing_host_firewall(self):
+        with patch.object(host.shutil, "which", return_value=None), patch.object(host, "command") as run:
+            with self.assertRaisesRegex(ValueError, "missing provisioned ufw"):
+                host.ensure_ufw(self.manifest)
+            run.assert_not_called()
+        with patch.object(host.shutil, "which", return_value="/usr/sbin/ufw"), \
+                patch.object(host, "command", return_value=SimpleNamespace(stdout="Status: inactive\n")) as run:
+            with self.assertRaisesRegex(ValueError, "not active"):
+                host.ensure_ufw(self.manifest)
+            self.assertEqual([call.args for call in run.call_args_list], [("ufw", "status")])
 
     def test_existing_unimportable_vdev_is_never_formatted(self):
         with tempfile.TemporaryDirectory() as temp:
