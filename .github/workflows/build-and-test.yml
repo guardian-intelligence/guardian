@@ -76,66 +76,17 @@ jobs:
             bazel-ci-
 
       - name: Build
-        # Temporary dispatch-only lifecycle probe; this branch is never merged.
+        # Temporary dispatch-only conformance probe; this branch is never merged.
         run: |
-          python3 - <<'PY'
-          import errno
+          sudo modprobe vsock_loopback
+          python3 - <<'PYPROOF'
           import json
-          import os
           import pathlib
           import platform
-          import select
-          import socket
-          import time
-
-          proof = {
-              "kind": "postflight-native-vsock-probe",
-              "kernel": platform.release(),
-              "euid": os.geteuid(),
-              "modules": {name: pathlib.Path("/sys/module", name).is_dir()
-                          for name in ("vsock", "vmw_vsock_virtio_transport", "vmw_vsock_virtio_transport_common", "vsock_loopback")},
-              "cases": [],
-          }
-          local_cid = 1
-          for cid in (socket.VMADDR_CID_ANY, local_cid):
-              case = {"bind_cid": cid}
-              server = client = accepted = None
-              try:
-                  server = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
-                  server.settimeout(2)
-                  server.bind((cid, socket.VMADDR_PORT_ANY))
-                  server.listen(1)
-                  case["bound_cid"], port = server.getsockname()
-                  case["bound_port"] = port
-                  client = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
-                  client.setblocking(False)
-                  start = time.monotonic()
-                  code = client.connect_ex((local_cid, port))
-                  case["connect_errno"] = code
-                  if code in (0, errno.EINPROGRESS, errno.EALREADY, errno.EWOULDBLOCK):
-                      _, writable, exceptional = select.select([], [client], [client], 2)
-                      case["writable"] = bool(writable)
-                      case["exceptional"] = bool(exceptional)
-                      if writable or exceptional:
-                          case["so_error"] = client.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
-                          if case["so_error"] == 0:
-                              case["peer_cid"], _ = client.getpeername()
-                              accepted, peer = server.accept()
-                              case["accepted_cid"] = peer[0]
-                              client.settimeout(2)
-                              client.sendall(b"postflight-vsock-probe")
-                              accepted.settimeout(2)
-                              case["payload_received"] = accepted.recv(64) == b"postflight-vsock-probe"
-                  case["elapsed_ms"] = round((time.monotonic() - start) * 1000)
-              except OSError as error:
-                  case["exception_errno"] = error.errno
-              finally:
-                  for descriptor in (accepted, client, server):
-                      if descriptor is not None:
-                          descriptor.close()
-              proof["cases"].append(case)
-          print("POSTFLIGHT_VSOCK_PROOF=" + json.dumps(proof, sort_keys=True))
-          PY
+          print("POSTFLIGHT_VSOCK_MODULE_PROOF=" + json.dumps({"kernel": platform.release(), "vsock_loopback_loaded": pathlib.Path("/sys/module/vsock_loopback").is_dir()}, sort_keys=True))
+          PYPROOF
+          bazelisk test --config=ci --nocache_test_results --test_output=all --test_arg=-test.v //src/postflight/guestd:guestd_test //src/postflight/hostd/vm:vm_test //src/postflight/hostd/vsock:vsock_test
+          echo POSTFLIGHT_FOCUSED_CONFORMANCE_PASSED
           exit 1
 
       - name: Test
