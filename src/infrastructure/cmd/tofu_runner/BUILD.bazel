@@ -14,7 +14,10 @@ filegroup(
 
 go_library(
     name = "tofu_runner_lib",
-    srcs = ["main.go"],
+    srcs = [
+        "codeql.go",
+        "main.go",
+    ],
     importpath = "github.com/guardian-intelligence/guardian/src/infrastructure/cmd/tofu_runner",
     visibility = ["//visibility:private"],
 )
@@ -28,7 +31,10 @@ go_binary(
 
 go_test(
     name = "tofu_runner_test",
-    srcs = ["main_test.go"],
+    srcs = [
+        "codeql_test.go",
+        "main_test.go",
+    ],
     embed = [":tofu_runner_lib"],
 )
 

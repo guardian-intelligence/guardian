@@ -46,6 +46,8 @@ const (
 )
 
 type config struct {
+	// CodeQL mode uses the same verified Flux artifact but never invokes tofu.
+	reconciler string
 	// rootName labels logs and matches the CronJob/Job name the health rule
 	// keys on; rootPath is the directory inside the artifact that holds the
 	// root's .tf files.
@@ -78,6 +80,7 @@ func envOr(key, fallback string) string {
 
 func loadConfig() (config, error) {
 	cfg := config{
+		reconciler:      envOr("RECONCILER", "tofu"),
 		rootName:        os.Getenv("ROOT_NAME"),
 		rootPath:        os.Getenv("ROOT_PATH"),
 		mode:            mode(envOr("MODE", string(modePlan))),
@@ -87,6 +90,9 @@ func loadConfig() (config, error) {
 		sourceNamespace: envOr("SOURCE_NAMESPACE", "cozy-fluxcd"),
 		tofuBin:         envOr("TOFU_BIN", "tofu"),
 		workDir:         envOr("WORKDIR", "/workspace"),
+	}
+	if cfg.reconciler != "tofu" && cfg.reconciler != "codeql" {
+		return cfg, errors.New("RECONCILER must be tofu or codeql")
 	}
 	if cfg.rootName == "" {
 		return cfg, errors.New("ROOT_NAME is required")
@@ -405,6 +411,9 @@ func reconcile(ctx context.Context, cfg config) int {
 		return 1
 	}
 	rootDir := filepath.Join(cfg.workDir, filepath.Clean(cfg.rootPath))
+	if cfg.reconciler == "codeql" {
+		return reconcileCodeQL(ctx, cfg, rootDir)
+	}
 
 	if code, err := runTofu(ctx, cfg, rootDir, "init", "-input=false"); err != nil || code != 0 {
 		slog.Error("tofu init failed", "code", code, "err", err)
