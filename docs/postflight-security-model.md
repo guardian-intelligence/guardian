@@ -1,8 +1,10 @@
 # Postflight workload security model
 
-Status: living security policy, 2026-07-24. Defines the customer-facing
-security claims for both Postflight SKU categories, the threat model behind
-each, and the evidence required before a claim ships.
+Status: living security policy, updated 2026-09-06. Confidential requirements
+below are preserved. The first-party Turbo implementation uses native
+encrypted ZFS on a trusted host and a generic pre-registration RAM template;
+it does not satisfy the older per-lineage Transit custody proposal. Product
+claims require the applicable live evidence, not just implemented code.
 
 ## Positioning
 
@@ -45,9 +47,12 @@ territory (see adopt-on-pull).
 1. Every job executes in its own hardware virtual machine (KVM), created for
    that job and destroyed after it. One physical core never serves two
    tenants.
-2. Everything persisted from a job is ciphertext under per-lineage keys
-   custodied in Guardian's OpenBao Transit. A stolen disk, leaked snapshot,
-   or compromised storage plane yields ciphertext.
+2. The current first-party host stores job disks and generic RAM templates
+   on native encrypted ZFS under a raw key seeded from OpenBao. A copy of the
+   encrypted backing file without that key yields ciphertext. The trusted
+   host loads the key locally, can access plaintext, and retains a root-only
+   key file. This does not protect a complete stolen host filesystem that
+   includes the key, or claim per-tenant cryptographic erasure.
 3. **Explicit boundary:** Turbo's hosts are trusted Guardian
    infrastructure. A live compromise of a worker host could expose the jobs
    on it. Customers who need that boundary closed buy Confidential — the
@@ -176,19 +181,30 @@ Process-memory capsules are the hottest plaintext the platform handles:
 
 ## Architecture — Turbo
 
-Same guest image family, same mount ladder, same CRIU rules — different key
-custody:
+The [Turbo image](../src/postflight/image/README.md) bakes `host-zfs` and does
+not request SNP or in-guest LUKS keys. The
+[host provisioner](../src/postflight/host/host.py) creates native AES-256-GCM
+storage with the externally seeded root-only raw key. Hostd
+[checks all managed descendants](../src/postflight/hostd/cmd/hostd/main.go)
+for encryption and available keys before starting its agent. The host,
+including its memory and local key file, remains trusted infrastructure.
 
-- Each volume lineage gets a random DEK generated as a `transit-postflight`
-  data key. The wrapped form lives in the generation catalog; the plaintext
-  half is delivered to guestd at rendezvous over the authenticated control
-  channel and exists only in guest RAM.
-- Claims follow custody: this protects data at rest against disk theft,
-  snapshot leaks, and storage-plane compromise. It does not protect against
-  a live host compromise, and the model says so (claim T3).
-- Deleting a tenant's Transit key is crypto-erase for everything it wraps.
-- Turbo classes may expose `/dev/kvm`; the host jail doctrine
-  ([product doc §16](postflight-product.md)) applies in full.
+[Generic QEMU templates](../src/postflight/hostd/vm/warm_template.go) may only
+capture a never-registered donor with no assignment or tenant volume. Memory
+and matching root state are sealed after the paused donor is destroyed.
+Templates bind the host boot and exact runtime inputs. A restored guest
+[renews entropy, time, identity, MAC, and DHCP state](../src/postflight/guestd/initialize_linux.go)
+before receiving a JIT registration. Customer jobs and registered listeners
+are never donors. The template path is rejected for Confidential.
+
+Arbitrary customer-process CRIU restore/publication remain disabled. Retained
+CRIU libraries do not establish that a dump of arbitrary customer code is
+secretless. Scoped disk generations are the only cross-job customer-state
+reuse. The trusted host is hardened with non-root QEMU, per-VM scopes, and
+filtered guest networking; actual Linux conformance remains required.
+
+The older per-lineage Turbo Transit DEK and tenant crypto-erase design below
+is a future custody profile, not the current first-party implementation.
 
 ## OpenBao Transit, product-scoped
 
@@ -198,7 +214,7 @@ declares the mount; durable keys are data):
 
 | Key | Purpose | Operations |
 | --- | --- | --- |
-| `tenant-<id>` | Confidential `K_tenant` custody; Turbo lineage DEK wrapping | datakey generate, decrypt |
+| `tenant-<id>` | Confidential `K_tenant` custody; proposed per-lineage Turbo DEK wrapping | datakey generate, decrypt |
 | `postflight-manifest` | Generation-manifest signing | sign, verify |
 
 Rules: keys are non-exportable and deny-by-default; each control-plane module
@@ -226,7 +242,17 @@ Rotation creates a new lineage (one cold build); it never rewrites volumes.
 
 ## Release gates
 
-Every gate runs on the exact hardware, firmware, guest image, and QEMU tuple
+The table retains the Confidential and proposed per-lineage custody gates.
+G7's host-page-cache exclusion and G13–G14's Transit DEK assertions are not
+claims of native-ZFS Turbo. For current first-party Turbo, inspect raw backing
+storage separately from the trusted host's unlocked views, verify all managed
+datasets are encrypted, verify the externally held key can unlock a cold
+import, and prove generic-template donor exclusion and distinct concurrent
+restored guest identities. G8 is a prohibition on publishing customer dumps,
+not evidence that customer CRIU restore is active. See the
+[CI migration proof contract](postflight-ci-migration.md).
+
+Every applicable gate runs on the exact hardware, firmware, guest image, and QEMU tuple
 admitted to production. No customer job runs on a tuple with a failing gate.
 Each gate needs a positive control proving the detector trips.
 

@@ -8,10 +8,14 @@ sh_test(
         "$(rootpath build.sh)",
         "$(rootpath runner-listener.patch)",
         "$(rootpath //src/postflight/image:pins.env)",
+        "$(rootpath @postflight_runner_cs//file)",
+        "$(rootpath //:MODULE.bazel)",
     ],
     data = [
         "build.sh",
         "runner-listener.patch",
         "//src/postflight/image:pins.env",
+        "@postflight_runner_cs//file",
+        "//:MODULE.bazel",
     ],
 )

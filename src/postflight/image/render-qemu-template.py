@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Render GitHub's Ubuntu Packer build with a QEMU source.
 
-The upstream build owns the provisioner order. This adapter replaces only its
-Azure source and final waagent deprovisioning step, then prepends the local
-QEMU source and the six variables referenced by the shared build block.
+The upstream build owns the provisioner order. This adapter replaces its
+Azure source and final waagent deprovisioning step, and isolates pipx from
+Ubuntu's apt-managed Python packages before adding the local QEMU source.
 """
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ AZURE_DEPROVISION = """  provisioner "shell" {
 
 """
 BOOTSTRAP_MARKER = '  name = "ubuntu-24_04"\n'
+PYTHON_INSTALLER = '"${path.root}/../scripts/build/install-python.sh"'
+PIPX_INSTALL = "python3 -m pip install pipx\npython3 -m pipx ensurepath"
 BOOTSTRAP = """
 
   provisioner "shell" {
@@ -107,17 +109,37 @@ source "qemu" "image" {
 """
 
 
-def render(source: str, plugin_version: str) -> str:
+def adapt_python_installer(source: str, pipx_version: str) -> str:
+    import re
+
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", pipx_version):
+        raise ValueError("pipx version must be an exact release")
+    if source.count(PIPX_INSTALL) != 1:
+        raise ValueError("upstream pipx installation changed")
+    # pipx now requires packaging>=26, while Noble owns packaging24 through
+    # dpkg (no pip RECORD). A venv avoids uninstalling or shadowing that
+    # system package and retains the upstream /opt/pipx application layout.
+    replacement = f'''python3 -m venv /opt/pipx-bootstrap
+/opt/pipx-bootstrap/bin/python -m pip install pipx=={pipx_version}
+ln -s /opt/pipx-bootstrap/bin/pipx /usr/local/bin/pipx
+/opt/pipx-bootstrap/bin/python -m pipx ensurepath'''
+    return source.replace(PIPX_INSTALL, replacement)
+
+
+def render(source: str, plugin_version: str, python_filename: str) -> str:
     if source.count(AZURE_SOURCE) != 1:
         raise ValueError("upstream Azure source marker changed")
     if source.count(AZURE_DEPROVISION) != 1:
         raise ValueError("upstream waagent deprovisioner changed")
     if source.count(BOOTSTRAP_MARKER) != 1:
         raise ValueError("upstream Ubuntu build marker changed")
+    if source.count(PYTHON_INSTALLER) != 1:
+        raise ValueError("upstream Python provisioner changed")
 
     build = source.replace(AZURE_SOURCE, '  sources = ["source.qemu.image"]')
     build = build.replace(AZURE_DEPROVISION, "")
     build = build.replace(BOOTSTRAP_MARKER, BOOTSTRAP_MARKER + BOOTSTRAP)
+    build = build.replace(PYTHON_INSTALLER, '"${path.root}/' + python_filename + '"')
     return PREFIX.replace("${qemu_plugin_version}", plugin_version) + build
 
 
@@ -126,9 +148,15 @@ def main() -> None:
     parser.add_argument("source", type=Path)
     parser.add_argument("destination", type=Path)
     parser.add_argument("--plugin-version", required=True)
+    parser.add_argument("--pipx-version", required=True)
+    parser.add_argument("--python-installer", required=True, type=Path)
     args = parser.parse_args()
 
-    rendered = render(args.source.read_text(), args.plugin_version)
+    python_path = args.destination.with_suffix(".install-python.sh")
+    python_script = adapt_python_installer(args.python_installer.read_text(), args.pipx_version)
+    rendered = render(args.source.read_text(), args.plugin_version, python_path.name)
+    python_path.write_text(python_script)
+    python_path.chmod(0o755)
     args.destination.write_text(rendered)
 
 

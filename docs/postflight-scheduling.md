@@ -1,6 +1,10 @@
 # Postflight scheduling and control plane
 
-Status: end-state architecture, 2026-07-24.
+Status: control-plane design with current Turbo implementation notes,
+2026-09-06. The current runtime uses bounded JSON host sync; the
+[architecture](postflight-architecture.md) separates implemented paths from
+Confidential and future service-policy requirements. Arbitrary customer
+CRIU restore and publication remain disabled.
 
 The control plane is one deployable binary over Postgres and OpenBao. It
 owns truth, admission, plans, and evidence; GitHub owns workflow
@@ -90,11 +94,14 @@ assignment record never claims a transparent requeue.
 
 ## Pool supply
 
-Slots are refilled ahead of demand: launch the generic guest, verify
-attestation, establish the sealed session, mint the JIT configuration,
-start the listener — all before any customer job exists. JIT
-configurations are single-use, exist only in guest RAM, and are minted per
-member, per registration.
+The current scheduler creates pools from observed class demand and refills
+their fixed slots. First-party Turbo hostd builds its generic, unregistered
+RAM/root template before starting the host agent. Pool guests restore that
+template, renew identity, and receive a fresh GitHub App JIT configuration
+per member. The registered Listener then waits for GitHub assignment; a
+registered guest cannot become a template donor. Turbo registration crosses
+the trusted host. Confidential retains its separate attestation/session
+requirements; those must not be inferred from a successful Turbo job.
 
 ## Reconcilers
 
@@ -121,12 +128,13 @@ administration. Every run traverses admission, planning, assignment,
 attestation, keys, storage, and metering, and accrues real showback usage
 that never settles.
 
-Standing scenarios: cold job; exact warm restore; injected recoverable
-CRIU incompatibility; integrity failure that must recycle; cancellation
-before and after acquisition; hostd restart with adoption; rollback-floor
-refusal; checkpoint timeout; runner and image version expiry. Each
-scenario asserts its span set (below), so a regression pages before a
-customer feels it.
+The current Turbo acceptance scenarios are real cold and disk-reused jobs,
+generic RAM restore with concurrent distinct guest identities, native GitHub
+log streaming, and hostd adoption. See [CI migration](postflight-ci-migration.md).
+The older standing scenarios (CRIU incompatibility, attested rollback-floor
+refusal, and customer-process checkpoint timeout) are retained design goals,
+not enabled Turbo runtime checks. A suspended or undeployed canary does not
+provide production coverage.
 
 ## Metering and moments
 

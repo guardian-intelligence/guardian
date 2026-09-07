@@ -18,6 +18,10 @@ type EncryptionMode string
 const (
 	// EncryptionOff mounts the workspace zvol plaintext.
 	EncryptionOff EncryptionMode = "off"
+	// EncryptionHostZFS is the trusted-host Turbo profile. The host requires
+	// native encrypted ZFS for every managed dataset; the guest sees an
+	// ordinary block device and does not derive an SNP or development key.
+	EncryptionHostZFS EncryptionMode = "host-zfs"
 	// EncryptionDev keys LUKS2 from a public constant: real plumbing,
 	// deliberately zero confidentiality. It exists so the format/open/reopen
 	// pipeline runs everywhere while only SNP guests can hold a real secret.
@@ -31,7 +35,9 @@ const (
 // EncryptionModePath is where the golden image bakes the mode.
 const EncryptionModePath = "/etc/postflight/workspace-encryption"
 
-func (m EncryptionMode) enabled() bool { return m != "" && m != EncryptionOff }
+func (m EncryptionMode) enabled() bool {
+	return m != "" && m != EncryptionOff && m != EncryptionHostZFS
+}
 
 // LoadEncryptionMode reads the baked mode; an absent file is EncryptionOff
 // (images predating the file), an unrecognized value is an error so a typo
@@ -46,7 +52,7 @@ func LoadEncryptionMode(path string) (EncryptionMode, error) {
 	}
 	mode := EncryptionMode(strings.TrimSpace(string(raw)))
 	switch mode {
-	case EncryptionOff, EncryptionDev, EncryptionSNP:
+	case EncryptionOff, EncryptionHostZFS, EncryptionDev, EncryptionSNP:
 		return mode, nil
 	}
 	return "", fmt.Errorf("guestd: unknown encryption mode %q in %s", mode, path)

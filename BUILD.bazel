@@ -1,5 +1,6 @@
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("@rules_python//python:defs.bzl", "py_test")
 
 # npm_link_all_packages() below generates the //:node_modules/* targets every
 # TypeScript package in the repo depends on, so the root package must be
@@ -89,6 +90,18 @@ sh_test(
     size = "small",
     srcs = [".github/scripts/check-actions-allowlist.sh"],
     data = [".github/actions-allowlist.json"] + glob([".github/workflows/*.yml"]),
+)
+
+py_test(
+    name = "dependency_snapshot_test",
+    srcs = [
+        ".github/scripts/dependency_snapshot.py",
+        ".github/scripts/dependency_snapshot_test.py",
+    ],
+    imports = [".github/scripts"],
+    main = ".github/scripts/dependency_snapshot_test.py",
+    size = "small",
+    python_version = "3.12",
 )
 
 # renovate-config-validator ships only inside the renovate distribution, so

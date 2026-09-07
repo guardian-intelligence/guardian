@@ -3,12 +3,46 @@
 One root disk image containing everything a runner VM needs and zero
 customer bytes. `build-upstream.sh` checks out a pinned
 `actions/runner-images` Ubuntu 24.04 release and runs its original Packer
-provisioners and toolset in their original order, changing only the
-Azure machine builder and Azure-agent deprovisioner. The result is cached
-as a QEMU qcow2 by upstream commit. `build.sh` layers the pinned
+provisioners and toolset in their original order, adapting the Azure machine
+builder and Azure-agent deprovisioner. The Python installer puts pinned pipx
+in a dedicated virtualenv: current pipx requires a newer `packaging` than
+Ubuntu's apt-owned package, which pip cannot safely uninstall. Upstream
+Python tests and the pipx application directories remain intact. The result
+is cached as a QEMU qcow2 by upstream commit and complete adapter recipe.
+`build.sh` layers the pinned
 `actions/runner`, the pinned CRIU release, cryptsetup, the single-job `runner` user, and guestd onto
 that image, removes the temporary image-build ingress, and imports it into
 ZFS. Workload always arrives later via the workspace zvol.
+
+Use `IMAGE_FLAVOR=turbo` for the initial Guardian CI deployment. It creates a
+distinct `noble-turbo-*` image with the `host-zfs` guest profile. Turbo hostd
+requires native encrypted ZFS with loaded keys throughout its managed dataset
+subtree, runs QEMU as `postflight-vm`, and uses the QEMU 8.2 machine ABI without
+SNP. The default `confidential` image continues to require SNP-derived LUKS
+keys. Changing the build flavor changes the image identity; runtime flags do
+not downgrade a confidential image.
+
+The QEMU environment contains no hostd credentials. The Turbo launch keeps
+seccomp and `no_new_privs`, while allowing the UID/GID syscalls that QEMU 8.2
+uses for its final `-runas` privilege drop. An empty-machine check on the
+pinned host verified all real/effective/saved IDs become unprivileged,
+effective capabilities are zero, and seccomp remains active. The dedicated
+VMM account is shared by these first-party slots; it is not a per-tenant jail.
+
+`HOSTD_WARM_TEMPLATE_DIR` enables host-local VM memory templates. Before the
+scheduler starts, hostd boots a generic guest, verifies it has never received a
+member, registration, assignment, or tenant volume, then records a paused RAM
+image and matching root snapshot. The template binds the host boot, image,
+QEMU, firmware, networking, and VM geometry. Every restore gets a new VM
+generation ID, vsock CID, entropy, machine identity, DHCP state, and clock
+before GitHub registration. Customer process checkpoint publication remains
+disabled by the security boundary introduced in PR #1212. Workspace and tool
+ZFS generations provide cross-job caching; arbitrary customer RAM is never
+reused.
+
+These memory templates require a Linux conformance run with the real guestd
+protocol. Unit tests on macOS prove policy and launch shape, not working KVM
+migration, guest identity renewal, or cache reuse on Linux.
 
 The customer-facing toolchain, Docker, and `/opt/hostedtoolcache` therefore
 come from the same source release as GitHub-hosted runners. Explicitly

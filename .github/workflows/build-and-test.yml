@@ -5,6 +5,14 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      runner:
+        description: Execution target (Postflight is an explicit migration canary)
+        type: choice
+        options:
+          - github
+          - postflight
+        default: github
 
 permissions:
   contents: read
@@ -19,18 +27,47 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    # Keep the required PR gate and main's bootstrap builds available until
+    # the end-to-end Turbo canary has passed. See docs/postflight-ci-migration.md.
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.runner == 'postflight' && 'postflight-4vcpu-ubuntu24-turbo' || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        if: github.event_name != 'workflow_dispatch' || inputs.runner != 'postflight'
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Check out through the Postflight host mirror
+        if: github.event_name == 'workflow_dispatch' && inputs.runner == 'postflight'
+        uses: guardian-intelligence/guardian/actions/checkout@2b9c745c405ea9de6386db448099c6dd9c79b0f4
+        with:
+          fetch-depth: 0
+          clean: true
+          persist-credentials: false
+
+      - name: Record Postflight execution and cache baseline
+        if: github.event_name == 'workflow_dispatch' && inputs.runner == 'postflight'
+        run: |
+          test "$RUNNER_ENVIRONMENT" = self-hosted
+          test -n "$POSTFLIGHT_EXECUTION_ID"
+          test -n "$POSTFLIGHT_ATTEMPT_ID"
+          printf 'Postflight execution: %s, attempt: %s\n' "$POSTFLIGHT_EXECUTION_ID" "$POSTFLIGHT_ATTEMPT_ID"
+          printf 'Guest boot ID: '
+          cat /proc/sys/kernel/random/boot_id
+          findmnt --target "$HOME" --output TARGET,SOURCE,FSTYPE,OPTIONS
+          findmnt --target "$GITHUB_WORKSPACE" --output TARGET,SOURCE,FSTYPE,OPTIONS
+          if [[ -d "$HOME/.cache/bazel-ci" ]]; then
+            du -sk "$HOME/.cache/bazel-ci"
+          else
+            echo 'Bazel CI cache is cold'
+          fi
 
       - name: Bootstrap toolchain
         run: scripts/bootstrap.sh
 
       - name: Restore Bazel cache
+        if: github.event_name != 'workflow_dispatch' || inputs.runner != 'postflight'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-ci

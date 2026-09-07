@@ -55,7 +55,9 @@ fetch_sha512 "${sdk_url}" "${sdk_archive}" "${DOTNET_SDK_SHA512}"
 if [[ ! -f "${source_root}/.postflight-patched" ]]; then
   mkdir -p "${source_root}"
   tar -xzf "${source_archive}" -C "${source_root}" --strip-components=1
-  patch --directory="${source_root}" --strip=1 <"${script_dir}/runner-listener.patch" >&2
+  # Context-free/fuzzy patches can apply successfully inside a method after
+  # an upstream release moves it. Require exact surrounding source instead.
+  patch --fuzz=0 --directory="${source_root}" --strip=1 <"${script_dir}/runner-listener.patch" >&2
   touch "${source_root}/.postflight-patched"
 fi
 if [[ ! -x "${sdk_root}/dotnet" ]]; then

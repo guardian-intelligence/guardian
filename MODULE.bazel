@@ -66,6 +66,15 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 
+# The runner patch must apply to its actual pinned upstream source in CI.
+# Keep this commit aligned with src/postflight/image/pins.env.
+http_file(
+    name = "postflight_runner_cs",
+    downloaded_file_path = "Runner.cs",
+    sha256 = "96f998692e2715b2c95800c843da4ac6206561f69b7fd41228d28d0fa007b5cd",
+    url = "https://raw.githubusercontent.com/actions/runner/397b032cbf865e9c3ddfab89d533ec19325e1273/src/Runner.Listener/Runner.cs",
+)
+
 # Dated snapshot, not https://curl.se/ca/cacert.pem: the undated URL is
 # mutable, so every Mozilla bundle rotation would sha256-fail the required
 # build check on unrelated PRs. Refresh by bumping the date and hash together.

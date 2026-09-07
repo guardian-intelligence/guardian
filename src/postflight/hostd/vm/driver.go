@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,8 +65,10 @@ var _ UpdateSource = (*QEMU)(nil)
 
 // ClassConfig is one runner class's shape on this host.
 type ClassConfig struct {
-	CPUs      int
-	MemoryMiB int
+	Flavor       Flavor
+	WarmTemplate *WarmTemplate
+	CPUs         int
+	MemoryMiB    int
 	// Image is the sealed golden snapshot root disks clone from, e.g.
 	// tank/postflight/golden/noble@sealed.
 	Image string
@@ -119,6 +123,12 @@ func (c *Config) validate() error {
 		return errors.New("vm: TapLifecycle is required for tap networking")
 	}
 	for class, shape := range c.Classes {
+		if shape.WarmTemplate != nil && shape.Flavor != FlavorTurbo {
+			return fmt.Errorf("vm: class %s cannot restore a Turbo template", class)
+		}
+		if shape.Flavor != "" && shape.Flavor != FlavorTurbo && shape.Flavor != FlavorConfidential {
+			return fmt.Errorf("vm: class %s has unknown flavor %q", class, shape.Flavor)
+		}
 		if shape.CPUs <= 0 || shape.MemoryMiB <= 0 || shape.Image == "" {
 			return fmt.Errorf("vm: class %s is underspecified", class)
 		}
@@ -224,6 +234,8 @@ func (q *QEMU) Updates() <-chan ID {
 // meta is a VM's durable identity. It is written before any side effect, so
 // everything the driver ever created is discoverable from disk alone.
 type meta struct {
+	Restored      bool        `json:"restored,omitempty"`
+	RunAs         string      `json:"run_as,omitempty"`
 	ID            ID          `json:"id"`
 	Class         Class       `json:"class"`
 	Image         string      `json:"image,omitempty"`
@@ -337,6 +349,8 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 	dir := q.stateDir(id)
 	dataset := q.rootDataset(id)
 	spec := LaunchSpec{
+		Incoming:     shape.WarmTemplate != nil,
+		Flavor:       shape.Flavor,
 		QEMUPath:     q.cfg.QEMUPath,
 		ID:           id,
 		CPUs:         shape.CPUs,
@@ -347,6 +361,9 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 		VsockCID:     cid,
 		GuestNetwork: q.cfg.GuestNetwork,
 	}
+	if shape.Flavor == FlavorTurbo {
+		spec.RunAs = "postflight-vm"
+	}
 	argv := spec.Argv()
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("vm: creating state dir for %s: %w", id, err)
@@ -356,7 +373,9 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 		return err
 	}
 	record := meta{
-		ID: id, Class: class, Image: shape.Image, CreatedUnixNS: time.Now().UnixNano(),
+		Restored: spec.Incoming,
+		RunAs:    spec.RunAs,
+		ID:       id, Class: class, Image: shape.Image, CreatedUnixNS: time.Now().UnixNano(),
 		Incarnation: incarnation, CID: cid, RootDataset: dataset, Argv: argv, ArgvSHA256: argvDigest(argv),
 	}
 	if q.cfg.GuestNetwork == guestNetworkTap {
@@ -366,9 +385,20 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 	if err := q.writeMeta(record); err != nil {
 		return err
 	}
-	rootDevice, err := q.disks.Ensure(ctx, dataset, shape.Image)
+	rootImage := shape.Image
+	if shape.WarmTemplate != nil {
+		rootImage = shape.WarmTemplate.RootSnapshot
+	}
+	rootDevice, err := q.disks.Ensure(ctx, dataset, rootImage)
 	if err != nil {
 		return err
+	}
+	if record.RunAs != "" {
+		for _, path := range []string{q.cfg.StateRoot, dir, rootDevice} {
+			if err := grantQEMUAccess(path, record.RunAs); err != nil {
+				return err
+			}
+		}
 	}
 	// The durable pre-side-effect record above makes a crash during cloning
 	// collectable. Once udev has published the zvol, replace its mutable link
@@ -395,6 +425,12 @@ func (q *QEMU) Launch(ctx context.Context, id ID, class Class) error {
 		return errors.Join(err, q.cfg.TapLifecycle.Down(ctx, record.TapName))
 	}
 	q.recordTiming(id, "qemu_started")
+	if shape.WarmTemplate != nil {
+		if err := q.restoreTemplate(ctx, id, record, *shape.WarmTemplate); err != nil {
+			return errors.Join(err, q.destroyLocked(ctx, id))
+		}
+		q.recordTiming(id, "warm_template_restored")
+	}
 	return nil
 }
 
@@ -474,9 +510,18 @@ func (q *QEMU) Prepare(ctx context.Context, id ID, preparation Preparation) erro
 	deliverCtx, cancel := context.WithTimeout(ctx, q.probeTimeout)
 	defer cancel()
 	q.recordTimingOnce(id, "listener_prepare_started")
-	if err := q.cfg.Guest.Prepare(deliverCtx, id, record.CID, guestproto.Prepare{
+	request := guestproto.Prepare{
 		MemberID: preparation.MemberID, JITConfig: preparation.JITConfig, Env: preparation.Env,
-	}); err != nil {
+	}
+	if record.Restored {
+		var seed [32]byte
+		if _, err := rand.Read(seed[:]); err != nil {
+			return err
+		}
+		request.Restored, request.HostUnixNS, request.Entropy = true, time.Now().UnixNano(), hex.EncodeToString(seed[:])
+		_, request.MACAddress = tapIdentity(id, record.CID)
+	}
+	if err := q.cfg.Guest.Prepare(deliverCtx, id, record.CID, request); err != nil {
 		return err
 	}
 	q.recordTimingOnce(id, "listener_prepare_sent")
@@ -558,6 +603,13 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 			defer attachWait.Done()
 			attachment := attachments[index]
 			started := time.Now()
+			if record.RunAs != "" {
+				if err := grantQEMUAccess(attachment.device, record.RunAs); err != nil {
+					errs[index] = err
+					cancelAttach()
+					return
+				}
+			}
 			errs[index] = q.attachVolume(attachCtx, client, attachment.node, attachment.qdev, attachment.device)
 			if errs[index] != nil {
 				cancelAttach()
@@ -610,6 +662,35 @@ func (q *QEMU) Rendezvous(ctx context.Context, id ID, rendezvous Rendezvous) err
 	}
 	q.recordTiming(id, "guest_rendezvous_sent")
 	return nil
+}
+
+// Only grant the dedicated VMM account access to the concrete whole-device
+// nodes selected by the storage manager. Tenant names are never shell input.
+func grantQEMUAccess(path, username string) error {
+	account, err := user.Lookup(username)
+	if err != nil {
+		return fmt.Errorf("vm: dedicated QEMU account: %w", err)
+	}
+	gid, err := strconv.Atoi(account.Gid)
+	if err != nil || account.Uid == "0" || gid == 0 {
+		return errors.New("vm: QEMU account must be unprivileged")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	mode := os.FileMode(0o660)
+	if info.IsDir() {
+		// Metadata remains root-owned and unwritable by the VMM: granting
+		// directory writes would let a compromised QEMU forge hostd intent.
+		mode = 0o750
+	} else if info.Mode()&os.ModeDevice == 0 || info.Mode()&os.ModeCharDevice != 0 {
+		return fmt.Errorf("vm: refusing non-block QEMU device %s", path)
+	}
+	if err := os.Chown(path, 0, gid); err != nil {
+		return err
+	}
+	return os.Chmod(path, mode)
 }
 
 // Authorize implements Driver.

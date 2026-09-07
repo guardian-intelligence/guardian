@@ -1,19 +1,65 @@
-diff --git a/src/Runner.Listener/Runner.cs b/src/Runner.Listener/Runner.cs
-index e20eb62..8ca004d 100644
 --- a/src/Runner.Listener/Runner.cs
 +++ b/src/Runner.Listener/Runner.cs
-@@ -3,0 +4,2 @@ using System.Collections.Generic;
+@@ -1,11 +1,13 @@
+ ﻿using System;
+ using System.Collections.Concurrent;
+ using System.Collections.Generic;
 +using System.Diagnostics;
 +using System.Globalization;
-@@ -670,2 +673,3 @@ namespace GitHub.Runner.Listener
+ using System.IO;
+ using System.Linq;
+ using System.Reflection;
+ using System.Runtime.CompilerServices;
+ using System.Security.Claims;
+ using System.Security.Cryptography;
+ using System.Text;
+ using System.Threading;
+@@ -664,16 +666,17 @@
+                                 {
+                                     skipMessageDeletion = true;
+                                     Trace.Info($"Skip message deletion for job request message '{message.MessageId}'.");
+                                 }
+                                 else
+                                 {
+                                     Trace.Info($"Received job message of length {message.Body.Length} from service, with hash '{IOUtil.GetSha256Hash(message.Body)}'");
                                      var jobMessage = StringUtil.ConvertFromJson<Pipelines.AgentJobRequestMessage>(message.Body);
 +                                    await PublishPostflightAssignmentAsync(jobMessage.RequestId.ToString(CultureInfo.InvariantCulture), jobMessage, settings, messageQueueLoopTokenSource.Token);
                                      jobDispatcher.Run(jobMessage, runOnce);
-@@ -754,2 +758,3 @@ namespace GitHub.Runner.Listener
+                                     if (runOnce)
+                                     {
+                                         Trace.Info("One time used runner received job message.");
+                                         runOnceJobReceived = true;
+                                     }
+                                 }
+                             }
+@@ -754,16 +757,17 @@
+                                                 HostContext.DeferAuthMigration(TimeSpan.FromMinutes(60), $"Acquire job failed with exception: {ex}");
+                                             }
+ 
+                                             continue;
+                                         }
+                                     }
+ 
                                      // Dispatch
 +                                    await PublishPostflightAssignmentAsync(messageRef.RunnerRequestId, jobRequestMessage, settings, messageQueueLoopTokenSource.Token);
                                      jobDispatcher.Run(jobRequestMessage, runOnce);
-@@ -886,0 +891,96 @@ namespace GitHub.Runner.Listener
+ 
+                                     // Run once?
+                                     if (runOnce)
+                                     {
+                                         Trace.Info("One time used runner received job message.");
+                                         runOnceJobReceived = true;
+                                     }
+@@ -893,16 +897,113 @@
+             }
+             catch (HostedRunnerDeprovisionedException)
+             {
+                 Trace.Info("Hosted runner has been deprovisioned. Shutting down.");
+             }
+ 
+             return Constants.Runner.ReturnCode.Success;
+         }
++
 +        private async Task PublishPostflightAssignmentAsync(
 +            string requestId,
 +            Pipelines.AgentJobRequestMessage jobMessage,
@@ -110,3 +156,11 @@ index e20eb62..8ca004d 100644
 +            Trace.Info($"Published Postflight request '{requestId}' before Runner.Worker dispatch");
 +        }
 +
+ 
+         private async Task<int> ExecuteRunnerAsync(RunnerSettings settings, bool runOnce, bool returnRunOnceJobResult)
+         {
+             int returnCode = Constants.Runner.ReturnCode.Success;
+             bool restart = false;
+             do
+             {
+                 restart = false;

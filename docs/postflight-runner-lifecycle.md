@@ -1,152 +1,98 @@
 # Postflight runner lifecycle
 
-The operational model for the Linux x64 Ubuntu 24.04 confidential runner:
-SEV-SNP, one job per VM, a pre-booted QEMU pool, encrypted node-local zvol
-generations.
+Status: current first-party Turbo path, 2026-09-06. Ubuntu 24.04, one job per
+KVM VM, no SEV-SNP requirement. The confidential profile remains separate.
 
-## Four durable identities
+## Pool creation and generic boot reuse
 
-| Resource | Stable identity | Created | Terminal condition |
-| --- | --- | --- | --- |
-| Pool member | `(host, vm, incarnation)` | A generic guest is launched | Its single job ends or the guest is recycled |
-| Job intent | `(scale set, runner request ID, protocol job ID)` | `JobAvailable` is received | GitHub completes or cancels the request |
-| Assignment | `(protocol job ID, member incarnation)` | The selected guest reports the job locally | The job ends, is withdrawn, or fails closed |
-| Generation | Authenticated manifest digest and monotonic generation number | A trusted successful donor is sealed | Retention reaps it or policy invalidates it |
+1. Hostd checks native encryption and loaded keys throughout its managed ZFS
+   subtree, then prepares a generic RAM/root template before starting its agent.
+2. A template donor boots only to guestd readiness. It has no pool-member
+   registration, assignment, tenant volumes, or customer processes.
+3. Hostd pauses it, saves QEMU RAM/device state, destroys the donor, and seals
+   the matching root snapshot. Template identity includes the host boot,
+   exact QEMU and firmware bytes, image, machine/CPU model, network, and geometry.
+4. Each pool VM clones that root and restores the generic RAM. Before JIT is
+   passed to Listener, guestd refreshes entropy, clock, machine identity, the
+   destination MAC, and DHCP state. Initialization failure keeps Listener
+   blocked and fails the VM.
+5. The control plane creates pools for observed class demand, and a fresh
+   GitHub App JIT configuration registers each member. GitHub decides which
+   connected Listener receives the job.
 
-The numeric GitHub REST job ID serves UI and conclusion reconciliation; it
-is not the runner protocol job ID and never decides which VM received a job.
+See [host startup](../src/postflight/hostd/cmd/hostd/main.go),
+[template lifecycle](../src/postflight/hostd/vm/warm_template.go),
+[guest initialization](../src/postflight/guestd/initialize_linux.go), and
+[control-plane scheduler](../src/postflight/controlplane/scheduler.go).
+The template is generic platform state, never a snapshot of a registered runner.
 
-## Pool and assignment state
+## Assignment and disk materialization
 
-```text
-pool member
-  provisioning -> listening -> assigned -> rendezvous -> running -> recycling
-        |              |           |            |            |
-        +--------------+-----------+------------+------------+-> lost
-
-job intent
-  available -> acquired -> assigned -> running -> completed
-       |           |          |          +-------> cancelled
-       +-----------+----------+------------------> cancelled
-
-assignment
-  observed -> resolving -> binding -> restoring -> authorizing -> running
-       |          |          |           |              |           |
-       +----------+----------+-----------+--------------+-----------> terminal
-```
-
-An assignment row's identity — member, request ID, protocol job ID, runner
-name, repository, run, attempt, and workflow job — is written once and never
-rewritten. Its state, selected generation, restore result, terminal result,
-and timing evidence advance in place.
-
-The runner listener is connected while the member is `listening`; GitHub's
-assignment reaches the guest directly. The listener invokes guestd before
-Runner.Worker dispatch, and guestd blocks the listener until hostd completes
-the rendezvous — assignment is deterministic after the fact without
-serializing listener registration.
-
-## Restore transaction
+The patched Listener reports the acquired job identity before Worker starts.
+The control plane joins that observation to a unique job intent. Its durable
+assignment records the member incarnation, repository, run and attempt,
+workflow job, and selected workspace scope/generation. GitHub REST job IDs
+and runner protocol job IDs have different meanings and are not interchangeable.
 
 ```text
-verify manifest and scope
-  -> attach authenticated workspace/tool/process volumes
-  -> converge mounts
-  -> attempt process restore
-       -> success: adopt capsule
-       -> incompatible:
-            destroy partial capsule
-            prove restore isolation is empty
-            replace the cgroup boundary
-            invalidate process component
-            create cold capsule
-       -> unsafe:
-            keep Worker blocked
-            recycle VM
-  -> sample synchronized clock
-  -> publish capsule PID
-  -> release Worker
+GitHub selects Listener
+  -> observed assignment binds member to exact job
+  -> verify scope and compatible generation
+  -> clone and attach workspace/tool volumes
+  -> converge host-zfs mounts
+  -> start fresh customer process capsule
+  -> authorize Worker
+  -> GitHub receives normal runner job logs
 ```
 
-The restore isolation is disposable: CRIU's process tree is confined to the
-capsule PID namespace and cgroup. A recoverable error may continue cold only
-after the process tree is empty, every temporary mount is detached, and the
-killed cgroup is replaced with a distinct cgroup object. Failing to prove or
-replace that boundary is an unsafe outcome.
+Arbitrary customer-process CRIU restore remains disabled in the
+[plan](../src/postflight/hostd/agent/plans.go) and
+[sync](../src/postflight/hostd/agent/sync.go) gates. A reused disk generation
+therefore does not mean restored compiler-process memory. The CRIU library's
+restore-or-cold tests cover retained code, not an enabled CI path.
 
-### Failure policy
+A scope, integrity, device, mount, or initialization failure keeps Worker
+blocked and recycles the VM. A compatible cache miss uses empty disks and
+fresh processes. Any VM loss after GitHub's `acquirejob` commit point cannot
+transparently give the acquired message back to another Listener; the record
+must not claim that attempt was requeued.
 
-| Evidence | Disposition | Process snapshot | Customer job |
-| --- | --- | --- | --- |
-| CRIU format/version or kernel feature mismatch | Cold fallback | Invalidate | Continue on same live Worker |
-| Missing/restale file, unsupported FD, PID or socket conflict | Cold fallback | Invalidate | Continue on same live Worker |
-| CRIU exits unsuccessfully and cleanup is proven | Cold fallback | Invalidate | Continue on same live Worker |
-| Snapshot digest, signature, tenant/scope, rollback floor, measurement, TCB, or key binding mismatch | Recycle VM | Quarantine generation | Never release this Worker |
-| Cleanup cannot prove an empty capsule | Recycle VM | Invalidate and quarantine evidence | Never release this Worker |
-| QEMU, guestd, or listener dies before provider acquisition | Recycle/refill | Invalidate suspect process component | GitHub requeues after its pickup deadline |
-| QEMU, guestd, or listener dies after provider acquisition | Recycle/refill | Invalidate suspect process component | Current attempt cannot be transparently requeued |
-| Cold capsule creation fails | Recycle VM | Already invalidated | Current attempt cannot be transparently requeued |
+## Disk generation creation and publication
 
-Workspace and tool snapshots survive a process-only invalidation while their
-authenticated manifest components remain valid; the next attempt gets their
-artifacts with a cold process capsule.
+The [completion path](../src/postflight/hostd/agent/converge.go) is:
 
-GitHub's broker `acquirejob` call is a commit point. Before it, a
-disconnected listener leaves the job eligible for GitHub's normal pickup
-retry. After it, the provider exposes no release operation that can hand the
-same job message to another listener, so the durable assignment record must
-not describe post-acquisition VM loss as requeued. Transparent recovery
-would require a separately designed, attested handoff of the acquired job
-message and its listener state to a replacement VM.
+1. Worker completes and the guest flushes its durable filesystems.
+2. Hostd destroys QEMU; the donor can no longer mutate its disks.
+3. An empty process-checkpoint sentinel advances disk publication. No CRIU
+   dump is taken and no customer process digest is published.
+4. Only an eligible trusted branch scope receives a candidate generation.
+5. Hostd seals the disk tuple and sends snapshot evidence.
+6. The control plane requires the exact GitHub attempt's successful API
+   conclusion, then promotes with a compare-and-swap against the prior scope
+   head. Failure or ambiguity leaves the previous trusted head intact.
+7. A new VM may clone the promoted workspace/tool state. The completed VM is
+   never reused for another job and never becomes a RAM-template donor.
 
-## Generation creation and publication
+The [Turbo end-to-end test](../src/postflight/controlplane/turbo_e2e_test.go)
+proves this policy with a real Postgres and fake substrate. It is not real
+KVM or ZFS evidence.
 
-One manifest couples the workspace ZFS snapshot GUID, root and tool volume
-generations, process image digest, guest image and kernel digests, QEMU/CRIU
-format versions, CPU compatibility, SNP measurement and minimum TCB, tenant,
-repository, branch, monotonic generation number, and the fleet's key
-reference (derivation salt on Confidential, wrapped DEK on Turbo).
+## Proof and timing
 
-The donor sequence is:
+The authenticated [operator projection](../src/postflight/controlplane/hostd_status.go)
+shows host health, pool/member states, demands, assignments, and generation
+lineage without credentials. Across two actual VM incarnations, compare the
+first assignment's sealed generation with the next assignment's source
+generation and scope head. Pair that with host `snapshot_seal_completed`
+evidence and guest-visible persisted cache state.
 
-1. GitHub's runner finishes and its credential-bearing processes are killed.
-2. The capsule is frozen and CRIU writes its process image.
-3. The guest flushes every mounted durable filesystem.
-4. hostd destroys QEMU; a live donor can no longer mutate the tuple.
-5. hostd snapshots every zvol and records their ZFS GUIDs.
-6. The control plane authenticates the complete manifest as a candidate.
-7. Attempt-specific GitHub success promotes it with a scope-pointer CAS.
+RAM restore is a separate proof: the host must load the saved RAM/root tuple,
+and two concurrent restored guests must have distinct MAC/IP and machine
+identities and complete real GitHub jobs. A cold QEMU start or a shell timing
+line is not that proof. Native GitHub logs must stream while the Worker runs.
 
-Any failure skips publication. Snapshotting the runner itself, resuming the
-donor after publication, or promoting a tuple with mismatched component
-generations is forbidden.
-
-## Timing contract
-
-Each source records `CLOCK_BOOTTIME`, boot ID, sequence, and realtime.
-Durations within a process use only its monotonic values; cross-source spans
-use bracketed realtime samples and report their uncertainty. Required
-hot-path events:
-
-```text
-github_job_available
-github_job_acquired
-guest_assignment_observed
-host_assignment_ingested
-generation_selected
-zvol_materialization_started/completed
-qmp_attach_started/completed
-guest_rendezvous_received
-mounts_ready
-restore_started
-restore_succeeded
-  | generation_restore_failed -> restore_cleanup_started/completed
-      -> cold_capsule_start_started/completed
-  | restore_unsafe
-clock_checked
-worker_released
-customer_steps_released
-```
-
-Reports separate GitHub queue/assignment time, Postflight rendezvous time,
-restore or cold-fallback time, and customer workload time.
+Timing events carry source-local monotonic clocks and boot IDs; cross-source
+spans use bracketed realtime samples and state their uncertainty. Report
+GitHub queue/assignment time, boot restore, disk materialization, Worker
+release, workload duration, and generation promotion separately. The full
+acceptance contract is in [CI migration](postflight-ci-migration.md).

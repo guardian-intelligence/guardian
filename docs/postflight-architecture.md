@@ -1,144 +1,122 @@
 # Postflight production architecture
 
-Status: end-state architecture, 2026-07-24.
+Status: current first-party Turbo implementation, 2026-09-06. Implementation
+is not deployment evidence: the [CI migration proof contract](postflight-ci-migration.md)
+records the required real jobs, cache lineage, VM restore, and log checks.
+Confidential remains a separate security profile with its own release gates.
 
-Companions:
+Companions: [fleet](postflight-fleet.md), [Lightning](postflight-lightning.md),
+[security model](postflight-security-model.md), [scheduling](postflight-scheduling.md),
+[storage](postflight-storage.md), [host](postflight-host.md), and
+[runner lifecycle](postflight-runner-lifecycle.md).
 
-- [Fleet](postflight-fleet.md) — hardware classes, warmth domains, the two clouds
-- [Lightning](postflight-lightning.md) — the warmth substrate: prewarmed VMs, sticky disks, userspace restore, node-local NVMe
-- [Security model](postflight-security-model.md) — per-product threat models and claims
-- [Scheduling](postflight-scheduling.md) — control plane, state, admission, assignment
-- [Storage](postflight-storage.md) — sticky disks, generations, sealing, locality
-- [Host](postflight-host.md) — hostd, the QEMU profile, the guest contract
-- [Runner lifecycle](postflight-runner-lifecycle.md) — the operational model per job
+## Runner profiles
 
-## Two SKU categories, three axes
-
-Postflight competes on three axes:
-
-| Axis | How we win | Load-bearing architecture |
+| | First-party Turbo | Confidential |
 | --- | --- | --- |
-| Speed | Warm starts in milliseconds, not minutes | CRIU process capsules + sticky ZFS disks (constant-time CoW clones) on high-clock bare metal |
-| Security | Hardware-enforced job isolation a compromised host cannot pierce | SEV-SNP guests, in-guest keys, attestation-gated release |
-| Features | A full machine, not a stripped microVM | Full QEMU: complete device surface, `/dev/kvm`, dockerd parity, SSH, hot-attach |
+| Runner class | `postflight-4vcpu-ubuntu24-turbo` | Separate confidential classes, unchanged by Turbo rollout |
+| Guest | Ubuntu 24.04, 4 vCPU, 16 GiB, QEMU/KVM | SEV-SNP guest; attestation and confidential-image requirements |
+| TEE requirement | None | SEV-SNP |
+| Boot reuse | Generic pre-registration QEMU RAM + root template | Turbo RAM template path is rejected |
+| Cross-job cache | Scoped workspace and tool ZFS generations | Separate confidential encryption profile |
+| At-rest keys | Native encrypted host ZFS; raw key seeded from OpenBao outside Git | In-guest SNP-derived volume keys |
+| Host trust | Trusted Guardian host, including kernel, QEMU, hostd, and storage key | Untrusted host is the confidential security-policy target |
 
-Two SKU categories on two separate clouds, both on the
-[Lightning](postflight-lightning.md) warmth substrate. SKUs are runner
-labels `postflight-<x>vcpu-<os>-<flavor>`; the flavor selects the category.
-The non-TEE flavor's public name is provisional (`turbo` until ruled
-otherwise):
-
-| | Turbo | Confidential |
-| --- | --- | --- |
-| Runner label | `postflight-<x>vcpu-ubuntu24-turbo` | `postflight-<x>vcpu-ubuntu24-confidential` |
-| Silicon | Bare-metal AMD Ryzen (high clock) | AMD EPYC with SEV-SNP |
-| Cloud | Ryzen bare-metal provider | Latitude (current) |
-| TEE | None — the silicon has no SEV | SEV-SNP, always on |
-| Warmth | CRIU capsule + sticky disks | CRIU capsule + sticky disks |
-| At-rest keys | OpenBao Transit custody | Derived inside the CPU |
-| `/dev/kvm` | Yes | No (impossible in SNP guests) |
-| Host trust | Trusted, hardened | Untrusted conduit |
-
-The split is hardware-honest: Ryzen has no SEV, so Turbo claims speed and
-isolation, never confidentiality; SNP forbids `/dev/kvm`, so KVM-needing
-jobs route to Turbo. Nobody else offers a TEE and KVM on one platform.
-
-Full QEMU is the only VMM that carries all three axes: SEV-SNP launch,
-tens-of-milliseconds virtio-scsi hot-attach of sticky disks, and the
-complete device model. "Custom QEMU" means a Guardian-built, pinned,
-attested **upstream** artifact plus an owned launch profile per hardware
-class — never a fork. Scheduling, storage, and lifecycle logic live in
-Guardian daemons.
+The concrete Turbo class is seeded by
+[migration 012](../src/postflight/controlplane/migrations/012_turbo_runner_class.sql).
+Its [host manifest](../src/postflight/host/hosts/rust-forge-01.json) declares two
+slots, the exact installed QEMU version, SeaBIOS, and the encrypted dataset.
+The [launch profile](../src/postflight/hostd/vm/spec.go) uses `pc-q35-8.2`, the
+host CPU model, and non-root `postflight-vm`. These are host-local templates;
+there is no portable CPU or cross-host memory-restore claim.
 
 ## The assembly
 
-Three Guardian processes, four pieces of infrastructure, one external
-scheduler.
-
 ```text
-GitHub webhooks/API ──► Control plane ──plans/prefetch──► hostd (one per host)
-       │                     │                              │
-       │                     ├─ Postgres: four schemas      ├─ OpenZFS: sticky disks
-       │                     ├─ OpenBao: transit-postflight ├─ QEMU: pinned artifact
-       │                     ├─ attested sessions           └─ one SlotActor per slot
-       │                     ├─ admission / planning                 │
-       │                     └─ metering / reconcilers               │ vsock
-       │                                                             │
-       └── assignment ──► selected Runner.Listener ──► guestd ───────┘
-                                                        │
-                                                        ├─ LUKS + mount ladder
-                                                        ├─ CRIU capsule
-                                                        └─ Worker gate
+GitHub workflow_job webhook/API -> control plane -> Postgres
+                                      |
+                         authenticated hostd sync
+                                      |
+                                    hostd
+                         /            |            \
+                 encrypted ZFS    QEMU + KVM    checkout broker
+                                      |
+                                    vsock
+                                      |
+                                   guestd
+                                      |
+                         patched Runner.Listener / Worker
+                                      |
+                         GitHub assignment and live job logs
 ```
 
-| Component | Owns |
-| --- | --- |
-| GitHub | Workflow DAG, retries, runner selection. The only workflow engine in the system. |
-| Control plane | One deployable binary: admission, job plans, assignment truth, generation catalog, attested sessions, key custody, metering, reconcilers, the production canary. |
-| Postgres | Four independently owned schemas: capacity, demand/assignment, storage, usage. Ordinary relational rows updated in place; history only where it pays (usage intervals, assignment identity). Short transactions, idempotency keys, `FOR UPDATE SKIP LOCKED` workers. |
-| OpenBao | Product-scoped Transit mount (`transit-postflight`): Turbo DEK wrap/unwrap, Confidential tenant key custody, generation-manifest signing, per-tenant crypto-erase. |
-| hostd | Per-host daemon: slot actors, storage manager, QEMU supervision, checkpoint sealing, crash-safe operation journal, two-lane control stream. |
-| guestd | The only privileged agent in the guest: attestation, LUKS and mounts, runner supervision, the Worker gate, the CRIU capsule, quiesce. |
-| QEMU + OpenZFS | Mechanism, never policy. Pinned QEMU per fleet; node-local NVMe zpools; no network storage on any hot path. |
+The [control-plane scheduler](../src/postflight/controlplane/scheduler.go)
+uses signed webhook hints and API reconciliation to admit class demand, create
+pools, mint fresh GitHub App JIT registrations, and preposition plans.
+GitHub chooses the listener; its observed assignment binds the selected VM
+to the exact job before Worker starts. GitHub remains the workflow engine.
+The patched [Actions runner](../src/postflight/runner/runner-listener.patch) uses GitHub's
+normal job/log protocol. Postflight host and guest lifecycle events are a
+separate operational stream, not a replacement job-log uploader.
 
-## Principles
+The current [host sync protocol](../src/postflight/hostd/syncproto) is bounded
+JSON over authenticated HTTPS; guest frames use the
+[vsock protocol](../src/postflight/hostd/guestproto). The older two-gRPC-stream
+and single-protobuf design is an end-state proposal, not the running wire
+contract. [Operator status](../src/postflight/controlplane/hostd_status.go)
+projects host health, pools, demands, assignments, and generation lineage
+without JIT credentials, raw webhook bodies, or tenant tokens.
 
-1. **GitHub is the scheduler.** No internal workflow engine duplicates its
-   DAG. Webhooks are hints (delivery and order are unreliable), the REST API
-   is truth, the guest's locally observed assignment is the final fallback.
-2. **Assignment is observed, never predicted.** All listeners
-   stay connected; GitHub picks one; the selected guest reports the binding
-   before Runner.Worker exists; prepositioned plans mean the winner needs
-   no round trip.
-3. **One job, one VM, destroy-and-refill.** Pool members are single-use;
-   completion, cancellation, loss, and unsafe restore all recycle the guest.
-4. **Warm state is a regenerable cache, never data.** Any miss, host loss,
-   image roll, or key rotation costs exactly one cold build. Nothing in the
-   warmth path is backed up, migrated, or recovered.
-5. **One warmth mechanism.** CRIU process capsules on sticky zvol
-   generations, identical on both fleets. Whole-VM snapshots do not exist:
-   SNP forbids them, and a second mechanism would fork the seal pipeline,
-   the manifest, and the compatibility story.
-6. **The hot path belongs to one slot.** Between assignment observation and
-   Worker authorization, only the owning slot actor runs — no pool scan,
-   inventory report, GC, or control-plane convergence.
-7. **Hardware is data.** New silicon (a hardware class, an EPYC generation,
-   a provider) is onboarded by adding rows, benching, and setting
-   attestation policy, not by writing code. Warmth is bounded by
-   compatibility classes and never crosses them.
-8. **Keys have one custodian per fleet.** Confidential: the CPU derives
-   volume keys in-guest; they never cross the guest boundary in either
-   direction. Turbo: `transit-postflight` custodies lineage DEKs, and a
-   tenant's Transit key is its crypto-erase switch.
-9. **On Confidential, the host is a conduit.** Secret-bearing traffic
-   between control plane and guest is sealed to attestation; hostd relays
-   ciphertext it cannot open. A compromised host reads nothing it was not
-   already entitled to operate.
-10. **Small schemas, not a god-object.** Capacity, demand/assignment,
-    storage, and usage are independently owned Postgres schemas with small
-    per-resource state machines; each controller advances only its own
-    resource. Ordinary relational state, not event sourcing: rows update in
-    place; append-only records exist only for usage intervals and
-    assignment identity.
-11. **Every claim ships with a gate.** Speed claims carry benchmark
-    provenance; security claims carry release gates with positive controls.
-    A claim without a falsifier does not go on the website.
-12. **One IDL.** Every internal channel is generated from one protobuf
-    package: control plane ↔ hostd is two gRPC streams per host
-    (assignment/plan on one lane, inventory/telemetry on the other, so
-    urgent messages never queue behind bulk); hostd ↔ guestd speaks the
-    same generated protocol over vsock. A hand-framed message anywhere is a
-    bug.
+## Two independent kinds of reuse
 
-## What does not exist
+**Boot reuse is generic and secretless.** Before its scheduling agent starts,
+hostd boots a donor that has never been registered, assigned, or given tenant
+volumes. It pauses QEMU, saves RAM/device state, destroys the donor, and seals
+the matching root zvol. The [template implementation](../src/postflight/hostd/vm/warm_template.go)
+binds the host boot, image, QEMU and firmware bytes, machine/CPU model,
+network mode, and VM geometry. A restored guest gets fresh entropy, clock,
+machine identity, MAC and DHCP state before the listener receives JIT
+registration; see [guest initialization](../src/postflight/guestd/initialize_linux.go).
+Memory lives under `/var/lib/postflight/warm-templates` on encrypted ZFS,
+separate from the ZFS `templates` dataset's mountpoint.
 
-- No workflow engine, no per-job Kubernetes objects, no host leases.
-- No whole-VM snapshots; no second warmth mechanism.
-- No cross-host generation replication, no key-release plane for moving
-  warm state between chips: warmth is host-affine and a miss runs cold. The
-  catalog and manifest keep the shape (wrapped-key reference, lineage,
-  pointer CAS), so portable warmth would be a key-plane change, not a
-  schema migration — adopted only on measured pull.
-- No QEMU fork.
-- No durable object-storage tier for customer state:
-  sticky disks are node-local NVMe; their loss is a cold build.
+**Cross-job reuse contains disk state.** The assignment materializes scoped
+workspace and tool clones. On completion, the guest flushes the durable
+filesystems and hostd destroys QEMU before sealing disk snapshots. Only an
+eligible trusted attempt with API-confirmed success may promote a candidate
+using a scope-pointer compare-and-swap. A subsequent VM can reuse those disks
+while starting fresh customer processes.
+
+Arbitrary customer-process CRIU publication and restore remain disabled by
+the security boundary introduced in PR #1212. The
+[plan gate](../src/postflight/hostd/agent/plans.go),
+[sync gate](../src/postflight/hostd/agent/sync.go), and
+[completion path](../src/postflight/hostd/agent/converge.go) enforce that
+boundary. Retained CRIU libraries and image tools do not imply enabled
+customer-process restoration. A registered listener, Worker, job token,
+tenant disk, or customer process can never become a generic template donor.
+
+## Operational and trust boundaries
+
+- One job per VM; completion, cancellation, loss, and unsafe initialization
+  destroy and refill the guest. Hostd restarts adopt surviving VM scopes.
+- Warm state is a regenerable local cache. A new image or host boot produces
+  a new RAM template; incompatible or absent disk state costs a cold build.
+  No customer memory replication, cross-host generation transport, or durable
+  customer-state backup is provided by this path.
+- Turbo uses the baked `host-zfs` guest profile, not a runtime downgrade of a
+  confidential image. Hostd verifies every managed dataset is encrypted and
+  its key loaded before serving. The trusted host can read guest state and
+  mounted disk plaintext. The root-only ZFS key is also on the host; native
+  encryption does not protect a stolen complete host filesystem containing
+  that key, nor provide per-tenant crypto-erase.
+- [Host reconciliation](../src/postflight/host/README.md) follows protected
+  public main from root-owned source and build locations. Secrets remain
+  outside Git. Guest networking permits public egress and only DHCP, DNS,
+  and checkout access to the host; private/reserved destinations, IPv6, and
+  guest-to-guest forwarding are denied.
+- Confidential attestation, key custody, and untrusted-host release gates are
+  preserved. Turbo's successful CI run does not establish those claims.
+- Report measured Linux evidence separately for VM boot restore, disk cache
+  reuse, GitHub log streaming, and end-to-end job latency. Historical tracer
+  timings and fake-backed tests do not establish the current host's speed.

@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/guardian-intelligence/guardian/src/postflight/generation"
@@ -40,6 +41,8 @@ const SyntheticFailureExitCode = 254
 
 // Config is guestd's static shape.
 type Config struct {
+	InitializeRestored func(context.Context, guestproto.Prepare, func()) error
+	PurgeEphemeral     func() error
 	// System is the privileged-operation seam.
 	System System
 	// RunRunner starts the actions runner and blocks until it exits.
@@ -118,11 +121,14 @@ func (c *Config) validate() error {
 // life, serving one host connection at a time; a newer connection always
 // supplants an older one, which is what makes host restarts converge.
 type Server struct {
-	cfg Config
+	cfg      Config
+	recorder atomic.Pointer[timing.Recorder]
 
 	mu            sync.Mutex
 	conn          net.Conn
 	prepared      *guestproto.Prepare
+	initializing  bool
+	initialized   bool
 	rendezvous    *guestproto.Rendezvous
 	authorized    *guestproto.Authorize
 	clock         *guestproto.ClockSample
@@ -145,7 +151,19 @@ func New(cfg Config) (*Server, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	return &Server{cfg: cfg, workerGate: make(chan struct{})}, nil
+	server := &Server{cfg: cfg, workerGate: make(chan struct{})}
+	server.recorder.Store(cfg.Timing)
+	return server, nil
+}
+
+func (s *Server) timingPoint(event string) timing.Point {
+	recorder := s.recorder.Load()
+	if recorder == nil {
+		// Internal protocol tests may construct a Server directly.
+		s.recorder.CompareAndSwap(nil, s.cfg.Timing)
+		recorder = s.recorder.Load()
+	}
+	return recorder.Point(event)
 }
 
 // Serve accepts host connections until the context ends or the listener
@@ -290,6 +308,10 @@ func (s *Server) sendStatus(status guestproto.RunnerStatus) {
 // itself is never checkpointed and publishes the assignment before
 // Runner.Worker is created.
 func (s *Server) handlePrepare(prepare guestproto.Prepare) {
+	if prepare.InitializeOnly {
+		s.handleInitialize(prepare)
+		return
+	}
 	s.mu.Lock()
 	if s.prepared != nil {
 		duplicate := s.prepared.MemberID == prepare.MemberID
@@ -302,32 +324,96 @@ func (s *Server) handlePrepare(prepare guestproto.Prepare) {
 	claimed := prepare
 	s.prepared = &claimed
 	s.mu.Unlock()
-	started := guestTiming(s.cfg.Timing.Point("listener_prepare_received"))
-	go s.run(prepare, started)
+	go s.run(prepare)
 }
 
-func (s *Server) run(prepare guestproto.Prepare, started guestproto.TimingPoint) {
+func (s *Server) run(prepare guestproto.Prepare) {
+	if prepare.Restored {
+		s.mu.Lock()
+		initialized := s.initialized
+		s.mu.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		err := errors.New("restored guest initialization is unavailable")
+		if initialized {
+			err = nil
+		} else if s.cfg.Encryption == EncryptionHostZFS && s.cfg.InitializeRestored != nil {
+			err = s.cfg.InitializeRestored(ctx, prepare, func() {})
+		}
+		cancel()
+		if err != nil {
+			s.cfg.Logger.Error("restored guest initialization failed", "error", err)
+			s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode})
+			return
+		}
+		// CLOCK_BOOTTIME and /proc boot_id were copied with guest RAM.
+		// A new source names this incarnation without falsely claiming the
+		// kernel boot ID changed. Never emit donor-source timing after init.
+		bootID, err := timing.BootID()
+		if err != nil {
+			s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode})
+			return
+		}
+		recorder, err := timing.New("guestd:"+prepare.MemberID, bootID)
+		if err != nil {
+			s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode})
+			return
+		}
+		s.recorder.Store(recorder)
+	}
+	started := guestTiming(s.timingPoint("listener_prepare_received"))
 	code, err := s.cfg.RunRunner(context.Background(), prepare.JITConfig, prepare.Env, func(event RunnerEvent) {
 		switch event {
 		case EventListening:
-			point := guestTiming(s.cfg.Timing.Point("runner_registered"))
+			point := guestTiming(s.timingPoint("runner_registered"))
 			s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerRegistered, Timing: []guestproto.TimingPoint{started, point}})
 		}
 	})
 	if err != nil {
 		s.cfg.Logger.Error("runner failed to run", "member_id", prepare.MemberID, "err", err)
-		point := guestTiming(s.cfg.Timing.Point("runner_exited"))
+		point := guestTiming(s.timingPoint("runner_exited"))
 		s.sendStatus(guestproto.RunnerStatus{
 			State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode,
 			Timing: []guestproto.TimingPoint{point},
 		})
 		return
 	}
-	point := guestTiming(s.cfg.Timing.Point("runner_exited"))
+	point := guestTiming(s.timingPoint("runner_exited"))
 	s.sendStatus(guestproto.RunnerStatus{
 		State: guestproto.RunnerExited, ExitCode: code,
 		Timing: []guestproto.TimingPoint{point},
 	})
+}
+
+// handleInitialize personalizes a restored VM while its host network link is
+// down. It carries no registration blob and never claims a pool member.
+func (s *Server) handleInitialize(prepare guestproto.Prepare) {
+	s.mu.Lock()
+	if s.prepared != nil || s.initializing || s.initialized {
+		s.mu.Unlock()
+		return
+	}
+	s.initializing = true
+	s.mu.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		err := errors.New("invalid pre-registration initialization")
+		if prepare.Restored && prepare.JITConfig == "" && len(prepare.Env) == 0 &&
+			s.cfg.Encryption == EncryptionHostZFS && s.cfg.InitializeRestored != nil {
+			err = s.cfg.InitializeRestored(ctx, prepare, func() {
+				s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerNetworkIdentityReady})
+			})
+		}
+		if err != nil {
+			s.cfg.Logger.Error("pre-registration initialization failed", "error", err)
+			s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerExited, ExitCode: SyntheticFailureExitCode})
+			return
+		}
+		s.mu.Lock()
+		s.initialized = true
+		s.mu.Unlock()
+		s.sendStatus(guestproto.RunnerStatus{State: guestproto.RunnerInitialized})
+	}()
 }
 
 func (s *Server) handleRendezvous(rendezvous guestproto.Rendezvous) {
@@ -354,7 +440,7 @@ func (s *Server) handleRendezvous(rendezvous guestproto.Rendezvous) {
 func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.MountDeadline)
 	emit := func(event string) guestproto.TimingPoint {
-		point := guestTiming(s.cfg.Timing.Point(event))
+		point := guestTiming(s.timingPoint(event))
 		s.sendStatus(guestproto.RunnerStatus{
 			State: guestproto.RunnerProgress, Timing: []guestproto.TimingPoint{point},
 		})
@@ -363,7 +449,7 @@ func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 	recycle := func(stage string, err error, restore *guestproto.RestoreStatus) {
 		cancel()
 		s.cfg.Logger.Error(stage, "member_id", rendezvous.MemberID, "assignment_id", rendezvous.AssignmentID, "err", err)
-		failed := guestTiming(s.cfg.Timing.Point("generation_recycle_required"))
+		failed := guestTiming(s.timingPoint("generation_recycle_required"))
 		s.sendStatus(guestproto.RunnerStatus{
 			State: guestproto.RunnerRecycleRequired, Reason: err.Error(), Restore: restore,
 			Timing: []guestproto.TimingPoint{failed},
@@ -399,12 +485,15 @@ func (s *Server) bindGeneration(rendezvous guestproto.Rendezvous) {
 	}
 	cancel()
 	clock := sampleClock()
-	clock.AfterRestore = false
+	if s.prepared != nil && s.prepared.Restored && s.cfg.Encryption == EncryptionHostZFS {
+		clock.Synchronized = true // initialized from the authenticated trusted host
+		clock.AfterRestore = true
+	}
 	s.mu.Lock()
 	s.bound = true
 	s.clock = &clock
 	s.mu.Unlock()
-	ready := guestTiming(s.cfg.Timing.Point("generation_restore_completed"))
+	ready := guestTiming(s.timingPoint("generation_restore_completed"))
 	s.sendStatus(guestproto.RunnerStatus{
 		State: guestproto.RunnerMountsReady, Clock: &clock, Restore: restoreStatus,
 		Timing: []guestproto.TimingPoint{ready},
@@ -446,7 +535,7 @@ func (s *Server) handleAuthorize(authorize guestproto.Authorize) {
 		s.failWorkerGate(fmt.Errorf("selecting workspace-only worker: %w", err))
 		return
 	}
-	point := guestTiming(s.cfg.Timing.Point("runner_worker_released"))
+	point := guestTiming(s.timingPoint("runner_worker_released"))
 	s.sendStatus(guestproto.RunnerStatus{
 		State: guestproto.RunnerWorkerReady, Identity: authorize.Identity, Clock: &clock,
 		Timing: []guestproto.TimingPoint{point},
@@ -700,7 +789,7 @@ func (s *Server) openEncrypted(ctx context.Context, device, serial string) (stri
 // handleQuiesce proves that every member of the selected generation is
 // mounted and flushes the filesystems before the host seals the zvols.
 func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
-	points := []guestproto.TimingPoint{guestTiming(s.cfg.Timing.Point("quiesce_received"))}
+	points := []guestproto.TimingPoint{guestTiming(s.timingPoint("quiesce_received"))}
 	if len(quiesce.Mountpoints) == 0 {
 		s.quiesceFailed(errors.New("quiesce requires at least one mounted volume"), points)
 		return
@@ -716,13 +805,31 @@ func (s *Server) handleQuiesce(quiesce guestproto.Quiesce) {
 			return
 		}
 	}
-	points = append(points, guestTiming(s.cfg.Timing.Point("quiesce_mounts_checked")))
-	points = append(points, guestTiming(s.cfg.Timing.Point("filesystem_sync_started")))
+	points = append(points, guestTiming(s.timingPoint("quiesce_mounts_checked")))
+	// Process reuse is disabled. Stop the complete workload boundary before
+	// removing task/authentication files so a surviving daemon cannot rewrite
+	// them between cleanup and the durable filesystem snapshot.
+	if s.cfg.Checkpoints != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := s.cfg.Checkpoints.Capsules.Reset(ctx)
+		cancel()
+		if err != nil {
+			s.quiesceFailed(fmt.Errorf("stopping workload before seal: %w", err), points)
+			return
+		}
+	}
+	if s.cfg.PurgeEphemeral != nil {
+		if err := s.cfg.PurgeEphemeral(); err != nil {
+			s.quiesceFailed(fmt.Errorf("purging runner credentials before seal: %w", err), points)
+			return
+		}
+	}
+	points = append(points, guestTiming(s.timingPoint("filesystem_sync_started")))
 	if err := s.cfg.System.Sync(); err != nil {
 		s.quiesceFailed(fmt.Errorf("syncing mounted filesystems: %w", err), points)
 		return
 	}
-	points = append(points, guestTiming(s.cfg.Timing.Point("filesystem_sync_completed")))
+	points = append(points, guestTiming(s.timingPoint("filesystem_sync_completed")))
 	if err := s.send(guestproto.Message{Kind: guestproto.KindQuiesced, Quiesced: &guestproto.Quiesced{
 		Timing: points,
 	}}); err != nil {

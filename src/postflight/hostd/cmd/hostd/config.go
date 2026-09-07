@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/guardian-intelligence/guardian/src/postflight/hostd/vm"
 )
 
 // config is the full environment surface of hostd. Everything dynamic
@@ -20,6 +22,7 @@ type config struct {
 	syncSecret                   string
 	hostSecretFile               string
 	stateDir                     string
+	warmTemplateDir              string
 	pool                         string
 	class                        string
 	imageID                      string
@@ -92,6 +95,7 @@ func loadConfig() (config, error) {
 		syncSecret:                   required("HOSTD_SYNC_SECRET"),
 		hostSecretFile:               required("HOSTD_HOST_SECRET_FILE"),
 		stateDir:                     required("HOSTD_STATE_DIR"),
+		warmTemplateDir:              os.Getenv("HOSTD_WARM_TEMPLATE_DIR"),
 		pool:                         required("HOSTD_POOL"),
 		class:                        required("HOSTD_CLASS"),
 		imageID:                      required("HOSTD_IMAGE_ID"),
@@ -110,6 +114,9 @@ func loadConfig() (config, error) {
 		checkoutGuestOrigin:          required("HOSTD_CHECKOUT_GUEST_ORIGIN"),
 		transferListenAddr:           os.Getenv("HOSTD_TRANSFER_LISTEN_ADDR"),
 		transferOrigin:               os.Getenv("HOSTD_TRANSFER_ORIGIN"),
+	}
+	if _, err := vm.ClassFlavor(vm.Class(cfg.class)); err != nil {
+		errs = append(errs, err)
 	}
 	switch cfg.guestNetwork {
 	case "none", "user":
