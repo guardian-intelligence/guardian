@@ -11,8 +11,8 @@ metadata:
     app.kubernetes.io/part-of: guardian
     guardian.dev/tofu-root: guardian-codeql
 spec:
-  # First unpause only after image automation pins a build with codeql.go.
-  suspend: true
+  # Observe live drift with the promoted reconciler; apply remains separate.
+  suspend: false
   schedule: "47 * * * *"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 300

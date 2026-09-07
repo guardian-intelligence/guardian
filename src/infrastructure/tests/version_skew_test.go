@@ -448,7 +448,7 @@ func TestTalmChartTalosVersionAgreesWithInstallerImage(t *testing.T) {
 func TestCodeQLCronJobCredentialAndActivationBoundary(t *testing.T) {
 	path := "src/infrastructure/deployments/guardian/tofu/cronjob-guardian-codeql.yaml"
 	doc := singleYAMLDoc(t, runfilePath(path))
-	assertNestedBool(t, doc, true, "spec", "suspend")
+	assertNestedBool(t, doc, false, "spec", "suspend")
 	pod := nestedMap(t, doc, "spec", "jobTemplate", "spec", "template", "spec")
 	assertNestedString(t, pod, "tofu-runner", "serviceAccountName")
 	containers := sliceValue(pod["containers"])
@@ -475,7 +475,7 @@ func TestCodeQLCronJobCredentialAndActivationBoundary(t *testing.T) {
 		}
 	}
 	if secrets != 1 || values["MODE"]["value"] != "plan" || values["RECONCILER"]["value"] != "codeql" {
-		t.Fatal("CodeQL must begin in suspended plan mode with only GITHUB_TOKEN")
+		t.Fatal("CodeQL must remain in plan mode with only GITHUB_TOKEN")
 	}
 	for _, raw := range sliceValue(pod["volumes"]) {
 		if _, exists := mapValue(raw)["emptyDir"]; !exists {
