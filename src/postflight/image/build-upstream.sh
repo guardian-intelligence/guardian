@@ -87,7 +87,7 @@ fetch() {
     return 0
   fi
   log "fetching ${url}"
-  curl -fsSL --retry 3 -o "${dest}.partial" "${url}"
+  curl -fsSL --retry 3 -o "${dest}.partial" "${url}" >&2
   local actual
   actual="$(sha256sum "${dest}.partial" | awk '{print $1}')"
   if [[ "${actual}" != "${sha256}" ]]; then
@@ -104,21 +104,21 @@ packer_dir="${work_dir}/packer-${PACKER_VERSION}"
 packer="${packer_dir}/packer"
 if [[ ! -x "${packer}" ]]; then
   mkdir -p "${packer_dir}"
-  unzip -q -o "${work_dir}/${packer_zip}" -d "${packer_dir}"
+  unzip -q -o "${work_dir}/${packer_zip}" -d "${packer_dir}" >&2
 fi
 [[ -x "${packer}" ]] || die "Packer extraction did not produce ${packer}"
 
 source_dir="${work_dir}/runner-images-${RUNNER_IMAGES_COMMIT}"
 if [[ ! -d "${source_dir}/.git" ]]; then
   mkdir -p "${source_dir}"
-  git -C "${source_dir}" init -q
-  git -C "${source_dir}" remote add origin https://github.com/actions/runner-images.git
+  git -C "${source_dir}" init -q >&2
+  git -C "${source_dir}" remote add origin https://github.com/actions/runner-images.git >&2
 fi
 if ! git -C "${source_dir}" cat-file -e "${RUNNER_IMAGES_COMMIT}^{commit}" 2>/dev/null; then
   log "fetching actions/runner-images ${RUNNER_IMAGES_REF} (${RUNNER_IMAGES_COMMIT})"
-  git -C "${source_dir}" fetch --depth=1 origin "${RUNNER_IMAGES_COMMIT}"
+  git -C "${source_dir}" fetch --depth=1 origin "${RUNNER_IMAGES_COMMIT}" >&2
 fi
-git -C "${source_dir}" checkout -q --detach "${RUNNER_IMAGES_COMMIT}"
+git -C "${source_dir}" checkout -q --detach "${RUNNER_IMAGES_COMMIT}" >&2
 actual_commit="$(git -C "${source_dir}" rev-parse HEAD)"
 [[ "${actual_commit}" == "${RUNNER_IMAGES_COMMIT}" ]] ||
   die "runner-images checkout is ${actual_commit}, expected ${RUNNER_IMAGES_COMMIT}"
@@ -151,7 +151,7 @@ cache_input_sha256="$(
 cache_key="${RUNNER_IMAGES_COMMIT}-${cache_input_sha256:0:16}"
 cache_dir="${work_dir}/runner-images-qemu-${cache_key}"
 cached_image="${cache_dir}/runner-images.qcow2"
-if [[ -f "${cached_image}" ]] && qemu-img check -q "${cached_image}"; then
+if [[ -f "${cached_image}" ]] && qemu-img check -q "${cached_image}" >&2; then
   log "cached runner image: ${cached_image}"
   echo "${cached_image}"
   exit 0
@@ -163,7 +163,7 @@ key_dir="${work_dir}/packer-key-${cache_key}"
 mkdir -p "${key_dir}"
 private_key="${key_dir}/id_ed25519"
 if [[ ! -f "${private_key}" ]]; then
-  ssh-keygen -q -t ed25519 -N "" -C postflight-image-builder -f "${private_key}"
+  ssh-keygen -q -t ed25519 -N "" -C postflight-image-builder -f "${private_key}" >&2
 fi
 public_key="$(cat "${private_key}.pub")"
 
@@ -200,7 +200,7 @@ rendered_template="${template_dir}/postflight.${cache_key}.pkr.hcl"
   --plugin-version "${PACKER_QEMU_PLUGIN_VERSION}" \
   --pipx-version "${PIPX_VERSION}" \
   --python-installer "${source_dir}/images/ubuntu/scripts/build/install-python.sh" \
-  "${upstream_template}" "${rendered_template}"
+  "${upstream_template}" "${rendered_template}" >&2
 
 ubuntu_image="ubuntu-24.04-server-cloudimg-amd64.img"
 ubuntu_url="https://cloud-images.ubuntu.com/releases/noble/release-${UBUNTU_SERIAL}/${ubuntu_image}"
@@ -212,7 +212,7 @@ export PACKER_PLUGIN_PATH="${work_dir}/packer-plugins"
 mkdir -p "${PACKER_CACHE_DIR}" "${PACKER_PLUGIN_PATH}"
 
 log "initializing Packer QEMU plugin ${PACKER_QEMU_PLUGIN_VERSION}"
-"${packer}" init "${rendered_template}"
+"${packer}" init "${rendered_template}" >&2
 plugin="${PACKER_PLUGIN_PATH}/github.com/hashicorp/qemu/packer-plugin-qemu_v${PACKER_QEMU_PLUGIN_VERSION}_x5.0_linux_amd64"
 [[ -x "${plugin}" ]] || die "Packer init did not produce ${plugin}"
 actual_plugin_sha256="$(sha256sum "${plugin}" | awk '{print $1}')"
@@ -232,7 +232,7 @@ log "validating runner-images QEMU template"
   -var "source_image_sha256=${UBUNTU_SHA256}" \
   -var "source_image_url=${ubuntu_url}" \
   -var "ssh_private_key_file=${private_key}" \
-  "${rendered_template}"
+  "${rendered_template}" >&2
 
 log "building runner-images ${RUNNER_IMAGES_REF}; live log: ${log_file}"
 if ! timeout --foreground "${packer_timeout}" \
@@ -249,13 +249,13 @@ if ! timeout --foreground "${packer_timeout}" \
   -var "source_image_sha256=${UBUNTU_SHA256}" \
   -var "source_image_url=${ubuntu_url}" \
   -var "ssh_private_key_file=${private_key}" \
-  "${rendered_template}" 2>&1 | tee "${log_file}"; then
+  "${rendered_template}" 2>&1 | tee "${log_file}" >&2; then
   die "Packer build failed or exceeded ${packer_timeout}; evidence retained at ${log_file}"
 fi
 
 built_image="${building_dir}/runner-images.qcow2"
 [[ -f "${built_image}" ]] || die "Packer completed without ${built_image}"
-qemu-img check -q "${built_image}" || die "Packer produced an invalid qcow2"
+qemu-img check -q "${built_image}" >&2 || die "Packer produced an invalid qcow2"
 mv "${building_dir}" "${cache_dir}"
 log "cached runner image: ${cached_image}"
 echo "${cached_image}"

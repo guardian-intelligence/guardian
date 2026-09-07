@@ -6,6 +6,8 @@
 # bytes; workload always arrives later via the workspace zvol. hostd clones
 # one root disk per slot from @golden and destroys it with the VM.
 #
+# Stdout contains only the completed image ID; operational output goes to
+# stderr so callers can safely capture the result on fresh builds and cache hits.
 # Runs as root on a plain Ubuntu host with qemu-utils and zfsutils-linux:
 #
 #   sudo env POOL=tank GUESTD_BIN=/path/to/guestd \
@@ -142,7 +144,7 @@ cleanup() {
   fi
   if [[ "${mounted}" == true ]]; then
     rm -f "${mnt}/usr/sbin/policy-rc.d"
-    umount -R "${mnt}" 2>/dev/null
+    umount -R "${mnt}" >/dev/null 2>&1
     mounted=false
   fi
   if [[ "${nbd_connected}" == true ]]; then
@@ -150,7 +152,7 @@ cleanup() {
     nbd_connected=false
   fi
   if [[ "${scratch_created}" == true ]]; then
-    zfs destroy -r "${scratch}" 2>/dev/null
+    zfs destroy -r "${scratch}" >/dev/null 2>&1
     scratch_created=false
   fi
 }
@@ -167,7 +169,7 @@ fetch() {
     return 0
   fi
   log "fetching ${url}"
-  curl -fsSL --retry 3 -o "${dest}.partial" "${url}"
+  curl -fsSL --retry 3 -o "${dest}.partial" "${url}" >&2
   local actual
   actual="$(sha256sum "${dest}.partial" | awk '{print $1}')"
   if [[ "${actual}" != "${sha256}" ]]; then
@@ -197,9 +199,9 @@ base_image="$(
 work_image="${work_dir}/${image_id}.qcow2"
 rm -f "${work_image}"
 cp --reflink=auto "${base_image}" "${work_image}"
-qemu-img resize -q "${work_image}" "${rootfs_size}"
+qemu-img resize -q "${work_image}" "${rootfs_size}" >&2
 
-modprobe nbd max_part=16
+modprobe nbd max_part=16 >&2
 # modprobe is a no-op when nbd is already loaded, and with max_part=0 the
 # kernel never surfaces the image's partitions.
 if [[ "$(cat /sys/module/nbd/parameters/max_part)" -eq 0 ]]; then
@@ -216,9 +218,9 @@ if [[ -z "${nbd}" ]]; then
 fi
 [[ -n "${nbd}" ]] || die "no free nbd device (set NBD_DEVICE to override)"
 
-qemu-nbd --connect "${nbd}" --format qcow2 "${work_image}"
+qemu-nbd --connect "${nbd}" --format qcow2 "${work_image}" >&2
 nbd_connected=true
-udevadm settle
+udevadm settle >&2
 
 # qemu-nbd returns before the kernel finishes scanning the partition table,
 # and settle cannot wait for uevents that have not been queued yet, so the
@@ -226,7 +228,7 @@ udevadm settle
 for _ in $(seq 1 50); do
   [[ -b "${nbd}p1" ]] && break
   sleep 0.2
-  udevadm settle
+  udevadm settle >&2
 done
 [[ -b "${nbd}p1" ]] || die "nbd partitions never appeared on ${nbd}"
 
@@ -250,22 +252,22 @@ if ! growpart_output="$(growpart "${nbd}" "${root_part#"${nbd}"p}" 2>&1)"; then
   fi
   log "${growpart_output}"
 fi
-udevadm settle
+udevadm settle >&2
 
 mnt="$(mktemp -d "${work_dir}/mnt.XXXXXX")"
-mount "${root_part}" "${mnt}"
+mount "${root_part}" "${mnt}" >&2
 mounted=true
-resize2fs "${root_part}" >/dev/null
+resize2fs "${root_part}" >&2
 if [[ -n "${boot_part}" ]]; then
-  mount "${boot_part}" "${mnt}/boot"
+  mount "${boot_part}" "${mnt}/boot" >&2
 fi
 if [[ -n "${esp_part}" ]]; then
-  mount "${esp_part}" "${mnt}/boot/efi"
+  mount "${esp_part}" "${mnt}/boot/efi" >&2
 fi
-mount -t proc proc "${mnt}/proc"
-mount -t sysfs sys "${mnt}/sys"
-mount --bind /dev "${mnt}/dev"
-mount --bind /dev/pts "${mnt}/dev/pts"
+mount -t proc proc "${mnt}/proc" >&2
+mount -t sysfs sys "${mnt}/sys" >&2
+mount --bind /dev "${mnt}/dev" >&2
+mount --bind /dev/pts "${mnt}/dev/pts" >&2
 
 # The pristine image's resolv.conf is a dangling symlink into /run; apt in
 # the chroot needs the host's resolver for the duration of the build. _apt
@@ -279,7 +281,7 @@ printf '#!/bin/sh\nexit 101\n' >"${mnt}/usr/sbin/policy-rc.d"
 chmod 0755 "${mnt}/usr/sbin/policy-rc.d"
 
 log "installing Postflight runtime dependencies"
-in_chroot apt-get -q update
+in_chroot apt-get -q update >&2
 guest_kernel_release="$(find "${mnt}/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -n 1)"
 [[ -n "${guest_kernel_release}" ]] || die "runner image has no installed kernel modules"
 # The upstream image supplies the customer-facing toolchain. These packages
@@ -303,7 +305,7 @@ in_chroot apt-get -q -y --no-install-recommends install \
   util-linux \
   "tini=${TINI_VERSION}" \
   uuid-dev \
-  "linux-modules-extra-${guest_kernel_release}"
+  "linux-modules-extra-${guest_kernel_release}" >&2
 
 # Ubuntu keeps the SEV guest-message driver in linux-modules-extra. Loading it
 # at boot creates /dev/sev-guest before guestd can derive a volume key.
@@ -315,18 +317,18 @@ log "building CRIU ${CRIU_VERSION} (${CRIU_COMMIT})"
 rm -rf "${mnt}/tmp/criu-${CRIU_VERSION}"
 tar -xzf "${work_dir}/${criu_tarball}" -C "${mnt}/tmp"
 in_chroot make -C "/tmp/criu-${CRIU_VERSION}" -j"$(nproc)" \
-  NETWORK_LOCK_DEFAULT=NETWORK_LOCK_SKIP
+  NETWORK_LOCK_DEFAULT=NETWORK_LOCK_SKIP >&2
 in_chroot make -C "/tmp/criu-${CRIU_VERSION}" install-criu \
-  PREFIX=/usr SBINDIR=/usr/sbin
+  PREFIX=/usr SBINDIR=/usr/sbin >&2
 criu_installed_version="$(in_chroot /usr/sbin/criu --version | head -n 1)"
 [[ "${criu_installed_version}" == "Version: ${CRIU_VERSION}" ]] ||
   die "installed CRIU version is ${criu_installed_version}, want Version: ${CRIU_VERSION}"
 rm -rf "${mnt}/tmp/criu-${CRIU_VERSION}"
 
 log "installing actions/runner ${RUNNER_VERSION}"
-in_chroot useradd --uid 1001 --user-group --create-home --shell /bin/bash runner
+in_chroot useradd --uid 1001 --user-group --create-home --shell /bin/bash runner >&2
 if in_chroot getent group docker >/dev/null; then
-  in_chroot usermod -aG docker runner
+  in_chroot usermod -aG docker runner >&2
 fi
 # GitHub-hosted runners let workflows install their declared system
 # prerequisites. The guest root disk is single-job and destroyed on release,
@@ -340,20 +342,20 @@ install -m 0755 "${RUNNER_LISTENER_DLL}" "${mnt}/opt/actions-runner/bin/Runner.L
 # The marker file makes the runner refuse to self-update: image releases
 # follow pins.env, on GitHub's retirement cadence, never in-place.
 touch "${mnt}/opt/actions-runner/.disableupdate"
-in_chroot bash /opt/actions-runner/bin/installdependencies.sh
-in_chroot chown -R runner:runner /opt/actions-runner
+in_chroot bash /opt/actions-runner/bin/installdependencies.sh >&2
+in_chroot chown -R runner:runner /opt/actions-runner >&2
 # Runner.Listener still publishes GitHub's conventional path under its
 # install root, while the physical _work tree lives on the encrypted durable
 # runner-home volume. The repository workspace is mounted beneath that
 # target before Runner.Worker is released.
-in_chroot install -d -o runner -g runner -m 0755 /home/runner/_work
+in_chroot install -d -o runner -g runner -m 0755 /home/runner/_work >&2
 rm -rf "${mnt}/opt/actions-runner/_work"
 ln -s /home/runner/_work "${mnt}/opt/actions-runner/_work"
 # Homebrew is the one upstream tool installed outside /opt or /usr/local as
 # the temporary Packer user. GitHub's runtime user inherits that install;
 # transfer it explicitly because Postflight fixes runner at UID 1001.
 if [[ -d "${mnt}/home/linuxbrew" ]]; then
-  in_chroot chown -R runner:runner /home/linuxbrew
+  in_chroot chown -R runner:runner /home/linuxbrew >&2
 fi
 
 log "installing guestd (sha256 ${guestd_sha256})"
@@ -396,9 +398,9 @@ ln -sf /etc/systemd/system/guestd.service \
   "${mnt}/etc/systemd/system/multi-user.target.wants/guestd.service"
 
 log "removing image-build ingress"
-in_chroot apt-get -q -y purge cloud-init openssh-server walinuxagent
-in_chroot apt-get -q -y --purge autoremove
-in_chroot userdel --remove packer
+in_chroot apt-get -q -y purge cloud-init openssh-server walinuxagent >&2
+in_chroot apt-get -q -y --purge autoremove >&2
+in_chroot userdel --remove packer >&2
 # Keep OpenSSH's client configuration and upstream known_hosts; only the
 # server package, server configuration, and host identity are ingress.
 rm -rf "${mnt}/etc/cloud" "${mnt}/var/lib/cloud" "${mnt}/var/lib/waagent"
@@ -421,9 +423,9 @@ EOF
 chmod 0644 "${mnt}/etc/systemd/network/10-postflight.network"
 # cloud-init used to bring the stack up; with it purged, networkd (address +
 # routes) and resolved (DNS from the DHCP lease) must be enabled explicitly.
-in_chroot systemctl enable systemd-networkd.service systemd-resolved.service
+in_chroot systemctl enable systemd-networkd.service systemd-resolved.service >&2
 
-in_chroot apt-get -q clean
+in_chroot apt-get -q clean >&2
 rm -rf "${mnt}/var/lib/apt/lists/"*
 
 rootfs_free_bytes="$(df --output=avail -B1 "${mnt}" | tail -n 1 | tr -d '[:space:]')"
@@ -444,20 +446,20 @@ chmod 0644 "${mnt}/etc/postflight/workspace-encryption"
 rm -f "${mnt}/usr/sbin/policy-rc.d"
 mv -f "${mnt}/etc/resolv.conf.pristine" "${mnt}/etc/resolv.conf"
 resolv_moved=false
-umount -R "${mnt}"
+umount -R "${mnt}" >&2
 mounted=false
 rmdir "${mnt}"
 qemu-nbd --disconnect "${nbd}" >/dev/null
 nbd_connected=false
-udevadm settle
+udevadm settle >&2
 
 log "templating ${dataset}@golden"
 virtual_bytes="$(qemu-img info --output=json -f qcow2 "${work_image}" |
   python3 -c 'import json, sys; print(json.load(sys.stdin)["virtual-size"])')"
 volsize=$(((virtual_bytes + 1048575) / 1048576 * 1048576))
 
-zfs destroy -r "${scratch}" 2>/dev/null || true
-zfs create -p -s -V "${volsize}" -o volmode=dev "${scratch}"
+zfs destroy -r "${scratch}" >/dev/null 2>&1 || true
+zfs create -p -s -V "${volsize}" -o volmode=dev "${scratch}" >&2
 scratch_created=true
 scratch_device="/dev/zvol/${scratch}"
 for _ in $(seq 1 150); do
@@ -465,15 +467,15 @@ for _ in $(seq 1 150); do
   sleep 0.1
 done
 [[ -e "${scratch_device}" ]] || die "device ${scratch_device} never appeared"
-qemu-img convert -f qcow2 -O raw -n "${work_image}" "${scratch_device}"
-zfs snapshot "${scratch}@golden"
+qemu-img convert -f qcow2 -O raw -n "${work_image}" "${scratch_device}" >&2
+zfs snapshot "${scratch}@golden" >&2
 
 # send | recv instead of renaming the scratch zvol: recv is atomic, so a
 # dataset under images/ either exists complete with its @golden snapshot or
 # not at all — hostd can never clone a half-written template.
-zfs create -p "${pool}/postflight/images"
-zfs send "${scratch}@golden" | zfs recv -o volmode=dev "${dataset}"
-zfs destroy -r "${scratch}"
+zfs create -p "${pool}/postflight/images" >&2
+zfs send "${scratch}@golden" | zfs recv -o volmode=dev "${dataset}" >&2
+zfs destroy -r "${scratch}" >&2
 scratch_created=false
 rm -f "${work_image}"
 
