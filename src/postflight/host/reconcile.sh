@@ -32,6 +32,41 @@ for name in ("/opt/postflight", "/opt/postflight/source", "/opt/postflight/artif
     else:
         path.mkdir(mode=0o700, parents=True)
 PY
+# Private tool caches must not depend on a login shell's HOME/XDG variables.
+# Validate every fixed parent before the tools can create executable state.
+python3 - <<'PY'
+import os
+from pathlib import Path
+import stat
+root = Path("/opt/postflight/build-cache")
+for path in (root, *(root / name for name in (
+        "bazelisk", "bazel-disk", "bazel-repository", "dotnet", "nuget-packages",
+        "nuget-http", "nuget-plugins", "nuget-scratch", "packer-config"))):
+    if path.exists() or path.is_symlink():
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise SystemExit("untrusted private build cache: " + str(path))
+    else:
+        path.mkdir(mode=0o700)
+PY
+export BAZELISK_HOME=/opt/postflight/build-cache/bazelisk
+export BAZELISK_HOME_LINUX="${BAZELISK_HOME}"
+export DOTNET_CLI_HOME=/opt/postflight/build-cache/dotnet
+export NUGET_PACKAGES=/opt/postflight/build-cache/nuget-packages
+export NUGET_HTTP_CACHE_PATH=/opt/postflight/build-cache/nuget-http
+export NUGET_PLUGINS_CACHE_PATH=/opt/postflight/build-cache/nuget-plugins
+export NUGET_SCRATCH=/opt/postflight/build-cache/nuget-scratch
+unset PACKER_CONFIG
+export PACKER_CONFIG_DIR=/opt/postflight/build-cache/packer-config
+export CHECKPOINT_DISABLE=1
+
+postflight_bazel() {
+  # Override the monorepo's interactive ~/.cache defaults on build and cquery.
+  bazelisk --output_user_root=/opt/postflight/bazel "$@" \
+    --disk_cache=/opt/postflight/build-cache/bazel-disk \
+    --repository_cache=/opt/postflight/build-cache/bazel-repository
+}
+
 # Only flock's supervisor owns the lock descriptor. --close removes it from
 # the re-entered shell and every build subprocess, including servers that
 # outlive a failed reconcile. The private argument is not inherited by later
@@ -85,9 +120,9 @@ PY
 if [[ ! -s "${artifacts}/image-id" || ! -x "${artifacts}/hostd" ]]; then
   # Bootstrap downloads only the version/hash-pinned Bazelisk/Aspect pair.
   eval "$(BOOTSTRAP_INSTALL_DIR=/opt/postflight/bootstrap-bin scripts/bootstrap.sh path)"
-  bazelisk --output_user_root=/opt/postflight/bazel build //src/postflight/hostd/cmd/hostd:hostd //src/postflight/guestd/cmd/guestd:guestd
-  hostd="$(bazelisk --output_user_root=/opt/postflight/bazel cquery --output=files //src/postflight/hostd/cmd/hostd:hostd)"
-  guestd="$(bazelisk --output_user_root=/opt/postflight/bazel cquery --output=files //src/postflight/guestd/cmd/guestd:guestd)"
+  postflight_bazel build //src/postflight/hostd/cmd/hostd:hostd //src/postflight/guestd/cmd/guestd:guestd
+  hostd="$(postflight_bazel cquery --output=files //src/postflight/hostd/cmd/hostd:hostd)"
+  guestd="$(postflight_bazel cquery --output=files //src/postflight/guestd/cmd/guestd:guestd)"
   install -m 0755 "${hostd}" "${artifacts}/hostd"
   install -m 0755 "${guestd}" "${artifacts}/guestd"
   listener="$(WORK_DIR=/var/tmp/postflight-ci-runner src/postflight/runner/build.sh)"

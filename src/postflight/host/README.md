@@ -62,6 +62,16 @@ assignment-safe listener retirement is not implemented. The installer returns
 75 while pending; the reconciler treats this as a successful deferral, leaves
 the applied receipts unchanged, and retries on the next timer.
 
+The reconciler works without a login home. It validates private mode-0700
+directories under `/opt/postflight/build-cache` before exporting Bazelisk,
+.NET CLI, NuGet, and Packer state paths. Both Bazel builds and output queries
+use explicit disk/repository cache paths instead of the repository's
+interactive `~/.cache` defaults. Packer's update check is disabled because
+its version is pinned; image downloads and plugins retain their verified
+build-directory caches. Existing symlinks, files, foreign-owned directories,
+or nonprivate cache directories are rejected rather than adopted. `HOME`
+is neither required nor changed.
+
 A hostd version predating this drain protocol cannot acknowledge a request.
 Its initial upgrade requires an operator-controlled maintenance window with
 hostd stopped and no remaining VM scopes. The installer fails closed while
