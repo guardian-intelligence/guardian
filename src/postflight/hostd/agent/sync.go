@@ -210,9 +210,10 @@ func (a *Agent) buildReport(ctx context.Context) (syncproto.SyncRequest, error) 
 		return request, err
 	}
 	admission := a.storageAdmission(ctx)
+	_, draining := a.drainRequest()
 	slots := map[vm.Class]*syncproto.SlotReport{}
 	for class, total := range a.cfg.Slots {
-		if !admission.Admitted {
+		if !admission.Admitted || draining {
 			total = 0
 		}
 		slots[class] = &syncproto.SlotReport{Class: string(class), Total: total}

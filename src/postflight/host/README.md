@@ -43,9 +43,29 @@ installer. The systemd timer follows the fixed public Guardian origin every
 five minutes. It clones into root-owned `/opt/postflight/source`, checks that
 main descends from the last applied commit, and hashes only runtime, host,
 image, dependency, and build-tool inputs. Unrelated commits reuse the existing
-hostd and golden image. Relevant changes build in root-owned locations and
-restart hostd after installation; active QEMU scopes survive that restart.
+hostd and golden image. Relevant changes build in root-owned locations, then
+request a drain before changing installed runtime files or restarting any
+runtime service. The durable request and acknowledgement live under
+`/var/lib/postflight/maintenance`. The acknowledgement binds the exact
+installation inputs to the host boot ID, live daemon's PID, and process start time. The
+installer also requires zero active VM scopes before stopping hostd.
 The interactive `/home/ubuntu` checkout is never an ongoing privileged input.
+
+During a drain, hostd stops advertising capacity, preparing new listeners,
+and refilling VMs. Never-registered VMs are retired; existing listeners may
+receive their final job, which completes and seals normally. There is no
+forced cancellation or drain deadline. An idle registered listener can keep
+the installation pending until its single use completes: provider-side
+assignment-safe listener retirement is not implemented. The installer returns
+75 while pending; the reconciler treats this as a successful deferral, leaves
+the applied receipts unchanged, and retries on the next timer.
+
+A hostd version predating this drain protocol cannot acknowledge a request.
+Its initial upgrade requires an operator-controlled maintenance window with
+hostd stopped and no remaining VM scopes. The installer fails closed while
+that older daemon is active; a stale acknowledgement or an idle-state poll
+cannot authorize a restart. Pending requests survive installer failure and
+reboot, and admission reopens only after all new runtime inputs are installed.
 
 The storage unit imports and unlocks ZFS before hostd at boot. The network
 unit installs `pfbr0`, per-host DHCP/DNS, public egress NAT, private/reserved

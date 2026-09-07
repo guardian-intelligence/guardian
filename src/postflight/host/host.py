@@ -2,6 +2,7 @@
 """Render and reconcile the small, first-party Postflight Turbo host."""
 
 import argparse
+import hashlib
 import ipaddress
 import json
 import os
@@ -17,6 +18,7 @@ import tempfile
 
 CONFIG = Path("/etc/postflight")
 LIBEXEC = Path("/usr/local/libexec/postflight-host")
+MAINTENANCE = Path("/var/lib/postflight/maintenance")
 BLOCKED_IPV4 = (
     "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
     "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24",
@@ -349,6 +351,71 @@ def ensure_network(m):
     ensure_ufw(m)
 
 
+class InstallDeferred(Exception):
+    """A healthy worker is still draining; the next timer retries the install."""
+
+
+def running_vm_scopes():
+    result = command("systemctl", "list-units", "--all", "--type=scope", "--plain", "--no-legend", "pf-vm-*.scope")
+    scopes = []
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) < 4 or not re.fullmatch(r"pf-vm-[a-zA-Z0-9_-]+\.scope", fields[0]):
+            raise ValueError("unrecognized Postflight VM scope inventory")
+        if fields[2] not in ("inactive", "failed"):
+            scopes.append(fields[0])
+    return scopes
+
+
+def service_identity():
+    result = command("systemctl", "show", "hostd.service", "--property=LoadState,ActiveState,MainPID", check=False)
+    values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    if values.get("LoadState") == "not-found" or values.get("ActiveState") in ("inactive", "failed"):
+        return None
+    if result.returncode or values.get("ActiveState") != "active" or not values.get("MainPID", "").isdigit():
+        raise InstallDeferred("hostd is transitioning; retaining the pending install")
+    pid = int(values["MainPID"])
+    if pid <= 0:
+        raise InstallDeferred("hostd has no stable process identity")
+    fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    boot_id = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    return f"{boot_id}:{pid}:{fields[19]}"
+
+
+def gate_runtime_install(plan, runtime_changed):
+    # Plan first: no runtime file, firewall, DHCP service, or daemon is replaced
+    # until the live daemon acknowledges this exact request as fully drained.
+    secure_directory(MAINTENANCE, 0o700)
+    request_path, state_path = MAINTENANCE / "request.json", MAINTENANCE / "state.json"
+    if not runtime_changed and not request_path.exists():
+        return False
+    digest = hashlib.sha256()
+    for path, data, mode in plan:
+        digest.update(str(path).encode() + b"\0" + str(mode).encode() + b"\0" + data + b"\0")
+    token = digest.hexdigest()
+    write_file(request_path, json.dumps({"protocol": 1, "token": token}) + "\n", 0o600)
+    identity = service_identity()
+    if identity is not None:
+        try:
+            secret_file(state_path)
+            state = json.loads(state_path.read_text())
+        except (OSError, ValueError):
+            state = {}
+        if not (state.get("protocol") == 1 and state.get("token") == token and
+                state.get("process_identity") == identity and state.get("drained") is True and
+                state.get("vms") == 0 and state.get("assignments") == 0):
+            raise InstallDeferred("waiting for hostd drain acknowledgement; existing listeners and jobs continue")
+    if running_vm_scopes():
+        raise InstallDeferred("VM scopes remain; retaining existing runtime")
+    if identity is not None:
+        # Admission stays closed after acknowledgement, so no listener can
+        # race this stop. Independent VM scopes are checked on both sides.
+        command("systemctl", "stop", "hostd.service")
+        if service_identity() is not None or running_vm_scopes():
+            raise InstallDeferred("hostd did not stop cleanly after draining")
+    return True
+
+
 def install(args, m):
     for executable in ("zpool", "zfs", "ip", "bridge", "nft", "sysctl", "dnsmasq", "systemctl", "git", "flock"):
         if not shutil.which(executable):
@@ -376,37 +443,49 @@ def install(args, m):
     files = render(m, args.image_id, args.criu_version)
     source = Path(__file__).resolve().parent
     repo = source.parents[2]
-    host_changed = write_file("/usr/local/bin/hostd", Path(args.hostd).read_bytes(), 0o755)
-    host_changed |= write_file("/usr/local/libexec/postflight-tap",
-                               (repo / "src/postflight/hostd/cmd/hostd/postflight-tap.sh").read_bytes(), 0o755)
-    host_changed |= write_file("/etc/systemd/system/hostd.service",
-                               (repo / "src/postflight/hostd/cmd/hostd/hostd.service").read_bytes())
-    config_changed = write_file(CONFIG / "host.json", json.dumps(m, indent=2) + "\n", 0o600)
-    network_changed = config_changed
+    plan = []
+
+    def stage(path, data, mode=0o644):
+        plan.append((Path(path), data.encode() if isinstance(data, str) else data, mode))
+
+    stage("/usr/local/bin/hostd", Path(args.hostd).read_bytes(), 0o755)
+    stage("/usr/local/libexec/postflight-tap", (repo / "src/postflight/hostd/cmd/hostd/postflight-tap.sh").read_bytes(), 0o755)
+    stage("/etc/systemd/system/hostd.service", (repo / "src/postflight/hostd/cmd/hostd/hostd.service").read_bytes())
+    stage(CONFIG / "host.json", json.dumps(m, indent=2) + "\n", 0o600)
+    for name in ("host.py", "reconcile.sh"):
+        stage(LIBEXEC / name, (source / name).read_bytes(), 0o755)
     for name, content in files.items():
         if name == "hostd-override.conf":
-            changed = write_file("/etc/systemd/system/hostd.service.d/postflight.conf", content)
-            host_changed |= changed
+            stage("/etc/systemd/system/hostd.service.d/postflight.conf", content)
         elif name.endswith((".service", ".timer")):
-            changed = write_file(Path("/etc/systemd/system") / name, content)
-            host_changed |= changed
+            stage(Path("/etc/systemd/system") / name, content)
         else:
-            changed = write_file(CONFIG / name, content, 0o600)
-            host_changed |= changed
-            network_changed |= changed and name in ("dnsmasq.conf", "postflight.nft")
-    for name in ("host.py", "reconcile.sh"):
-        write_file(LIBEXEC / name, (source / name).read_bytes(), 0o755)
-    write_file("/etc/sysctl.d/90-postflight.conf", "net.ipv4.ip_forward=1\n")
+            stage(CONFIG / name, content, 0o600)
     # A change to the externally supplied bearer reloads hostd without ever
     # storing the bearer or its hash in a receipt.
     secret_revision = str((CONFIG / "secrets.env").stat().st_mtime_ns) + "\n"
-    host_changed |= write_file(CONFIG / "secrets.revision", secret_revision, 0o600)
+    stage(CONFIG / "secrets.revision", secret_revision, 0o600)
+    changed_paths = {path for path, data, mode in plan if
+                     path.is_symlink() or not path.exists() or path.read_bytes() != data or
+                     stat.S_IMODE(path.stat().st_mode) != mode}
+    activated = gate_runtime_install(plan, bool(changed_paths))
+    for path, data, mode in plan:
+        write_file(path, data, mode)
+    write_file("/etc/sysctl.d/90-postflight.conf", "net.ipv4.ip_forward=1\n")
     command("dnsmasq", "--test", "--conf-file=" + str(CONFIG / "dnsmasq.conf"))
     command("systemctl", "daemon-reload")
     command("systemctl", "enable", "postflight-storage.service", "postflight-network.service", "postflight-dnsmasq.service", "hostd.service")
     command("systemctl", "start", "postflight-storage.service")
-    command("systemctl", "restart" if network_changed else "start", "postflight-network.service", "postflight-dnsmasq.service")
-    command("systemctl", "restart" if host_changed else "start", "hostd.service")
+    # A retry after files were installed but before services converged must
+    # apply the pending network helper too. The durable drain request, rather
+    # than a fresh byte comparison, owns this activation boundary.
+    command("systemctl", "restart" if activated else "start", "postflight-network.service", "postflight-dnsmasq.service")
+    if activated:
+        # The old daemon is stopped and all installed inputs are now complete.
+        # Removing the durable request reopens admission only for the new start.
+        (MAINTENANCE / "request.json").unlink(missing_ok=True)
+        (MAINTENANCE / "state.json").unlink(missing_ok=True)
+    command("systemctl", "start", "hostd.service")
     if args.enable_reconcile:
         command("systemctl", "enable", "--now", "postflight-reconcile.timer")
     print(f"Postflight {m['host_id']} configured with {args.image_id}")
@@ -446,6 +525,9 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except InstallDeferred as error:
+        print(f"postflight-host: install deferred: {error}", file=sys.stderr)
+        sys.exit(75)
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f"postflight-host: {error}", file=sys.stderr)
         sys.exit(1)

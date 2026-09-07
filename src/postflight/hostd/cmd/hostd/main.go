@@ -153,6 +153,10 @@ func run(logger *slog.Logger) error {
 		}
 	}
 
+	maintenanceIdentity, err := agent.ProcessIdentity()
+	if err != nil {
+		return fmt.Errorf("read maintenance process identity: %w", err)
+	}
 	instance, err := agent.New(agent.Config{
 		HostID:                       cfg.hostID,
 		ControlPlaneOrigin:           cfg.syncURL,
@@ -161,6 +165,8 @@ func run(logger *slog.Logger) error {
 		SyncInterval:                 cfg.syncInterval,
 		CheckoutGuestOrigin:          cfg.checkoutGuestOrigin,
 		TraceDir:                     filepath.Join(cfg.stateDir, "rendezvous"),
+		MaintenanceDir:               filepath.Join(cfg.stateDir, "maintenance"),
+		MaintenanceProcessIdentity:   maintenanceIdentity,
 		StorageMinimumAvailableBytes: cfg.storageMinimumAvailableBytes,
 		TransferOrigin:               cfg.transferOrigin,
 		Platform:                     platformFingerprint(cfg),
