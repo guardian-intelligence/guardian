@@ -89,6 +89,62 @@ fi
 
 fixture_dir="$(mktemp -d)"
 trap 'rm -rf "${fixture_dir}"' EXIT
+
+# Execute the actual public-config writes from the builder in a disposable
+# guest tree. This reproduces the root reconciler's restrictive umask without
+# chroot, root privileges, package downloads, or a live VM.
+python3 - "${build_sh}" "${fixture_dir}" <<'PY'
+from pathlib import Path
+import os
+import stat
+import subprocess
+import sys
+
+source = Path(sys.argv[1]).read_text()
+fixture = Path(sys.argv[2])
+
+def section(start, end):
+    return source.split(start, 1)[1].split(end, 1)[0]
+
+resolver_write, = [line for line in source.splitlines()
+                   if line.startswith(("cp ", "install "))
+                   and line.endswith('"${mnt}/etc/resolv.conf"')]
+resolver = fixture / "host-resolv.conf"
+resolver.write_text("nameserver 192.0.2.53\n")
+resolver.chmod(0o644)
+snippets = [
+    resolver_write.replace(" /etc/resolv.conf ", ' "${test_resolver}" '),
+    section('install -d -m 0755 "${mnt}/etc/modules-load.d"\n', 'log "building CRIU'),
+    'cat >"${mnt}/etc/systemd/system/guestd.service"' +
+        section('cat >"${mnt}/etc/systemd/system/guestd.service"',
+                'install -d -m 0755 "${mnt}/etc/systemd/system/multi-user.target.wants"'),
+    'install -d -m 0755 "${mnt}/etc/systemd/network"' +
+        section('install -d -m 0755 "${mnt}/etc/systemd/network"', '# cloud-init used to bring'),
+    ': >"${mnt}/etc/machine-id"' +
+        section(': >"${mnt}/etc/machine-id"', '# The selected build flavor'),
+    'install -d -m 0755 "${mnt}/etc/postflight"' +
+        section('install -d -m 0755 "${mnt}/etc/postflight"', 'rm -f "${mnt}/usr/sbin/policy-rc.d"'),
+]
+for mask in ("027", "077"):
+    guest = fixture / ("guest-" + mask)
+    for directory in ("etc/modules-load.d", "etc/systemd/system"):
+        (guest / directory).mkdir(parents=True, exist_ok=True)
+    script = "set -eu\numask " + mask + "\n" + "\n".join(snippets)
+    script += '\n: >"${mnt}/private-mode-sentinel"\n'
+    subprocess.run(["bash", "-c", script], check=True,
+                   env={**os.environ, "mnt": str(guest), "test_resolver": str(resolver),
+                        "image_id": "noble-turbo-fixture", "encryption_mode": "host-zfs"})
+    for name in ("etc/resolv.conf", "etc/modules-load.d/postflight-sev.conf",
+                 "etc/systemd/system/guestd.service", "etc/systemd/network/10-postflight.network",
+                 "etc/machine-id", "etc/postflight-image-release", "etc/postflight/workspace-encryption"):
+        mode = stat.S_IMODE((guest / name).stat().st_mode)
+        assert mode == 0o644, f"{name} mode {mode:o} under umask {mask}; unprivileged readers need 644"
+    assert (guest / "etc/resolv.conf").read_text() == resolver.read_text()
+    assert "Driver=virtio_net\n" in (guest / "etc/systemd/network/10-postflight.network").read_text()
+    assert "DHCP=yes\n" in (guest / "etc/systemd/network/10-postflight.network").read_text()
+    assert stat.S_IMODE((guest / "private-mode-sentinel").stat().st_mode) == (0o666 & ~int(mask, 8)), "caller umask changed"
+PY
+
 cat >"${fixture_dir}/upstream.pkr.hcl" <<'EOF'
 build {
   sources = ["source.azure-arm.image"]
