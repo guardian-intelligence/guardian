@@ -268,10 +268,11 @@ mount --bind /dev "${mnt}/dev"
 mount --bind /dev/pts "${mnt}/dev/pts"
 
 # The pristine image's resolv.conf is a dangling symlink into /run; apt in
-# the chroot needs the host's resolver for the duration of the build.
+# the chroot needs the host's resolver for the duration of the build. _apt
+# reads it after dropping privileges, even under the reconciler's umask 027.
 mv "${mnt}/etc/resolv.conf" "${mnt}/etc/resolv.conf.pristine"
 resolv_moved=true
-cp /etc/resolv.conf "${mnt}/etc/resolv.conf"
+install -m 0644 /etc/resolv.conf "${mnt}/etc/resolv.conf"
 
 # Keep dpkg maintainer scripts from starting services inside the chroot.
 printf '#!/bin/sh\nexit 101\n' >"${mnt}/usr/sbin/policy-rc.d"
@@ -308,6 +309,7 @@ in_chroot apt-get -q -y --no-install-recommends install \
 # at boot creates /dev/sev-guest before guestd can derive a volume key.
 install -d -m 0755 "${mnt}/etc/modules-load.d"
 printf 'sev-guest\n' >"${mnt}/etc/modules-load.d/postflight-sev.conf"
+chmod 0644 "${mnt}/etc/modules-load.d/postflight-sev.conf"
 
 log "building CRIU ${CRIU_VERSION} (${CRIU_COMMIT})"
 rm -rf "${mnt}/tmp/criu-${CRIU_VERSION}"
@@ -388,6 +390,7 @@ Restart=no
 [Install]
 WantedBy=multi-user.target
 EOF
+chmod 0644 "${mnt}/etc/systemd/system/guestd.service"
 install -d -m 0755 "${mnt}/etc/systemd/system/multi-user.target.wants"
 ln -sf /etc/systemd/system/guestd.service \
   "${mnt}/etc/systemd/system/multi-user.target.wants/guestd.service"
@@ -414,6 +417,8 @@ Driver=virtio_net
 [Network]
 DHCP=yes
 EOF
+# networkd reads configuration as its unprivileged service account.
+chmod 0644 "${mnt}/etc/systemd/network/10-postflight.network"
 # cloud-init used to bring the stack up; with it purged, networkd (address +
 # routes) and resolved (DNS from the DHCP lease) must be enabled explicitly.
 in_chroot systemctl enable systemd-networkd.service systemd-resolved.service
@@ -428,11 +433,13 @@ log "rootfs headroom: ${rootfs_free_bytes} bytes free"
 
 : >"${mnt}/etc/machine-id"
 printf '%s\n' "${image_id}" >"${mnt}/etc/postflight-image-release"
+chmod 0644 "${mnt}/etc/machine-id" "${mnt}/etc/postflight-image-release"
 # The selected build flavor is part of the immutable image identity. A
 # confidential image always derives its key from SNP; Turbo's trusted host
 # verifies native encrypted ZFS before launching any guest.
 install -d -m 0755 "${mnt}/etc/postflight"
 printf '%s\n' "${encryption_mode}" >"${mnt}/etc/postflight/workspace-encryption"
+chmod 0644 "${mnt}/etc/postflight/workspace-encryption"
 
 rm -f "${mnt}/usr/sbin/policy-rc.d"
 mv -f "${mnt}/etc/resolv.conf.pristine" "${mnt}/etc/resolv.conf"
