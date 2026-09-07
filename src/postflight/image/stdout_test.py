@@ -94,7 +94,7 @@ zfs() {
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, "noble-turbo-fixture\n")
-            for command in ("apt-get", "make", "installdependencies.sh", "systemctl", "qemu-img output", "zfs receive output"):
+            for command in ("apt-get", "modprobe --set-version fixture-kernel --show-depends vsock_loopback", "make", "installdependencies.sh", "systemctl", "qemu-img output", "zfs receive output"):
                 self.assertIn(command, result.stderr)
 
     def test_packer_cold_build_result_and_failure(self):

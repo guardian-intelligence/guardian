@@ -5,8 +5,11 @@ package vm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -93,15 +96,25 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 
 	system := &loopSystem{mounted: map[string]bool{}}
 	ran := make(chan string, 1)
-	assignmentSocket := filepath.Join(t.TempDir(), "assignment.sock")
+	runnerFinished := make(chan error, 1)
+	// sockaddr_un has a short fixed limit; Bazel's test temp root can exceed
+	// it before the test's own directory and socket names are appended.
+	socketRoot, err := os.MkdirTemp("/tmp", "postflight-vsock-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketRoot) })
+	assignmentSocket := filepath.Join(socketRoot, "assignment.sock")
 	identity := guestproto.JobIdentity{
 		RunID: "1", RunAttempt: 1, RunnerName: "member-loop",
 		Repository: "acme/widget", WorkflowJob: "test",
 	}
 	var server *guestd.Server
 	server, err = guestd.New(guestd.Config{
-		System: system,
-		RunRunner: func(_ context.Context, jitConfig string, _ map[string]string, event func(guestd.RunnerEvent)) (int, error) {
+		System:         system,
+		CapsulePIDPath: filepath.Join(socketRoot, "capsule.pid"),
+		RunRunner: func(_ context.Context, jitConfig string, _ map[string]string, event func(guestd.RunnerEvent)) (code int, runErr error) {
+			defer func() { runnerFinished <- runErr }()
 			ran <- jitConfig
 			event(guestd.EventListening)
 			assignment := guestproto.Assignment{
@@ -136,14 +149,39 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 		_ = server.Serve(serveCtx, listener)
 	}()
 	assignmentServed := make(chan struct{})
+	var assignmentServeErr error
 	go func() {
 		defer close(assignmentServed)
-		_ = server.ServeAssignments(serveCtx, assignmentSocket)
+		assignmentServeErr = server.ServeAssignments(serveCtx, assignmentSocket)
 	}()
 	t.Cleanup(func() {
 		cancel()
 		<-served
 		<-assignmentServed
+	})
+	assignmentServerError := func() error {
+		select {
+		case <-assignmentServed:
+			return fmt.Errorf("assignment server stopped: %v", assignmentServeErr)
+		default:
+			return nil
+		}
+	}
+	// The fake Runner can publish immediately after Prepare. A vsock hello
+	// proves only the separate host listener is ready, not this Unix socket.
+	waitFor(t, "local assignment socket readiness", 10*time.Second, func() (bool, error) {
+		if err := assignmentServerError(); err != nil {
+			return false, err
+		}
+		conn, err := net.DialTimeout("unix", assignmentSocket, time.Second)
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, unix.ECONNREFUSED) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		conn.Close()
+		return true, nil
 	})
 
 	transport, err := NewVsockGuest()
@@ -170,6 +208,14 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 		t.Fatalf("prepare: %v", err)
 	}
 	waitFor(t, "local assignment over loopback", 10*time.Second, func() (bool, error) {
+		if err := assignmentServerError(); err != nil {
+			return false, err
+		}
+		select {
+		case err := <-runnerFinished:
+			return false, fmt.Errorf("fixture runner stopped before assignment: %v", err)
+		default:
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		observed, err := transport.Observe(ctx, id, vsock.Local)

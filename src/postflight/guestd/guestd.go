@@ -16,6 +16,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -61,6 +62,10 @@ type Config struct {
 	// runner account's primary group; tests default to the current process.
 	AssignmentSocketMode os.FileMode
 	AssignmentSocketGID  int
+	// CapsulePIDPath publishes the worker's selected namespace root. Empty
+	// uses the production hook path; tests must isolate this runtime state
+	// even when System and RunRunner are fakes inside an actual runner guest.
+	CapsulePIDPath string
 	// Encryption is the baked at-rest mode for workspace volumes; the zero
 	// value mounts plaintext. See LoadEncryptionMode.
 	Encryption EncryptionMode
@@ -97,6 +102,12 @@ func (c *Config) validate() error {
 	}
 	if c.AssignmentSocketGID == 0 {
 		c.AssignmentSocketGID = -1
+	}
+	if c.CapsulePIDPath == "" {
+		c.CapsulePIDPath = CapsulePIDPath
+	}
+	if !filepath.IsAbs(c.CapsulePIDPath) || filepath.Clean(c.CapsulePIDPath) != c.CapsulePIDPath {
+		return errors.New("guestd: capsule PID path must be absolute and clean")
 	}
 	if c.HostCID == 0 {
 		c.HostCID = vsock.Host
@@ -527,11 +538,11 @@ func (s *Server) handleAuthorize(authorize guestproto.Authorize) {
 			s.failWorkerGate(fmt.Errorf("locating restored capsule: %w", err))
 			return
 		}
-		if err := os.WriteFile(CapsulePIDPath, []byte(strconv.Itoa(rootPID)+"\n"), 0o644); err != nil {
+		if err := os.WriteFile(s.cfg.CapsulePIDPath, []byte(strconv.Itoa(rootPID)+"\n"), 0o644); err != nil {
 			s.failWorkerGate(fmt.Errorf("publishing restored capsule: %w", err))
 			return
 		}
-	} else if err := os.Remove(CapsulePIDPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+	} else if err := os.Remove(s.cfg.CapsulePIDPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		s.failWorkerGate(fmt.Errorf("selecting workspace-only worker: %w", err))
 		return
 	}
