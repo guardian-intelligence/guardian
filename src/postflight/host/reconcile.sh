@@ -92,6 +92,8 @@ if [[ ! -s "${artifacts}/image-id" || ! -x "${artifacts}/hostd" ]]; then
   install -m 0755 "${guestd}" "${artifacts}/guestd"
   listener="$(WORK_DIR=/var/tmp/postflight-ci-runner src/postflight/runner/build.sh)"
   install -m 0644 "${listener}" "${artifacts}/Runner.Listener.dll"
+  # Host and image identities are separate: host-only changes rebuild/check
+  # these artifacts but reuse a golden image whose actual guest inputs match.
   image_id="$(POOL="${host_values[0]}" IMAGE_FLAVOR=turbo WORK_DIR=/var/tmp/postflight-ci-image \
     QEMU_BINARY="${host_values[1]}" GUESTD_BIN="${artifacts}/guestd" \
     RUNNER_LISTENER_DLL="${artifacts}/Runner.Listener.dll" src/postflight/image/build.sh)"

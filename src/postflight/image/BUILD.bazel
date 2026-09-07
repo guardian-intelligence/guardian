@@ -4,6 +4,14 @@ load("@rules_python//python:defs.bzl", "py_test")
 exports_files(["pins.env"])
 
 py_test(
+    name = "image_identity_test",
+    size = "small",
+    srcs = ["image_identity.py", "image_identity_test.py"],
+    data = ["build.sh", "build-upstream.sh"],
+    imports = ["."],
+)
+
+py_test(
     name = "stdout_test",
     size = "small",
     srcs = ["stdout_test.py"],

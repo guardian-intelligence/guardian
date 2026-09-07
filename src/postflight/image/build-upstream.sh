@@ -145,7 +145,9 @@ cache_input_sha256="$(
 	  "PACKER_QEMU_PLUGIN_VERSION=${PACKER_QEMU_PLUGIN_VERSION}" \
 	  "PACKER_QEMU_PLUGIN_SHA256=${PACKER_QEMU_PLUGIN_SHA256}" \
 	  "PIPX_VERSION=${PIPX_VERSION}"
-    sha256sum "${script_dir}/render-qemu-template.py" | awk '{print $1}'
+    # This script also generates cloud-init and Packer arguments. Its bytes
+    # belong to the bootstrap recipe just as much as the template adapter.
+    sha256sum "${script_dir}/render-qemu-template.py" "${script_dir}/build-upstream.sh" | awk '{print $1}'
   } | sha256sum | awk '{print $1}'
 )"
 cache_key="${RUNNER_IMAGES_COMMIT}-${cache_input_sha256:0:16}"
