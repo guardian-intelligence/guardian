@@ -1,0 +1,19 @@
+{
+  "host_id": "rust-forge-01",
+  "class": "postflight-4vcpu-ubuntu24-turbo",
+  "slots": 2,
+  "cpus": 4,
+  "memory_mib": 16384,
+  "pool": "postflight_ci",
+  "vdev_file": "/var/lib/postflight-pool/pool.img",
+  "vdev_gib": 384,
+  "bridge": "pfbr0",
+  "subnet": "10.77.0.0/24",
+  "gateway": "10.77.0.1",
+  "dhcp_start": "10.77.0.32",
+  "dhcp_end": "10.77.0.223",
+  "control_plane": "https://guardianintelligence.org",
+  "qemu_path": "/usr/bin/qemu-system-x86_64",
+  "qemu_version": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.16)",
+  "firmware": "/usr/share/seabios/bios.bin"
+}

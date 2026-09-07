@@ -148,6 +148,7 @@ func buildMux(ctx context.Context, cfg config, st *pgStore, ws *webhookServer, r
 		mux.HandleFunc(syncproto.SyncPath, ss.handleSync)
 		mux.HandleFunc(syncproto.JobPlanPath, ss.handleJobPlans)
 		mux.HandleFunc(syncproto.JobPlanResolvePath, ss.handleResolveJobPlan)
+		mux.HandleFunc(hostdStatusPath, ss.handleStatus)
 	}
 	health := func(w http.ResponseWriter, r *http.Request) {
 		hctx, hcancel := context.WithTimeout(r.Context(), 2*time.Second)

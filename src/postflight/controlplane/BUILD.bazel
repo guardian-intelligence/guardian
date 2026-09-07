@@ -18,6 +18,7 @@ go_library(
         "config.go",
         "events.go",
         "github_api.go",
+        "hostd_status.go",
         "hostd_store.go",
         "hostd_sync.go",
         "job_plan_resolver.go",
@@ -46,6 +47,7 @@ go_library(
         "migrations/009_prepositioned_job_plans.sql",
         "migrations/010_workspace_scope_epochs.sql",
         "migrations/011_generation_transfer_lane.sql",
+        "migrations/012_turbo_runner_class.sql",
     ],
     importpath = "github.com/guardian-intelligence/guardian/src/postflight/controlplane",
     visibility = ["//visibility:private"],
@@ -107,6 +109,7 @@ go_test(
     timeout = "short",
     srcs = [
         "e2e_test.go",
+        "turbo_e2e_test.go",
     ],
     data = [
         "//src/tools/postgres:dist",

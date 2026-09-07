@@ -1,125 +1,67 @@
 # Lightning
 
-Status: technology doctrine, 2026-07-24.
+Status: current Turbo warmth mechanisms, 2026-09-06.
 
-Lightning is the warmth substrate under every Postflight SKU: it makes a CI
-job start warm, run on hot caches, and leave its work behind for the next
-job. It is a technology, not a SKU — runner labels are plain
-(`postflight-<x>vcpu-<os>-<flavor>`), and both categories behind them,
-Turbo and Confidential, run the same substrate. Companion docs own the
-mechanisms in detail; this document owns the rationale.
+Lightning names Postflight's reusable CI state, not a separate SKU. The
+current `postflight-4vcpu-ubuntu24-turbo` path combines a generic VM boot
+template with scoped ZFS disk caches. Confidential retains its separate
+security profile; generic QEMU RAM restoration is admitted only for Turbo.
+See the [architecture](postflight-architecture.md) for code and trust boundaries.
 
-## Customer goals
+## Boot the platform once, register each runner fresh
 
-Every mechanism below serves one of three customer-observable properties:
+Hostd creates a generic QEMU RAM/device-state image with a matching root
+snapshot before its scheduler starts. The donor has never received GitHub
+registration, an assignment, or tenant storage. Each restored VM gets a new
+identity, entropy, clock, MAC, and DHCP lease before a fresh Listener starts.
+The template is tied to the host boot and exact runtime inputs; a customer
+job never supplies its memory. See
+[warm_template.go](../src/postflight/hostd/vm/warm_template.go) and
+[initialize_linux.go](../src/postflight/guestd/initialize_linux.go).
 
-1. **Minimize queueing.** A job starts when GitHub assigns it: pools
-   prewarmed, sessions attested, plans prepositioned. Up to reserved
-   concurrency, P99 start time is P50.
-2. **Maximize concurrency.** Slots are real cores, never oversubscribed.
-   Capacity is fixed, refilled ahead of demand; destroy-and-refill keeps
-   every slot immediately resalable. Concurrency is a guaranteed number.
-3. **Fastest possible CI.** The highest-clock silicon we can buy, with
-   source, caches, and long-lived build processes already present when the
-   job lands. Warm start × hot cache × fast CPU compound.
+This reduces platform boot work. It is separate from the pool of registered
+listeners awaiting GitHub assignment. A registered listener is single-use:
+one job, then destroy and refill.
 
-## The four pillars
+## Preserve useful disk work across jobs
 
-### 1. Prewarmed VMs
+Workspace and tool state live in encrypted host-local zvols. The selected
+assignment clones a compatible scoped generation and hot-attaches its disks
+before Worker starts. A trusted successful attempt can publish the next
+cache generation only after the guest flushes the filesystems, hostd destroys
+the VM and seals the disks, and the control plane verifies the exact GitHub
+attempt's success. Untrusted writes do not become trusted cache heads.
+See [storage](postflight-storage.md) and the
+[Turbo end-to-end policy test](../src/postflight/controlplane/turbo_e2e_test.go).
 
-A generic guest is booted, attested, and listening before any customer
-demand exists ([scheduling](postflight-scheduling.md), pool supply). When
-GitHub assigns a job, only the hot path remains: observe the assignment,
-attach the sticky disks, restore the capsule, open the Worker gate. Every
-VM is single-use — one job, then destroyed and its slot refilled — so
-warmth never trades against isolation.
+The initial host uses a 384-GiB file-backed ZFS pool on local storage. Its
+managed child has native AES-256-GCM encryption, with the key seeded from
+OpenBao outside Git. The guest uses the baked `host-zfs` profile. Turbo
+trusts the host; this does not promise plaintext exclusion from host RAM or
+per-tenant cryptographic erasure.
 
-### 2. Build artifacts persisted in zvols, mounted just in time
+## Customer process memory stays fresh
 
-Workspace, tool caches, and build state persist as sparse zvol generations
-on the worker's NVMe zpool ([storage](postflight-storage.md)).
-Materializing a workspace from a sealed generation is a constant-time CoW
-clone; volumes reach the running VM by virtio-scsi hot-attach in tens of
-milliseconds. Source and caches are local block devices before the job's
-first step, never a download protocol.
+Arbitrary build-process CRIU publication and restoration remain disabled.
+Compiler daemons, watchers, JIT state, runner registration, and job tokens
+are not restored from previous jobs. Disk warmth can still make later builds
+incremental. The retained capsule/CRIU libraries are not an enabled runtime
+feature; [agent plan validation](../src/postflight/hostd/agent/plans.go)
+rejects process-restore requests.
 
-### 3. Snapshots restored in userspace, just in time
+A cache miss or compatibility change costs a cold build. Host loss does not
+require restoring customer cache data from a backup. There is no cross-host
+warm-state transport in this rollout.
 
-On green push-to-main, the guest's long-lived build processes — compilers,
-daemons, watchers, warm JITs — are checkpointed by CRIU
-(checkpoint/restore in userspace) into an encrypted process volume,
-atomically coupled to the zvol generation set, and sealed as a signed
-golden generation. The next job restores that capsule into a fresh
-prewarmed VM. Restore-or-cold is the only branch — a miss costs speed,
-never correctness ([runner lifecycle](postflight-runner-lifecycle.md)).
+## Evidence before speed claims
 
-### 4. Node-local zvols on premium NVMe
+The older guardian-w1 tracer measurements dated 2026-07-05 (~520 ms full
+restore, eight restores in 774 ms, and 227 ms hot-attach) describe that tracer
+and hardware only. They are not current Turbo CI latency or production SLA
+measurements. The [CI migration proof contract](postflight-ci-migration.md)
+requires real Linux VM restores with unique concurrent guest identities,
+cross-VM generation lineage, native GitHub logs, and actual job results.
 
-All warm state lives on the worker's own striped NVMe zpool. No network
-storage on any hot path: no Ceph, no object-store round trip, no cache
-download. The cost: warm state is a regenerable cache, host loss is one
-cold build, and nothing is replicated or migrated
-([storage](postflight-storage.md), locality).
-
-## The mindset
-
-Each pillar corrects an operating assumption:
-
-- **Stop discarding CI's work.** Every run compiles, fetches, and warms;
-  stock runners throw it away at job end. Persisting artifacts — scoped,
-  sealed, promoted on green — makes each run the starting line for the
-  next.
-- **Use existing compute better.** Not more shared vCPUs: real cores at
-  high clocks with hot caches. A warm start on reserved hardware beats an
-  autoscaled cold fleet on both latency and cost.
-- **Treat CI like a developer machine.** CI catches only a subset of
-  problems; waiting 20+ minutes for it is a bad trade. A developer machine
-  builds incrementally from yesterday's state; Lightning gives CI the same
-  property — and gives agents a golden workspace: a cold VM starts from the
-  sealed green-on-main state instead of warming caches for 20 minutes.
-
-## Who Lightning is for
-
-Agentic engineers, specifically:
-
-- Engineers who want to unhobble their agents — agents multiply job volume
-  ahead of headcount, and the feedback loop is the bottleneck.
-- Engineers who understand CI shouldn't persist secrets and will make the
-  few changes to keep that true. Lightning enforces its half by
-  construction: runner processes are killed and proven absent before any
-  capsule freezes, credentials never touch disk, and everything persisted
-  is ciphertext ([security model](postflight-security-model.md)).
-- Engineers who want to run code in a TEE — Confidential runs the
-  identical substrate inside SEV-SNP, where a compromised host reads
-  nothing.
-
-## Measured baselines
-
-Tracer-measured on guardian-w1 NVMe, 2026-07-05. Per-class production
-numbers come from the rate-card bench and carry benchmark provenance
-before any claim ships ([fleet](postflight-fleet.md), onboarding).
-
-| Operation | Measured |
-| --- | --- |
-| Full warm restore | ~520 ms (vs 8.8 s cold boot) |
-| Parallel restore | 8 restores in 774 ms wall (~10 VMs/s) |
-| Sticky-disk hot-attach | 227 ms, revoke verified |
-| Workspace materialization (CoW clone) | Constant-time metadata, ~tens of ms at any size |
-
-## What Lightning is not
-
-- Not a SKU, a fleet, or a hardware class — those are rows and labels; the
-  fleets are named Turbo and Confidential.
-- Not durable storage. Warm state is a regenerable cache; anything that
-  would complicate that — replication, migration, backup, cross-host key
-  release — is a cold build instead.
-- Not a second warmth mechanism. One mechanism: CRIU capsules on sticky
-  zvol generations, identical on both fleets
-  ([architecture](postflight-architecture.md), principle 5).
-- Not a scheduler. GitHub owns the DAG and runner selection; Lightning
-  makes whichever guest wins the assignment already warm.
-
-Related: [architecture](postflight-architecture.md) ·
-[fleet](postflight-fleet.md) · [storage](postflight-storage.md) ·
-[scheduling](postflight-scheduling.md) · [host](postflight-host.md) ·
-[security model](postflight-security-model.md)
+Related: [architecture](postflight-architecture.md),
+[runner lifecycle](postflight-runner-lifecycle.md),
+[host provisioning](../src/postflight/host/README.md).

@@ -32,6 +32,8 @@ type Guest interface {
 
 // GuestObservation is the guest-reported slice of a VM's state.
 type GuestObservation struct {
+	NetworkIdentityReady bool
+	Initialized          bool
 	// Hello: guestd announced itself; the VM is warm.
 	Hello bool
 	// RunnerRegistered: the runner registered with GitHub and is listening.

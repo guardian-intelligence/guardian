@@ -1,0 +1,22 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+exports_files([
+    "host.py",
+    "reconcile.sh",
+    "hosts/rust-forge-01.json",
+])
+
+py_test(
+    name = "host_test",
+    size = "small",
+    srcs = [
+        "host.py",
+        "host_test.py",
+    ],
+    main = "host_test.py",
+    imports = ["."],
+    data = [
+        "hosts/rust-forge-01.json",
+        "reconcile.sh",
+    ],
+)

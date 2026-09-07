@@ -314,6 +314,10 @@ func (c *guestChannel) fold(status guestproto.RunnerStatus) bool {
 	defer c.mu.Unlock()
 	changed := status.State != guestproto.RunnerProgress || status.Restore != nil
 	switch status.State {
+	case guestproto.RunnerNetworkIdentityReady:
+		c.observation.NetworkIdentityReady = true
+	case guestproto.RunnerInitialized:
+		c.observation.Initialized = true
 	case guestproto.RunnerProgress:
 	case guestproto.RunnerRegistered:
 		c.observation.RunnerRegistered = true

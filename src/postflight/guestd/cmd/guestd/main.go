@@ -97,6 +97,8 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("parse runner gid: %w", err)
 	}
 	server, err := guestd.New(guestd.Config{
+		InitializeRestored:   guestd.InitializeRestoredTurbo,
+		PurgeEphemeral:       func() error { return guestd.PurgeRunnerEphemeral(guestd.RunnerHomeMountpoint) },
 		System:               guestd.RealSystem{},
 		RunRunner:            guestd.ExecRunner(guestd.RunnerRoot, "runner", logger),
 		Checkpoints:          checkpoints,

@@ -34,6 +34,7 @@ func (ProcessLauncher) Start(_ context.Context, _ ID, stateDir string, argv []st
 	}
 	defer log.Close()
 	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = qemuEnvironment(false)
 	cmd.Stdout = log
 	cmd.Stderr = log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

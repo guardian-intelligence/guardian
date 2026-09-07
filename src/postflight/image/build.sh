@@ -30,6 +30,7 @@ environment:
   POOL        zpool that receives the image dataset (default: tank)
   WORK_DIR    download cache + scratch space (default: /var/tmp/postflight-image)
   NBD_DEVICE  nbd device to attach the image to (default: first free /dev/nbdN)
+  IMAGE_FLAVOR  confidential (default) or turbo; Turbo uses host-encrypted ZFS
 
 build-upstream.sh also accepts QEMU_ACCELERATOR, QEMU_CPUS,
 QEMU_MEMORY_MIB, QEMU_BINARY, and PACKER_TIMEOUT.
@@ -81,6 +82,12 @@ done
 
 pool="${POOL:-tank}"
 work_dir="${WORK_DIR:-/var/tmp/postflight-image}"
+image_flavor="${IMAGE_FLAVOR:-confidential}"
+case "${image_flavor}" in
+confidential) encryption_mode="snp" ;;
+turbo) encryption_mode="host-zfs" ;;
+*) die "IMAGE_FLAVOR must be confidential or turbo" ;;
+esac
 
 # Match Blacksmith's 4-vCPU root-disk size. GitHub's full runner image is
 # intentionally large; its own validation requires 17 GiB free, which we
@@ -108,9 +115,9 @@ fi
 # The id binds every direct build input — pins, guestd binary, commit, and
 # the working-tree diff when dirty — so the @golden idempotence
 # short-circuit cannot serve different content under one id.
-input_sha256="$(printf '%s\n' "${pins_sha256}" "${guestd_sha256}" "${listener_sha256}" "${commit}" "${diff_sha256}" |
+input_sha256="$(printf '%s\n' "${pins_sha256}" "${guestd_sha256}" "${listener_sha256}" "${commit}" "${diff_sha256}" "${image_flavor}" |
   sha256sum | awk '{print $1}')"
-image_id="noble-${input_sha256:0:12}-g${commit_short}"
+image_id="noble-${image_flavor}-${input_sha256:0:12}-g${commit_short}"
 
 dataset="${pool}/postflight/images/${image_id}"
 scratch="${pool}/postflight/build/${image_id}"
@@ -421,12 +428,11 @@ log "rootfs headroom: ${rootfs_free_bytes} bytes free"
 
 : >"${mnt}/etc/machine-id"
 printf '%s\n' "${image_id}" >"${mnt}/etc/postflight-image-release"
-# The at-rest mode is baked, never host-supplied: the host is the party the
-# encryption is aimed at, so it cannot hold the downgrade lever. A constant
-# (not an env knob) so the image id keeps binding all content. The initial
-# class is SNP-only; a non-SNP launch therefore fails closed at first mount.
+# The selected build flavor is part of the immutable image identity. A
+# confidential image always derives its key from SNP; Turbo's trusted host
+# verifies native encrypted ZFS before launching any guest.
 install -d -m 0755 "${mnt}/etc/postflight"
-printf 'snp\n' >"${mnt}/etc/postflight/workspace-encryption"
+printf '%s\n' "${encryption_mode}" >"${mnt}/etc/postflight/workspace-encryption"
 
 rm -f "${mnt}/usr/sbin/policy-rc.d"
 mv -f "${mnt}/etc/resolv.conf.pristine" "${mnt}/etc/resolv.conf"

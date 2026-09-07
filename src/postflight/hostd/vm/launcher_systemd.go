@@ -236,6 +236,7 @@ func (s SystemdScopes) Start(ctx context.Context, unit, stateDir string, argv []
 	args = append(args, "--")
 	args = append(args, argv...)
 	cmd := exec.Command("systemd-run", args...)
+	cmd.Env = qemuEnvironment(s.User)
 	cmd.Stdout = log
 	cmd.Stderr = log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

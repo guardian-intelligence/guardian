@@ -11,7 +11,7 @@ up)
   bridge_name="${HOSTD_GUEST_BRIDGE:?HOSTD_GUEST_BRIDGE is required}"
   /usr/sbin/ip link show dev "$bridge_name" >/dev/null
   if ! /usr/sbin/ip link show dev "$tap" >/dev/null 2>&1; then
-    /usr/sbin/ip tuntap add dev "$tap" mode tap
+    /usr/sbin/ip tuntap add dev "$tap" mode tap user postflight-vm
   fi
   /usr/sbin/ip link set dev "$tap" master "$bridge_name"
   /usr/sbin/ip link set dev "$tap" up

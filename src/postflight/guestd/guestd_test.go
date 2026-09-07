@@ -716,6 +716,105 @@ func TestQuiesceFailsClosedWhenFilesystemSyncFails(t *testing.T) {
 	}
 }
 
+func TestSealStopsWorkloadBeforePurgingEphemeralFiles(t *testing.T) {
+	capsule := &fakeCapsules{}
+	w := newWorld(t, func(cfg *Config) {
+		cfg.Checkpoints = &ProcessCheckpoints{Capsules: capsule}
+		cfg.PurgeEphemeral = func() error {
+			if len(capsule.journal) != 1 || capsule.journal[0] != "reset" {
+				return errors.New("workload still alive at purge")
+			}
+			return errors.New("purge failed")
+		}
+	}, nil)
+	w.system.mounted["/work"] = "/dev/sdb"
+	host := w.listener.dial(t)
+	host.expect(guestproto.KindHello)
+	host.send(guestproto.Message{Kind: guestproto.KindQuiesce, Quiesce: &guestproto.Quiesce{Mountpoints: []string{"/work"}}})
+	message := host.expect(guestproto.KindQuiesceFailed)
+	if !strings.Contains(message.QuiesceFailed.Reason, "purge failed") || w.system.syncs != 0 {
+		t.Fatalf("unsafe generation could seal: reason=%q syncs=%d", message.QuiesceFailed.Reason, w.system.syncs)
+	}
+}
+
+func TestRestoredInitializationFailsBeforeRunnerCredentialsAreUsed(t *testing.T) {
+	w := newWorld(t, func(cfg *Config) {
+		cfg.Encryption = EncryptionHostZFS
+		cfg.InitializeRestored = func(context.Context, guestproto.Prepare, func()) error { return errors.New("identity refresh failed") }
+	}, nil)
+	host := w.listener.dial(t)
+	host.expect(guestproto.KindHello)
+	prepare := testPrepare()
+	prepare.Restored = true
+	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: &prepare})
+	status := host.expectStatus(guestproto.RunnerExited)
+	if status.ExitCode != SyntheticFailureExitCode {
+		t.Fatalf("exit=%d", status.ExitCode)
+	}
+	select {
+	case <-w.runs:
+		t.Fatal("Runner.Listener used credentials after failed initialization")
+	default:
+	}
+}
+
+func TestRestoredTimingUsesFreshGuestIncarnation(t *testing.T) {
+	w := newWorld(t, func(cfg *Config) {
+		cfg.Encryption = EncryptionHostZFS
+		cfg.InitializeRestored = func(context.Context, guestproto.Prepare, func()) error { return nil }
+	}, func(_ context.Context, _ string, _ map[string]string, event func(RunnerEvent)) (int, error) {
+		event(EventListening)
+		return 0, nil
+	})
+	host := w.listener.dial(t)
+	host.expect(guestproto.KindHello)
+	prepare := testPrepare()
+	prepare.Restored = true
+	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: &prepare})
+	status := host.expectStatus(guestproto.RunnerRegistered)
+	for i, point := range status.Timing {
+		if point.Source != "guestd:"+prepare.MemberID || point.Sequence != uint64(i+1) {
+			t.Fatalf("donor timing survived: %+v", point)
+		}
+	}
+}
+
+func TestRestoredPoolInitializationDoesNotRegisterOrConsumeMember(t *testing.T) {
+	initialized := 0
+	w := newWorld(t, func(cfg *Config) {
+		cfg.Encryption = EncryptionHostZFS
+		cfg.InitializeRestored = func(_ context.Context, prepare guestproto.Prepare, identityReady func()) error {
+			if prepare.JITConfig != "" {
+				return errors.New("credential entered pool initialization")
+			}
+			initialized++
+			identityReady()
+			return nil
+		}
+	}, func(_ context.Context, _ string, _ map[string]string, event func(RunnerEvent)) (int, error) {
+		event(EventListening)
+		return 0, nil
+	})
+	host := w.listener.dial(t)
+	host.expect(guestproto.KindHello)
+	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: &guestproto.Prepare{InitializeOnly: true, Restored: true, MemberID: "vm-incarnation"}})
+	host.expectStatus(guestproto.RunnerNetworkIdentityReady)
+	host.expectStatus(guestproto.RunnerInitialized)
+	w.server.mu.Lock()
+	prepared := w.server.prepared
+	w.server.mu.Unlock()
+	if prepared != nil {
+		t.Fatal("pool initialization consumed its one-shot member")
+	}
+	prepare := testPrepare()
+	prepare.Restored = true
+	host.send(guestproto.Message{Kind: guestproto.KindPrepare, Prepare: &prepare})
+	host.expectStatus(guestproto.RunnerRegistered)
+	if initialized != 1 {
+		t.Fatalf("initialization count=%d", initialized)
+	}
+}
+
 func TestQuiesceFailureCarriesTheReason(t *testing.T) {
 	w := newWorld(t, nil, nil)
 

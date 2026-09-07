@@ -91,6 +91,13 @@ type Hello struct {
 // Prepare carries a single-use runner registration into an otherwise empty
 // warm VM. The listener connects before any customer generation is attached.
 type Prepare struct {
+	// Restored marks a pre-registration Turbo VM template. These values
+	// refresh guest identity and time before any GitHub credential is used.
+	Restored       bool   `json:"restored,omitempty"`
+	InitializeOnly bool   `json:"initialize_only,omitempty"`
+	HostUnixNS     int64  `json:"host_unix_ns,omitempty"`
+	Entropy        string `json:"entropy,omitempty"`
+	MACAddress     string `json:"mac_address,omitempty"`
 	// MemberID names this single VM incarnation. It is deliberately opaque
 	// to the guest and carries no customer identity.
 	MemberID string `json:"member_id"`
@@ -213,6 +220,8 @@ type QuiesceFailed struct {
 type RunnerState string
 
 const (
+	RunnerNetworkIdentityReady RunnerState = "network-identity-ready"
+	RunnerInitialized          RunnerState = "initialized"
 	// RunnerProgress carries a timing point without changing lifecycle state.
 	RunnerProgress RunnerState = "progress"
 	// RunnerRegistered: the runner registered and is listening for its job.

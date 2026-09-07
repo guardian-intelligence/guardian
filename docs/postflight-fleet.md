@@ -1,6 +1,9 @@
 # Postflight fleet
 
-Status: end-state architecture, 2026-07-24.
+Status: fleet design with current Turbo implementation notes, 2026-09-06.
+The current manifest is [rust-forge-01](../src/postflight/host/hosts/rust-forge-01.json).
+Hardware and commercial descriptions below are onboarding policy, not a
+claim that all described fleets are currently serving jobs.
 
 ## Two fleets, two clouds
 
@@ -41,13 +44,15 @@ hardware_class:
 
 Hosts carry `(hardware_class, site, capabilities, slot count)`. The scheduler
 filters on class and capabilities; admission maps runner labels to classes.
-Nothing in hostd or guestd branches on class identity; they consume the
-launch profile and slot geometry they are handed.
+The current hostd explicitly maps the canonical Turbo and Confidential
+classes to distinct image/launch profiles; unknown profiles fail closed.
+The longer-term data-driven class design does not override those admission
+checks; see [spec.go](../src/postflight/hostd/vm/spec.go).
 
 ## Compatibility classes bound warmth
 
-A **compatibility class** is the domain inside which a CRIU capsule may
-restore:
+A **compatibility class** bounds disk-generation reuse. Customer CRIU restore
+is disabled. The retained manifest compatibility tuple is:
 
 ```text
 compat_class = (qemu_cpu_model, machine type, guest image, CRIU format)
@@ -58,13 +63,13 @@ requires an exact match; anything else is a cold build, never an error.
 Warmth never crosses a compatibility class, a fleet, or (on Confidential) a
 chip.
 
-**The guest CPU model is pinned per hardware class, not passed through.**
-Passthrough would maximize guest-visible clocks but make every chassis its
-own warmth island and every firmware quirk a restore hazard. A pinned
-baseline keeps capsules portable across all hosts of the class at a small
-ISA cost, keeps the launch profile deterministic, and on Confidential keeps
-the measurement stable. Each class's baseline is as new as its silicon
-allows.
+Current Turbo passes through the host CPU model and uses `pc-q35-8.2`.
+Its generic RAM template is tied to the host boot, exact QEMU/firmware bytes,
+image, CPU/machine profile, network mode, and geometry. It is deliberately
+host-local, with no cross-host portability claim; see
+[warm_template.go](../src/postflight/hostd/vm/warm_template.go). A future portable
+CPU baseline would need separate compatibility evidence. Confidential keeps
+its own measured launch profile and cannot enable the Turbo template path.
 
 ## Onboarding new silicon is a routine
 

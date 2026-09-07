@@ -19,6 +19,33 @@ const MachineType = "pc-q35-11.0"
 // exact microarchitecture.
 const CPUModel = "EPYC-v4"
 
+// Turbo uses the Ubuntu 24.04 QEMU machine ABI and a host-local CPU model.
+// Memory images must therefore remain on the host that created them.
+const TurboMachineType = "pc-q35-8.2"
+const TurboCPUModel = "host"
+
+type Flavor string
+
+const (
+	FlavorConfidential Flavor = "confidential"
+	FlavorTurbo        Flavor = "turbo"
+	TurboClass         Class  = "postflight-4vcpu-ubuntu24-turbo"
+	ConfidentialClass  Class  = "postflight-4-ubuntu-24.04-github-confidential"
+)
+
+// ClassFlavor is deliberately closed: a misspelled class cannot silently
+// select a weaker launch profile.
+func ClassFlavor(class Class) (Flavor, error) {
+	switch class {
+	case TurboClass:
+		return FlavorTurbo, nil
+	case ConfidentialClass:
+		return FlavorConfidential, nil
+	default:
+		return "", fmt.Errorf("vm: unsupported runner class %q", class)
+	}
+}
+
 const (
 	sevSNPObject = "sev-snp-guest,id=sev0,cbitpos=51,reduced-phys-bits=1,policy=0x30000"
 	sevSNPPolicy = uint64(0x30000)
@@ -73,6 +100,9 @@ const (
 
 // LaunchSpec is everything that determines one VM's QEMU invocation.
 type LaunchSpec struct {
+	Flavor     Flavor
+	RunAs      string
+	Incoming   bool
 	QEMUPath   string
 	ID         ID
 	CPUs       int
@@ -104,37 +134,65 @@ func serialLogPath(stateDir string) string { return filepath.Join(stateDir, "ser
 // (-daemonize, -pidfile) are deliberately absent: the Launcher owns the
 // process lifetime.
 func (s LaunchSpec) Argv() []string {
+	elevatePrivileges := "deny"
+	if s.Flavor == FlavorTurbo && s.RunAs != "" {
+		// QEMU 8.2 installs seccomp before -runas drops UID/GID. Denying
+		// these syscalls kills that privilege drop itself with SIGSYS.
+		// libseccomp still sets no_new_privs; -runas drops all saved IDs,
+		// verifies root cannot be regained, and leaves no capabilities.
+		elevatePrivileges = "allow"
+	}
 	argv := []string{
 		s.QEMUPath,
 		"-nodefaults",
-		"-machine", MachineType + ",accel=kvm,confidential-guest-support=sev0",
-		"-object", sevSNPObject,
-		"-cpu", CPUModel,
+	}
+	if s.Flavor == FlavorTurbo {
+		argv = append(argv, "-machine", TurboMachineType+",accel=kvm", "-cpu", TurboCPUModel)
+	} else {
+		argv = append(argv, "-machine", MachineType+",accel=kvm,confidential-guest-support=sev0",
+			"-object", sevSNPObject, "-cpu", CPUModel)
+	}
+	argv = append(argv,
 		"-smp", strconv.Itoa(s.CPUs),
 		"-m", strconv.Itoa(s.MemoryMiB),
-		"-name", "postflight-vm-" + string(s.ID),
-		"-sandbox", "on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny",
+		"-name", "postflight-vm-"+string(s.ID),
+		"-sandbox", "on,obsolete=deny,elevateprivileges="+elevatePrivileges+",spawn=deny,resourcecontrol=deny",
 		"-display", "none",
-		"-serial", "file:" + serialLogPath(s.StateDir),
-		"-qmp", "unix:" + qmpSocketPath(s.StateDir) + ",server=on,wait=off",
+		"-serial", "file:"+serialLogPath(s.StateDir),
+		"-qmp", "unix:"+qmpSocketPath(s.StateDir)+",server=on,wait=off",
 		"-bios", s.Firmware,
 		"-device", "virtio-scsi-pci,id=scsi0",
-		"-blockdev", "driver=raw,node-name=root,file.driver=host_device,file.filename=" + s.RootDevice + ",file.cache.direct=on,file.aio=native",
+		"-blockdev", "driver=raw,node-name=root,file.driver=host_device,file.filename="+s.RootDevice+",file.cache.direct=on,file.aio=native",
 		"-device", "scsi-hd,bus=scsi0.0,drive=root,serial=root,bootindex=0",
 		"-device", "virtio-rng-pci",
-		"-device", "vhost-vsock-pci,guest-cid=" + strconv.FormatUint(uint64(s.VsockCID), 10),
+		"-device", "vhost-vsock-pci,guest-cid="+strconv.FormatUint(uint64(s.VsockCID), 10),
+	)
+	if s.Flavor == FlavorTurbo {
+		digest := sha256.Sum256([]byte(s.ID))
+		guid := fmt.Sprintf("%x-%x-%x-%x-%x", digest[:4], digest[4:6], digest[6:8], digest[8:10], digest[10:16])
+		argv = append(argv, "-device", "vmgenid,guid="+guid)
+	}
+	nic := "virtio-net-pci,netdev=net0"
+	if s.Flavor == FlavorTurbo {
+		nic += ",id=nic0"
 	}
 	if s.GuestNetwork == guestNetworkUser {
 		argv = append(argv,
 			"-netdev", "user,id=net0",
-			"-device", "virtio-net-pci,netdev=net0",
+			"-device", nic,
 		)
 	} else if s.GuestNetwork == guestNetworkTap {
 		ifname, mac := tapIdentity(s.ID, s.VsockCID)
 		argv = append(argv,
 			"-netdev", "tap,id=net0,ifname="+ifname+",script=no,downscript=no,vhost=on",
-			"-device", "virtio-net-pci,netdev=net0,mac="+mac,
+			"-device", nic+",mac="+mac,
 		)
+	}
+	if s.RunAs != "" {
+		argv = append(argv, "-runas", s.RunAs)
+	}
+	if s.Incoming {
+		argv = append(argv, "-incoming", "defer")
 	}
 	return argv
 }

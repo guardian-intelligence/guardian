@@ -10,8 +10,9 @@
 //	HOSTD_SYNC_SECRET             bearer credential for the sync exchange
 //	HOSTD_HOST_SECRET_FILE        >=32 random bytes keying checkout tokens; per host, never shared
 //	HOSTD_STATE_DIR               root for VM state dirs and the checkout store, e.g. /var/lib/postflight
+//	HOSTD_WARM_TEMPLATE_DIR       optional root-owned directory for pre-registration Turbo memory templates
 //	HOSTD_POOL                    hostd-managed dataset subtree, e.g. tank/postflight
-//	HOSTD_CLASS                   runner class this host serves, e.g. postflight-4-ubuntu-24.04-github-confidential
+//	HOSTD_CLASS                   postflight-4vcpu-ubuntu24-turbo or postflight-4-ubuntu-24.04-github-confidential
 //	HOSTD_IMAGE_ID                golden image id; root disks clone <pool>/images/<id>@golden
 //	HOSTD_SLOTS                   per-class slot count (default 4; warm VM = slot, no overcommit)
 //	HOSTD_CPUS                    vCPUs per VM (default 4)
@@ -91,6 +92,24 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	flavor, err := vm.ClassFlavor(vm.Class(cfg.class))
+	if err != nil {
+		return err
+	}
+	if flavor == vm.FlavorTurbo {
+		if !strings.HasPrefix(cfg.imageID, "noble-turbo-") {
+			return errors.New("Turbo requires a golden image built with IMAGE_FLAVOR=turbo")
+		}
+		checkCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		output, err := exec.CommandContext(checkCtx, "zfs", "get", "-r", "-H", "-o", "name,property,value", "encryption,keystatus", cfg.pool).Output()
+		cancel()
+		if err != nil {
+			return fmt.Errorf("verify Turbo encrypted storage: %w", err)
+		}
+		if err := validateTurboStorage(cfg.pool, string(output)); err != nil {
+			return err
+		}
+	}
 	hostSecret, err := os.ReadFile(cfg.hostSecretFile)
 	if err != nil {
 		return fmt.Errorf("read host secret: %w", err)
@@ -114,7 +133,7 @@ func run(logger *slog.Logger) error {
 		QEMUPath:     cfg.qemuPath,
 		Firmware:     cfg.firmwarePath,
 		DatasetRoot:  cfg.pool,
-		Classes:      map[vm.Class]vm.ClassConfig{class: {CPUs: cfg.cpus, MemoryMiB: cfg.memoryMiB, Image: image}},
+		Classes:      map[vm.Class]vm.ClassConfig{class: {Flavor: flavor, CPUs: cfg.cpus, MemoryMiB: cfg.memoryMiB, Image: image}},
 		Launcher:     vm.NewSystemdLauncher(),
 		Guest:        guest,
 		GuestNetwork: cfg.guestNetwork,
@@ -123,6 +142,15 @@ func run(logger *slog.Logger) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	if cfg.warmTemplateDir != "" {
+		templateCtx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+		err := vms.EnableWarmTemplate(templateCtx, class, cfg.warmTemplateDir)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("prepare pre-registration VM template: %w", err)
+		}
 	}
 
 	instance, err := agent.New(agent.Config{
@@ -239,9 +267,39 @@ func platformFingerprint(cfg config) agent.PlatformFingerprint {
 	if line, _, ok := strings.Cut(qemuVersion, "\n"); ok {
 		qemuVersion = line
 	}
+	machineType := vm.MachineType
+	if flavor, err := vm.ClassFlavor(vm.Class(cfg.class)); err == nil && flavor == vm.FlavorTurbo {
+		machineType = vm.TurboMachineType
+	}
 	return agent.PlatformFingerprint{
 		QEMUVersion: qemuVersion, KernelRelease: strings.TrimSpace(string(kernelRaw)),
-		OSImageID: cfg.imageID, MachineType: vm.MachineType, CPUModel: cpuModel,
+		OSImageID: cfg.imageID, MachineType: machineType, CPUModel: cpuModel,
 		CRIUVersion: cfg.criuVersion,
 	}
+}
+
+// Check descendants as well as the root: children created before an
+// encryption cutover may retain plaintext storage. Snapshots are immutable
+// descendants and must meet the same at-rest contract.
+func validateTurboStorage(root, output string) error {
+	properties := map[string]map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) != 3 || (fields[0] != root && !strings.HasPrefix(fields[0], root+"/") && !strings.HasPrefix(fields[0], root+"@")) {
+			return errors.New("Turbo encrypted storage inventory is malformed")
+		}
+		if properties[fields[0]] == nil {
+			properties[fields[0]] = map[string]string{}
+		}
+		properties[fields[0]][fields[1]] = fields[2]
+	}
+	if properties[root] == nil {
+		return errors.New("Turbo encrypted storage root is absent")
+	}
+	for dataset, values := range properties {
+		if !strings.HasPrefix(values["encryption"], "aes-") || values["keystatus"] != "available" {
+			return fmt.Errorf("Turbo requires native encrypted ZFS with an available key: %s", dataset)
+		}
+	}
+	return nil
 }

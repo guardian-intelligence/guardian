@@ -50,7 +50,7 @@ done
 # shellcheck source=pins.env
 source "${script_dir}/pins.env"
 for var in RUNNER_IMAGES_REF RUNNER_IMAGES_VERSION RUNNER_IMAGES_COMMIT UBUNTU_SERIAL UBUNTU_SHA256 \
-  PACKER_VERSION PACKER_SHA256 PACKER_QEMU_PLUGIN_VERSION PACKER_QEMU_PLUGIN_SHA256; do
+  PACKER_VERSION PACKER_SHA256 PACKER_QEMU_PLUGIN_VERSION PACKER_QEMU_PLUGIN_SHA256 PIPX_VERSION; do
   [[ -n "${!var:-}" ]] || die "pins.env is missing ${var}"
 done
 
@@ -143,7 +143,8 @@ cache_input_sha256="$(
 	  "PACKER_VERSION=${PACKER_VERSION}" \
 	  "PACKER_SHA256=${PACKER_SHA256}" \
 	  "PACKER_QEMU_PLUGIN_VERSION=${PACKER_QEMU_PLUGIN_VERSION}" \
-	  "PACKER_QEMU_PLUGIN_SHA256=${PACKER_QEMU_PLUGIN_SHA256}"
+	  "PACKER_QEMU_PLUGIN_SHA256=${PACKER_QEMU_PLUGIN_SHA256}" \
+	  "PIPX_VERSION=${PIPX_VERSION}"
     sha256sum "${script_dir}/render-qemu-template.py" | awk '{print $1}'
   } | sha256sum | awk '{print $1}'
 )"
@@ -197,6 +198,8 @@ upstream_template="${template_dir}/build.ubuntu-24_04.pkr.hcl"
 rendered_template="${template_dir}/postflight.${cache_key}.pkr.hcl"
 "${script_dir}/render-qemu-template.py" \
   --plugin-version "${PACKER_QEMU_PLUGIN_VERSION}" \
+  --pipx-version "${PIPX_VERSION}" \
+  --python-installer "${source_dir}/images/ubuntu/scripts/build/install-python.sh" \
   "${upstream_template}" "${rendered_template}"
 
 ubuntu_image="ubuntu-24.04-server-cloudimg-amd64.img"

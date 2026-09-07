@@ -96,6 +96,7 @@ build {
 
   provisioner "shell" {
     inline = ["preserve-upstream-provisioner"]
+    scripts = ["${path.root}/../scripts/build/install-python.sh"]
   }
 
   provisioner "shell" {
@@ -105,8 +106,23 @@ build {
 
 }
 EOF
-"${renderer}" --plugin-version 1.2.3 \
+cat >"${fixture_dir}/install-python.sh" <<'EOF'
+#!/bin/bash -e
+apt-get install python3-venv
+python3 -m pip install pipx
+python3 -m pipx ensurepath
+invoke_tests "Tools" "Python"
+EOF
+"${renderer}" --plugin-version 1.2.3 --pipx-version 1.17.2 \
+  --python-installer "${fixture_dir}/install-python.sh" \
   "${fixture_dir}/upstream.pkr.hcl" "${fixture_dir}/rendered.pkr.hcl"
+grep -Fq '/opt/pipx-bootstrap/bin/python -m pip install pipx==1.17.2' "${fixture_dir}/rendered.pkr.install-python.sh" ||
+  fail "pipx bootstrap is not pinned and isolated from system Python"
+grep -Fq 'invoke_tests "Tools" "Python"' "${fixture_dir}/rendered.pkr.install-python.sh" ||
+  fail "Python adapter discarded upstream validation"
+if grep -Fq 'python3 -m pip install pipx' "${fixture_dir}/rendered.pkr.install-python.sh"; then
+  fail "pipx bootstrap can still mutate apt-owned Python packages"
+fi
 grep -Fq 'sources = ["source.qemu.image"]' "${fixture_dir}/rendered.pkr.hcl" ||
   fail "renderer did not select QEMU"
 grep -Fq 'version = "= 1.2.3"' "${fixture_dir}/rendered.pkr.hcl" ||
@@ -129,7 +145,7 @@ fi
   for var in RUNNER_IMAGES_REF RUNNER_IMAGES_VERSION RUNNER_IMAGES_COMMIT UBUNTU_SERIAL UBUNTU_SHA256 \
     PACKER_VERSION PACKER_SHA256 PACKER_QEMU_PLUGIN_VERSION PACKER_QEMU_PLUGIN_SHA256 \
     RUNNER_VERSION RUNNER_SHA256 RUNNER_SOURCE_COMMIT RUNNER_SOURCE_SHA256 DOTNET_SDK_VERSION DOTNET_SDK_SHA512 \
-    CRIU_VERSION CRIU_COMMIT CRIU_SHA256 TINI_VERSION; do
+    CRIU_VERSION CRIU_COMMIT CRIU_SHA256 TINI_VERSION PIPX_VERSION; do
     [[ -n "${!var:-}" ]] || fail "pins.env is missing ${var}"
   done
   for var in UBUNTU_SHA256 PACKER_SHA256 PACKER_QEMU_PLUGIN_SHA256 RUNNER_SHA256 RUNNER_SOURCE_SHA256 CRIU_SHA256; do

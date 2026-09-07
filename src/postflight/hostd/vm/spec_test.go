@@ -5,6 +5,48 @@ import (
 	"testing"
 )
 
+func TestTurboLaunchDoesNotRequireSNP(t *testing.T) {
+	spec := LaunchSpec{Flavor: FlavorTurbo, QEMUPath: "/usr/bin/qemu-system-x86_64", ID: "turbo-1", CPUs: 4, MemoryMiB: 16384, Firmware: "/usr/share/seabios/bios.bin", VsockCID: 4}
+	argv := strings.Join(spec.Argv(), " ")
+	for _, forbidden := range []string{"sev", "confidential-guest", "EPYC-v4", "pc-q35-11.0"} {
+		if strings.Contains(argv, forbidden) {
+			t.Fatalf("Turbo launch includes %s: %s", forbidden, argv)
+		}
+	}
+	for _, required := range []string{"pc-q35-8.2,accel=kvm", "-cpu host", "vhost-vsock-pci,guest-cid=4", "virtio-scsi-pci"} {
+		if !strings.Contains(argv, required) {
+			t.Fatalf("Turbo launch lacks %s: %s", required, argv)
+		}
+	}
+}
+
+func TestTurboPrivilegeDropRemainsPossibleUnderSeccomp(t *testing.T) {
+	argv := strings.Join((LaunchSpec{Flavor: FlavorTurbo, RunAs: "postflight-vm"}).Argv(), " ")
+	if !strings.Contains(argv, "-runas postflight-vm") ||
+		!strings.Contains(argv, "-sandbox on,obsolete=deny,elevateprivileges=allow,spawn=deny,resourcecontrol=deny") {
+		t.Fatal("Turbo must permit its initial UID drop while retaining the remaining syscall filters")
+	}
+	for _, spec := range []LaunchSpec{{Flavor: FlavorTurbo}, {Flavor: FlavorConfidential}} {
+		if !strings.Contains(strings.Join(spec.Argv(), " "), "elevateprivileges=deny") {
+			t.Fatal("launches without a Turbo UID drop must retain the credential syscall filter")
+		}
+	}
+}
+
+func TestRunnerClassFlavorIsClosed(t *testing.T) {
+	for class, want := range map[Class]Flavor{TurboClass: FlavorTurbo, ConfidentialClass: FlavorConfidential} {
+		got, err := ClassFlavor(class)
+		if err != nil || got != want {
+			t.Fatalf("ClassFlavor(%q) = %q, %v", class, got, err)
+		}
+	}
+	for _, class := range []Class{"", "postflight-4vcpu-ubuntu24", "postflight-4vcpu-ubuntu24-tubro"} {
+		if _, err := ClassFlavor(class); err == nil {
+			t.Fatalf("accepted ambiguous class %q", class)
+		}
+	}
+}
+
 // TestArgvGolden pins the exact QEMU invocation for a fixture class. Argv
 // determinism is load-bearing (attestation measurement stability rides on
 // it), so any change here is a deliberate platform revision, not a refactor.

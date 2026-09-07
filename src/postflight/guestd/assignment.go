@@ -126,7 +126,7 @@ func (s *Server) runnerWorkerStarting() localReply {
 	if authorized == nil || authorized.Identity == nil {
 		return localReply{Error: "worker was not authorized"}
 	}
-	point := guestTiming(s.cfg.Timing.Point("runner_worker_exec_started"))
+	point := guestTiming(s.timingPoint("runner_worker_exec_started"))
 	s.sendStatus(guestproto.RunnerStatus{
 		State: guestproto.RunnerWorkerStarted, Identity: authorized.Identity,
 		Timing: []guestproto.TimingPoint{point},
@@ -141,7 +141,7 @@ func (s *Server) runnerWorkerFailed(reason string) localReply {
 	if len(reason) > 512 {
 		reason = reason[:512]
 	}
-	point := guestTiming(s.cfg.Timing.Point("runner_worker_exec_failed"))
+	point := guestTiming(s.timingPoint("runner_worker_exec_failed"))
 	s.sendStatus(guestproto.RunnerStatus{
 		State: guestproto.RunnerWorkerFailed, ExitCode: SyntheticFailureExitCode,
 		Reason: reason, Timing: []guestproto.TimingPoint{point},
@@ -156,7 +156,7 @@ func (s *Server) publishAssignment(assignment *guestproto.Assignment) localReply
 		assignment.Identity.Repository == "" || assignment.Identity.WorkflowJob == "" {
 		return localReply{Error: "incomplete assignment"}
 	}
-	assignment.Timing = append(assignment.Timing, guestTiming(s.cfg.Timing.Point("guest_assignment_received")))
+	assignment.Timing = append(assignment.Timing, guestTiming(s.timingPoint("guest_assignment_received")))
 	s.mu.Lock()
 	if s.assignment != nil {
 		duplicate := s.assignment.RequestID == assignment.RequestID && s.assignment.CheckRunID == assignment.CheckRunID && s.assignment.RunnerName == assignment.RunnerName
@@ -174,7 +174,7 @@ func (s *Server) publishAssignment(assignment *guestproto.Assignment) localReply
 			return localReply{Error: "assignment was not delivered to hostd: " + err.Error()}
 		}
 	}
-	published := guestTiming(s.cfg.Timing.Point("guest_assignment_published"))
+	published := guestTiming(s.timingPoint("guest_assignment_published"))
 	s.sendStatus(guestproto.RunnerStatus{
 		State: guestproto.RunnerProgress, Timing: []guestproto.TimingPoint{published},
 	})
@@ -188,7 +188,7 @@ func (s *Server) awaitWorker(ctx context.Context) localReply {
 	if assignment == nil {
 		return localReply{Error: "worker arrived before assignment publication"}
 	}
-	entered := guestTiming(s.cfg.Timing.Point("runner_worker_gate_entered"))
+	entered := guestTiming(s.timingPoint("runner_worker_gate_entered"))
 	s.sendStatus(guestproto.RunnerStatus{
 		State: guestproto.RunnerProgress, Timing: []guestproto.TimingPoint{entered},
 	})
@@ -205,7 +205,7 @@ func (s *Server) awaitWorker(ctx context.Context) localReply {
 		if authorized == nil || authorized.Identity == nil || clock == nil {
 			return localReply{Error: "worker gate opened without authorization"}
 		}
-		completed := guestTiming(s.cfg.Timing.Point("runner_worker_gate_completed"))
+		completed := guestTiming(s.timingPoint("runner_worker_gate_completed"))
 		s.sendStatus(guestproto.RunnerStatus{
 			State: guestproto.RunnerProgress, Timing: []guestproto.TimingPoint{completed},
 		})
@@ -240,7 +240,7 @@ func (s *Server) validateAssignment(identity *guestproto.JobIdentity) localReply
 	}
 	s.hookValidated = true
 	s.mu.Unlock()
-	blocked := guestTiming(s.cfg.Timing.Point("job_hook_validated"))
+	blocked := guestTiming(s.timingPoint("job_hook_validated"))
 	s.sendStatus(guestproto.RunnerStatus{
 		State: guestproto.RunnerHookBlocked, Identity: identity, Clock: clock,
 		Timing: []guestproto.TimingPoint{blocked},
@@ -277,7 +277,7 @@ func (s *Server) releaseAssignment(identity *guestproto.JobIdentity) localReply 
 	}
 	s.hookReleased = true
 	s.mu.Unlock()
-	released := guestTiming(s.cfg.Timing.Point("customer_steps_released"))
+	released := guestTiming(s.timingPoint("customer_steps_released"))
 	s.sendStatus(guestproto.RunnerStatus{
 		State: guestproto.RunnerReleased, Identity: identity, Clock: clock,
 		Timing: []guestproto.TimingPoint{released},
