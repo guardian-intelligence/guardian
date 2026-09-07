@@ -45,7 +45,7 @@ genrule(
         "//:vp_node",
         "//:workspace_sources",
     ],
-    outs = ["generated/index.js"],
+    outs = ["generated/index.cjs"],
     visibility = ["//actions/checkout:__pkg__"],
     cmd = """
 set -euo pipefail
@@ -77,7 +77,7 @@ cd "$$work/src/postflight/checkout"
 "$$node" "$$tsc" -p tsconfig.json
 "$$node" "$$vp" test run --config vitest.config.ts
 POSTFLIGHT_ACTION_OUT_DIR="$$work/dist" "$$node" "$$vp" build
-test -s "$$work/dist/index.js"
-cp "$$work/dist/index.js" "$$execroot/$@"
+test -s "$$work/dist/index.cjs"
+cp "$$work/dist/index.cjs" "$$execroot/$@"
 """,
 )
