@@ -1,15 +1,16 @@
-# One-time, Flux-managed plan for the first Postflight checkout allowance.
+# One-time, Flux-managed apply for the verified Postflight checkout allowance.
 # Keep the scheduled guardian-github root in full plan mode: its unrelated
 # ruleset/fleet changes are outside this bootstrap. OpenTofu targeting here
 # is temporary and exceptional; the runner applies only its saved tfplan.
-# Review this Job's plan before a separate PR replaces it with an apply Job.
+# The c9c8ed41 plan imported one resource and added only the reviewed action
+# digest. The scheduled root continues to expose its complete, unapplied plan.
 # No TTL: Flux would recreate a deleted completed Job. Remove this manifest
 # through Git after verified policy convergence. The image pin is deliberately
 # fixed because a Job's pod template cannot follow image automation in place.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: tofu-guardian-github-actions-plan
+  name: tofu-guardian-github-actions-apply
   namespace: tofu-system
   labels:
     app.kubernetes.io/name: tofu-runner
@@ -44,7 +45,7 @@ spec:
                 - ALL
           env:
             - name: MODE
-              value: plan
+              value: apply
             - name: TF_CLI_ARGS_plan
               value: -target=github_actions_repository_permissions.guardian
             - name: ROOT_NAME

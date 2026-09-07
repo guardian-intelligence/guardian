@@ -72,8 +72,8 @@ exercise through the pre-commit hook on every commit.
 The repo runs `allowed_actions: selected` with exact-digest patterns.
 `.github/actions-allowlist.json` is the declared source of truth, and
 `//:actions_allowlist_test` fails any PR whose workflows use a third-party
-ref the file does not carry. Bumping a third-party action digest is a
-two-step lockstep:
+ref the file does not carry. A new action digest follows this
+ordering:
 
 1. Add the new exact digest to the allowlist. The `guardian-github`
    OpenTofu root imports the existing repository Actions policy and reads
