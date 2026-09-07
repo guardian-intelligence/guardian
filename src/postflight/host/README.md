@@ -52,9 +52,21 @@ unit installs `pfbr0`, per-host DHCP/DNS, public egress NAT, private/reserved
 IPv4 egress denial, IPv6 denial, and guest-to-guest bridge denial. Guests can
 reach the host only for DHCP, DNS, and checkout on port 8480. Firewall updates
 replace only the `inet postflight_ci` and `bridge postflight_ci` tables in one
-transaction; existing nftables tables remain intact. Existing host firewall
-policy can still reject traffic and must be investigated if public egress
-fails.
+transaction. The manifest declares the existing UFW host firewall. After
+the nft deny boundary is installed, the network unit adds only commented,
+bridge-scoped UFW rules for DHCP (including source `0.0.0.0` before a lease),
+gateway DNS, checkout, and IPv4 forwarding. UFW deduplicates and persists
+these rules; its defaults and unrelated rules remain intact. The provisioner
+refuses an inactive UFW or a different bridge/subnet identity instead of
+enabling a firewall or leaving stale allows on a renamed bridge.
+
+This ordering matters: an nft `accept` is not final across base chains,
+whereas a `drop` cannot be overridden by a later chain. The Postflight hook
+at priority -20 drops private/reserved destinations, spoofed sources, IPv6,
+guest-to-guest traffic, and unsolicited ingress before UFW's priority-0
+forwarding allows. Only established/related return traffic survives the
+Postflight ingress filter. See the [nftables verdict contract](https://netfilter.org/projects/nftables/manpage.html)
+and [UFW rule documentation](https://manpages.ubuntu.com/manpages/noble/man8/ufw.8.html).
 
 `host.py render --manifest ... --image-id ... --output /tmp/postflight-render`
 produces reviewable systemd, environment, dnsmasq, and nftables files without
@@ -106,8 +118,9 @@ state; customer guests cannot write them.
 
 The installer checks its exact QEMU version, firmware, secret-file ownership,
 existing pool identity, native encryption contract, and golden snapshot
-before starting hostd. It validates dnsmasq syntax and the nft transaction;
-any existing host firewall may still deny traffic. Verify DHCP, public
+before starting hostd. It validates dnsmasq syntax, the nft transaction, and
+the declared active UFW firewall. Other host rules can still reject traffic.
+Verify DHCP, public
 egress, private/IPv6/guest-to-guest denial, host service exclusions, and the
 checkout path on the live host. Then verify `postflight-storage`,
 `postflight-network`, `postflight-dnsmasq`, and `hostd` are healthy, and inspect
