@@ -80,6 +80,7 @@ type Agent struct {
 	reap               []zvol.GenerationID
 	poolTargets        map[vm.Class]int
 	synced             bool
+	maintenanceState   string
 }
 
 type Options struct {

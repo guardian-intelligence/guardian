@@ -36,6 +36,10 @@ type Config struct {
 	// TraceDir receives one append-only JSONL trace per single-use runner.
 	// Empty disables the local evidence sink.
 	TraceDir string
+	// MaintenanceDir is the root-private durable installer handshake directory.
+	// A request closes new admission until a reviewed install removes it.
+	MaintenanceDir string
+	MaintenanceProcessIdentity string
 	// StorageMinimumAvailableBytes is the emergency headroom below which this
 	// host stops offering listeners and rejects an assignment before attaching
 	// tenant volumes. Zero disables the gate.
@@ -60,6 +64,9 @@ type PlatformFingerprint struct {
 const defaultCheckoutPath = "/internal/sandbox/v1/github-checkout"
 
 func (c *Config) validate() error {
+	if c.MaintenanceDir != "" && c.MaintenanceProcessIdentity == "" {
+		return fmt.Errorf("agent: maintenance process identity is required")
+	}
 	if c.HostID == "" {
 		return fmt.Errorf("agent: HostID is required")
 	}

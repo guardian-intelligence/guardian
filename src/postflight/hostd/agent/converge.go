@@ -38,8 +38,9 @@ func (a *Agent) Tick(ctx context.Context) {
 		return
 	}
 	admission := a.storageAdmission(ctx)
+	drainToken, draining := a.drainRequest()
 	a.recycleUnownedUnusableVMs(ctx, view, assignments)
-	a.stepMembers(ctx, view, members, quarantinedMembers, assignments, admission.Admitted)
+	a.stepMembers(ctx, view, members, quarantinedMembers, assignments, admission.Admitted && !draining)
 	for _, id := range sortedAssignmentIDs(assignments) {
 		record := assignments[id]
 		record.mu.Lock()
@@ -54,8 +55,15 @@ func (a *Agent) Tick(ctx context.Context) {
 			poolTargets[class] = 0
 		}
 	}
-	a.reconcilePool(ctx, view, poolTargets, assignments)
+	if draining {
+		a.drainPool(ctx, view)
+	} else {
+		a.reconcilePool(ctx, view, poolTargets, assignments)
+	}
 	a.collectOrphans(ctx, view, assignments, desiredAssignments, quarantinedJobs)
+	if draining {
+		a.acknowledgeDrain(ctx, drainToken)
+	}
 	a.mu.Lock()
 	traceMembers := cloneMap(a.desiredMembers)
 	traceAssignments := cloneMap(a.assignments)

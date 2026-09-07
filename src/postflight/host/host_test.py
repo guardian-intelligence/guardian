@@ -235,6 +235,93 @@ exit "${TEST_RECONCILE_EXIT}"
                         except ProcessLookupError:
                             pass
 
+    def test_runtime_gate_defers_until_matching_process_drains_and_scopes_disappear(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            plan = [(root / "hostd.env", b"new-image", 0o600)]
+            calls = []
+            identity = "123:456"
+            scopes = ["pf-vm-existing.scope"]
+
+            def run(*args, **kwargs):
+                nonlocal identity
+                calls.append(args)
+                if args == ("systemctl", "stop", "hostd.service"):
+                    identity = None
+                    return SimpleNamespace(returncode=0)
+                self.fail("unexpected command: " + repr(args))
+
+            with patch.object(host, "MAINTENANCE", root), patch.object(host, "secure_directory"), \
+                    patch.object(host, "secret_file"), patch.object(host, "command", side_effect=run), \
+                    patch.object(host, "service_identity", side_effect=lambda: identity), \
+                    patch.object(host, "running_vm_scopes", side_effect=lambda: scopes):
+                with self.assertRaises(host.InstallDeferred):
+                    host.gate_runtime_install(plan, True)
+                request = json.loads((root / "request.json").read_text())
+                ack = dict(request, process_identity="123:old", drained=True, vms=0, assignments=0)
+                (root / "state.json").write_text(json.dumps(ack))
+                with self.assertRaises(host.InstallDeferred):
+                    host.gate_runtime_install(plan, True)
+                ack["process_identity"] = identity
+                for changed in (dict(ack, token="0" * 64), dict(ack, drained=False),
+                                dict(ack, assignments=1), ack):
+                    (root / "state.json").write_text(json.dumps(changed))
+                    with self.assertRaises(host.InstallDeferred):
+                        host.gate_runtime_install(plan, True)
+                self.assertEqual(calls, [], "deferred installer stopped a live daemon")
+                self.assertFalse(plan[0][0].exists(), "pending runtime was installed before draining")
+                scopes.clear()
+                self.assertTrue(host.gate_runtime_install(plan, True))
+                self.assertEqual(calls, [("systemctl", "stop", "hostd.service")])
+                self.assertTrue((root / "request.json").exists(), "admission reopened before installed inputs complete")
+
+    def test_reconcile_deferred_install_keeps_receipts_and_retries(self):
+        source = (HERE / "reconcile.sh").read_text()
+        phase = source[source.index("if python3 src/postflight/host/host.py install"):]
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for name in ("applied-commit", "applied-inputs"):
+                (root / name).write_text("old\n")
+            (root / "image-id").write_text("noble-turbo-fixture\n")
+            phase = phase.replace("/opt/postflight/applied-", str(root / "applied-"))
+            setup = 'set -euo pipefail\npython3() { return "${INSTALL_EXIT}"; }\n'
+            env = dict(os.environ, manifest="fixture", artifacts=str(root), CRIU_VERSION="4.2",
+                       commit="new-commit", inputs="new-inputs", host_id="fixture", INSTALL_EXIT="75")
+            result = subprocess.run(["bash", "-c", setup + phase], env=env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((root / "applied-commit").read_text(), "old\n")
+            self.assertEqual((root / "applied-inputs").read_text(), "old\n")
+            self.assertIn("next timer retries", result.stderr)
+            env["INSTALL_EXIT"] = "19"
+            result = subprocess.run(["bash", "-c", setup + phase], env=env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 19, "non-defer install failure was hidden")
+            env["INSTALL_EXIT"] = "0"
+            result = subprocess.run(["bash", "-c", setup + phase], env=env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((root / "applied-commit").read_text(), "new-commit\n")
+            self.assertEqual((root / "applied-inputs").read_text(), "new-inputs\n")
+
+    def test_stopped_host_bootstrap_and_interrupted_install_retry(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            plan = [(root / "hostd.env", b"new-image", 0o600)]
+            with patch.object(host, "MAINTENANCE", root), patch.object(host, "secure_directory"), \
+                    patch.object(host, "service_identity", return_value=None), \
+                    patch.object(host, "running_vm_scopes", return_value=[]), \
+                    patch.object(host, "command") as command:
+                self.assertTrue(host.gate_runtime_install(plan, True))
+                # Installed bytes can match after a crash, but the pending
+                # request still requires activation before admission reopens.
+                self.assertTrue(host.gate_runtime_install(plan, False))
+                command.assert_not_called()
+                (root / "request.json").unlink()
+                self.assertFalse(host.gate_runtime_install(plan, False))
+            with patch.object(host, "MAINTENANCE", root), patch.object(host, "secure_directory"), \
+                    patch.object(host, "service_identity", return_value=None), \
+                    patch.object(host, "running_vm_scopes", return_value=["pf-vm-orphan.scope"]):
+                with self.assertRaises(host.InstallDeferred):
+                    host.gate_runtime_install(plan, True)
+
 
 if __name__ == "__main__":
     unittest.main()

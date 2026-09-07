@@ -103,9 +103,18 @@ fi
 
 # shellcheck source=../image/pins.env
 source src/postflight/image/pins.env
-python3 src/postflight/host/host.py install --manifest "${manifest}" \
+if python3 src/postflight/host/host.py install --manifest "${manifest}" \
   --hostd "${artifacts}/hostd" --image-id "$(cat "${artifacts}/image-id")" \
-  --criu-version "${CRIU_VERSION}" --enable-reconcile
+  --criu-version "${CRIU_VERSION}" --enable-reconcile; then
+  :
+else
+  install_status=$?
+  if [[ "${install_status}" -eq 75 ]]; then
+    echo "Postflight install pending drain; next timer retries without marking inputs applied" >&2
+    exit 0
+  fi
+  exit "${install_status}"
+fi
 printf '%s\n' "${commit}" >/opt/postflight/applied-commit.tmp
 mv /opt/postflight/applied-commit.tmp /opt/postflight/applied-commit
 printf '%s\n' "${inputs}" >/opt/postflight/applied-inputs.tmp
