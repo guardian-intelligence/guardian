@@ -21,7 +21,7 @@ export default defineConfig({
           "// Source: src/postflight/checkout/src/action-main.ts",
           "// Regenerate: vp run @guardian/postflight-checkout#build",
         ].join("\n"),
-        entryFileNames: "index.js",
+        entryFileNames: "index.cjs",
         format: "cjs",
         codeSplitting: false,
       },

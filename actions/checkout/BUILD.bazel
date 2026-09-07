@@ -1,13 +1,34 @@
 load("@aspect_bazel_lib//lib:write_source_files.bzl", "write_source_files")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
-# GitHub resolves this action straight from the git tree, so dist/index.js
+# GitHub resolves this action straight from the git tree, so dist/index.cjs
 # must be a committed file. `bazel run :bundle` regenerates it from the
 # TypeScript in //src/postflight/checkout;
 # the generated :bundle_test fails the gate whenever the two drift.
 write_source_files(
     name = "bundle",
     files = {
-        "dist/index.js": "//src/postflight/checkout:generated_bundle",
+        "dist/index.cjs": "//src/postflight/checkout:generated_bundle",
     },
     visibility = ["//visibility:public"],
+)
+
+# Execute the committed artifact using the manifest's entrypoint. Source-level
+# tests cannot catch Node interpreting the deployed CommonJS bundle as ESM.
+sh_test(
+    name = "packaged_action_test",
+    srcs = ["packaged_action_test.sh"],
+    args = [
+        "$(rootpath //:vp_node)",
+        "$(rootpath :action.yml)",
+        "$(rootpath :dist/index.cjs)",
+        "$(rootpath //:package.json)",
+    ],
+    data = [
+        "action.yml",
+        "dist/index.cjs",
+        "//:package.json",
+        "//:vp_node",
+    ],
+    size = "small",
 )
