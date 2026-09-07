@@ -376,7 +376,7 @@ func RunValidateAssignment(args []string) error {
 		ReportRunnerWorkerFailure(err)
 		return err
 	}
-	if err := appendJobEnvironment(envPath, reply.Env); err != nil {
+	if err := appendJobEnvironment(envPath, reply.Env, os.Stdout); err != nil {
 		err = fmt.Errorf("guestd: write job environment: %w", err)
 		ReportRunnerWorkerFailure(err)
 		return err
@@ -451,7 +451,7 @@ func callLocalAt(ctx context.Context, socketPath string, request localRequest, r
 	return nil
 }
 
-func appendJobEnvironment(path string, env map[string]string) error {
+func appendJobEnvironment(path string, env map[string]string, commands io.Writer) error {
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
 		return err
@@ -465,6 +465,16 @@ func appendJobEnvironment(path string, env map[string]string) error {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+	// Runner.Worker processes hook stdout commands before it imports GITHUB_ENV.
+	// Register our locally derived credential before any later step can print
+	// its environment header. add-mask itself is not echoed by the runner.
+	if token := env["POSTFLIGHT_CHECKOUT_TOKEN"]; token != "" {
+		// Values above cannot contain CR/LF. Escape literal percent sequences so
+		// GitHub's workflow-command decoder registers the exact credential.
+		if _, err := fmt.Fprintf(commands, "::add-mask::%s\n", strings.ReplaceAll(token, "%", "%25")); err != nil {
+			return errors.New("guestd: register checkout credential mask")
+		}
+	}
 	for _, key := range keys {
 		value := env[key]
 		if _, err := fmt.Fprintf(file, "%s=%s\n", key, value); err != nil {

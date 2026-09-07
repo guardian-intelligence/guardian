@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/guardian-intelligence/guardian/src/postflight/hostd/checkoutbundle"
 	"github.com/guardian-intelligence/guardian/src/postflight/hostd/guestproto"
 	"github.com/guardian-intelligence/guardian/src/postflight/hostd/syncproto"
 	"github.com/guardian-intelligence/guardian/src/postflight/hostd/transfer"
@@ -22,6 +23,44 @@ import (
 )
 
 const testRunnerClass = vm.Class("postflight-4-ubuntu-24.04-github-confidential")
+
+func TestCheckoutCredentialStopsAuthenticatingWhenAssignmentRetires(t *testing.T) {
+	for _, terminal := range []syncproto.AssignmentState{
+		syncproto.AssignmentSealed, syncproto.AssignmentCompleted, syncproto.AssignmentFailedClosed, "removed",
+	} {
+		t.Run(string(terminal), func(t *testing.T) {
+			record := &assignment{state: syncproto.AssignmentRunning, spec: syncproto.DesiredAssignment{
+				ExecutionID: "test-execution", AttemptID: "test-attempt",
+			}}
+			agent := &Agent{assignments: map[string]*assignment{"test-assignment": record}}
+			secret := []byte("test-only-host-secret-not-a-live-credential")
+			handler := checkoutbundle.New(checkoutbundle.Config{StoreDir: t.TempDir(), HostSecret: secret}, agent).Handler()
+			token := checkoutbundle.DeriveCheckoutToken(secret, record.spec.ExecutionID, record.spec.AttemptID)
+			request := func() int {
+				// Invalid JSON stops the authenticated control before any Git/network
+				// operation. Revoked credentials must be rejected before body parsing.
+				r := httptest.NewRequest(http.MethodPost, checkoutbundle.BundlePath, strings.NewReader("invalid JSON"))
+				r.Header.Set("X-Postflight-Execution-Id", record.spec.ExecutionID)
+				r.Header.Set("X-Postflight-Attempt-Id", record.spec.AttemptID)
+				r.Header.Set("Authorization", "Bearer "+token)
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, r)
+				return response.Code
+			}
+			if status := request(); status != http.StatusBadRequest {
+				t.Fatalf("active assignment did not reach request validation: %d", status)
+			}
+			if terminal == "removed" {
+				delete(agent.assignments, "test-assignment")
+			} else {
+				record.state = terminal
+			}
+			if status := request(); status != http.StatusUnauthorized {
+				t.Fatalf("retired assignment still accepted its unchanged credential: %d", status)
+			}
+		})
+	}
+}
 
 type updateFloodDriver struct {
 	*vm.Fake

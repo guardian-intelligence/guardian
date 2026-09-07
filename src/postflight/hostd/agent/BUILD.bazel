@@ -39,6 +39,7 @@ go_test(
     ],
     embed = [":agent"],
     deps = [
+        "//src/postflight/hostd/checkoutbundle",
         "//src/postflight/hostd/syncproto",
         "//src/postflight/hostd/transfer",
         "//src/postflight/hostd/vm",
