@@ -24,13 +24,14 @@ import (
 
 // WarmTemplate contains only a generic, never-registered VM. Tenant disks,
 // GitHub registration, and customer process state cannot enter this path.
-// The manifest and memory file are root-owned; their digest is checked once
-// before the class starts serving jobs.
+// The manifest and memory file are root-owned. The memory digest and immutable
+// root snapshot GUID bind the pair at startup and before every restore.
 type WarmTemplate struct {
-	Key          string `json:"key"`
-	RootSnapshot string `json:"root_snapshot"`
-	MemoryPath   string `json:"memory_path"`
-	MemorySHA256 string `json:"memory_sha256"`
+	Key              string `json:"key"`
+	RootSnapshot     string `json:"root_snapshot"`
+	RootSnapshotGUID string `json:"root_snapshot_guid"`
+	MemoryPath       string `json:"memory_path"`
+	MemorySHA256     string `json:"memory_sha256"`
 }
 
 // EnableWarmTemplate runs before the scheduling agent starts. A template is
@@ -84,11 +85,7 @@ func (q *QEMU) EnableWarmTemplate(ctx context.Context, class Class, directory st
 		if err := rootOwnedTemplatePath(template.MemoryPath, false); err != nil {
 			return err
 		}
-		digest, err := fileDigest(template.MemoryPath)
-		if err != nil || digest != template.MemorySHA256 {
-			return errors.New("vm: warm template memory digest mismatch")
-		}
-		if err := runTemplateZFS(ctx, "list", "-H", "-o", "name", template.RootSnapshot); err != nil {
+		if err := validateTemplateArtifacts(ctx, template); err != nil {
 			return err
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -134,7 +131,9 @@ func (q *QEMU) templateKey(shape ClassConfig) (string, error) {
 		}
 		_, _ = fmt.Fprintln(hash, digest)
 	}
-	_, _ = fmt.Fprintf(hash, "turbo-warm-v2\n%s\n%d\n%d\n%s\n%s\n%s\n", shape.Image, shape.CPUs, shape.MemoryMiB, TurboMachineType, TurboCPUModel, q.cfg.GuestNetwork)
+	// v3 requires the captured root snapshot GUID. Older manifests cannot be
+	// upgraded by trusting their current snapshot name; mint a fresh donor.
+	_, _ = fmt.Fprintf(hash, "turbo-warm-v3\n%s\n%d\n%d\n%s\n%s\n%s\n", shape.Image, shape.CPUs, shape.MemoryMiB, TurboMachineType, TurboCPUModel, q.cfg.GuestNetwork)
 	return hex.EncodeToString(hash.Sum(nil))[:24], nil
 }
 
@@ -149,6 +148,36 @@ func fileDigest(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func templateSnapshotGUID(ctx context.Context, snapshot string) (string, error) {
+	output, err := exec.CommandContext(ctx, "zfs", "get", "-H", "-p", "-o", "value", "guid", snapshot).Output()
+	if err != nil {
+		return "", fmt.Errorf("vm: read warm template root snapshot GUID: %w", err)
+	}
+	guid := strings.TrimSpace(string(output))
+	if value, err := strconv.ParseUint(guid, 10, 64); err != nil || value == 0 {
+		return "", errors.New("vm: warm template root snapshot GUID is invalid")
+	}
+	return guid, nil
+}
+
+func validateTemplateArtifacts(ctx context.Context, template WarmTemplate) error {
+	if value, err := strconv.ParseUint(template.RootSnapshotGUID, 10, 64); err != nil || value == 0 {
+		return errors.New("vm: warm template manifest root snapshot GUID is missing or invalid")
+	}
+	guid, err := templateSnapshotGUID(ctx, template.RootSnapshot)
+	if err != nil {
+		return err
+	}
+	if guid != template.RootSnapshotGUID {
+		return errors.New("vm: warm template root snapshot GUID mismatch")
+	}
+	digest, err := fileDigest(template.MemoryPath)
+	if err != nil || digest != template.MemorySHA256 {
+		return errors.New("vm: warm template memory digest mismatch")
+	}
+	return nil
 }
 
 func templateDonorEligible(record meta, status Status) bool {
@@ -284,6 +313,10 @@ func (q *QEMU) buildWarmTemplate(ctx context.Context, class Class, template *War
 	if err := runTemplateZFS(ctx, "snapshot", template.RootSnapshot); err != nil {
 		return err
 	}
+	template.RootSnapshotGUID, err = templateSnapshotGUID(ctx, template.RootSnapshot)
+	if err != nil {
+		return err
+	}
 	if err := os.Rename(partial, template.MemoryPath); err != nil {
 		return err
 	}
@@ -331,6 +364,15 @@ func migrationSocketAccess(path string) error {
 func (q *QEMU) restoreTemplate(ctx context.Context, id ID, record meta, template WarmTemplate) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	// Startup validation is insufficient if an operator replaces a named
+	// snapshot or memory file while hostd is running. Refuse the pair before
+	// sending any migration state or resuming the cloned guest.
+	if err := rootOwnedTemplatePath(template.MemoryPath, false); err != nil {
+		return err
+	}
+	if err := validateTemplateArtifacts(ctx, template); err != nil {
+		return err
+	}
 	// The launcher proves exec/liveness, not that QMP finished binding.
 	var client *qmpClient
 	for {
