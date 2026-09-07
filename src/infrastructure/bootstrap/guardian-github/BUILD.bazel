@@ -2,6 +2,7 @@ filegroup(
     name = "root",
     srcs = glob(["*.tf"]) + [
         ".terraform.lock.hcl",
+        "//:.github/actions-allowlist.json",
     ],
     visibility = ["//visibility:public"],
 )

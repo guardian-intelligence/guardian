@@ -75,10 +75,16 @@ The repo runs `allowed_actions: selected` with exact-digest patterns.
 ref the file does not carry. Bumping a third-party action digest is a
 two-step lockstep:
 
-1. In the PR: update the workflow pin **and** the allowlist entry (drop the
-   superseded digest).
-2. On merge (repo admin): re-apply the setting —
-   `gh api -X PUT repos/guardian-intelligence/guardian/actions/permissions/selected-actions --input .github/actions-allowlist.json`
+1. Add the new exact digest to the allowlist. The `guardian-github`
+   OpenTofu root imports the existing repository Actions policy and reads
+   this JSON directly; preserve the old digest during the transition.
+2. Verify that the root applied the declared policy and that the live
+   selected-actions API contains the new digest before updating workflows.
+   A plan-only root reports the change but does not apply it.
+3. Update the workflow pin, then remove the superseded digest once no
+   workflow needs it.
 
-Skipping step 2 causes a GitHub `startup_failure` before any job exists.
+Skipping live-setting convergence causes a GitHub `startup_failure` before
+any job exists. First-party composite actions hosted in this repository
+use the same ordering.
 First-party `actions/*` refs are exempt through `github_owned_allowed`.

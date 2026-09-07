@@ -44,6 +44,7 @@ exports_files([
     ".aspect/tasks/mythra.axl",
     ".aspect/tasks/tools.axl",
     ".cursor/environment.json",
+    ".github/actions-allowlist.json",
     ".github/scripts/check-renovate-config.sh",
     "MODULE.bazel",
     ".bazelignore",
