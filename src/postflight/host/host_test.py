@@ -180,6 +180,82 @@ class HostTest(unittest.TestCase):
         self.assertNotIn("apt-get", text)
         self.assertNotIn("secrets.env", text)
 
+    def test_reconcile_build_tools_have_private_caches_without_home(self):
+        source = (HERE / "reconcile.sh").read_text()
+        block = source[source.index("# Private tool caches"):source.index("# Only flock's supervisor")]
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            script = root / "cache-test.sh"
+            script.write_text("set -euo pipefail\n" + block.replace("/opt/postflight", str(root)) + r'''
+bazelisk() {
+  python3 - "$@" <<'PY'
+import json, os, sys
+keys = ("BAZELISK_HOME", "BAZELISK_HOME_LINUX", "DOTNET_CLI_HOME", "NUGET_PACKAGES",
+        "NUGET_HTTP_CACHE_PATH", "NUGET_PLUGINS_CACHE_PATH", "NUGET_SCRATCH", "PACKER_CONFIG_DIR")
+print(json.dumps({"argv": sys.argv[1:], "caches": {key: os.environ[key] for key in keys},
+                  "home_present": "HOME" in os.environ, "xdg_present": "XDG_CACHE_HOME" in os.environ,
+                  "packer_config_present": "PACKER_CONFIG" in os.environ,
+                  "checkpoint_disabled": os.environ.get("CHECKPOINT_DISABLE")}))
+PY
+}
+postflight_bazel build //fixture:build
+postflight_bazel cquery --output=files //fixture:binary
+''')
+            # Match systemd's missing login home; poison inherited cache paths
+            # to also prove that root builds cannot select an external cache.
+            env = {"PATH": os.environ["PATH"], "BAZELISK_HOME": "/untrusted",
+                   "BAZELISK_HOME_LINUX": "/untrusted", "DOTNET_CLI_HOME": "/untrusted",
+                   "PACKER_CONFIG": "/untrusted"}
+            for _ in range(2):  # Existing secure directories remain reusable.
+                result = subprocess.run(["bash", str(script)], env=env, check=True,
+                                        capture_output=True, text=True, timeout=10)
+                records = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertEqual(len(records), 2)
+                for record in records:
+                    self.assertFalse(record["home_present"])
+                    self.assertFalse(record["xdg_present"])
+                    self.assertFalse(record["packer_config_present"])
+                    self.assertEqual(record["checkpoint_disabled"], "1")
+                    self.assertIn("--output_user_root=" + str(root / "bazel"), record["argv"])
+                    for flag, name in (("--disk_cache=", "bazel-disk"),
+                                       ("--repository_cache=", "bazel-repository")):
+                        self.assertIn(flag + str(root / "build-cache" / name), record["argv"])
+                    for path in record["caches"].values():
+                        self.assertTrue(Path(path).is_relative_to(root / "build-cache"))
+                        info = Path(path).lstat()
+                        self.assertEqual(info.st_uid, os.geteuid())
+                        self.assertEqual(stat.S_IMODE(info.st_mode), 0o700)
+                self.assertEqual(records[0]["argv"][1:3], ["build", "//fixture:build"])
+                self.assertEqual(records[1]["argv"][1:4], ["cquery", "--output=files", "//fixture:binary"])
+
+    def test_reconcile_rejects_untrusted_build_cache_before_tools(self):
+        source = (HERE / "reconcile.sh").read_text()
+        block = source[source.index("# Private tool caches"):source.index("# Only flock's supervisor")]
+        for kind in ("symlink", "public-directory", "file"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                cache = root / "build-cache"
+                cache.mkdir(mode=0o700)
+                target = cache / "bazelisk"
+                outside = root / "untouched"
+                outside.mkdir(mode=0o700)
+                if kind == "symlink":
+                    target.symlink_to(outside, target_is_directory=True)
+                elif kind == "public-directory":
+                    target.mkdir(mode=0o755)
+                    target.chmod(0o755)
+                else:
+                    target.write_text("not a cache directory")
+                script = root / "cache-test.sh"
+                script.write_text("set -euo pipefail\n" + block.replace("/opt/postflight", str(root)) +
+                                  '\ntouch "' + str(root / "tool-started") + '"\n')
+                result = subprocess.run(["bash", str(script)], env={"PATH": os.environ["PATH"]},
+                                        capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("untrusted private build cache", result.stderr)
+                self.assertFalse((root / "tool-started").exists())
+                self.assertEqual(list(outside.iterdir()), [])
+
     @unittest.skipUnless(shutil.which("flock"), "requires util-linux flock")
     def test_reconcile_lock_is_not_retained_by_orphan_build_child(self):
         text = (HERE / "reconcile.sh").read_text()
