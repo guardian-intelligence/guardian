@@ -9,6 +9,7 @@ resources:
   - cronjob-guardian-stripe-sandbox.yaml
   - cronjob-guardian-mgmt-edge-policy.yaml
   - cronjob-guardian-github.yaml
+  - job-guardian-github-checkout-cjs-plan.yaml
   - cronjob-guardian-codeql.yaml
   - cronjob-guardian-mgmt-dns.yaml
   - cronjob-guardian-mgmt-cloudflare-tokens.yaml
