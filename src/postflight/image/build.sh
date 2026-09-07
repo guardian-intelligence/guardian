@@ -307,9 +307,18 @@ in_chroot apt-get -q -y --no-install-recommends install \
   uuid-dev \
   "linux-modules-extra-${guest_kernel_release}" >&2
 
+install -d -m 0755 "${mnt}/etc/modules-load.d"
+# A virtio guest has AF_VSOCK without necessarily having its local transport.
+# CID 1 then falls through to guest-to-host routing and times out instead of
+# reaching local listeners. Make loopback part of the runner image contract.
+# Resolve against the guest kernel without loading anything into the build host.
+# systemd-modules-load runs before sysinit.target; ordinary guestd startup is
+# ordered after it, so this also precedes hostd's pre-registration RAM capture.
+in_chroot modprobe --set-version "${guest_kernel_release}" --show-depends vsock_loopback >&2
+printf 'vsock_loopback\n' >"${mnt}/etc/modules-load.d/postflight-vsock.conf"
+chmod 0644 "${mnt}/etc/modules-load.d/postflight-vsock.conf"
 # Ubuntu keeps the SEV guest-message driver in linux-modules-extra. Loading it
 # at boot creates /dev/sev-guest before guestd can derive a volume key.
-install -d -m 0755 "${mnt}/etc/modules-load.d"
 printf 'sev-guest\n' >"${mnt}/etc/modules-load.d/postflight-sev.conf"
 chmod 0644 "${mnt}/etc/modules-load.d/postflight-sev.conf"
 

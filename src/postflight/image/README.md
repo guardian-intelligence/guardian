@@ -50,6 +50,17 @@ The customer-facing toolchain, Docker, and `/opt/hostedtoolcache` therefore
 come from the same source release as GitHub-hosted runners. Explicitly
 absent from the final image: cloud-init and ssh.
 
+The image also loads `vsock_loopback` at boot so local CID 1 connections work
+inside CI. Virtio provides host/guest vsock independently; without the local
+transport, Linux can send CID 1 toward the host and time out. The offline
+builder checks that the module resolves for the guest kernel without loading
+it into the build host. systemd loads the declared modules before
+`sysinit.target`, which precedes the ordinary `guestd.service` startup and
+warm-template capture. Booted-image validation still requires the real
+`vsock_test` and `vm_test` loopback cases to pass; a timeout remains a test
+failure. This recipe change creates a new final image and warm template while
+reusing the compatible upstream runner-images base.
+
 `build.sh` templates the image into ZFS as
 `<pool>/postflight/images/<image-id>@golden`. hostd clones one root disk
 per slot from `@golden` and destroys it with the VM. The image id uses the
