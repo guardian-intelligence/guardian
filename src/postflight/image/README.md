@@ -8,7 +8,9 @@ builder and Azure-agent deprovisioner. The Python installer puts pinned pipx
 in a dedicated virtualenv: current pipx requires a newer `packaging` than
 Ubuntu's apt-owned package, which pip cannot safely uninstall. Upstream
 Python tests and the pipx application directories remain intact. The result
-is cached as a QEMU qcow2 by upstream commit and complete adapter recipe.
+is cached as a QEMU qcow2 by upstream commit, pins, bootstrap script, and
+template adapter. Adding bootstrap-script coverage changes the upstream
+cache key once; older cache directories are retained but not silently adopted.
 `build.sh` layers the pinned
 `actions/runner`, the pinned CRIU release, cryptsetup, the single-job `runner` user, and guestd onto
 that image, removes the temporary image-build ingress, and imports it into
@@ -50,11 +52,27 @@ absent from the final image: cloud-init and ssh.
 
 `build.sh` templates the image into ZFS as
 `<pool>/postflight/images/<image-id>@golden`. hostd clones one root disk
-per slot from `@golden` and destroys it with the VM. The image id derives
-from `pins.env`, the guestd binary, and the repo commit, is baked into the
-guest at `/etc/postflight-image-release`, and is the `platform_image_id`
-dimension of the workspace scope key — any pin bump or guestd change mints
-a new image identity.
+per slot from `@golden` and destroys it with the VM. The image id uses the
+full SHA256 of the guest build inputs: current recipe/adapter/key-helper and
+pin-file bytes and modes, the patched runner build recipe, guestd and Listener
+binaries, the actual cached upstream qcow2 bytes, and the build flavor.
+Dirty relevant files are hashed directly; the surrounding repository commit,
+host-only edits, and documentation do not change this identity. The id is
+baked into `/etc/postflight-image-release` and forms the `platform_image_id`
+dimension of the workspace scope key.
+
+`WORK_DIR/image-receipts/<image-id>.json` records those inputs, the original
+build commit and relevant dirty-file status, and the immutable golden
+snapshot GUID. A cache hit verifies the receipt and current snapshot GUID
+before returning the image id, preserving the original provenance. Missing,
+unbound, or replaced receipts/snapshots fail closed. Keep these receipts with
+the root-owned build cache when moving it; this change does not adopt legacy
+commit-named images or delete any old image. Its first build creates a newly
+bound image, and subsequent compatible host-only changes reuse both that
+golden image and its existing warm template on the same host boot.
+This identifies recipes and supplied artifact bytes, rather than claiming
+that an independent rebuild is byte-for-byte reproducible: some runtime apt
+dependencies still resolve from Ubuntu's package repositories during a build.
 
 ## Build (on the tracer host)
 
@@ -96,9 +114,11 @@ Homebrew install. TCG template smoke tests use the emulated `max` CPU model.
 
 Re-runs are idempotent: modification always restarts from the cached,
 pristine upstream image, the final dataset appears atomically
-(`zfs send | zfs recv`), and an `@golden` snapshot that already exists is
-left untouched. Failed upstream build directories are deliberately not
-deleted during this tracer phase.
+(`zfs send | zfs recv`), and an `@golden` snapshot with a matching receipt is
+left untouched. The receipt is published after the receive completes. An
+interruption between receive and receipt publication retains an unbound
+snapshot for diagnosis and refuses to silently bless it on retry. Failed
+upstream build directories and old images are not automatically deleted.
 
 ## Verify
 

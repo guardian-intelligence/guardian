@@ -58,6 +58,10 @@ rm() { :; }
 mv() { :; }
 ln() { :; }
 touch() { :; }
+python3() {
+  if [[ "$1" == fixture/image_identity.py ]]; then return 0; fi
+  command python3 "$@"
+}
 qemu-img() {
   if [[ "$1" == info ]]; then echo '{"virtual-size":1048576}';
   else echo "qemu-img output: $*"; fi
@@ -85,6 +89,7 @@ zfs() {
                 RUNNER_LISTENER_DLL="listener", GUESTD_BIN="guestd", guestd_sha256="fixture",
                 pool="test", dataset="test/images/noble-turbo-fixture", scratch="test/build/fixture",
                 work_image="fixture.qcow2", image_id="noble-turbo-fixture",
+                script_dir="fixture", identity_file="fixture-identity", receipt="fixture-receipt",
                 test_scratch_device=str(scratch),
             )
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -150,12 +155,13 @@ qemu-img() { echo 'qemu integrity output'; }
             cached.touch()
             for source, start, end, expected in (
                 (upstream, 'if [[ -f "${cached_image}" ]]', '[[ ! -e "${cache_dir}" ]]', str(cached)),
-                (runtime, 'if zfs list -H -o name "${dataset}@golden"', '\nmnt=""', "noble-turbo-fixture"),
+                (runtime, 'if zfs list -H -o name "${dataset}@golden"', 'fetch "${runner_url}"', "noble-turbo-fixture"),
             ):
                 result = self.run_phase(
-                    'log() { echo "$*" >&2; }\nqemu-img() { echo integrity; }\nzfs() { echo snapshot; }\n' +
+                    'log() { echo "$*" >&2; }\nqemu-img() { echo integrity; }\nzfs() { echo snapshot; }\npython3() { :; }\n' +
                     section(source, start, end), root,
                     cached_image=str(cached), dataset="test/images/fixture", image_id="noble-turbo-fixture",
+                    script_dir="fixture", identity_file="fixture-identity", receipt="fixture-receipt",
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, expected + "\n")

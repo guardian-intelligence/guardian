@@ -43,8 +43,10 @@ installer. The systemd timer follows the fixed public Guardian origin every
 five minutes. It clones into root-owned `/opt/postflight/source`, checks that
 main descends from the last applied commit, and hashes only runtime, host,
 image, dependency, and build-tool inputs. Unrelated commits reuse the existing
-hostd and golden image. Relevant changes build in root-owned locations, then
-request a drain before changing installed runtime files or restarting any
+hostd and golden image. Relevant changes build in root-owned locations; the
+image builder independently reuses a GUID-bound golden image when actual
+guest inputs match, even if hostd or provisioning code changed. It then
+requests a drain before changing installed runtime files or restarting any
 runtime service. The durable request and acknowledgement live under
 `/var/lib/postflight/maintenance`. The acknowledgement binds the exact
 installation inputs to the host boot ID, live daemon's PID, and process start time. The

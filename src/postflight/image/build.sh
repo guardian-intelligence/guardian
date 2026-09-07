@@ -15,9 +15,9 @@
 #     src/postflight/image/build.sh
 #
 # Every artifact in pins.env is sha256-verified before use; a mismatch
-# aborts the build. Re-runs are idempotent: the image id derives from the
-# pins file, the guestd binary, and the repo commit, and an @golden snapshot
-# that already exists is left untouched. See README.md for the full runbook.
+# aborts the build. Re-runs bind the actual guest inputs to a stable image
+# id and verify the cached snapshot against its GUID-bound build receipt.
+# Source provenance is recorded separately. See README.md for the runbook.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -103,32 +103,9 @@ runner_url="https://github.com/actions/runner/releases/download/v${RUNNER_VERSIO
 criu_tarball="criu-${CRIU_VERSION}.tar.gz"
 criu_url="https://github.com/checkpoint-restore/criu/archive/refs/tags/v${CRIU_VERSION}.tar.gz"
 
-pins_sha256="$(sha256sum "${script_dir}/pins.env" | awk '{print $1}')"
 guestd_sha256="$(sha256sum "${GUESTD_BIN}" | awk '{print $1}')"
-listener_sha256="$(sha256sum "${RUNNER_LISTENER_DLL}" | awk '{print $1}')"
-commit="$(git -C "${script_dir}" rev-parse HEAD)"
-commit_short="${commit:0:12}"
-diff_sha256=""
-if ! git -C "${script_dir}" diff-index --quiet HEAD --; then
-  diff_sha256="$(git -C "${script_dir}" diff HEAD | sha256sum | awk '{print $1}')"
-  commit_short="${commit_short}-dirty"
-  log "WARNING: building from a dirty tree; the image id records ${commit_short}"
-fi
-# The id binds every direct build input — pins, guestd binary, commit, and
-# the working-tree diff when dirty — so the @golden idempotence
-# short-circuit cannot serve different content under one id.
-input_sha256="$(printf '%s\n' "${pins_sha256}" "${guestd_sha256}" "${listener_sha256}" "${commit}" "${diff_sha256}" "${image_flavor}" |
-  sha256sum | awk '{print $1}')"
-image_id="noble-${image_flavor}-${input_sha256:0:12}-g${commit_short}"
-
-dataset="${pool}/postflight/images/${image_id}"
-scratch="${pool}/postflight/build/${image_id}"
-if zfs list -H -o name "${dataset}@golden" >/dev/null 2>&1; then
-  log "already templated: ${dataset}@golden"
-  echo "${image_id}"
-  exit 0
-fi
-
+identity_file=""
+scratch=""
 mnt=""
 mounted=false
 resolv_moved=false
@@ -138,6 +115,9 @@ scratch_created=false
 
 cleanup() {
   set +e
+  if [[ -n "${identity_file}" ]]; then
+    rm -f "${identity_file}"
+  fi
   if [[ "${resolv_moved}" == true ]]; then
     mv -f "${mnt}/etc/resolv.conf.pristine" "${mnt}/etc/resolv.conf"
     resolv_moved=false
@@ -187,12 +167,32 @@ in_chroot() {
 }
 
 mkdir -p "${work_dir}"
-fetch "${runner_url}" "${work_dir}/${runner_tarball}" "${RUNNER_SHA256}"
-fetch "${criu_url}" "${work_dir}/${criu_tarball}" "${CRIU_SHA256}"
 base_image="$(
   WORK_DIR="${work_dir}" "${script_dir}/build-upstream.sh"
 )"
 [[ -f "${base_image}" ]] || die "runner-images builder returned no image: ${base_image}"
+
+# Hash the real base bytes, current recipes (including dirty relevant files),
+# and the two baked binaries. Host-only commits share a compatible golden
+# image and therefore the same warm-template key. A cache hit preserves the
+# original build's source provenance instead of relabelling old bytes as HEAD.
+identity_file="$(mktemp "${work_dir}/image-identity.XXXXXX")"
+image_id="$(python3 "${script_dir}/image_identity.py" prepare \
+  --identity "${identity_file}" --repo "$(git -C "${script_dir}" rev-parse --show-toplevel)" \
+  --guestd "${GUESTD_BIN}" --listener "${RUNNER_LISTENER_DLL}" --base "${base_image}" --flavor "${image_flavor}")"
+dataset="${pool}/postflight/images/${image_id}"
+scratch="${pool}/postflight/build/${image_id}"
+receipt="${work_dir}/image-receipts/${image_id}.json"
+if zfs list -H -o name "${dataset}@golden" >/dev/null 2>&1; then
+  python3 "${script_dir}/image_identity.py" verify --identity "${identity_file}" \
+    --receipt "${receipt}" --snapshot "${dataset}@golden"
+  log "already templated and verified: ${dataset}@golden"
+  echo "${image_id}"
+  exit 0
+fi
+
+fetch "${runner_url}" "${work_dir}/${runner_tarball}" "${RUNNER_SHA256}"
+fetch "${criu_url}" "${work_dir}/${criu_tarball}" "${CRIU_SHA256}"
 
 # Always start from the pristine download: a crashed run leaves a
 # half-modified working copy behind, and re-entering it would compound edits.
@@ -475,6 +475,8 @@ zfs snapshot "${scratch}@golden" >&2
 # not at all — hostd can never clone a half-written template.
 zfs create -p "${pool}/postflight/images" >&2
 zfs send "${scratch}@golden" | zfs recv -o volmode=dev "${dataset}" >&2
+python3 "${script_dir}/image_identity.py" publish --identity "${identity_file}" \
+  --receipt "${receipt}" --snapshot "${dataset}@golden"
 zfs destroy -r "${scratch}" >&2
 scratch_created=false
 rm -f "${work_image}"
