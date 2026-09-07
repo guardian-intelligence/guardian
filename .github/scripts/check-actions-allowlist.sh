@@ -6,14 +6,11 @@
 # `uses:` ref must appear verbatim in .github/actions-allowlist.json, the
 # declared source of truth for the GitHub setting.
 #
-# The setting itself is applied from the file (repo admin required):
-#
-#   gh api -X PUT repos/<owner>/<repo>/actions/permissions/selected-actions \
-#     --input .github/actions-allowlist.json
-#
-# Bumping a third-party action digest therefore means: update the workflow
-# pin AND the allowlist entry in the same PR, then re-apply the setting when
-# the PR merges. See docs/dependency-management.md.
+# guardian-github/actions.tf imports and reconciles the setting from this
+# file. New action refs must be allowed before a workflow uses them: stage
+# the allowlist change first and verify its live convergence, then update
+# the workflow. Plan-only OpenTofu runs do not apply it. See
+# docs/dependency-management.md.
 set -euo pipefail
 
 repo_root="${1:-.}"
@@ -48,20 +45,18 @@ while IFS=: read -r file _ ref; do
   fi
 # -R, not -r: a Bazel runfiles tree presents the workflow files as symlinks,
 # which -r silently skips — the check would pass vacuously.
-done < <(grep -Rn -E '^\s*-?\s*uses:' "${repo_root}/.github/workflows" | sed -E 's/^([^:]+):([0-9]+):\s*-?\s*uses:\s*/\1:\2:/')
+done < <(grep -Rn -E '^[[:space:]]*-?[[:space:]]*uses:' "${repo_root}/.github/workflows" | sed -E 's/^([^:]+):([0-9]+):[[:space:]]*-?[[:space:]]*uses:[[:space:]]*/\1:\2:/')
 
 if ((failures > 0)); then
   cat >&2 <<EOF
 
 ${failures} action ref(s) missing from .github/actions-allowlist.json.
-Add the exact ref(s) to patterns_allowed (drop superseded digests of the
-same action), and after merge re-apply the GitHub setting:
+Add the exact ref(s) to patterns_allowed and reconcile the guardian-github
+OpenTofu root before a workflow uses the new digest. A plan-only run is not
+convergence. Remove superseded digests only after no workflow needs them.
 
-  gh api -X PUT repos/\${OWNER}/\${REPO}/actions/permissions/selected-actions \\
-    --input .github/actions-allowlist.json
-
-Without the re-apply, workflows using the new digest die as startup_failure
-with no logs and no page.
+Without live-setting convergence, workflows using the new digest die as
+startup_failure with no logs and no page.
 EOF
   exit 1
 fi
