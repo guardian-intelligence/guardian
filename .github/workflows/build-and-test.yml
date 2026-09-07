@@ -40,7 +40,7 @@ jobs:
 
       - name: Check out through the Postflight host mirror
         if: github.event_name == 'workflow_dispatch' && inputs.runner == 'postflight'
-        uses: guardian-intelligence/guardian/actions/checkout@2b9c745c405ea9de6386db448099c6dd9c79b0f4
+        uses: guardian-intelligence/guardian/actions/checkout@9297608734dcb700f0a3bf2bf302453813f5ed57
         with:
           fetch-depth: 0
           clean: true
