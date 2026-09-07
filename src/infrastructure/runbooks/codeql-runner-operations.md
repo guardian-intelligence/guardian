@@ -21,18 +21,18 @@ values remain GitHub-owned: they are compared before/after, not imposed.
 
 ## Plan, then separately activate
 
-The committed CronJob is initially suspended and explicitly sets `MODE=plan`.
-After the image pin contains the new reconciler, a reviewed Git change
-unpauses plan observation. It GETs the live setup,
+The committed CronJob runs hourly in `MODE=plan` using the promoted image
+that contains the CodeQL reconciler. It GETs the live setup,
 checks coverage, and logs `status=no-op` or `status=drift`; it cannot PATCH.
 A plan success means observation succeeded, not that routing changed. API or
 coverage errors fail the Job and remain visible through the existing
 `tofu-*` failed-job alerts.
 
-Keep the new CronJob suspended until Flux image automation pins an OCI
-containing this controller. The old binary ignores `RECONCILER` and would
-attempt OpenTofu initialization without backend credentials. After the OCI
-converges, unpause in plan mode and verify its structured observation log.
+For a new installation, keep the CronJob suspended until Flux image automation
+pins an OCI containing this controller. The old binary ignores `RECONCILER`
+and would attempt OpenTofu initialization without backend credentials. After
+the OCI converges, unpause in plan mode and verify its structured observation
+log.
 
 Before applying, require a real Postflight Turbo CI canary with native GitHub
 logs, VM-restore/identity proof, and disk-generation reuse. Require an actual `CodeQL routing observation` plan log from the promoted
