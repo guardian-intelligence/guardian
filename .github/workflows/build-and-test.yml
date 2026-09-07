@@ -76,7 +76,8 @@ jobs:
             bazel-ci-
 
       - name: Build
-        run: bazelisk build --config=ci //...
+        # Temporary dispatch-only lifecycle probe; this branch is never merged.
+        run: bazelisk build --config=ci //postflight-lifecycle-probe:intentional-missing-target
 
       - name: Test
         run: bazelisk test --config=ci //...
