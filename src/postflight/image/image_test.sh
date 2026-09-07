@@ -125,24 +125,46 @@ snippets = [
     'install -d -m 0755 "${mnt}/etc/postflight"' +
         section('install -d -m 0755 "${mnt}/etc/postflight"', 'rm -f "${mnt}/usr/sbin/policy-rc.d"'),
 ]
+module_probe = '''
+in_chroot() {
+    [[ "$*" == "modprobe --set-version fixture-kernel --show-depends vsock_loopback" ]] || return 97
+    [[ "${fixture_module_missing:-false}" == false ]] || return 42
+}
+'''
 for mask in ("027", "077"):
     guest = fixture / ("guest-" + mask)
     for directory in ("etc/modules-load.d", "etc/systemd/system"):
         (guest / directory).mkdir(parents=True, exist_ok=True)
-    script = "set -eu\numask " + mask + "\n" + "\n".join(snippets)
+    script = "set -eu\numask " + mask + "\n" + module_probe + "\n".join(snippets)
     script += '\n: >"${mnt}/private-mode-sentinel"\n'
     subprocess.run(["bash", "-c", script], check=True,
                    env={**os.environ, "mnt": str(guest), "test_resolver": str(resolver),
+                        "guest_kernel_release": "fixture-kernel",
                         "image_id": "noble-turbo-fixture", "encryption_mode": "host-zfs"})
     for name in ("etc/resolv.conf", "etc/modules-load.d/postflight-sev.conf",
+                 "etc/modules-load.d/postflight-vsock.conf",
                  "etc/systemd/system/guestd.service", "etc/systemd/network/10-postflight.network",
                  "etc/machine-id", "etc/postflight-image-release", "etc/postflight/workspace-encryption"):
         mode = stat.S_IMODE((guest / name).stat().st_mode)
         assert mode == 0o644, f"{name} mode {mode:o} under umask {mask}; unprivileged readers need 644"
     assert (guest / "etc/resolv.conf").read_text() == resolver.read_text()
+    assert (guest / "etc/modules-load.d/postflight-vsock.conf").read_text() == "vsock_loopback\n"
     assert "Driver=virtio_net\n" in (guest / "etc/systemd/network/10-postflight.network").read_text()
     assert "DHCP=yes\n" in (guest / "etc/systemd/network/10-postflight.network").read_text()
     assert stat.S_IMODE((guest / "private-mode-sentinel").stat().st_mode) == (0o666 & ~int(mask, 8)), "caller umask changed"
+
+# A missing guest-kernel transport must abort the builder phase before writing
+# its boot declaration or continuing to the image publication phase.
+guest = fixture / "guest-missing-module"
+(guest / "etc/modules-load.d").mkdir(parents=True)
+result = subprocess.run(
+    ["bash", "-c", "set -eu\n" + module_probe + snippets[1] + '\n: >"${mnt}/continued-image-build"\n'],
+    env={**os.environ, "mnt": str(guest), "guest_kernel_release": "fixture-kernel",
+         "fixture_module_missing": "true"},
+)
+assert result.returncode == 42, "missing vsock_loopback did not abort the image build"
+assert not (guest / "etc/modules-load.d/postflight-vsock.conf").exists()
+assert not (guest / "continued-image-build").exists()
 PY
 
 cat >"${fixture_dir}/upstream.pkr.hcl" <<'EOF'
