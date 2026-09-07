@@ -1,10 +1,14 @@
 import copy
 import ipaddress
 import json
+import os
 from pathlib import Path
+import shutil
+import signal
 import stat
 import subprocess
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -115,6 +119,61 @@ class HostTest(unittest.TestCase):
         self.assertNotIn("/home/ubuntu", text)
         self.assertNotIn("apt-get", text)
         self.assertNotIn("secrets.env", text)
+
+    @unittest.skipUnless(shutil.which("flock"), "requires util-linux flock")
+    def test_reconcile_lock_is_not_retained_by_orphan_build_child(self):
+        text = (HERE / "reconcile.sh").read_text()
+        # Execute the production lock/re-entry block with a disposable worker,
+        # without privileged preflight, Git access, builds, or host mutation.
+        lock_block = text[text.index("lock_file=/run/postflight-reconcile/reconcile.lock"):
+                          text.index('if [[ ! -d "${source_dir}/.git" ]]')]
+        for worker_exit in (0, 19):
+            with self.subTest(worker_exit=worker_exit), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                lock = root / "reconcile.lock"
+                pid_file, release, entered = (root / name for name in ("child.pid", "release", "entered"))
+                script = root / "reconcile.sh"
+                script.write_text('set -euo pipefail\nhost_id="fixture-host"\n' +
+                                  lock_block.replace("/run/postflight-reconcile/reconcile.lock", str(lock)) + r'''
+if [[ "${TEST_RECONCILE_MODE:-}" == probe ]]; then
+  : >"${TEST_RECONCILE_ENTERED}"
+  exit 23
+fi
+sleep 60 </dev/null >/dev/null 2>&1 &
+printf '%s\n' "$!" >"${TEST_RECONCILE_CHILD_PID}"
+while [[ ! -f "${TEST_RECONCILE_RELEASE}" ]]; do sleep 0.02; done
+exit "${TEST_RECONCILE_EXIT}"
+''')
+                env = dict(os.environ, TEST_RECONCILE_CHILD_PID=str(pid_file),
+                           TEST_RECONCILE_RELEASE=str(release), TEST_RECONCILE_ENTERED=str(entered),
+                           TEST_RECONCILE_EXIT=str(worker_exit))
+                worker = subprocess.Popen(["bash", str(script), "fixture-host"], env=env)
+                child = None
+                try:
+                    deadline = time.monotonic() + 5
+                    while not pid_file.exists() and time.monotonic() < deadline and worker.poll() is None:
+                        time.sleep(0.02)
+                    self.assertTrue(pid_file.exists(), "worker never entered the critical section")
+                    child = int(pid_file.read_text())
+                    probe_env = dict(env, TEST_RECONCILE_MODE="probe")
+                    blocked = subprocess.run(["bash", str(script), "fixture-host"], env=probe_env, timeout=5)
+                    self.assertEqual(blocked.returncode, 0, "contended reconcile must skip successfully")
+                    self.assertFalse(entered.exists(), "concurrent reconcile entered the critical section")
+                    release.touch()
+                    self.assertEqual(worker.wait(timeout=5), worker_exit, "worker exit status was lost")
+                    os.kill(child, 0)  # The original build child still lives.
+                    next_run = subprocess.run(["bash", str(script), "fixture-host"], env=probe_env, timeout=5)
+                    self.assertEqual(next_run.returncode, 23, "orphan child retained the reconcile lock")
+                    self.assertTrue(entered.exists(), "next reconcile silently skipped after its predecessor exited")
+                finally:
+                    release.touch()
+                    if worker.poll() is None:
+                        worker.wait(timeout=5)
+                    if child is not None:
+                        try:
+                            os.kill(child, signal.SIGTERM)
+                        except ProcessLookupError:
+                            pass
 
 
 if __name__ == "__main__":

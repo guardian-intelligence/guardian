@@ -10,6 +10,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OB
 [[ "${EUID}" -eq 0 && "$(uname -s)" == Linux ]] || { echo "Linux root is required" >&2; exit 1; }
 host_id="${1:?usage: reconcile.sh HOST_ID}"
 [[ "${host_id}" =~ ^[a-z][a-z0-9-]{0,30}$ ]] || { echo "invalid host ID" >&2; exit 1; }
+[[ "$#" -le 2 && ( -z "${2:-}" || "${2:-}" == --lock-held ) ]] || { echo "unexpected reconcile argument" >&2; exit 1; }
 origin=https://github.com/guardian-intelligence/guardian.git
 source_dir=/opt/postflight/source
 artifact_root=/opt/postflight/artifacts
@@ -31,8 +32,14 @@ for name in ("/opt/postflight", "/opt/postflight/source", "/opt/postflight/artif
     else:
         path.mkdir(mode=0o700, parents=True)
 PY
-exec 9>/run/postflight-reconcile/reconcile.lock
-flock -n 9 || exit 0
+# Only flock's supervisor owns the lock descriptor. --close removes it from
+# the re-entered shell and every build subprocess, including servers that
+# outlive a failed reconcile. The private argument is not inherited by later
+# invocations, unlike an environment flag. Contention remains a successful skip.
+lock_file=/run/postflight-reconcile/reconcile.lock
+if [[ "${2:-}" != --lock-held ]]; then
+  exec flock --nonblock --conflict-exit-code 0 --close "${lock_file}" "${BASH}" "$0" "${host_id}" --lock-held
+fi
 
 if [[ ! -d "${source_dir}/.git" ]]; then
   [[ -z "$(ls -A "${source_dir}")" ]] || { echo "nonempty source directory is not our Git repository" >&2; exit 1; }
