@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -93,14 +94,22 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 
 	system := &loopSystem{mounted: map[string]bool{}}
 	ran := make(chan string, 1)
-	assignmentSocket := filepath.Join(t.TempDir(), "assignment.sock")
+	// sockaddr_un has a short fixed limit; Bazel's test temp root can exceed
+	// it before the test's own directory and socket names are appended.
+	socketRoot, err := os.MkdirTemp("/tmp", "postflight-vsock-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketRoot) })
+	assignmentSocket := filepath.Join(socketRoot, "assignment.sock")
 	identity := guestproto.JobIdentity{
 		RunID: "1", RunAttempt: 1, RunnerName: "member-loop",
 		Repository: "acme/widget", WorkflowJob: "test",
 	}
 	var server *guestd.Server
 	server, err = guestd.New(guestd.Config{
-		System: system,
+		System:         system,
+		CapsulePIDPath: filepath.Join(socketRoot, "capsule.pid"),
 		RunRunner: func(_ context.Context, jitConfig string, _ map[string]string, event func(guestd.RunnerEvent)) (int, error) {
 			ran <- jitConfig
 			event(guestd.EventListening)
