@@ -92,6 +92,34 @@ func TestPGMetricsAbsentRequiresCurrentCNPGInstance(t *testing.T) {
 	}
 }
 
+// PGReplicationSlotWALRetained pages at 2GiB on the premise that every
+// instance invalidates a slot at 4GiB. An instance without the cap lets one
+// unreachable replica fill the volume of every surviving member.
+func TestPostgresInstancesCarryTheOperationalStamp(t *testing.T) {
+	stamp := map[string]string{
+		"statement_timeout":                   "120s",
+		"idle_in_transaction_session_timeout": "300s",
+		"lock_timeout":                        "10s",
+		"archive_timeout":                     "300s",
+		"max_slot_wal_keep_size":              "4GB",
+	}
+	instances := map[string]string{
+		"src/company/deploy/cms/postgres.yaml":                               "products",
+		"src/infrastructure/base/apps/postflight-controlplane-postgres.yaml": "postflight-controlplane",
+		"src/infrastructure/deployments/authorization/data/postgres.yaml":    "spicedb",
+		"src/infrastructure/deployments/iam/prod/postgres.yaml":              "keycloak",
+	}
+	for path, name := range instances {
+		postgres := findDoc(t, yamlDocs(t, runfilePath(path)), "Postgres", name)
+		parameters := nestedMap(t, postgres, "spec", "postgresql", "parameters")
+		for parameter, want := range stamp {
+			if got := stringValue(parameters[parameter]); got != want {
+				t.Errorf("%s: Postgres %s sets %s = %q, want %q", path, name, parameter, got, want)
+			}
+		}
+	}
+}
+
 func TestEtcdFragmentationRequiresMaterialReclaimableSpace(t *testing.T) {
 	path := runfilePath("src/infrastructure/base/app-patches/monitoring-agents-etcd-alerts.yaml")
 	patch := singleYAMLDoc(t, path)
