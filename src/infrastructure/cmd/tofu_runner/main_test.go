@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestPluralize(t *testing.T) {
@@ -236,5 +237,58 @@ func TestResolveArtifactNoArtifactYet(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error when artifact not ready")
+	}
+}
+
+// A cancelled run interrupts tofu and waits for it, which is the window tofu
+// uses to release the root's state lock.
+func TestRunTofuInterruptsAndWaitsOnCancellation(t *testing.T) {
+	dir := t.TempDir()
+	started := filepath.Join(dir, "started")
+	released := filepath.Join(dir, "released")
+	tofu := filepath.Join(dir, "tofu")
+	script := "#!/bin/sh\n" +
+		"trap 'echo unlocked > \"" + released + "\"; exit 130' INT\n" +
+		"echo locked > \"" + started + "\"\n" +
+		"while :; do sleep 0.05; done\n"
+	if err := os.WriteFile(tofu, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type result struct {
+		code int
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		code, err := runTofu(ctx, config{tofuBin: tofu}, dir, "plan")
+		done <- result{code, err}
+	}()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stand-in tofu never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+
+	select {
+	case got := <-done:
+		if got.err != nil || got.code != 130 {
+			t.Fatalf("runTofu = (%d, %v), want tofu's own interrupt exit (130, nil)", got.code, got.err)
+		}
+	case <-time.After(tofuStopGrace):
+		t.Fatal("runTofu did not return after cancellation")
+	}
+	body, err := os.ReadFile(released)
+	if err != nil || string(body) != "unlocked\n" {
+		t.Fatalf("release marker = %q, %v; want tofu to have handled the interrupt", body, err)
 	}
 }

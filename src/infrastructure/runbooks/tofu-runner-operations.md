@@ -124,3 +124,30 @@ and an in-cluster apply plan identically against the same state.
 4. Afterwards: if the emergency change isn't already declared in the root,
    PR it now — resuming with undeclared changes hands an apply-mode root a
    revert. Then resume the CronJob and confirm its next plan is a no-op.
+
+## Clear a stale state lock
+
+The runner interrupts tofu on SIGTERM and gives it 25s to release the lock, so
+eviction, deletion, and the Job deadline all unlock cleanly. A kill with no
+warning (OOM, node loss) cannot: the `.tflock` object stays in R2, every later
+Job fails with `Error acquiring the state lock` / `PreconditionFailed`, and
+`TofuRootJobFailed` pages until a human clears it.
+
+The error prints the lock's `ID` and `Who: nonroot@<pod-name>`. The lock is
+stale when that pod no longer exists or is not Running — `concurrencyPolicy:
+Forbid` means no second holder can exist for a scheduled root:
+
+```sh
+kubectl get pod -n tofu-system <pod-name>
+```
+
+Clear it with the break-glass credentials above (the lock lives beside the
+state, so it needs the same R2 env and `TF_ENCRYPTION`), then let the next
+tick prove the root:
+
+```sh
+bazelisk run @multitool//tools/tofu:workspace_root -- \
+  -chdir=src/infrastructure/bootstrap/<root> force-unlock <lock-id>
+```
+
+Never force-unlock while the named pod is still Running.
