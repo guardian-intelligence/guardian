@@ -44,7 +44,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: tofu
-              image: ghcr.io/guardian-intelligence/tofu-runner:edge@sha256:97fc090608f392211b91d93d26eedd9c0d6e5740627bd7e9eb1795fe5594ecb5 # {"$imagepolicy": "guardian-imageops:tofu-runner"}
+              image: ghcr.io/guardian-intelligence/tofu-runner:edge@sha256:64b63143fd4c0cb0f3189024c662997570706e4695888e0d96e1a3cb121f8d30 # {"$imagepolicy": "guardian-imageops:tofu-runner"}
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
