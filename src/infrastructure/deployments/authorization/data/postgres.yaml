@@ -5,13 +5,20 @@ metadata:
   namespace: tenant-guardian-prod
 spec:
   replicas: 3
-  size: 20Gi
+  # 40Gi: the thumper's write load produces several GiB of WAL per day, and
+  # CNPG refuses to start an instance whose volume has no room for WAL, so
+  # headroom above the slot cap is what keeps a degraded cluster startable.
+  size: 40Gi
   storageClass: replicated-encrypted
   external: false
   version: v18
   resources:
     cpu: 2
     memory: 2Gi
+  # Carries the operational stamp uniform across Guardian Postgres instances
+  # (see deployments/iam/prod/postgres.yaml): slot WAL retention capped at 4GB
+  # so a replica on an unreachable node invalidates its slot instead of
+  # filling the volume of every surviving instance.
   postgresql:
     parameters:
       max_connections: 100
@@ -21,6 +28,7 @@ spec:
       idle_in_transaction_session_timeout: 300s
       lock_timeout: 10s
       archive_timeout: 300s
+      max_slot_wal_keep_size: 4GB
       track_commit_timestamp: "on"
   users:
     spicedb: {}
