@@ -149,6 +149,46 @@ EOF
 point-in-time instead of latest. Omitting `targetApplicationRef` makes the
 restore IN-PLACE and destructive — never do that in a drill.
 
+## Recovering an instance after a node loss
+
+Two CNPG behaviours need a human push; neither needs a restore.
+
+**Volume full (`phase: Not enough disk space`).** The operator stops
+reconciling the cluster until "the PVC group is enlarged" — and that stop comes
+before the step that would propagate a larger `spec.size` to the PVCs, so
+raising `size` in Git is necessary but not sufficient. After the PR converges
+(the CNPG `Cluster` shows the new `spec.storage.size`), patch every PVC of the
+instance to that same declared size; expansion is online:
+
+```sh
+kubectl -n <ns> patch pvc <cluster>-<n> --type=merge \
+  -p '{"spec":{"resources":{"requests":{"storage":"<size from Git>"}}}}'
+```
+
+LINSTOR refuses the resize while any replica of the volume is on an offline
+satellite, so the node has to be back first.
+
+**Writes hang after a replica returns (`IPC:SyncRep`).** `max_slot_wal_keep_size`
+invalidates the slot of a replica that was away for more than 4GB of WAL
+(`wal_status = lost`). The returning replica replays the archive to within one
+segment, then loops on `can no longer access replication slot`; CNPG creates
+missing HA slots but does not replace invalidated ones. The pod is Ready, so
+CNPG still counts it toward `synchronous_standby_names = ANY 2 (...)`, and
+every commit waits for a standby that can never stream. On the primary:
+
+```sql
+-- confirm: commits stuck in SyncRep, one standby missing from pg_stat_replication
+SELECT pid, wait_event, now() - xact_start FROM pg_stat_activity WHERE wait_event = 'SyncRep';
+SELECT slot_name, active, wal_status FROM pg_replication_slots;
+-- replace the dead slot exactly as the operator would have created it
+SELECT pg_drop_replication_slot('_cnpg_<cluster>_<n>');          -- only when lost and inactive
+SELECT pg_create_physical_replication_slot('_cnpg_<cluster>_<n>', true);
+```
+
+The replica starts streaming within seconds and the queued commits drain. A
+*logical* slot that reports `lost` belongs to its consumer (for example
+`electric_slot_default`): the consumer has to re-create it and resync.
+
 ## Known limits (stated, not hidden)
 
 - **Idle-database RPO**: bounded at ~5 minutes. Every Guardian Postgres CR
