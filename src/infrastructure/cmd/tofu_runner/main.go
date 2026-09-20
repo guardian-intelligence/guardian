@@ -31,8 +31,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -44,6 +46,11 @@ const (
 	modePlan  mode = "plan"
 	modeApply mode = "apply"
 )
+
+// tofuStopGrace is how long an interrupted tofu gets to release its state
+// lock. It sits inside the pod's 30s default termination grace period so the
+// unlock finishes before the kubelet's own kill.
+const tofuStopGrace = 25 * time.Second
 
 type config struct {
 	// CodeQL mode uses the same verified Flux artifact but never invokes tofu.
@@ -367,6 +374,13 @@ func writeFile(path string, r io.Reader, mode os.FileMode) error {
 // -detailed-exitcode contract (0 no-change, 2 changes, 1 error).
 func runTofu(ctx context.Context, cfg config, rootDir string, args ...string) (int, error) {
 	cmd := exec.CommandContext(ctx, cfg.tofuBin, args...)
+	// tofu holds the root's state lock in R2 for the length of the run and
+	// only releases it on a graceful stop. Interrupt it on cancellation and
+	// give it tofuStopGrace to unlock before the kill; a killed tofu leaves a
+	// lock no later Job can take, and the root stays wedged until a human
+	// force-unlocks it.
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = tofuStopGrace
 	cmd.Dir = rootDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -475,5 +489,10 @@ func main() {
 	// outlive the pod's own deadline silently.
 	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Minute)
 	defer cancel()
+	// The kubelet announces eviction, deletion, and the Job deadline with
+	// SIGTERM; turning it into cancellation is what lets runTofu stop tofu
+	// gracefully inside the pod's termination grace period.
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, os.Interrupt)
+	defer stop()
 	os.Exit(reconcile(ctx, cfg))
 }
