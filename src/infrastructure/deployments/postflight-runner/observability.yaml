@@ -49,10 +49,20 @@ spec:
             summary: "Postflight canary PR loop is stale"
             description: "No canary heartbeat for {{ $labels.owner }}/{{ $labels.repository }} has reached VictoriaMetrics for 30 minutes and its CronJob is not suspended. The CronJob, GitHub App secret, or network path is unavailable."
         # The gate above must not become a way for the canary estate to die
-        # quietly: a suspension that outlives a day is a forgotten one.
+        # quietly: a suspension that outlives a day is a forgotten one unless
+        # it is parked. The unless leg is the parking ledger — the lanes that
+        # carry guardian.dev/parked-until in canary-loop.yaml, honoured until
+        # that date (UTC midnight, as a Unix time) and not after. It lives
+        # here rather than being read off the CronJob because kube-state-
+        # metrics exports no CronJob annotations; canary_loop_parking_test.go
+        # keeps the two in lockstep. After expiry the usual 24h hold applies.
         - alert: PostflightCanaryLoopSuspended
           expr: |-
             max by (cronjob) (kube_cronjob_spec_suspend{namespace="postflight-runner",cronjob=~"postflight-canary-loop.*"}) > 0
+            unless on (cronjob) (
+              max by (cronjob) (kube_cronjob_spec_suspend{namespace="postflight-runner",cronjob=~"postflight-canary-loop|postflight-canary-loop-node|postflight-canary-loop-go|postflight-canary-loop-python|postflight-canary-loop-gradle"})
+              and on () (vector(time()) < 1793404800)
+            )
           for: 24h
           labels:
             severity: warning
@@ -60,7 +70,7 @@ spec:
             exported_instance: "prod/{{ $labels.cronjob }}"
           annotations:
             summary: "Postflight canary loop {{ $labels.cronjob }} has been suspended for a day"
-            description: "{{ $labels.cronjob }} has declared suspend for over 24 hours, so nothing exercises this canary lane. Re-provision the fleet and un-suspend it, or retire the lane."
+            description: "{{ $labels.cronjob }} has declared suspend for over 24 hours with no current parking, so nothing exercises this canary lane. Un-suspend it, retire the lane, or renew its guardian.dev/parked-until with a reason in canary-loop.yaml."
         - alert: PostflightCanaryLoopMissing
           expr: |-
             absent(kube_cronjob_status_last_schedule_time{namespace="postflight-runner",cronjob="postflight-canary-loop"})

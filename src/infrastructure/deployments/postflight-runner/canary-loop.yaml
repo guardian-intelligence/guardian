@@ -3,19 +3,33 @@
 # requests, and workflow_job events from GitHub. Each lane alternates one file
 # between the merged and parent versions of a seed PR, waits for its Postflight
 # check, merges, and repeats.
+#
+# A suspended lane is parked, never just stopped: it carries
+# guardian.dev/parked-until (a UTC date) and guardian.dev/parked-reason.
+# PostflightCanaryLoopSuspended (observability.yaml) stands down for exactly
+# the parked lanes until that date and warns again after it, so a parking
+# has to be renewed on purpose rather than becoming permanent silence.
+# src/infrastructure/tests/canary_loop_parking_test.go holds the annotations
+# and the rule in lockstep.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: postflight-canary-loop
   namespace: postflight-runner
+  annotations:
+    guardian.dev/parked-until: "2026-10-31"
+    guardian.dev/parked-reason: >-
+      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn
+      down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot
+      host whose real-VM canaries gate the default-CI cutover, and five
+      continuous PR lanes would contend with that. Un-suspend once the
+      cutover lands, or retire the lane.
   labels:
     app.kubernetes.io/name: postflight-canary-loop
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: postflight
 spec:
   schedule: "0,10,20,30,40,50 * * * *"
-  # Workers are torn down overnight (2026-07-26); un-suspend when the
-  # Postflight fleet is re-provisioned.
   suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
@@ -97,14 +111,20 @@ kind: CronJob
 metadata:
   name: postflight-canary-loop-node
   namespace: postflight-runner
+  annotations:
+    guardian.dev/parked-until: "2026-10-31"
+    guardian.dev/parked-reason: >-
+      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn
+      down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot
+      host whose real-VM canaries gate the default-CI cutover, and five
+      continuous PR lanes would contend with that. Un-suspend once the
+      cutover lands, or retire the lane.
   labels:
     app.kubernetes.io/name: postflight-canary-loop
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: postflight
 spec:
   schedule: "2,12,22,32,42,52 * * * *"
-  # Workers are torn down overnight (2026-07-26); un-suspend when the
-  # Postflight fleet is re-provisioned.
   suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
@@ -186,14 +206,20 @@ kind: CronJob
 metadata:
   name: postflight-canary-loop-go
   namespace: postflight-runner
+  annotations:
+    guardian.dev/parked-until: "2026-10-31"
+    guardian.dev/parked-reason: >-
+      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn
+      down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot
+      host whose real-VM canaries gate the default-CI cutover, and five
+      continuous PR lanes would contend with that. Un-suspend once the
+      cutover lands, or retire the lane.
   labels:
     app.kubernetes.io/name: postflight-canary-loop
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: postflight
 spec:
   schedule: "4,14,24,34,44,54 * * * *"
-  # Workers are torn down overnight (2026-07-26); un-suspend when the
-  # Postflight fleet is re-provisioned.
   suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
@@ -275,14 +301,20 @@ kind: CronJob
 metadata:
   name: postflight-canary-loop-python
   namespace: postflight-runner
+  annotations:
+    guardian.dev/parked-until: "2026-10-31"
+    guardian.dev/parked-reason: >-
+      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn
+      down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot
+      host whose real-VM canaries gate the default-CI cutover, and five
+      continuous PR lanes would contend with that. Un-suspend once the
+      cutover lands, or retire the lane.
   labels:
     app.kubernetes.io/name: postflight-canary-loop
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: postflight
 spec:
   schedule: "6,16,26,36,46,56 * * * *"
-  # Workers are torn down overnight (2026-07-26); un-suspend when the
-  # Postflight fleet is re-provisioned.
   suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
@@ -364,14 +396,20 @@ kind: CronJob
 metadata:
   name: postflight-canary-loop-gradle
   namespace: postflight-runner
+  annotations:
+    guardian.dev/parked-until: "2026-10-31"
+    guardian.dev/parked-reason: >-
+      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn
+      down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot
+      host whose real-VM canaries gate the default-CI cutover, and five
+      continuous PR lanes would contend with that. Un-suspend once the
+      cutover lands, or retire the lane.
   labels:
     app.kubernetes.io/name: postflight-canary-loop
     app.kubernetes.io/part-of: guardian
     guardian.dev/product: postflight
 spec:
   schedule: "8,18,28,38,48,58 * * * *"
-  # Workers are torn down overnight (2026-07-26); un-suspend when the
-  # Postflight fleet is re-provisioned.
   suspend: true
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120

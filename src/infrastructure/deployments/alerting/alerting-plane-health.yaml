@@ -34,11 +34,12 @@ spec:
       path: /metrics
       interval: 30s
 ---
-# The Service is headless, so this discovers every replica. That is the point:
-# Alertmanager gossip replicates silences and the notification log but not
-# alerts, and vmalert's notifier is the headless name with Go keep-alive
-# pinning it to whichever replica it connected to — so per-replica series are
-# the only way to see where alert state actually lives.
+# The Service is headless, so this discovers every replica. Alertmanager gossip
+# replicates silences and the notification log but not alerts, so each
+# replica's alert state is only what vmalert sent it. Both evaluators notify
+# every replica by pod DNS (base/app-patches/monitoring-vmalert-notifiers.yaml,
+# vmalert-vlogs.yaml); per-replica alertmanager_alerts series should agree, and
+# a replica that disagrees is one vmalert cannot reach.
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMServiceScrape
 metadata:
@@ -139,19 +140,53 @@ spec:
               have raised is silently absent. Read
               vmalert_alerting_rules_errors_total by group to find which.
         - alert: RuleEvaluatorNotificationErrors
+          # vmalert notifies each Alertmanager replica separately and counts
+          # every attempt in sent_total, failures in send_errors_total. One
+          # replica refusing is redundancy lost (the warning below); this
+          # pages only when no replica accepted anything.
           expr: |
-            sum by (pod) (increase(vmalert_alerts_send_errors_total{job="vmalert-vmalert-shortterm"}[10m])) > 0
+            (sum by (pod) (increase(vmalert_alerts_send_errors_total{job="vmalert-vmalert-shortterm"}[10m])) > 0)
+            unless on (pod)
+            (max by (pod) (
+              increase(vmalert_alerts_sent_total{job="vmalert-vmalert-shortterm"}[10m])
+              - increase(vmalert_alerts_send_errors_total{job="vmalert-vmalert-shortterm"}[10m])
+            ) >= 1)
           for: 5m
           labels:
             severity: critical
             guardian_component: alerting
             exported_instance: guardian-mgmt/vmalert-shortterm
           annotations:
-            summary: "vmalert-shortterm could not hand {{ $value }} alerts to Alertmanager in 10m"
+            summary: "vmalert-shortterm could not hand {{ $value }} alerts to any Alertmanager replica in 10m"
             description: >-
               Firing rules are not reaching Alertmanager, so nothing
-              downstream can page. Check the notifier URL and the
+              downstream can page. Check the notifier URLs and the
               Alertmanager pods.
+        - alert: RuleEvaluatorNotifierReplicaUnreachable
+          # A replica that stays in the gossip cluster but stops hearing from
+          # vmalert lets its copies of open alerts expire, and then sends
+          # resolves that the healthy replicas' repeats contradict: the
+          # resolve/re-fire storm in miniature. While gossip itself reports a
+          # missing member, AlertmanagerClusterDegraded tells that story
+          # instead (a dead replica sends nothing).
+          expr: |
+            (sum by (job, pod, addr) (increase(vmalert_alerts_send_errors_total{namespace="tenant-root", job=~"vmalert-vmalert-(shortterm|vlogs)"}[10m])) > 0)
+            unless on () (min(alertmanager_cluster_members) < 3)
+          for: 15m
+          labels:
+            severity: warning
+            guardian_component: alerting
+            exported_instance: guardian-mgmt/alerting-plane
+          annotations:
+            summary: "{{ $labels.job }} cannot notify {{ $labels.addr }}"
+            description: >-
+              {{ $labels.pod }} failed {{ $value }} deliveries to one
+              Alertmanager replica in 10m while gossip sees every member.
+              The evaluator's notifier list and the replica set disagree
+              (renamed or rescaled StatefulSet, network policy, DNS). Compare
+              base/app-patches/monitoring-vmalert-notifiers.yaml and
+              deployments/alerting/vmalert-vlogs.yaml with the live
+              vmalertmanager-alertmanager pods.
         - alert: AlertingPlaneScrapeDuplicated
           # 2026-07-24 (#1134): two scrapes of one Hubble endpoint doubled
           # every sum() that did not select a job, and the step change read as

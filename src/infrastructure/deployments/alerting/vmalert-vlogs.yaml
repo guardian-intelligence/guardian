@@ -36,8 +36,13 @@ spec:
   # consumers can query log-derived series.
   remoteWrite:
     url: http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus
+  # Every Alertmanager replica by pod DNS, never the headless Service: see
+  # base/app-patches/monitoring-vmalert-notifiers.yaml, which carries the same
+  # list for vmalert-shortterm (alertmanager_notifiers_test.go).
   notifiers:
-    - url: http://vmalertmanager-alertmanager.tenant-root.svc:9093
+    - url: http://vmalertmanager-alertmanager-0.vmalertmanager-alertmanager.tenant-root.svc:9093
+    - url: http://vmalertmanager-alertmanager-1.vmalertmanager-alertmanager.tenant-root.svc:9093
+    - url: http://vmalertmanager-alertmanager-2.vmalertmanager-alertmanager.tenant-root.svc:9093
   # Own exactly the mounted rule files; the never-matching selector keeps the
   # operator from injecting every VMRule in the cluster (shortterm already
   # evaluates those).
