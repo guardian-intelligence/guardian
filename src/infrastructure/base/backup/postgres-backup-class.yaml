@@ -1,4 +1,5 @@
-# Guardian's Postgres BackupClass. It is the platform's `cozy-default` CNPG
+# Guardian's Postgres strategy, plus the `guardian-r2` BackupClass at the end
+# of this file. The strategy is the platform's `cozy-default` CNPG
 # strategy with one deliberate difference: base backups are bzip2-compressed
 # instead of gzip.
 #
@@ -55,8 +56,11 @@ spec:
       wal:
         compression: gzip
 ---
-# Only Postgres is bound. ClickHouse keeps using `cozy-default` (Altinity
-# strategy, unaffected: clickhouse-backup uploads with fixed part sizes).
+# Postgres binds guardian-r2-cnpg (above); ClickHouse binds
+# guardian-r2-altinity (clickhouse-backup-strategy.yaml), which prunes local
+# copies and fails loudly instead of hanging when the sidecar restarts.
+# Kinds not listed here have no strategy under this class, so their Plans
+# stay on `cozy-default`.
 apiVersion: backups.cozystack.io/v1alpha1
 kind: BackupClass
 metadata:
@@ -73,3 +77,10 @@ spec:
         apiGroup: strategy.backups.cozystack.io
         kind: CNPG
         name: guardian-r2-cnpg
+    - application:
+        apiGroup: apps.cozystack.io
+        kind: ClickHouse
+      strategyRef:
+        apiGroup: strategy.backups.cozystack.io
+        kind: Altinity
+        name: guardian-r2-altinity

@@ -14,7 +14,8 @@ What this covers: the `guardian-backups` R2 bucket fed by Cozystack's
 backup machinery — the `guardian-r2` BackupClass (CNPG/barman, bzip2 base
 backups; `postgres-backup-restore.md` explains the R2 multipart rule) for
 `tenant-root/postflight-controlplane` and `tenant-guardian-prod/keycloak`
-Postgres (continuous WAL + nightly base), clickhouse-backup for
+Postgres (continuous WAL + nightly base), the same class's
+`guardian-r2-altinity` clickhouse-backup strategy for
 `tenant-root/analytics` (nightly archive), and talos-backup for
 age-encrypted etcd snapshots every six hours (`talos-etcd/` prefix).
 Sibling procedure docs: `postgres-backup-restore.md` (enablement,

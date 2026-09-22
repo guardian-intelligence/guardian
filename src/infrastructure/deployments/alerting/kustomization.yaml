@@ -20,6 +20,7 @@ resources:
   - audit-alerts.yaml
   - blackbox-exporter.yaml
   - cilium-drop-metrics.yaml
+  - clickhouse-backup-alerts.yaml
   - core-metrics-wiring.yaml
   - etcd-snapshot-alerts.yaml
   - ingress-error-alerts.yaml

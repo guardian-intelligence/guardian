@@ -1,0 +1,81 @@
+# Freshness alerts for the analytics ClickHouse nightly backup (Plan
+# tenant-root/analytics-clickhouse-nightly, strategy guardian-r2-altinity in
+# base/backup/clickhouse-backup-strategy.yaml). Same posture as
+# etcd-snapshot-alerts: a backup that is not asserted fresh is assumed
+# broken.
+#
+# Cozystack exports no metrics for BackupJobs and the clickhouse-backup
+# sidecar's /metrics is not scraped, so every rule reads kube-state-metrics
+# series for the batch Jobs the Altinity driver creates. Each Plan run is a
+# BackupJob named <plan>-<minutes since epoch> that owns a Job named
+# <BackupJob>-backup. Kubernetes sets completionTime only when a Job
+# succeeds, so kube_job_status_completion_time is the time of each
+# successful backup. A failed latest run pages sooner through the platform
+# KubeJobFailed rule, which evaluates only a Plan's latest run
+# (base/app-patches/monitoring-agents-kube-pod-not-ready.yaml).
+# ClickHouseBackupMetricsAbsent guards against the other two rules going
+# blind.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: clickhouse-backup-health
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: clickhouse-backup-health
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  groups:
+    - name: clickhouse-backup-health.rules
+      interval: 60s
+      rules:
+        - alert: ClickHouseBackupStale
+          expr: time() - max(kube_job_status_completion_time{job="kube-state-metrics", namespace="tenant-root", job_name=~"analytics-clickhouse-nightly-[0-9]+-backup"}) > 93600
+          for: 30m
+          labels:
+            severity: critical
+            guardian_component: backup
+          annotations:
+            summary: 'Analytics ClickHouse backup stale'
+            description: >-
+              The newest successful analytics-clickhouse-nightly backup is
+              older than 26 hours (daily 05:00 UTC schedule plus slack).
+              Analytics data newer than the last archive in R2 is not
+              recoverable. Triage and cleanup:
+              src/infrastructure/runbooks/analytics-clickhouse.md.
+        - alert: ClickHouseBackupStuck
+          expr: >-
+            time() - max(
+              kube_job_status_start_time{job="kube-state-metrics", namespace="tenant-root", job_name=~"analytics-clickhouse-nightly-[0-9]+-backup"}
+              and on (namespace, job_name)
+              (kube_job_status_active{job="kube-state-metrics", namespace="tenant-root", job_name=~"analytics-clickhouse-nightly-[0-9]+-backup"} > 0)
+            ) > 7200
+          for: 5m
+          labels:
+            severity: warning
+            guardian_component: backup
+          annotations:
+            summary: 'Analytics ClickHouse backup running for over 2 hours'
+            description: >-
+              An analytics-clickhouse-nightly backup Job has been active for
+              more than 2 hours; nightlies finish in under a minute. Each
+              strategy pod is capped at one hour and fails when the sidecar
+              loses the action, so this means repeated retries or a hang
+              the strategy cannot see. Check the sidecar for OOMKills and
+              stale local backups:
+              src/infrastructure/runbooks/analytics-clickhouse.md.
+        - alert: ClickHouseBackupMetricsAbsent
+          expr: absent(kube_job_owner{job="kube-state-metrics", namespace="tenant-root", owner_kind="BackupJob", owner_name=~"analytics-clickhouse-nightly-[0-9]+"})
+          for: 30m
+          labels:
+            severity: critical
+            guardian_component: backup
+          annotations:
+            summary: 'Analytics ClickHouse backup Jobs missing from metrics'
+            description: >-
+              kube-state-metrics reports no Job owned by an
+              analytics-clickhouse-nightly BackupJob. Either the Plan's
+              history was deleted, the Plan stopped scheduling, or KSM is
+              blind; in every case the other clickhouse-backup-health rules
+              are dark. Treat with the same urgency as a stale backup:
+              src/infrastructure/runbooks/analytics-clickhouse.md.
