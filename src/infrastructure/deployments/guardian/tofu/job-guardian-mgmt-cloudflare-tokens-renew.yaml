@@ -1,0 +1,87 @@
+# One-time, Flux-managed apply renewing the Cloudflare lane tokens' expiry
+# (local.expires, 2026-10-06 -> 2027-01-04). expires_on updates in place in
+# cloudflare provider v5 (no RequiresReplace; value is UseStateForUnknown),
+# so token values are unchanged and nothing needs relaying to consumers.
+# The scheduled root stays plan-only and is suspended while this runs, so its
+# PAGE_ON_DRIFT plan cannot page on the renewal it is about to see. The
+# runner applies only its saved plan, targeted at the eight lane tokens.
+# No TTL: remove this completed Job and resume the CronJob through Git after
+# the resumed plan reads back clean.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tofu-guardian-mgmt-cloudflare-tokens-renew-expiry
+  namespace: tofu-system
+  labels:
+    app.kubernetes.io/name: tofu-runner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tofu-root: guardian-mgmt-cloudflare-tokens
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 3000
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tofu-runner
+        guardian.dev/tofu-root: guardian-mgmt-cloudflare-tokens
+    spec:
+      serviceAccountName: tofu-runner
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tofu
+          image: ghcr.io/guardian-intelligence/tofu-runner:edge@sha256:64b63143fd4c0cb0f3189024c662997570706e4695888e0d96e1a3cb121f8d30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: MODE
+              value: apply
+            - name: TF_CLI_ARGS_plan
+              value: -target=cloudflare_account_token.dns_lb_provisioner -target=cloudflare_account_token.external_dns -target=cloudflare_account_token.edge_policy_provisioner -target=cloudflare_account_token.payments_journal_isolated -target=cloudflare_account_token.r2_backups -target=cloudflare_account_token.r2_bucket_provisioner -target=cloudflare_account_token.r2_state -target=cloudflare_account_token.mythra_acme_dns
+            - name: ROOT_NAME
+              value: guardian-mgmt-cloudflare-tokens
+            - name: ROOT_PATH
+              value: ./src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens
+            - name: SOURCE_KIND
+              value: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+            - name: SOURCE_NAME
+              value: ${GUARDIAN_SOURCE_NAME:=guardian}
+            - name: TF_VAR_cloudflare_account_id
+              valueFrom:
+                configMapKeyRef:
+                  name: tofu-vars
+                  key: cloudflare_account_id
+          envFrom:
+            - secretRef:
+                name: tofu-backend-r2
+            - secretRef:
+                name: tofu-state-encryption
+            - secretRef:
+                name: tofu-cloudflare-minter
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
