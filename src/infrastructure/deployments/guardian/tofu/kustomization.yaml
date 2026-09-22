@@ -9,11 +9,9 @@ resources:
   - cronjob-guardian-stripe-sandbox.yaml
   - cronjob-guardian-mgmt-edge-policy.yaml
   - cronjob-guardian-github.yaml
-  - job-guardian-github-checkout-cjs-apply.yaml
   - cronjob-guardian-codeql.yaml
   - cronjob-guardian-mgmt-dns.yaml
   - cronjob-guardian-mgmt-cloudflare-tokens.yaml
-  - job-guardian-mgmt-cloudflare-tokens-renew.yaml
   - cronjob-guardian-mgmt.yaml
 
 # One copy of the non-secret account id every Cloudflare root's CronJob

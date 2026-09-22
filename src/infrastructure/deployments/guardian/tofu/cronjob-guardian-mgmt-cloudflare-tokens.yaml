@@ -15,10 +15,6 @@ metadata:
     app.kubernetes.io/part-of: guardian
     guardian.dev/tofu-root: guardian-mgmt-cloudflare-tokens
 spec:
-  # Suspended for the one-shot expiry renewal in
-  # job-guardian-mgmt-cloudflare-tokens-renew.yaml; resume in the PR that
-  # removes that Job.
-  suspend: true
   schedule: "*/15 * * * *"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 300
