@@ -46,7 +46,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: gateway
-          image: ghcr.io/guardian-intelligence/chunkies-gateway:edge@sha256:167e3d111acb549975a79d8c6811d279de6ea6d6f5e31bee213880211b2e4e66 # {"$imagepolicy": "guardian-imageops:chunkies-gateway"}
+          image: ghcr.io/guardian-intelligence/chunkies-gateway:edge@sha256:f1ae6af288e36a7d28a5466937aa908b51fb1484cbc33c31afbbe299f686e09e # {"$imagepolicy": "guardian-imageops:chunkies-gateway"}
           ports:
             - name: wt
               containerPort: 4433
