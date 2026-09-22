@@ -45,14 +45,14 @@ locals {
   vault_bucket_resource            = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-vault"
 
   expires = {
-    dns_lb_provisioner    = "2026-10-06T00:00:00Z"
-    external_dns          = "2026-10-06T00:00:00Z"
-    edge_policy_provision = "2026-10-06T00:00:00Z"
-    payments_journal      = "2026-10-06T00:00:00Z"
-    r2_backups            = "2026-10-06T00:00:00Z"
-    r2_bucket_provision   = "2026-10-06T00:00:00Z"
-    r2_state              = "2026-10-06T00:00:00Z"
-    mythra_acme_dns       = "2026-10-06T00:00:00Z"
+    dns_lb_provisioner    = "2027-01-04T00:00:00Z"
+    external_dns          = "2027-01-04T00:00:00Z"
+    edge_policy_provision = "2027-01-04T00:00:00Z"
+    payments_journal      = "2027-01-04T00:00:00Z"
+    r2_backups            = "2027-01-04T00:00:00Z"
+    r2_bucket_provision   = "2027-01-04T00:00:00Z"
+    r2_state              = "2027-01-04T00:00:00Z"
+    mythra_acme_dns       = "2027-01-04T00:00:00Z"
   }
 }
 
