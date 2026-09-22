@@ -1,0 +1,150 @@
+# Guardian's ClickHouse backup strategy, bound to ClickHouse apps by the
+# `guardian-r2` BackupClass (postgres-backup-class.yaml). It is the
+# platform's `cozy-default-altinity` strategy (backupstrategy-controller
+# v1.6.0-rc.4) with three deliberate differences, all from the 2026-09-16 and
+# 2026-09-19 nightlies that skipped without a sound:
+#
+# 1. Local copies never accumulate. Upstream calls create_remote without
+#    delete_source and the sidecar keeps backups_to_keep_local at its default
+#    of 0 (keep everything), so every nightly left a full hardlinked local copy
+#    on replica 0-0: 73 of them by 2026-09-22. The sidecar (chart-fixed 256Mi
+#    limit) was then OOMKilled seconds into create_remote. Two changes here:
+#    - `delete_source=true` on create_remote. clickhouse-backup v2.7.4 reads
+#      it via getQueryParameter (either spelling) in httpCreateRemoteHandler
+#      and, after a successful upload, Upload() calls RemoveBackupLocal on the
+#      source (pkg/backup/upload.go, fix for Altinity/clickhouse-backup#777).
+#    - Before creating, delete every local backup under this release's prefix
+#      through POST /backup/delete/local/{name}. delete_source only runs on a
+#      successful upload; a failed run's local copy would otherwise survive
+#      until the next manual cleanup. A local copy is never the only copy we
+#      rely on: restores read from R2.
+# 2. The poll loop fails when the action disappears. The sidecar keeps its
+#    action log in memory; a restart empties it, so upstream's loop (which
+#    exits only on success/error) polled an empty status forever. Here, 24
+#    consecutive polls (2 minutes) with the action missing or the API
+#    unreachable fail the pod, and a `cancel` status fails it too.
+# 3. `activeDeadlineSeconds` bounds each pod. Nightlies finish in about 30s;
+#    the one-hour cap is the backstop for any hang the loop cannot see.
+#    The controller wraps the pod in a Job with backoffLimit 2, so a run
+#    ends within about three hours in the worst case.
+#
+# Retries never re-upload an existing name: each pod stamps a fresh
+# second-resolution target, the Job never passes `resume`, and Upload()
+# refuses a name that already exists on remote ("already exists on remote
+# storage"). That matters because the guardian-backups bucket carries an
+# object-lock policy: re-uploading an existing name fails with
+# ObjectLockedByBucketPolicy.
+#
+# The restore branch is unchanged from upstream. Re-diff this object against
+# `kubectl get altinity cozy-default-altinity -o yaml` on every Cozystack
+# upgrade; the chart-owned original is reverted on helm reconcile, so a
+# sibling strategy is the supported override path (same as guardian-r2-cnpg).
+apiVersion: strategy.backups.cozystack.io/v1alpha1
+kind: Altinity
+metadata:
+  name: guardian-r2-altinity
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: backup
+spec:
+  template:
+    spec:
+      activeDeadlineSeconds: 3600
+      restartPolicy: Never
+      containers:
+        - name: ch-backup-client
+          image: ghcr.io/cozystack/cozystack/platform-migrations:v1.4.0-rc.2@sha256:17390197a9b11d76a8dd1b24c6d1512adb7d3226b28b5bcba8551b14b1ec4be0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              set -euo pipefail
+              # curl + jq are baked into the ch-backup-client image.
+              host="chi-clickhouse-{{ .Release.Name }}-clickhouse-0-0.{{ .Release.Namespace }}.svc"
+              api="http://${host}:7171"
+              auth="-u ${API_USERNAME}:${API_PASSWORD}"
+              for _ in $(seq 1 60); do
+                if curl -fsS ${auth} --max-time 2 "${api}/backup/status" >/dev/null 2>&1; then break; fi
+                sleep 5
+              done
+              if [ "{{ .Mode }}" = "backup" ]; then
+                prefix="clickhouse-{{ .Release.Name }}-"
+                curl -fsS ${auth} "${api}/backup/list/local" \
+                  | jq -r --arg prefix "${prefix}" 'select((.name // "") | startswith($prefix)) | .name' \
+                  | while read -r stale; do
+                      echo "delete local ${stale}"
+                      curl -fsS ${auth} -X POST "${api}/backup/delete/local/${stale}" >/dev/null
+                    done
+                target="${prefix}$(date -u +%Y%m%dT%H%M%SZ)"
+                echo "create_remote ${target}"
+                curl -fsS ${auth} -X POST "${api}/backup/create_remote?name=${target}&delete_source=true" >/dev/null
+              else
+                prefix="clickhouse-{{ .Backup.ApplicationRef.Name }}-"
+                target=$(curl -fsS ${auth} "${api}/backup/list/remote" \
+                  | jq -rs --arg prefix "${prefix}" \
+                      '[.[] | select((.name // "") | startswith($prefix))] | sort_by(.created // "") | last.name // ""')
+                if [ -z "${target}" ] || [ "${target}" = "null" ]; then
+                  echo "no remote backup found" >&2
+                  exit 1
+                fi
+                echo "restore_remote ${target}"
+                curl -fsS ${auth} -X POST "${api}/backup/restore_remote/${target}" >/dev/null
+              fi
+              misses=0
+              while true; do
+                if row=$(curl -fsS ${auth} --max-time 10 "${api}/backup/actions" \
+                    | jq -rs --arg suffix "${target}" \
+                        '[.[] | select((.command // "") | endswith($suffix))] | sort_by(.start) | last'); then
+                  status=$(echo "${row}" | jq -r '.status // ""')
+                else
+                  status=""
+                fi
+                case "${status}" in
+                  success) echo "operation succeeded" ; exit 0 ;;
+                  error|cancel)
+                    err=$(echo "${row}" | jq -r '.error // "unknown"')
+                    echo "operation ${status}: ${err}" >&2
+                    exit 1
+                    ;;
+                  "in progress") misses=0 ;;
+                  "")
+                    misses=$((misses + 1))
+                    if [ "${misses}" -ge 24 ]; then
+                      echo "action for ${target} vanished from ${api}/backup/actions for 2m: sidecar restart (OOMKilled?) wiped its in-memory action log" >&2
+                      exit 1
+                    fi
+                    ;;
+                  *)
+                    echo "unexpected action status '${status}' for ${target}" >&2
+                    exit 1
+                    ;;
+                esac
+                sleep 5
+              done
+          env:
+            - name: API_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-{{ .Release.Name }}-backup-api-auth
+                  key: username
+            - name: API_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-{{ .Release.Name }}-backup-api-auth
+                  key: password
+          resources:
+            limits:
+              cpu: 200m
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault

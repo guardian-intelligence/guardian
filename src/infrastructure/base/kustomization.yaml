@@ -10,6 +10,7 @@ resources:
   - secrets/external-secrets.yaml
   - secrets/backup-storage-credentials.yaml
   - secrets/cloudflare-origin-tls.yaml
+  - backup/clickhouse-backup-strategy.yaml
   - backup/etcd-snapshots.yaml
   - backup/postgres-backup-class.yaml
   - networking/metallb.yaml

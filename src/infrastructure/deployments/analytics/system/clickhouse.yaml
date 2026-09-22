@@ -89,9 +89,11 @@ spec:
     replicas: 3
     size: 2Gi
 ---
-# Nightly base backup via the Altinity strategy (clickhouse-backup sidecar →
-# guardian-backups R2, prefix tenant-root/analytics). Offset from the two
-# Postgres Plans (03:00 / 04:00).
+# Nightly base backup via the guardian-r2 class's Altinity strategy
+# (base/backup/clickhouse-backup-strategy.yaml: clickhouse-backup sidecar →
+# guardian-backups R2, prefix tenant-root/analytics, local copy deleted after
+# upload). Offset from the two Postgres Plans (03:00 / 04:00). Freshness is
+# asserted by deployments/alerting/clickhouse-backup-alerts.yaml.
 apiVersion: backups.cozystack.io/v1alpha1
 kind: Plan
 metadata:
@@ -102,7 +104,7 @@ spec:
     apiGroup: apps.cozystack.io
     kind: ClickHouse
     name: analytics
-  backupClassName: cozy-default
+  backupClassName: guardian-r2
   schedule:
     type: cron
     cron: "0 5 * * *"

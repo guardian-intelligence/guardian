@@ -1,6 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = [
+        "clickhouse-backup-strategy.yaml",
         "etcd-snapshots.yaml",
         "postgres-backup-class.yaml",
     ],

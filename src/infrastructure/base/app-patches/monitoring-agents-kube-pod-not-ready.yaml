@@ -237,17 +237,25 @@ spec:
     - alert: KubeJobFailed
       annotations:
         description: >-
-          Job or CronJob {{ $labels.namespace }}/{{ $labels.job_name }} has no
-          newer successful run. For CronJobs only the latest run is evaluated,
-          so retained failure history does not hold the alert open after
-          recovery.
+          Job, CronJob, or backup Plan {{ $labels.namespace }}/{{ $labels.job_name }}
+          has no newer successful run. For CronJobs and for Jobs that a
+          Cozystack backup Plan's BackupJobs own, only the latest run is
+          evaluated, so retained failure history does not hold the alert open
+          after recovery.
         runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubejobfailed
         summary: Latest Job run failed to complete.
+      # Plan-scheduled BackupJobs are named <plan>-<minutes since epoch>
+      # (8+ digits) and nothing on the Job or the BackupJob carries the Plan
+      # as a label kube-state-metrics exports, so the Plan is recovered from
+      # owner_name. Manually created BackupJobs (analytics-backup-4) fall
+      # outside the regex and are judged individually like any other Job.
       expr: |-
         (
           (kube_job_failed{job="kube-state-metrics", namespace=~".*"} > 0)
             unless on (namespace, job_name, cluster)
           kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+            unless on (namespace, job_name, cluster)
+          kube_job_owner{job="kube-state-metrics", owner_kind="BackupJob", owner_name=~".+-[0-9]{8,}"}
         )
         or
         label_replace(
@@ -266,6 +274,30 @@ spec:
             )
           ),
           "job_name", "$1", "owner_name", "(.*)"
+        )
+        or
+        label_replace(
+          max by (namespace, plan, cluster) (
+            (
+              (kube_job_failed{job="kube-state-metrics", namespace=~".*"} > 0)
+                * on (namespace, job_name, cluster) group_left(plan)
+              label_replace(
+                kube_job_owner{job="kube-state-metrics", owner_kind="BackupJob", owner_name=~".+-[0-9]{8,}"},
+                "plan", "$1", "owner_name", "(.+)-[0-9]{8,}"
+              )
+            )
+              and on (namespace, job_name, cluster)
+            topk by (namespace, plan, cluster) (
+              1,
+              kube_job_status_start_time{job="kube-state-metrics", namespace=~".*"}
+                * on (namespace, job_name, cluster) group_left(plan)
+              label_replace(
+                kube_job_owner{job="kube-state-metrics", owner_kind="BackupJob", owner_name=~".+-[0-9]{8,}"},
+                "plan", "$1", "owner_name", "(.+)-[0-9]{8,}"
+              )
+            )
+          ),
+          "job_name", "$1", "plan", "(.*)"
         )
       for: 15m
       labels:
