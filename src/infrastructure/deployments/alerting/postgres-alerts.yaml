@@ -118,8 +118,25 @@ spec:
               range from a deleted PodMonitor to vmagent discovery loss. A
               current CNPG instance pod confirms that this is a live database,
               not a completed decommission or a platform-wide metrics outage.
+        # Slot health reads each slot against the WAL physically present in
+        # pg_wal. A slot pins every segment from its restart_lsn onward, so a
+        # live slot's pg_wal_lsn_diff cannot exceed the pg_wal directory size
+        # (64MiB of slack absorbs segment rounding and the gap between the
+        # two exporter queries). A slot whose distance does exceed it points
+        # at WAL that is already gone: Postgres invalidated it at
+        # max_slot_wal_keep_size (wal_status 'lost', which the CNPG exporter
+        # does not expose). Its restart_lsn stays frozen, so the distance
+        # grows without bound while pinning nothing. In September 2026 an
+        # orphaned lost Electric slot read ~197GiB against a 576MiB pg_wal
+        # and held two critical pages open for days.
         - alert: PGReplicationSlotInactive
-          expr: (max by (namespace, job, pod, slot_name) (cnpg_pg_replication_slots_active) == 0) and on (namespace, pod) (cnpg_pg_replication_in_recovery == 0)
+          expr: >-
+            ((max by (namespace, job, pod, slot_name) (cnpg_pg_replication_slots_active) == 0)
+            and on (namespace, pod) (cnpg_pg_replication_in_recovery == 0))
+            unless on (namespace, pod, slot_name)
+            (max by (namespace, pod, slot_name) (cnpg_pg_replication_slots_pg_wal_lsn_diff)
+            > on (namespace, pod) group_left ()
+            (max by (namespace, pod) (cnpg_collector_pg_wal{value="size"}) + 67108864))
           for: 15m
           labels:
             severity: critical
@@ -133,10 +150,14 @@ spec:
               they are inactive by design. An abandoned logical slot pins WAL
               and can eventually fill the volume and take down the primary;
               this is the standing guard for any logical replication consumer.
+              A slot that no longer pins WAL raises PGReplicationSlotLost
+              instead.
         - alert: PGReplicationSlotWALRetained
           expr: >-
             (max by (namespace, job, pod, slot_name)
             (cnpg_pg_replication_slots_pg_wal_lsn_diff) > 2e9)
+            <= on (namespace, pod) group_left ()
+            (max by (namespace, pod) (cnpg_collector_pg_wal{value="size"}) + 67108864)
             and on (namespace, pod)
             (cnpg_pg_replication_in_recovery == 0)
           for: 10m
@@ -147,8 +168,28 @@ spec:
             summary: 'Postgres replication slot {{ $labels.slot_name }} retaining WAL for {{ $labels.job }}'
             description: >-
               Replication slot {{ $labels.slot_name }} on {{ $labels.job }} is
-              holding back more than 2GiB of WAL. Instances cap slot retention
-              at 4GiB with max_slot_wal_keep_size, so this pages at half the
-              cap before Postgres invalidates the slot. Restore and recovery
-              context lives in
-              src/infrastructure/runbooks/postgres-backup-restore.md.
+              holding back more than 2GiB of WAL that is still on disk.
+              Instances cap slot retention at 4GiB with
+              max_slot_wal_keep_size, so this pages at half the cap before
+              Postgres invalidates the slot. Restore and recovery context
+              lives in src/infrastructure/runbooks/postgres-backup-restore.md.
+        - alert: PGReplicationSlotLost
+          expr: >-
+            (max by (namespace, job, pod, slot_name) (cnpg_pg_replication_slots_pg_wal_lsn_diff)
+            > on (namespace, pod) group_left ()
+            (max by (namespace, pod) (cnpg_collector_pg_wal{value="size"}) + 67108864))
+            and on (namespace, pod)
+            (cnpg_pg_replication_in_recovery == 0)
+          for: 30m
+          labels:
+            severity: warning
+            guardian_component: postgres
+          annotations:
+            summary: 'Postgres replication slot {{ $labels.slot_name }} was invalidated on {{ $labels.job }}'
+            description: >-
+              Replication slot {{ $labels.slot_name }} on {{ $labels.job }}
+              needs WAL that no longer exists, so Postgres has invalidated it
+              (wal_status 'lost'). It pins no WAL and threatens no volume, but
+              its consumer can never resume from it: rebuild that consumer's
+              replication from a fresh slot, or drop this one with
+              pg_drop_replication_slot if nothing consumes it any more.

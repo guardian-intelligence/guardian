@@ -154,11 +154,19 @@ spec:
             description: >-
               LogsQL alert evaluations have continued failing. A datasource,
               query, or response error can make a missing/leak canary fail open.
+        # Pages only when no Alertmanager replica accepted anything; a single
+        # unreachable replica is RuleEvaluatorNotifierReplicaUnreachable
+        # (alerting-plane-health.yaml).
         - alert: VLogsRuleEvaluatorNotificationErrors
           expr: >-
-            sum by (namespace, pod)
+            (sum by (namespace, pod)
               (increase(vmalert_alerts_send_errors_total{namespace="tenant-root",
-              job="vmalert-vmalert-vlogs"}[5m])) > 0
+              job="vmalert-vmalert-vlogs"}[5m])) > 0)
+            unless on (namespace, pod)
+            (max by (namespace, pod) (
+              increase(vmalert_alerts_sent_total{namespace="tenant-root", job="vmalert-vmalert-vlogs"}[5m])
+              - increase(vmalert_alerts_send_errors_total{namespace="tenant-root", job="vmalert-vmalert-vlogs"}[5m])
+            ) >= 1)
           for: 5m
           labels:
             severity: critical

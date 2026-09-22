@@ -1,0 +1,35 @@
+# Notify every Alertmanager replica, never the Service. The chart points
+# vmalert-shortterm at the headless vmalertmanager-alertmanager name, and Go's
+# keep-alive pins that to whichever replica it first dialled. Alertmanager
+# gossip replicates silences and the notification log but not alerts, so the
+# whole alert set lived on one replica: when a node disruption moved the
+# connection, the new replica had nothing and the old one's alerts expired,
+# resolving and re-firing every open page (~2,800 pages over 2026-09-19/20).
+# Upstream's HA contract is the opposite: "Do not load balance traffic between
+# Prometheus and its Alertmanagers, but instead point Prometheus to a list of
+# all Alertmanagers" (prometheus/alertmanager README, High Availability).
+# Each replica then holds every alert, and the gossiped notification log is
+# what keeps three receivers from sending three pages.
+#
+# The list is static per-pod DNS (StatefulSet vmalertmanager-alertmanager,
+# serviceName vmalertmanager-alertmanager, replicaCount 3) rather than the
+# operator's notifier selector: the rendered -notifier.url flags are then
+# exactly what Git says. A replica that vanishes surfaces as
+# RuleEvaluatorNotifierReplicaUnreachable; the vmalert-vlogs list in
+# deployments/alerting/vmalert-vlogs.yaml is kept identical by
+# alertmanager_notifiers_test.go.
+#
+# VMAlert preserves unknown fields, so notifiers is an atomic list under
+# server-side apply and Override replaces the chart's single entry whole.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMAlert
+metadata:
+  name: vmalert-shortterm
+  namespace: tenant-root
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: Override
+spec:
+  notifiers:
+    - url: http://vmalertmanager-alertmanager-0.vmalertmanager-alertmanager.tenant-root.svc:9093
+    - url: http://vmalertmanager-alertmanager-1.vmalertmanager-alertmanager.tenant-root.svc:9093
+    - url: http://vmalertmanager-alertmanager-2.vmalertmanager-alertmanager.tenant-root.svc:9093
