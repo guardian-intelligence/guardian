@@ -246,34 +246,6 @@ func TestImportPlanOptionalKeycloakStages(t *testing.T) {
 	}
 }
 
-func TestImportPlanGitHubLoginCanary(t *testing.T) {
-	env := testImportEnv()
-	env["PROD_GITHUB_LOGIN_CANARY_USERNAME"] = "guardian-canary"
-	env["PROD_GITHUB_LOGIN_CANARY_PASSWORD"] = "canary-pass"
-	env["PROD_GITHUB_LOGIN_CANARY_TOTP_SECRET"] = "JBSWY3DPEHPK3PXP"
-
-	plan, err := importPlan(env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	byPath := map[string]secretWrite{}
-	for _, w := range plan {
-		byPath[w.APIPath] = w
-	}
-	canary, ok := byPath["kv/data/guardian/guardian-mgmt/tenant-guardian-prod/keycloak/login-canary-github"]
-	if !ok {
-		t.Fatal("prod login-canary-github write missing")
-	}
-	if canary.Data["password"] != "canary-pass" || canary.Data["totp_secret"] != "JBSWY3DPEHPK3PXP" {
-		t.Fatalf("login-canary-github data = %#v", canary.Data)
-	}
-
-	delete(env, "PROD_GITHUB_LOGIN_CANARY_PASSWORD")
-	if _, err := importPlan(env); err == nil {
-		t.Fatal("importPlan accepted incomplete GitHub canary credentials")
-	}
-}
-
 func TestImportPlanGitHubOrgCanary(t *testing.T) {
 	env := testImportEnv()
 	env["PROD_GITHUB_ORG_CANARY_USERNAME"] = "postflight-canary-001"

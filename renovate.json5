@@ -39,7 +39,6 @@
     "src/infrastructure/deployments/payments/**",
     "src/infrastructure/deployments/privatecut/**",
     "src/infrastructure/deployments/postflight-runner/**",
-    "src/infrastructure/deployments/iam/prod/journey-canary.yaml",
   ],
 
   // Third-party workload images (Keycloak, Renovate, Directus) are ordinary

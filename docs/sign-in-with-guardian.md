@@ -57,9 +57,6 @@ Before production activation:
 - OAuth App settings ID `3708383` has homepage
   `https://staging.guardianintelligence.org` and the single callback
   `https://staging.guardianintelligence.org/realms/guardianintelligence.org/broker/github/endpoint`.
-- The GitHub machine account username, password, and TOTP seed exist at
-  `guardian/guardian-mgmt/tenant-guardian-prod/keycloak/login-canary-github`
-  in OpenBao.
 - OAuth App settings ID `3708383` is the only staging registration. Settings
   ID `3708386` is retired.
 - The Postflight staging GitHub App is installed only in the canary
@@ -67,8 +64,7 @@ Before production activation:
 
 There is no general-purpose Guardian GitHub App in this product boundary.
 Use
-[`create-github-login-canary`](skills/create-github-login-canary/SKILL.md),
-[`configure-guardian-github-oauth`](skills/configure-guardian-github-oauth/SKILL.md),
+[`configure-guardian-github-oauth`](skills/configure-guardian-github-oauth/SKILL.md)
 and
 [`configure-postflight-github-app`](skills/configure-postflight-github-app/SKILL.md)
 for the browser procedures.
@@ -130,67 +126,10 @@ references backed by mounted Kubernetes Secrets. Their usable credentials do
 not enter the Keycloak database or its backups. Temporary bootstrap
 administrators are recovery artifacts, not runtime dependencies.
 
-## Canary
-
-The production canary is a fresh Chromium profile that performs the same
-journey as a user: open Postflight, click **Sign in with GitHub**, land
-directly on github.com, enter the GitHub machine account credentials and
-TOTP, return through the OIDC callback to the Postflight console, verify an
-authenticated Postflight session, sign out, and verify the local session is
-gone. Any rendered Keycloak page at any step fails the run. It does not use
-a direct grant or Keycloak admin API and it does not simulate a broker
-callback. The journey is a Playwright spec in
-`src/shared/ts/canary-journeys/` (general canary
-principles: `docs/canaries.md`); it runs as the `guardian-journey-canary`
-CronJob, treats its credentials as critical data (captures off, output
-scrubbed by known value, a honeytoken self-test on every run), and its
-structured page classification fails closed on the same negative cases the
-journey has always held: no rendered Keycloak page, no automatic account
-linking on email collision.
-
-A second journey in the same package drives the device grant the postflight
-CLI signs in with: approve the code, ride the broker to GitHub and back, and
-take delivery of a token set. It then asserts what the CLI's session verbs
-rest on — a live access token names a session at the userinfo endpoint, a
-back-channel logout with the refresh token ends that session, and afterwards
-userinfo refuses the access token and the refresh token is `invalid_grant`.
-This is the only place the server side of `postflight auth logout` is proven:
-ending a session needs a session, and the CLI's own pre-promotion deep test
-has no browser to approve one with.
-
-A third, browserless-cheap journey pins the device-flow error vocabulary:
-Keycloak's terminal pages share one "failed" header, and the bounce theme
-discriminates the body message into the approval page's `?error=` values, so
-the journey drives the deny and expiry mappings end to end and asserts the
-approval page renders each with its own copy.
-
-An operator approves the OAuth App once in an interactive browser during
-machine-account enrollment and verifies that it appears under the account's
-authorized OAuth Apps. Scheduled runs use a fresh browser profile and fail if
-GitHub unexpectedly requires interactive consent again. The canary runs every
-15 minutes because GitHub limits a user/application/scope combination to ten
-OAuth tokens per hour and deliberately forces reauthorization above that
-limit.
-
-The machine account is permanent and has no organization privileges. Its
-password and TOTP seed live only in the production OpenBao scope. Its first
-run creates the Guardian account headlessly; an email collision or
-account-linking prompt fails the canary instead of linking automatically.
-
-The separate `digital-guardian-software` organization exercises the staging
-Postflight GitHub App and CI runner path. It is not part of the customer-login
-canary and grants the login machine account no organization access.
-
 ## Alerting
 
-Sign-in health is alerted on at the funnel, not on the canary Job: Keycloak's
-per-realm user event metrics (`keycloak_user_events_total`) count every login
-attempt — real users and the canary alike. Prod pages `critical` when a
-majority of recent attempts fail (`GuardianSignInFailing`) or when no attempt
-has succeeded for 35 minutes (`GuardianSignInStale`, two canary cycles). The
-canary's role in this scheme is a traffic floor: it guarantees at least one
-authentic journey per 15 minutes so the staleness alert stays meaningful with
-zero user traffic, and a single flaked run never pages. With today's
-canary-only traffic the staleness alert bounds detection at roughly 37
-minutes; the failure-rate alert takes over at minutes-scale as real login
-volume grows.
+Sign-in health is alerted on at the funnel: Keycloak's per-realm user event
+metrics (`keycloak_user_events_total`) count every login attempt. Prod pages
+`critical` when a majority of recent attempts fail (`GuardianSignInFailing`).
+There is no synthetic traffic floor, so an absence of logins is not treated as
+a signal; detection latency scales with real login volume.

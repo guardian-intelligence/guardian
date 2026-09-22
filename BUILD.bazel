@@ -17,7 +17,6 @@ WORKSPACE_PACKAGES = [
     "src/privatecut/web",
     "src/games/wake-up-mythra/web",
     "src/shared/ts/brand",
-    "src/shared/ts/canary-journeys",
     "src/chunkies/host/ts",
     "src/chunkies/testkit/ts",
     "src/chunkies/transport/ts",

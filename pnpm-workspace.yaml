@@ -8,7 +8,6 @@ packages:
   - src/postflight/checkout
   - src/privatecut/web
   - src/shared/ts/brand
-  - src/shared/ts/canary-journeys
   - src/shared/ts/telemetry
   - src/shared/ts/visual-harness
 allowBuilds:

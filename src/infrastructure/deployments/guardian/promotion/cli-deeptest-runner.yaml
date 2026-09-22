@@ -348,9 +348,9 @@ data:
     # decays silently: a credential the issuer never minted must read as ended
     # and be removed, an unreachable issuer must be an error that leaves the
     # credential alone, and signing out must clear the machine and report the
-    # session ended rather than merely local. The end-to-end proof that logout
-    # kills the server-side session needs a real approval and lives in the
-    # postflight device-flow journey canary.
+    # session ended rather than merely local. Proving end to end that logout
+    # kills the server-side session needs a real approval, which nothing
+    # automated performs.
     AUTH_HOME=/tmp/auth-home
     AUTH_CREDENTIALS="$AUTH_HOME/postflight/credentials.json"
     AUTH_CLI=(env -u CLICKHOUSE_USER -u CLICKHOUSE_PASSWORD XDG_CONFIG_HOME="$AUTH_HOME" "$BIN")
