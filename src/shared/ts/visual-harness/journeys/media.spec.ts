@@ -18,6 +18,11 @@ const LONG_WEBM_FIXTURE = Buffer.from(
   "base64",
 );
 
+// The first assertion after an upload waits on in-browser probing and decode,
+// which the canary pod runs at a 250m CPU request; Playwright's 5s default
+// expect budget intermittently lapses there. Later assertions keep it.
+const UPLOAD_SETTLE = { timeout: 20_000 };
+
 if (cfg.target.name === "privatecut") {
   test("three-minute selections show a reactive quality warning", async ({ page }) => {
     test.setTimeout(60_000);
@@ -28,7 +33,7 @@ if (cfg.target.name === "privatecut") {
       buffer: LONG_WEBM_FIXTURE,
     });
 
-    await expect(page.getByText("0:00 – 3:00", { exact: true })).toBeVisible();
+    await expect(page.getByText("0:00 – 3:00", { exact: true })).toBeVisible(UPLOAD_SETTLE);
     const warning = page.getByRole("status").filter({ hasText: "Low-quality output likely" });
     await expect(warning).toContainText(
       "Try increasing maximum size or splitting into shorter clips.",
@@ -51,7 +56,7 @@ if (cfg.target.name === "privatecut") {
     });
 
     const outputGroup = page.getByRole("group", { name: "Output format" });
-    await expect(outputGroup).toBeVisible();
+    await expect(outputGroup).toBeVisible(UPLOAD_SETTLE);
     await expect(outputGroup.getByRole("button", { name: "MP4" })).toBeEnabled();
     await expect(outputGroup.getByRole("button", { name: "WebM" })).toBeEnabled();
 
