@@ -113,7 +113,6 @@ go_test(
         "//src/infrastructure/talm:chart",
         "//src/postflight/cli:installer",
         "//src/postflight/cli:sources",
-        "//src/shared/ts/canary-journeys:sources",
         "//src/postflight/cli/dist/homebrew:formula",
         "//src/postflight/cli/dist/npm:packages",
         "//src/postflight/cli/release:channels",

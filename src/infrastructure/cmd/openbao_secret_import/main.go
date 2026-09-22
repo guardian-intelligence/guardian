@@ -372,7 +372,8 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 	// settings id, homepage/callback URL, realm, idp alias, client ID) is
 	// not sensitive and is checked into
 	// src/infrastructure/deployments/iam/github-oauth-apps.yaml instead.
-	// Browser canary credentials belong to a dedicated GitHub machine account.
+	// The org-owning canary machine account (postflight-canary-001) holds a
+	// real GitHub organization for organization- and repo-linking journeys.
 	for _, stage := range []string{"staging", "prod"} {
 		prefix := strings.ToUpper(stage)
 		base := fmt.Sprintf("kv/data/guardian/guardian-mgmt/tenant-guardian-%s/keycloak", stage)
@@ -384,30 +385,23 @@ func importPlan(env map[string]string) ([]secretWrite, error) {
 				},
 			})
 		}
-		// login-canary is the org-less returning-user account; org-canary
-		// owns a real GitHub organization for linking journeys.
-		for _, account := range []struct{ envInfix, path string }{
-			{"GITHUB_LOGIN_CANARY", "login-canary-github"},
-			{"GITHUB_ORG_CANARY", "org-canary-github"},
-		} {
-			canaryUsername := strings.TrimSpace(env[prefix+"_"+account.envInfix+"_USERNAME"])
-			canaryPassword := env[prefix+"_"+account.envInfix+"_PASSWORD"]
-			canaryTOTP := strings.TrimSpace(env[prefix+"_"+account.envInfix+"_TOTP_SECRET"])
-			if canaryUsername == "" && canaryPassword == "" && canaryTOTP == "" {
-				continue
-			}
-			if canaryUsername == "" || canaryPassword == "" || canaryTOTP == "" {
-				return nil, fmt.Errorf("%[1]s_%[2]s_USERNAME, %[1]s_%[2]s_PASSWORD, and %[1]s_%[2]s_TOTP_SECRET must be set together", prefix, account.envInfix)
-			}
-			writes = append(writes, secretWrite{
-				APIPath: base + "/" + account.path,
-				Data: map[string]string{
-					"username":    canaryUsername,
-					"password":    canaryPassword,
-					"totp_secret": canaryTOTP,
-				},
-			})
+		canaryUsername := strings.TrimSpace(env[prefix+"_GITHUB_ORG_CANARY_USERNAME"])
+		canaryPassword := env[prefix+"_GITHUB_ORG_CANARY_PASSWORD"]
+		canaryTOTP := strings.TrimSpace(env[prefix+"_GITHUB_ORG_CANARY_TOTP_SECRET"])
+		if canaryUsername == "" && canaryPassword == "" && canaryTOTP == "" {
+			continue
 		}
+		if canaryUsername == "" || canaryPassword == "" || canaryTOTP == "" {
+			return nil, fmt.Errorf("%[1]s_GITHUB_ORG_CANARY_USERNAME, %[1]s_GITHUB_ORG_CANARY_PASSWORD, and %[1]s_GITHUB_ORG_CANARY_TOTP_SECRET must be set together", prefix)
+		}
+		writes = append(writes, secretWrite{
+			APIPath: base + "/org-canary-github",
+			Data: map[string]string{
+				"username":    canaryUsername,
+				"password":    canaryPassword,
+				"totp_secret": canaryTOTP,
+			},
+		})
 	}
 
 	return writes, nil

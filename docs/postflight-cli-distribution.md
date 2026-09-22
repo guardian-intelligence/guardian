@@ -624,10 +624,8 @@ drift from the binary's compiled-in default —
 `TestDeeptestAuthIssuerMatchesTheCliDefault` holds them together, and
 `TestDeeptestRecordsTheAuthSessionChecks` keeps the checks from being dropped
 without their alerting. What they cannot prove is that signing out ends the
-session *at the issuer*: that needs a session to end, so it is asserted in the
-postflight device-flow journey canary ([canaries.md](canaries.md)), which
-completes a real approval and then walks the same userinfo → logout → userinfo
-sequence the CLI does.
+session *at the issuer*: that needs a real approval to create a session to
+end, and nothing automated performs one today.
 
 `structure` is read-only inspection and runs unconditionally. Execution does
 not: if `image_signature`, `blob_signatures` or `binaries_digest` is 0 the

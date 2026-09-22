@@ -59,10 +59,9 @@ spec:
       interval: 30s
       rules:
         # Sign-in health is measured at the funnel: Keycloak user event
-        # counters over every login attempt, real users and the browser
-        # canary alike. The canary guarantees at least one attempt per
-        # 15 minutes, so absence of success is meaningful even with zero
-        # user traffic.
+        # counters over every login attempt. With no synthetic traffic floor
+        # an absence of logins is not a signal, so only the failure ratio
+        # pages.
         - alert: GuardianSignInFailing
           expr: |
             (
@@ -80,39 +79,6 @@ spec:
           annotations:
             summary: "Most sign-in attempts are failing in prod"
             description: "More than half of the login attempts through the Guardian realm in the last 10 minutes failed (minimum 4 attempts). Split keycloak_user_events_total{event=\"login\",error!=\"\"} by idp and error to localize: idp=\"github\" points at the broker or GitHub, no idp points at the realm or its database."
-        # The 35m window tolerates exactly one failed or missed canary run
-        # (15m cadence + 3m run deadline + scrape lag). The 48h clause arms
-        # the rule only after the funnel has ever reported a success, so
-        # enabling the metric or standing up a new stage cannot page before
-        # first traffic.
-        - alert: GuardianSignInStale
-          expr: |
-            (
-              (
-                sum(increase(keycloak_user_events_total{namespace="tenant-guardian-prod",realm="guardianintelligence.org",event="login",error=""}[35m]))
-                or on() vector(0)
-              ) == 0
-            )
-            and
-            sum(increase(keycloak_user_events_total{namespace="tenant-guardian-prod",realm="guardianintelligence.org",event="login",error=""}[48h])) > 0
-          for: 2m
-          labels:
-            severity: critical
-            guardian_stage: prod
-            exported_instance: prod/sign-in
-          annotations:
-            summary: "Sign in with Guardian is failing in prod"
-            description: "No successful login through the Guardian realm for 35 minutes — at least two consecutive browser-canary journeys have not completed. Check guardian-journey-canary Job logs in tenant-guardian-prod and keycloak_user_events_total{event=\"login\",error!=\"\"} for the failing step."
-        - alert: GuardianJourneyCanaryAbsent
-          expr: absent(kube_cronjob_status_last_schedule_time{namespace="tenant-guardian-prod",cronjob="guardian-journey-canary"})
-          for: 15m
-          labels:
-            severity: warning
-            guardian_stage: prod
-            exported_instance: prod/journey-canary
-          annotations:
-            summary: "Sign in with Guardian canary is missing in prod"
-            description: "kube-state-metrics has not reported the guardian-journey-canary CronJob for 15 minutes."
         - alert: KeycloakScrapeDown
           expr: up{namespace="tenant-guardian-prod",job="keycloak-metrics"} == 0
           for: 5m

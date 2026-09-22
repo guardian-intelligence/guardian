@@ -528,24 +528,4 @@ func TestCustomerIdentityRealmConformance(t *testing.T) {
 		"the org-owning canary account credentials must resolve from OpenBao")
 	assertTextNotContains(t, string(secrets), `keycloak-admin-bootstrap`,
 		"temporary Keycloak bootstrap administrators must not be steady-state secrets")
-
-	canary, err := os.ReadFile(runfilePath(root + "journey-canary.yaml"))
-	if err != nil {
-		t.Fatalf("read Guardian journey canary: %v", err)
-	}
-	assertTextContains(t, string(canary), `ghcr.io/guardian-intelligence/canary-journeys:edge@sha256:`,
-		"Guardian journey canary must run the signed browser image")
-	assertTextContains(t, string(canary), `value: https://guardianintelligence.org/postflight`,
-		"Guardian journey canary must start at the public Postflight route")
-	assertTextContains(t, string(canary), `schedule: "*/15 * * * *"`,
-		"Guardian journey canary must stay below GitHub's per-user OAuth token issuance limit")
-	assertTextContains(t, string(canary), `name: GITHUB_CANARY_TOTP_SECRET`,
-		"Guardian journey canary must exercise GitHub MFA")
-	assertTextNotContains(t, string(canary), `grant_type=password`,
-		"Guardian journey canary must not use a password grant")
-	assertTextNotContains(t, string(canary), `KC_ADMIN`,
-		"Guardian journey canary must not use Keycloak administration")
-
-	assertTextContains(t, string(canary), `{"$imagepolicy": "guardian-imageops:canary-journeys"}`,
-		"journey canary image must carry the image-automation marker that moves its pin")
 }

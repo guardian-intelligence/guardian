@@ -62,8 +62,6 @@ export default {
       "src/privatecut/web/**/*.test.tsx",
       "src/shared/ts/brand/**/*.test.ts",
       "src/shared/ts/brand/**/*.test.tsx",
-      "src/shared/ts/canary-journeys/**/*.test.ts",
-      "src/shared/ts/canary-journeys/**/*.test.tsx",
       "src/shared/ts/telemetry/**/*.test.ts",
       "src/shared/ts/telemetry/**/*.test.tsx",
       "src/shared/ts/visual-harness/**/*.test.ts",

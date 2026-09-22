@@ -14,5 +14,4 @@ resources:
   - loadtester.yaml
   - ingress.yaml
   - networkpolicy.yaml
-  - journey-canary.yaml
   - observability.yaml

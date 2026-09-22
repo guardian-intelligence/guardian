@@ -10,7 +10,6 @@ src/games/wake-up-mythra/web/node_modules
 src/postflight/checkout/node_modules
 src/privatecut/web/node_modules
 src/shared/ts/brand/node_modules
-src/shared/ts/canary-journeys/node_modules
 src/shared/ts/telemetry/node_modules
 src/shared/ts/visual-harness/node_modules
 
