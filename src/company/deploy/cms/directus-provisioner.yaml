@@ -108,7 +108,7 @@ data:
             STATUS_FIELD,
             { field: "author", type: "string", schema: {}, meta: { interface: "input", note: "Provenance only, never rendered." } },
             { field: "authorTitle", type: "string", schema: {}, meta: { interface: "input", note: "Provenance only, never rendered." } },
-            { field: "description", type: "text", schema: {}, meta: { interface: "input-multiline", note: "SEO/share description. Empty = the letter's opening words." } },
+            { field: "description", type: "text", schema: {}, meta: { interface: "input-multiline", hidden: true, note: "SEO/share description. Empty = the letter's opening words." } },
             { field: "note", type: "text", schema: {}, meta: { interface: "input-multiline", note: "Author's longer context, JSON-LD only." } },
             { field: "body", type: "text", schema: {}, meta: { interface: "input-rich-text-md" } },
           ],
@@ -127,6 +127,14 @@ data:
       }),
     });
     console.error("kind field: hidden, default dispatch");
+
+    // description is optional SEO text the author doesn't write: hidden in
+    // the form, and the page falls back to the letter's opening words.
+    await api("/fields/letters/description", {
+      method: "PATCH",
+      body: JSON.stringify({ meta: { hidden: true } }),
+    });
+    console.error("description field: hidden");
 
     if (!(await get("/fields/letters/status"))) {
       await api("/fields/letters", { method: "POST", body: JSON.stringify(STATUS_FIELD) });
@@ -218,7 +226,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/provision-script: ce618319cafc8420563a2b2f3f6432a61d95a7a27ed3ce9777aefe8815f4757a
+        checksum/provision-script: 3def8048055dadf335c96e83dbe936b4c65bf59ca1b30a8fd94d119e1d5e9ec5
       labels:
         app.kubernetes.io/name: directus-provisioner
         app.kubernetes.io/part-of: guardian

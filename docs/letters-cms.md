@@ -25,7 +25,7 @@ never passes through git, so publishing an edit is saving it in the Studio.
   not to the site, not to `cms.guardianintelligence.org/items/letters`
   (which serves exactly the content already public on /letters).
 - `description` is the page's meta/OG description and JSON-LD description.
-  Leave it empty and the letter's opening words stand in.
+  It is hidden in the Studio form; the letter's opening words stand in.
 - The Data Studio is routed at https://cms.guardianintelligence.org behind
   Keycloak SSO (client `directus`, customer realm). Public registration is
   off: an SSO login succeeds only for users pre-created in Directus via
@@ -38,22 +38,27 @@ never passes through git, so publishing an edit is saving it in the Studio.
 
 ## Authoring loop
 
-Open https://cms.guardianintelligence.org and continue with Keycloak — the
-Guardian sign-in you already use. (Ops fallback: port-forward
+Open https://cms.guardianintelligence.org and choose "Continue with
+Keycloak", which signs in with GitHub. There is no Directus password; the
+GitHub account's email must match the pre-created Directus user. (Ops fallback: port-forward
 `svc/directus 8055:80` and sign in as admin@guardianintelligence.org with
 `Secret/directus-admin-credential`.)
 
 Edit and save. Published pages pick the change up within ~1 minute at the
 origin and within the edge TTL (~5 minutes) globally.
 
-Drafting: keep `status` on Draft while writing; set it to Published to ship. To
-preview a draft with the site's real typography, run the app dev server
-against a port-forward with draft access:
+Drafting: keep `status` on Draft while writing; set it to Published to ship.
+
+## Preview
 
 ```sh
-kubectl port-forward -n tenant-guardian-prod svc/directus 8055:80 &
-DIRECTUS_TOKEN=... DIRECTUS_INCLUDE_DRAFTS=true npx pnpm run dev
+src/company/web/scripts/preview.sh
 ```
+
+Serves the site from that checkout at http://127.0.0.1:4252 with prod
+letters, drafts included, via a port-forward to Directus (needs cluster
+access). Code edits hot-reload; Studio edits show up within a minute. The
+live site never renders drafts.
 
 ## Provisioning
 
