@@ -21,7 +21,7 @@ catalog:
   "@bufbuild/protoc-gen-es": 2.12.1
   "@changesets/cli": 2.31.1
   "@changesets/read": 0.6.7
-  "@chenglou/pretext": 0.0.8
+  "@chenglou/pretext": 0.0.9
   "@connectrpc/connect": 2.1.2
   "@connectrpc/connect-web": 2.1.2
   "@manypkg/get-packages": 1.1.3
