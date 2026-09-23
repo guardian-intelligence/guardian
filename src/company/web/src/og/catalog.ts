@@ -108,7 +108,6 @@ export function letterOgSpec(letter: Letter): OGSpec {
     flare: letter.flare,
     kicker: formatLetterDate(letter.publishedAt),
     bodyExcerpt: excerptOf(letter.bodyHtml),
-    ...(letter.summary === letter.title ? {} : { subtitle: letter.summary }),
     footerLeft: `guardianintelligence.org/letters/${letter.slug}`,
     footerRight: "Read the letter →",
   };

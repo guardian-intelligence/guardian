@@ -21,8 +21,7 @@ import { ogMeta } from "~/lib/head";
 // dated sheet opening: date first, salutation second, then the first words
 // dissolving back into the paper. The reader sees enough to know whether to
 // open it, never a summary written *about* it.
-// The excerpt is the letter's real first words (the frontmatter summary is
-// SEO/OG only and never renders). A letter with an empty body is one that
+// The excerpt is the letter's real first words. A letter with an empty body is one that
 // has been dated and titled but not yet written; it shows the title alone
 // rather than a faked preview.
 

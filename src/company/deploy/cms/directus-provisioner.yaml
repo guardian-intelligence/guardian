@@ -22,7 +22,8 @@ metadata:
 data:
   provision.mjs: |
     // Idempotent Directus provisioning: the letters collection, the hidden
-    // kind field, and the anonymous read grant the public site depends on.
+    // kind field, the draft/published status field, and the anonymous read
+    // grant the public site depends on.
     const BASE = process.env.DIRECTUS_URL;
 
     const login = await fetch(`${BASE}/auth/login`, {
@@ -45,20 +46,50 @@ data:
           ...init?.headers,
         },
       });
-      if (!res.ok && res.status !== 404) {
+      if (!res.ok) {
         throw new Error(`${init?.method ?? "GET"} ${path}: ${res.status} ${await res.text()}`);
       }
       return res;
     }
+    // Reads return null for something that does not exist. Directus answers
+    // a missing collection or field with 403 FORBIDDEN even for admin, so
+    // that counts as absent alongside 404.
     const get = async (path) => {
-      const res = await api(path);
-      return res.ok ? (await res.json()).data : null;
+      const res = await fetch(`${BASE}${path}`, { headers: { authorization: `Bearer ${token}` } });
+      if (res.status === 404 || res.status === 403) return null;
+      if (!res.ok) throw new Error(`GET ${path}: ${res.status} ${await res.text()}`);
+      return (await res.json()).data;
     };
 
     const FIELDS = [
-      "slug", "title", "publishedAt", "flare", "kind", "summary",
+      "slug", "title", "publishedAt", "flare", "kind", "status",
       "author", "authorTitle", "description", "note", "body",
     ];
+    // summary was the publish gate before status. It stays anonymously
+    // readable only until every site pod runs an image that no longer
+    // requests it; the follow-up that deletes the field drops it here.
+    const PUBLIC_FIELDS = [...FIELDS, "summary"];
+
+    // Directus's standard status field. Created nullable with no default so
+    // existing rows arrive null and the backfill below can classify them;
+    // new letters then default to draft.
+    const STATUS_FIELD = {
+      field: "status",
+      type: "string",
+      schema: {},
+      meta: {
+        interface: "select-dropdown",
+        display: "labels",
+        width: "half",
+        options: {
+          choices: [
+            { text: "Draft", value: "draft" },
+            { text: "Published", value: "published" },
+          ],
+        },
+        note: "Only published letters reach the site.",
+      },
+    };
 
     // Collection: create when absent (fresh database); the field list must
     // stay in sync with letters.server.ts and letter-schema.ts.
@@ -70,7 +101,7 @@ data:
           collection: "letters",
           meta: {
             icon: "mail",
-            note: "Company-site letters. The public site serves published letters (summary set) from here at request time.",
+            note: "Company-site letters. The public site serves published letters from here at request time.",
           },
           schema: {},
           fields: [
@@ -79,10 +110,10 @@ data:
             { field: "publishedAt", type: "date", schema: {}, meta: {} },
             { field: "flare", type: "string", schema: {}, meta: { interface: "input", note: "Must be a substring of title; the OG card highlights it." } },
             { field: "kind", type: "string", schema: { default_value: "dispatch" }, meta: { hidden: true } },
-            { field: "summary", type: "text", schema: {}, meta: { interface: "input-multiline", note: "Empty = draft; the site hides letters without a summary." } },
+            STATUS_FIELD,
             { field: "author", type: "string", schema: {}, meta: { interface: "input", note: "Provenance only, never rendered." } },
             { field: "authorTitle", type: "string", schema: {}, meta: { interface: "input", note: "Provenance only, never rendered." } },
-            { field: "description", type: "text", schema: {}, meta: { interface: "input-multiline", note: "One-line account; doubles as OG/share text." } },
+            { field: "description", type: "text", schema: {}, meta: { interface: "input-multiline", note: "SEO/share description. Empty = the letter's opening words." } },
             { field: "note", type: "text", schema: {}, meta: { interface: "input-multiline", note: "Author's longer context, JSON-LD only." } },
             { field: "body", type: "text", schema: {}, meta: { interface: "input-rich-text-md" } },
           ],
@@ -102,10 +133,46 @@ data:
     });
     console.error("kind field: hidden, default dispatch");
 
+    if (!(await get("/fields/letters/status"))) {
+      await api("/fields/letters", { method: "POST", body: JSON.stringify(STATUS_FIELD) });
+      console.error("created status field");
+    }
+    // Classify letters that predate status: a summary meant published. A
+    // summary that said more than the title was share text, so it becomes
+    // the description when the letter has none. Only rows with a null status
+    // are touched, so reruns and Studio edits are left alone.
+    const hasSummary = Boolean(await get("/fields/letters/summary"));
+    const unclassified =
+      (await get(
+        `/items/letters?limit=-1&filter[status][_null]=true&fields=slug,title,description${hasSummary ? ",summary" : ""}`,
+      )) ?? [];
+    for (const item of unclassified) {
+      const summary = item.summary?.trim() ?? "";
+      const patch = { status: summary ? "published" : "draft" };
+      if (summary && summary !== item.title && !item.description?.trim()) {
+        patch.description = summary;
+      }
+      await api(`/items/letters/${encodeURIComponent(item.slug)}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      console.error(`classified ${item.slug}: ${JSON.stringify(patch)}`);
+    }
+    await api("/fields/letters/status", {
+      method: "PATCH",
+      body: JSON.stringify({ meta: STATUS_FIELD.meta, schema: { default_value: "draft" } }),
+    });
+    if (hasSummary) {
+      await api("/fields/letters/summary", {
+        method: "PATCH",
+        body: JSON.stringify({ meta: { hidden: true, note: "Retired; status is the publish gate." } }),
+      });
+    }
+
     // Anonymous read on published letters only — the site's runtime read
     // path. The same grant is what cms.guardianintelligence.org exposes to
     // the world: exactly the content already public on /letters. Drafts
-    // (empty summary) never pass the filter. The policy id is Directus's
+    // never pass the filter. The policy id is Directus's
     // well-known PUBLIC_POLICY_ID constant (migration 20240806A), stable
     // across every install.
     const PUBLIC_POLICY_ID = "abf8a154-5b1c-4a46-ac9c-7300570f4f17";
@@ -114,27 +181,26 @@ data:
     const existing = await get(
       `/permissions?filter[policy][_eq]=${publicPolicy.id}&filter[collection][_eq]=letters&filter[action][_eq]=read&fields=id`,
     );
+    const grant = {
+      fields: hasSummary ? PUBLIC_FIELDS : FIELDS,
+      permissions: { _and: [{ status: { _eq: "published" } }] },
+    };
     if (existing?.[0]) {
-      console.error(`public read permission exists: ${existing[0].id}`);
+      await api(`/permissions/${existing[0].id}`, { method: "PATCH", body: JSON.stringify(grant) });
+      console.error(`public read permission reconciled: ${existing[0].id}`);
     } else {
       await api("/permissions", {
         method: "POST",
-        body: JSON.stringify({
-          policy: publicPolicy.id,
-          collection: "letters",
-          action: "read",
-          fields: FIELDS,
-          permissions: { _and: [{ summary: { _nempty: true } }] },
-        }),
+        body: JSON.stringify({ policy: publicPolicy.id, collection: "letters", action: "read", ...grant }),
       });
       console.error("created public read permission");
     }
 
     // Verify as the anonymous role before declaring success.
-    const anon = await fetch(`${BASE}/items/letters?fields=slug,summary`);
+    const anon = await fetch(`${BASE}/items/letters?fields=slug,status`);
     if (!anon.ok) throw new Error(`anonymous read failed: ${anon.status}`);
     const items = (await anon.json()).data ?? [];
-    if (items.some((item) => !item.summary)) {
+    if (items.some((item) => item.status !== "published")) {
       throw new Error("anonymous read returned a draft — permission filter broken");
     }
     console.error(`anonymous read ok: ${items.map((item) => item.slug).join(", ")}`);
@@ -158,7 +224,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/provision-script: e184ef6eea49a1ce80f7731c3c5846eb411aad9e6aa5fba8e4194164e5e0dc19
+        checksum/provision-script: 35caf5d99c5aafaa8295b61d08922a13dd8e72b5d75f1d8c00c95ac35a5d07f5
       labels:
         app.kubernetes.io/name: directus-provisioner
         app.kubernetes.io/part-of: guardian

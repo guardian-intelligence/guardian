@@ -14,6 +14,7 @@ import {
   LETTER_POST_PAGE_PADDING_CLASS,
   LETTER_READING_COLUMN_CLASS,
   LETTER_TEXT_MEASURE_CLASS,
+  excerptOf,
   LetterBody,
   LetterDate,
   LetterSalutation,
@@ -113,9 +114,9 @@ export const Route = createFileRoute("/letters/$slug")({
         slug: `letter/${letter.slug}`,
         title: `${letter.title} — Guardian`,
         // The provenance description doubles as the share text: what the
-        // link says about itself on X, in search, and in previews. Falls
-        // back to the bare summary for letters that declare nothing.
-        description: letter.description || letter.summary,
+        // link says about itself on X, in search, and in previews. Letters
+        // that declare none are described by their own opening words.
+        description: letter.description || excerptOf(letter.bodyHtml),
         type: "article",
         path: `/letters/${letter.slug}`,
         imageFormat: "png",

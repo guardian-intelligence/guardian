@@ -19,11 +19,13 @@ never passes through git, so publishing an edit is saving it in the Studio.
     origin outage degrades to staleness for any page the edge has seen.
   - Worst case — pod cold start with Directus down — /letters fails, which
     the synthetic probes page on.
-- Publishing is gated on `summary`: a letter without one is a draft. The
-  anonymous role's permission filter (`setup-public-read`) only exposes
-  letters with a summary, so drafts never leave the Studio — not to the
-  site, not to `cms.guardianintelligence.org/items/letters` (which serves
-  exactly the content already public on /letters).
+- Publishing is gated on `status` (Directus's standard draft/published
+  field; new letters start as drafts). The anonymous role's permission
+  filter only exposes published letters, so drafts never leave the Studio —
+  not to the site, not to `cms.guardianintelligence.org/items/letters`
+  (which serves exactly the content already public on /letters).
+- `description` is the page's meta/OG description and JSON-LD description.
+  Leave it empty and the letter's opening words stand in.
 - The Data Studio is routed at https://cms.guardianintelligence.org behind
   Keycloak SSO (client `directus`, customer realm). Public registration is
   off: an SSO login succeeds only for users pre-created in Directus via
@@ -44,7 +46,7 @@ Guardian sign-in you already use. (Ops fallback: port-forward
 Edit and save. Published pages pick the change up within ~1 minute at the
 origin and within the edge TTL (~5 minutes) globally.
 
-Drafting: leave `summary` empty while writing; fill it in to publish. To
+Drafting: keep `status` on Draft while writing; set it to Published to ship. To
 preview a draft with the site's real typography, run the app dev server
 against a port-forward with draft access:
 
