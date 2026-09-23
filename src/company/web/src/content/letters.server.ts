@@ -13,11 +13,12 @@ import type { Letter } from "./letters";
 //
 // DIRECTUS_URL          in-cluster service URL (web.yaml); localhost default
 //                       matches a `kubectl port-forward svc/directus 8055:80`
-// DIRECTUS_TOKEN        optional bearer token (previewing drafts locally)
+// DIRECTUS_EMAIL, DIRECTUS_PASSWORD
+//                       local preview only (scripts/preview.sh): sign in on
+//                       every fetch so drafts are readable; the anonymous
+//                       role can only ever see published letters
 // DIRECTUS_INCLUDE_DRAFTS=true
-//                       local preview only: also fetch draft letters
-//                       (requires DIRECTUS_TOKEN; the anonymous role can only
-//                       ever see published letters)
+//                       local preview only: also render draft letters
 
 const FIELDS = [
   "slug",
@@ -80,10 +81,30 @@ function renderLetter(raw: unknown): Letter | null {
   };
 }
 
+// Directus access tokens expire in minutes, so a long-running preview server
+// signs in per fetch (at most once per cache TTL) instead of holding one.
+async function previewToken(base: string): Promise<string | undefined> {
+  const email = process.env["DIRECTUS_EMAIL"]?.trim();
+  const password = process.env["DIRECTUS_PASSWORD"];
+  if (!email || !password) return undefined;
+  const response = await fetch(`${base}/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, password }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`letters: Directus login responded ${response.status}`);
+  const json = v.parse(
+    v.object({ data: v.object({ access_token: v.string() }) }),
+    await response.json(),
+  );
+  return json.data.access_token;
+}
+
 async function fetchLetters(): Promise<readonly Letter[]> {
   const base = process.env["DIRECTUS_URL"]?.trim() || "http://127.0.0.1:8055";
   const includeDrafts = process.env["DIRECTUS_INCLUDE_DRAFTS"] === "true";
-  const token = process.env["DIRECTUS_TOKEN"]?.trim();
+  const token = await previewToken(base);
   const url = new URL(`${base}/items/letters`);
   url.searchParams.set("limit", "-1");
   url.searchParams.set("fields", FIELDS.join(","));
