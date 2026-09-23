@@ -1,6 +1,6 @@
 # Directus: the letters source of truth for company-site. The SSR server
 # fetches published letters from this service at request time (anonymous,
-# permission-filtered to letters with a summary — drafts never leave the
+# permission-filtered to published letters — drafts never leave the
 # Studio). Availability is layered rather than duplicated: the site serves
 # its last-good fetch through a Directus outage, and Cloudflare edge-caches
 # /letters* with stale-if-error, so a CMS outage degrades to staleness, not

@@ -15,9 +15,9 @@ import type { Letter } from "./letters";
 //                       matches a `kubectl port-forward svc/directus 8055:80`
 // DIRECTUS_TOKEN        optional bearer token (previewing drafts locally)
 // DIRECTUS_INCLUDE_DRAFTS=true
-//                       local preview only: also fetch letters without a
-//                       summary (requires DIRECTUS_TOKEN; the anonymous role
-//                       can only ever see published letters)
+//                       local preview only: also fetch draft letters
+//                       (requires DIRECTUS_TOKEN; the anonymous role can only
+//                       ever see published letters)
 
 const FIELDS = [
   "slug",
@@ -25,7 +25,7 @@ const FIELDS = [
   "publishedAt",
   "flare",
   "kind",
-  "summary",
+  "status",
   "author",
   "authorTitle",
   "description",
@@ -101,10 +101,9 @@ async function fetchLetters(): Promise<readonly Letter[]> {
   const letters = (json.data ?? [])
     .map(renderLetter)
     .filter((letter): letter is Letter => letter !== null)
-    // Empty summary = draft. The anonymous role is permission-filtered to
-    // published letters already; this keeps the gate true regardless of the
-    // credential in play.
-    .filter((letter) => includeDrafts || letter.summary.trim() !== "");
+    // The anonymous role is permission-filtered to published letters
+    // already; this keeps the gate true regardless of the credential in play.
+    .filter((letter) => includeDrafts || letter.status === "published");
   return [...letters].sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1));
 }
 

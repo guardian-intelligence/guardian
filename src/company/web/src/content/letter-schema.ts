@@ -1,10 +1,8 @@
 import * as v from "valibot";
 
-// summary is the only field allowed to be absent — that absence is the
-// publish gate. A letter with no summary is a draft: it stays in Directus,
-// invisible to the anonymous role and to /letters, until the summary is
-// written. Authors can draft freely in the Studio and ship by filling in
-// the summary.
+// status is the publish gate, Directus's standard draft/published field: a
+// draft stays in Directus, invisible to the anonymous role and to /letters,
+// until it is flipped to published in the Studio.
 export const LetterFrontmatterSchema = v.pipe(
   v.object({
     slug: v.pipe(v.string(), v.minLength(1)),
@@ -19,16 +17,17 @@ export const LetterFrontmatterSchema = v.pipe(
     // sender's own sign-off in the body. Required so each letter declares its
     // nature rather than inheriting a silent default.
     kind: v.picklist(["dispatch", "correspondence"]),
-    summary: v.optional(v.string(), ""),
+    status: v.picklist(["draft", "published"]),
     // Machine-readable provenance, never rendered. A letter may be written to
     // be open-ended on the page — a correspondence whose sender the reader is
     // left to imagine — while still owing the record an account of what it is
     // and who wrote it. `author` names the real author (the page may say
     // otherwise or nothing at all) and `authorTitle` disambiguates them;
-    // `description` is the one-line account of the work; `note` is the
-    // author's own longer statement of context. All are carried as JSON-LD on
-    // /letters/$slug for crawlers, archives, and search — readers never see
-    // them.
+    // `description` is the one-line account of the work and the page's
+    // meta/OG description (absent, the letter's opening words stand in);
+    // `note` is the author's own longer statement of context. All are carried
+    // as JSON-LD on /letters/$slug for crawlers, archives, and search —
+    // readers never see them.
     author: v.optional(v.string(), ""),
     authorTitle: v.optional(v.string(), ""),
     description: v.optional(v.string(), ""),
