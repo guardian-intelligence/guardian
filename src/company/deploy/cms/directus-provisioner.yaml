@@ -65,11 +65,6 @@ data:
       "slug", "title", "publishedAt", "flare", "kind", "status",
       "author", "authorTitle", "description", "note", "body",
     ];
-    // summary was the publish gate before status. It stays anonymously
-    // readable only until every site pod runs an image that no longer
-    // requests it; the follow-up that deletes the field drops it here.
-    const PUBLIC_FIELDS = [...FIELDS, "summary"];
-
     // Directus's standard status field. Created nullable with no default so
     // existing rows arrive null and the backfill below can classify them;
     // new letters then default to draft.
@@ -140,7 +135,8 @@ data:
     // Classify letters that predate status: a summary meant published. A
     // summary that said more than the title was share text, so it becomes
     // the description when the letter has none. Only rows with a null status
-    // are touched, so reruns and Studio edits are left alone.
+    // are touched, so reruns and Studio edits are left alone. The summary
+    // field is then deleted; Directus revision history keeps its values.
     const hasSummary = Boolean(await get("/fields/letters/summary"));
     const unclassified =
       (await get(
@@ -163,10 +159,8 @@ data:
       body: JSON.stringify({ meta: STATUS_FIELD.meta, schema: { default_value: "draft" } }),
     });
     if (hasSummary) {
-      await api("/fields/letters/summary", {
-        method: "PATCH",
-        body: JSON.stringify({ meta: { hidden: true, note: "Retired; status is the publish gate." } }),
-      });
+      await api("/fields/letters/summary", { method: "DELETE" });
+      console.error("deleted summary field");
     }
 
     // Anonymous read on published letters only — the site's runtime read
@@ -182,7 +176,7 @@ data:
       `/permissions?filter[policy][_eq]=${publicPolicy.id}&filter[collection][_eq]=letters&filter[action][_eq]=read&fields=id`,
     );
     const grant = {
-      fields: hasSummary ? PUBLIC_FIELDS : FIELDS,
+      fields: FIELDS,
       permissions: { _and: [{ status: { _eq: "published" } }] },
     };
     if (existing?.[0]) {
@@ -224,7 +218,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/provision-script: 35caf5d99c5aafaa8295b61d08922a13dd8e72b5d75f1d8c00c95ac35a5d07f5
+        checksum/provision-script: ce618319cafc8420563a2b2f3f6432a61d95a7a27ed3ce9777aefe8815f4757a
       labels:
         app.kubernetes.io/name: directus-provisioner
         app.kubernetes.io/part-of: guardian
