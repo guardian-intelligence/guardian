@@ -72,7 +72,7 @@ jobs:
           names=(alert-relay analytics-ingest authorization
             chunkies-gateway chunkies-chunkie feature-flags-notify payments payments-canary
             postflight-controlplane tofu-runner company-site privatecut-web
-            visual-harness wake-up-mythra-web)
+            wake-up-mythra-web)
           declare -A watch=(
             [alert-relay]='^src/alerting/'
             [analytics-ingest]='^src/analytics/|^src/proto/'
@@ -87,7 +87,6 @@ jobs:
             [company-site]='^src/company/web/|^src/shared/ts/(brand|telemetry)/'
             [privatecut-web]='^src/privatecut/web/|^src/shared/ts/(brand|telemetry)/'
             [wake-up-mythra-web]='^src/games/wake-up-mythra/|^src/chunkies/|^src/shared/ts/telemetry/'
-            [visual-harness]='^src/shared/ts/visual-harness/|^(pnpm-(lock|workspace)\.yaml|package\.json|vite\.config\.ts)$'
           )
           declare -A push_target=(
             [alert-relay]='//src/alerting/relay:push'
@@ -103,7 +102,6 @@ jobs:
             [company-site]='//src/company/web/site:push'
             [privatecut-web]='//src/privatecut/web/site:push'
             [wake-up-mythra-web]='//src/games/wake-up-mythra/web/site:push'
-            [visual-harness]='//src/shared/ts/visual-harness:push'
           )
           go_images=' alert-relay analytics-ingest authorization chunkies-gateway chunkies-chunkie feature-flags-notify payments payments-canary postflight-controlplane tofu-runner '
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'
