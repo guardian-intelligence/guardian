@@ -1,6 +1,6 @@
 # Cluster and platform architecture
 
-* Cozystack 1.6.0 `isp-full` - when researching Cozystack, use the exact [`v1.6.0`](https://github.com/cozystack/cozystack/tree/v1.6.0) tag. See `src/infrastructure/base/cozystack/platform.yaml` and `src/infrastructure/base/apps/core-services.yaml`
+* Cozystack 1.6.3 `isp-full` - when researching Cozystack, use the exact [`v1.6.3`](https://github.com/cozystack/cozystack/tree/v1.6.3) tag. See `src/infrastructure/base/cozystack/platform.yaml` and `src/infrastructure/base/apps/core-services.yaml`
 * This cluster is k8s v1.36.2 (VAP is GA)
 * Single region right now (`ash` Ashburn, Virginia Latitude region). The active management control plane is the `guardian-mgmt` Kubernetes cluster. Its Kubernetes API endpoint is the private VLAN VIP `https://10.8.0.250:6443`. Reference files:
   - `src/infrastructure/bootstrap/guardian-mgmt/main.tf`
