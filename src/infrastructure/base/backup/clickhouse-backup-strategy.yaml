@@ -43,6 +43,10 @@ apiVersion: strategy.backups.cozystack.io/v1alpha1
 kind: Altinity
 metadata:
   name: guardian-r2-altinity
+  annotations:
+    # The script's shell variables (${api}, ${auth}, ...) must reach the
+    # pod verbatim; Flux postBuild substitution would blank them.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
   labels:
     app.kubernetes.io/part-of: guardian
     guardian.dev/component: backup
