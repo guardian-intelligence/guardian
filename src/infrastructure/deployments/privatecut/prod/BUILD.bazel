@@ -7,7 +7,6 @@ filegroup(
         "otel-networkpolicy.yaml",
         "root-ingress-networkpolicy.yaml",
         "secrets.yaml",
-        "visual-canary.yaml",
         "web.yaml",
     ],
     visibility = ["//visibility:public"],
