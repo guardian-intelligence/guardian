@@ -536,7 +536,7 @@ export function SectionWorkshop() {
               incident response · pageable
             </SignatureStatusBadge>
           }
-          contact={{ email: "engineer@guardianintelligence.org" }}
+          contact={{ email: "contact@guardianintelligence.org" }}
         />
       </div>
     </Section>

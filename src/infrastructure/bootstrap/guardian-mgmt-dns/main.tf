@@ -292,6 +292,58 @@ resource "cloudflare_zero_trust_access_application" "guardian_codex_cloud" {
   ]
 }
 
+# Inbound mail for guardianintelligence.org: one public address,
+# contact@, forwarded by Cloudflare Email Routing to the founder inbox. The
+# zone's MX and SPF records are the ones Email Routing manages itself.
+# Cloudflare forwards only to verified destinations: creating the address
+# mails a verification link to the inbox, and the rule stays inert until it
+# is clicked. Everything else sent to the zone is dropped, so a typo or a
+# harvested role address never reaches the inbox.
+resource "cloudflare_email_routing_address" "founder_inbox" {
+  account_id = var.cloudflare_account_id
+  email      = "integrations.anveio@gmail.com"
+}
+
+resource "cloudflare_email_routing_rule" "contact" {
+  zone_id  = data.cloudflare_zone.guardianintelligence_org.id
+  name     = "contact@ to the founder inbox"
+  enabled  = true
+  priority = 0
+
+  matchers = [
+    {
+      type  = "literal"
+      field = "to"
+      value = "contact@${local.cloudflare_zone_name}"
+    },
+  ]
+
+  actions = [
+    {
+      type  = "forward"
+      value = [cloudflare_email_routing_address.founder_inbox.email]
+    },
+  ]
+}
+
+resource "cloudflare_email_routing_catch_all" "guardianintelligence_org" {
+  zone_id = data.cloudflare_zone.guardianintelligence_org.id
+  name    = "drop everything but contact@"
+  enabled = true
+
+  matchers = [
+    {
+      type = "all"
+    },
+  ]
+
+  actions = [
+    {
+      type = "drop"
+    },
+  ]
+}
+
 # rumi.engineering — the PrivateCut product edge. Proxied A records straight to
 # the three ASH origins: no Cloudflare Load Balancer for this zone, so there
 # is no per-request origin health steering — an origin outage surfaces as

@@ -1,43 +1,21 @@
-// Contact. No form. Email addresses that go to real humans.
+// Contact. No form. One email address that goes to a real human.
+
+// The one inbound address. Every other role (sales, press, security,
+// careers) shares it rather than fanning out to mailboxes nobody reads.
+export const CONTACT_EMAIL = "contact@guardianintelligence.org";
 
 export const CONTACT_META = {
   title: "Contact — Guardian",
   description:
-    "Email addresses for sales, press, security, and careers. No form. We answer every note.",
+    "One email address for sales, press, security, and careers. No form. We answer every note.",
 } as const;
 
 export const contact = {
   kicker: "We answer every note.",
   hero: "Contact Guardian.",
   intro:
-    "There is no form. Every address below goes to a person. We try to answer within one working day.",
-  channels: [
-    {
-      name: "General",
-      email: "hello@guardianintelligence.org",
-      note: "Everything that doesn't fit the other buckets.",
-    },
-    {
-      name: "Sales",
-      email: "sales@guardianintelligence.org",
-      note: "You want to run real work on Postflight Platform.",
-    },
-    {
-      name: "Press",
-      email: "press@guardianintelligence.org",
-      note: "Journalists and editors writing about Guardian.",
-    },
-    {
-      name: "Security",
-      email: "security@guardianintelligence.org",
-      note: "Anything that concerns customer data or platform safety is handled with Postflight; this address is the marketing-site backstop and we route from here.",
-    },
-    {
-      name: "Careers",
-      email: "careers@guardianintelligence.org",
-      note: "You would like to work with us.",
-    },
-  ],
+    "There is no form. One address reaches a person, whatever the note is about — sales, press, security, or careers. We try to answer within one working day.",
+  email: CONTACT_EMAIL,
   mailingAddress:
     "Guardian Intelligence is operated by Anveio Foundation · Seattle, Washington, USA",
 } as const;

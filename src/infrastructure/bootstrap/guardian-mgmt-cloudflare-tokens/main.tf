@@ -38,6 +38,8 @@ locals {
     r2_bucket_item_write    = "2efd5506f9c8494dacb1fa10a3e7d5b6" # Workers R2 Storage Bucket Item Write (bucket)
     r2_storage_read         = "b4992e1108244f5d8bfbd5744320c2e1" # Workers R2 Storage Read (account)
     r2_storage_write        = "bf7481a1826f439697cb59a20b22293e" # Workers R2 Storage Write (account)
+    email_addresses_write   = "e4589eb09e63436686cd64252a3aebeb" # Email Routing Addresses Write (account)
+    email_rules_write       = "79b3ec0d10ce4148a8f8bdc0cc5f97f2" # Email Routing Rules Write (zone)
   }
 
   backups_bucket_resource          = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-backups"
@@ -58,8 +60,8 @@ locals {
 
 # Apply-time credential for the guardian-mgmt-dns root:
 #   CLOUDFLARE_API_TOKEN=$(tofu output -raw dns_lb_provisioner_token_value)
-# Monitors and pools are account-level objects in Cloudflare's model, hence
-# the two policy statements.
+# Monitors, pools, and Email Routing destination addresses are account-level
+# objects in Cloudflare's model, hence the two policy statements.
 resource "cloudflare_account_token" "dns_lb_provisioner" {
   account_id = var.cloudflare_account_id
   name       = "guardian-dns-lb-provisioner"
@@ -74,6 +76,7 @@ resource "cloudflare_account_token" "dns_lb_provisioner" {
         { id = local.permission_groups.cloudflare_tunnel_write },
         { id = local.permission_groups.access_apps_write },
         { id = local.permission_groups.access_tokens_write },
+        { id = local.permission_groups.email_addresses_write },
       ]
       resources = jsonencode({ (local.account_resource) = "*" })
     },
@@ -85,6 +88,7 @@ resource "cloudflare_account_token" "dns_lb_provisioner" {
         { id = local.permission_groups.dns_write },
         { id = local.permission_groups.load_balancers_read },
         { id = local.permission_groups.load_balancers_write },
+        { id = local.permission_groups.email_rules_write },
       ]
       resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*", (local.mythra_zone_resource) = "*" })
     },

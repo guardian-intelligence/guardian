@@ -19,40 +19,19 @@ function ContactPage() {
     <PageShell kicker={contact.kicker} heading={contact.hero}>
       <BodyParagraph>{contact.intro}</BodyParagraph>
 
-      <ul className="mt-6 flex flex-col gap-8">
-        {contact.channels.map((channel) => (
-          <li key={channel.email} className="flex flex-col gap-1.5">
-            <span
-              className="font-mono text-[10px] uppercase tracking-[0.18em]"
-              style={{ color: "var(--treatment-muted-faint)" }}
-            >
-              {channel.name}
-            </span>
-            <a
-              href={`mailto:${channel.email}`}
-              style={{
-                color: "var(--treatment-ink)",
-                fontSize: "16px",
-                textDecoration: "underline",
-                textDecorationThickness: "1px",
-                textUnderlineOffset: "4px",
-              }}
-            >
-              {channel.email}
-            </a>
-            <span
-              style={{
-                fontFamily: "'Geist', sans-serif",
-                fontSize: "13px",
-                lineHeight: 1.55,
-                color: "var(--treatment-muted)",
-              }}
-            >
-              {channel.note}
-            </span>
-          </li>
-        ))}
-      </ul>
+      <a
+        href={`mailto:${contact.email}`}
+        className="mt-6"
+        style={{
+          color: "var(--treatment-ink)",
+          fontSize: "16px",
+          textDecoration: "underline",
+          textDecorationThickness: "1px",
+          textUnderlineOffset: "4px",
+        }}
+      >
+        {contact.email}
+      </a>
 
       <p
         className="mt-6 font-mono text-[11px] uppercase tracking-[0.16em]"
