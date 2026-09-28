@@ -74,7 +74,7 @@ spec:
           - payments
   quorum:
     minSyncReplicas: 1
-    maxSyncReplicas: 2
+    maxSyncReplicas: 1
   # Platform-managed backup flow: barmanObjectStore is SSA-patched onto the
   # live Cluster by the CNPG backup driver at first BackupJob time; continuous
   # WAL archiving starts then, not at merge - fire an ad-hoc BackupJob right

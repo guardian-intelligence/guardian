@@ -39,7 +39,7 @@ spec:
           - spicedb
   quorum:
     minSyncReplicas: 1
-    maxSyncReplicas: 2
+    maxSyncReplicas: 1
   backup:
     enabled: true
     useSystemBucket: true
