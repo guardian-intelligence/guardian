@@ -1,0 +1,21 @@
+# barman-cli-cloud 3.19+ (plugin-barman-cloud sidecar >= v0.13.0) uploads
+# backup.info as STARTED and later rewrites it (EnterpriseDB/barman#1195).
+# The guardian-backups bucket's 7-day lock refuses the rewrite, so every
+# Postgres base backup fails after its data upload. v0.12.0 ships barman
+# 3.18.0, which writes backup.info once. Unpin only when upstream makes the
+# STARTED write optional; relaxing the bucket lock is not the fix.
+apiVersion: cozystack.io/v1alpha1
+kind: Package
+metadata:
+  name: cozystack.postgres-operator
+spec:
+  components:
+    postgres-operator:
+      values:
+        plugin-barman-cloud:
+          sidecarImage:
+            tag: v0.12.0@sha256:578926fbacfe2f384fab0bab6a4e5f11e08ab1572c97078d04216c22c677f65c
+          # The plugin Deployment reads SIDECAR_IMAGE from a ConfigMap with no
+          # checksum annotation; this rolls it so injection picks up the pin.
+          podAnnotations:
+            guardian.dev/sidecar-image: v0.12.0
