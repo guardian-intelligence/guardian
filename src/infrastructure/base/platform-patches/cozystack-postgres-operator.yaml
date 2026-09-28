@@ -15,7 +15,9 @@ spec:
         plugin-barman-cloud:
           sidecarImage:
             tag: v0.12.0@sha256:578926fbacfe2f384fab0bab6a4e5f11e08ab1572c97078d04216c22c677f65c
-          # The plugin Deployment reads SIDECAR_IMAGE from a ConfigMap with no
-          # checksum annotation; this rolls it so injection picks up the pin.
-          podAnnotations:
+          # The plugin Deployment reads SIDECAR_IMAGE from a ConfigMap at
+          # startup with no checksum to roll it. The chart's pod template
+          # renders podLabels but ignores podAnnotations, so the label is
+          # what makes injection pick up the pin.
+          podLabels:
             guardian.dev/sidecar-image: v0.12.0
