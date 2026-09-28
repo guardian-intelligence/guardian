@@ -3,6 +3,8 @@
 // Argent on Paper chip, wordmark), tokens.css, and a copy of voice.md. A
 // real PR asset kit replaces the stub when we ship printable material.
 
+import { CONTACT_EMAIL } from "./contact";
+
 export const PRESS_META = {
   title: "Press — Guardian",
   description: "Brand kit downloads, press contact, and guidance for writing about Guardian.",
@@ -22,7 +24,7 @@ export const press = {
     "Voice guide — what we sound like and what we avoid.",
   ],
   contactLabel: "Press contact",
-  contactEmail: "press@guardianintelligence.org",
+  contactEmail: CONTACT_EMAIL,
   contactNote:
     "Please include the outlet, the angle, and the deadline. We answer by end of day Seattle time.",
   writingGuide: [

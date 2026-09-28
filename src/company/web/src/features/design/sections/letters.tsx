@@ -353,7 +353,7 @@ export function SectionLetters() {
           }}
           accent={{ hex: "var(--color-ink)", style: "rule-left", heightPx: 3 }}
           contact={{
-            email: "letters@guardianintelligence.org",
+            email: "contact@guardianintelligence.org",
             secondary: "guardianintelligence.org/letters",
           }}
         />

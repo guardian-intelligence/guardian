@@ -1,3 +1,5 @@
+import { CONTACT_EMAIL } from "./contact";
+
 export const LEGAL_META = {
   title: "Legal identity — Guardian",
   description:
@@ -17,7 +19,7 @@ export const legalIdentity = {
   },
   domain: "guardianintelligence.org",
   website: "https://guardianintelligence.org",
-  contactEmail: "hello@guardianintelligence.org",
+  contactEmail: CONTACT_EMAIL,
 } as const;
 
 export const legalIdentityJsonLd = {

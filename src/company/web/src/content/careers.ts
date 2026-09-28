@@ -1,6 +1,8 @@
 // Careers. Guardian is small. The page is a real page, not a "we are hiring"
 // modal — it explains who we hire, when, and what a week looks like.
 
+import { CONTACT_EMAIL } from "./contact";
+
 export const CAREERS_META = {
   title: "Careers — Guardian",
   description:
@@ -18,5 +20,5 @@ export const careers = {
   openings: [] as readonly { title: string; description: string }[],
   emptyState:
     "No open roles at the moment. Write to us anyway if you would enjoy the work described above — we answer every note.",
-  contactEmail: "careers@guardianintelligence.org",
+  contactEmail: CONTACT_EMAIL,
 } as const;
