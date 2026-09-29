@@ -67,12 +67,6 @@ environment snapshot.
 </cursor_cloud>
 
 <web_workspace>
-The pnpm workspace root is the repo root: `pnpm-workspace.yaml`, `package.json`,
-`pnpm-lock.yaml`, and the dependency catalog all live beside `go.mod` and
-`MODULE.bazel`. Workspace members are declared by glob, so a TypeScript package
-lives with the Rust and Go it belongs to rather than in a language island.
-Adding one is a glob entry plus a line in `WORKSPACE_PACKAGES` in `//BUILD.bazel`.
-
 - Use `vp` (vite-plus), never raw `pnpm` — the system pnpm strips vp-specific
   fields out of `pnpm-lock.yaml`. If that happens, `git checkout pnpm-lock.yaml`
   and re-run `CI=true vp install`. Reach the package manager via `vp pm` if you
