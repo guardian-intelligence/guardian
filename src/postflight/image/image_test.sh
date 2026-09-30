@@ -91,7 +91,7 @@ fixture_dir="$(mktemp -d)"
 trap 'rm -rf "${fixture_dir}"' EXIT
 
 # Execute the actual public-config writes from the builder in a disposable
-# guest tree. This reproduces the root reconciler's restrictive umask without
+# guest tree. This reproduces a root caller's restrictive umask without
 # chroot, root privileges, package downloads, or a live VM.
 python3 - "${build_sh}" "${fixture_dir}" <<'PY'
 from pathlib import Path

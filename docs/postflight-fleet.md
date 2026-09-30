@@ -1,7 +1,6 @@
 # Postflight fleet
 
 Status: fleet design with current Turbo implementation notes, 2026-09-06.
-The current manifest is [rust-forge-01](../src/postflight/host/hosts/rust-forge-01.json).
 Hardware and commercial descriptions below are onboarding policy, not a
 claim that all described fleets are currently serving jobs.
 

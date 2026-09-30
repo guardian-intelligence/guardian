@@ -64,4 +64,4 @@ cross-VM generation lineage, native GitHub logs, and actual job results.
 
 Related: [architecture](postflight-architecture.md),
 [runner lifecycle](postflight-runner-lifecycle.md),
-[host provisioning](../src/postflight/host/README.md).
+[host](postflight-host.md).

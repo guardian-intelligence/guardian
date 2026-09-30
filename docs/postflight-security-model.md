@@ -182,9 +182,8 @@ Process-memory capsules are the hottest plaintext the platform handles:
 ## Architecture — Turbo
 
 The [Turbo image](../src/postflight/image/README.md) bakes `host-zfs` and does
-not request SNP or in-guest LUKS keys. The
-[host provisioner](../src/postflight/host/host.py) creates native AES-256-GCM
-storage with the externally seeded root-only raw key. Hostd
+not request SNP or in-guest LUKS keys. The host stores guest state on native
+AES-256-GCM ZFS encrypted with an externally seeded root-only raw key. Hostd
 [checks all managed descendants](../src/postflight/hostd/cmd/hostd/main.go)
 for encryption and available keys before starting its agent. The host,
 including its memory and local key file, remains trusted infrastructure.

@@ -271,7 +271,7 @@ mount --bind /dev/pts "${mnt}/dev/pts" >&2
 
 # The pristine image's resolv.conf is a dangling symlink into /run; apt in
 # the chroot needs the host's resolver for the duration of the build. _apt
-# reads it after dropping privileges, even under the reconciler's umask 027.
+# reads it after dropping privileges, even under a root caller's umask 027.
 mv "${mnt}/etc/resolv.conf" "${mnt}/etc/resolv.conf.pristine"
 resolv_moved=true
 install -m 0644 /etc/resolv.conf "${mnt}/etc/resolv.conf"
