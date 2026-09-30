@@ -37,13 +37,10 @@ Linux binaries. Kernel conformance for KVM, AF_VSOCK, systemd, mount, CRIU, and
 ZFS still requires the Linux host suite described by the golden-image verify
 procedure; macOS never substitutes an approximation for that evidence.
 
-## Host substrate and reconciliation
+## Host substrate
 
-The [host manifest and reconciler](../src/postflight/host/README.md) declare
-two 4-vCPU/16-GiB slots on `rust-forge-01`, pinned QEMU 8.2.2, SeaBIOS, the
-384-GiB file-backed pool, and its encrypted `postflight` child. Secrets are
-root-only files outside Git. A systemd timer follows protected public main
-from root-owned source and build locations; unrelated commits reuse artifacts.
+A Turbo host serves 4-vCPU/16-GiB slots from an encrypted ZFS pool with
+QEMU and SeaBIOS. Secrets are root-only files outside Git.
 Storage imports and unlocks before hostd. Guests use a filtered TAP bridge
 with DHCP/DNS and public egress; host access is limited to DHCP, DNS, and
 checkout. Existing nftables tables are preserved.

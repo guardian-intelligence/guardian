@@ -24,8 +24,6 @@ Companions: [fleet](postflight-fleet.md), [Lightning](postflight-lightning.md),
 
 The concrete Turbo class is seeded by
 [migration 012](../src/postflight/controlplane/migrations/012_turbo_runner_class.sql).
-Its [host manifest](../src/postflight/host/hosts/rust-forge-01.json) declares two
-slots, the exact installed QEMU version, SeaBIOS, and the encrypted dataset.
 The [launch profile](../src/postflight/hostd/vm/spec.go) uses `pc-q35-8.2`, the
 host CPU model, and non-root `postflight-vm`. These are host-local templates;
 there is no portable CPU or cross-host memory-restore claim.
@@ -110,11 +108,9 @@ tenant disk, or customer process can never become a generic template donor.
   mounted disk plaintext. The root-only ZFS key is also on the host; native
   encryption does not protect a stolen complete host filesystem containing
   that key, nor provide per-tenant crypto-erase.
-- [Host reconciliation](../src/postflight/host/README.md) follows protected
-  public main from root-owned source and build locations. Secrets remain
-  outside Git. Guest networking permits public egress and only DHCP, DNS,
-  and checkout access to the host; private/reserved destinations, IPv6, and
-  guest-to-guest forwarding are denied.
+- Host secrets remain outside Git. Guest networking permits public egress
+  and only DHCP, DNS, and checkout access to the host; private/reserved
+  destinations, IPv6, and guest-to-guest forwarding are denied.
 - Confidential attestation, key custody, and untrusted-host release gates are
   preserved. Turbo's successful CI run does not establish those claims.
 - Report measured Linux evidence separately for VM boot restore, disk cache

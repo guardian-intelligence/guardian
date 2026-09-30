@@ -25,9 +25,9 @@ class ImageIdentityTest(unittest.TestCase):
             path = self.repo / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(name + "\n")
-        self.host = self.repo / "src/postflight/host/host.py"
-        self.host.parent.mkdir(parents=True)
-        self.host.write_text("host v1\n")
+        self.unrelated = self.repo / "src/postflight/hostd/main.go"
+        self.unrelated.parent.mkdir(parents=True, exist_ok=True)
+        self.unrelated.write_text("hostd v1\n")
         self.git("init", "-q")
         self.commit()
         self.artifacts = []
@@ -48,9 +48,9 @@ class ImageIdentityTest(unittest.TestCase):
     def describe(self, flavor="turbo"):
         return identity.image_identity(self.repo, *self.artifacts, flavor)
 
-    def test_host_only_commits_and_dirty_unrelated_files_reuse_guest_identity(self):
+    def test_non_recipe_commits_and_dirty_unrelated_files_reuse_guest_identity(self):
         before = self.describe()
-        self.host.write_text("host v2\n")
+        self.unrelated.write_text("hostd v2\n")
         self.commit()
         (self.repo / "unrelated.txt").write_text("untracked unrelated change\n")
         after = self.describe()
@@ -83,7 +83,7 @@ class ImageIdentityTest(unittest.TestCase):
         with patch.object(identity, "snapshot_guid", return_value="123"):
             identity.publish_receipt(before, receipt_path, snapshot)
         receipt = identity.private_json(receipt_path)
-        self.host.write_text("host v2\n")
+        self.unrelated.write_text("hostd v2\n")
         self.commit()
         identity.verify_receipt(self.describe(), receipt, snapshot, "123")
         self.assertEqual(receipt["source"], before["source"])
@@ -156,7 +156,7 @@ class ImageIdentityTest(unittest.TestCase):
             return result.stdout.strip()
 
         original = key()
-        self.host.write_text("unrelated host update")
+        self.unrelated.write_text("unrelated hostd update")
         self.assertEqual(original, key())
         for name in ("build-upstream.sh", "render-qemu-template.py"):
             path = script_dir / name
