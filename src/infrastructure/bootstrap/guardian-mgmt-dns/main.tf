@@ -40,6 +40,23 @@ locals {
   k8s_api_hostname             = "k8s.${local.cloudflare_zone_name}"
   codex_cloud_k8s_api_hostname = "k8s-codex.${local.cloudflare_zone_name}"
   cloud_agent_providers        = toset(["cursor", "devin"])
+
+  # The operator route: the founder's workstation reaches the Kubernetes and
+  # Talos APIs through the same Tunnel, each behind its own identity-gated
+  # Access application, so no host outside the cluster needs allowlisting.
+  operator_emails = ["im.shovonhasan@gmail.com"]
+  operator_tunnel_routes = {
+    kubernetes = {
+      hostname = "k8s-operator.${local.cloudflare_zone_name}"
+      service  = "tcp://kubernetes.default.svc:443"
+      title    = "Kubernetes"
+    }
+    talos = {
+      hostname = "talos-operator.${local.cloudflare_zone_name}"
+      service  = "tcp://talos.default.svc:50000"
+      title    = "Talos"
+    }
+  }
 }
 
 data "cloudflare_zone" "guardianintelligence_org" {
@@ -179,6 +196,14 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "guardian_codex_cloud
         service  = "tcp://kubernetes.default.svc:443"
       },
       {
+        hostname = local.operator_tunnel_routes.kubernetes.hostname
+        service  = local.operator_tunnel_routes.kubernetes.service
+      },
+      {
+        hostname = local.operator_tunnel_routes.talos.hostname
+        service  = local.operator_tunnel_routes.talos.service
+      },
+      {
         service = "http_status:404"
       },
     ]
@@ -288,6 +313,54 @@ resource "cloudflare_zero_trust_access_application" "guardian_codex_cloud" {
     {
       id         = cloudflare_zero_trust_access_policy.guardian_cloud_agent["devin"].id
       precedence = 3
+    },
+  ]
+}
+
+# The operator route. Access admits only the founder's identity (Cloudflare
+# one-time PIN to the listed address); behind it the Kubernetes API still
+# demands a Keycloak persona and the Talos API its mTLS client certificate.
+# The workstation side is tools/ops/mgmt-tunnel.
+resource "cloudflare_dns_record" "guardian_operator_tunnel" {
+  for_each = local.operator_tunnel_routes
+
+  zone_id = data.cloudflare_zone.guardianintelligence_org.id
+  name    = each.value.hostname
+  type    = "CNAME"
+  content = "${cloudflare_zero_trust_tunnel_cloudflared.guardian_codex_cloud.id}.cfargotunnel.com"
+  ttl     = 1
+  proxied = true
+  comment = "Guardian ${each.value.title} API for the operator through the cluster Tunnel"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "cloudflare_zero_trust_access_policy" "guardian_operator" {
+  account_id = var.cloudflare_account_id
+  name       = "Guardian operator identity"
+  decision   = "allow"
+  include = [
+    for email in local.operator_emails : {
+      email = {
+        email = email
+      }
+    }
+  ]
+}
+
+resource "cloudflare_zero_trust_access_application" "guardian_operator" {
+  for_each = local.operator_tunnel_routes
+
+  account_id = var.cloudflare_account_id
+  type       = "self_hosted"
+  name       = "Guardian operator ${each.value.title}"
+  domain     = each.value.hostname
+  policies = [
+    {
+      id         = cloudflare_zero_trust_access_policy.guardian_operator.id
+      precedence = 1
     },
   ]
 }

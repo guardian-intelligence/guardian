@@ -78,6 +78,9 @@ func TestCodexCloudTunnelIsServiceAuthenticatedAndReadPathOnly(t *testing.T) {
 		`token_id = cloudflare_zero_trust_access_service_token.guardian_codex_cloud.id`,
 		`name    = local.codex_cloud_k8s_api_hostname`,
 		`proxied = true`,
+		`service  = "tcp://talos.default.svc:50000"`,
+		`resource "cloudflare_zero_trust_access_policy" "guardian_operator"`,
+		`id         = cloudflare_zero_trust_access_policy.guardian_operator.id`,
 	} {
 		assertTextContains(t, tofu, want, tofuPath)
 	}
@@ -89,6 +92,7 @@ func TestCodexCloudTunnelIsServiceAuthenticatedAndReadPathOnly(t *testing.T) {
 		"docker.io/cloudflare/cloudflared:2026.7.2@sha256:4f6655284ab3d252b7f28fedb19fe6c8fc82ee5b1295c20ac74d475e5398a52d",
 		"- kube-apiserver",
 		"port: '7844'",
+		"port: '50000'",
 		"protocol: TCP",
 		"automountServiceAccountToken: false",
 		"readOnlyRootFilesystem: true",
