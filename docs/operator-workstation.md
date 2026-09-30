@@ -10,15 +10,17 @@
   using the stale global config.
 - Current node public IPs are recorded in the `# talm:` modeline on the
   first line of each `src/infrastructure/talm/nodes/*.yaml` — that is the
-  source of truth and it changes on reimage. Port 50000 is open on those
-  IPs from the operator workstation.
-- The apiserver firewall admits only the operations VPS (`operatorSubnets`
-  in `src/infrastructure/talm/values.yaml`). Any other workstation (e.g. a
-  macOS dev machine) runs `tools/ops/mgmt-tunnel install` once: launchd then
-  keeps an SSH tunnel on `127.0.0.1:16443` through the VPS, and both
-  `aspect infra auth` and kubectl use it automatically — guardian_auth probes
-  the loopback port before the direct endpoint, so no flags are needed on
-  either kind of machine.
+  source of truth and it changes on reimage. The node firewall does not
+  admit a workstation on those IPs.
+- The workstation reaches both APIs through the in-cluster Cloudflare Tunnel,
+  behind founder-only Cloudflare Access applications (`guardian-mgmt-dns`).
+  Run `tools/ops/mgmt-tunnel install` once: launchd then keeps `cloudflared
+  access tcp` listeners on `127.0.0.1:16443` (Kubernetes) and
+  `127.0.0.1:50000` (Talos). `aspect infra auth` and kubectl use the first
+  automatically — guardian_auth probes the loopback port before the direct
+  endpoint. Point talosctl/talm at the second with `-e 127.0.0.1 -n
+  <node VLAN IP>`. The first connection, and each one after the Access
+  session expires, opens a browser for Cloudflare's one-time PIN.
 - The kube API is reachable via the default `~/.kube/config`, whose only
   standing identity is the `read` persona (the `platform-agent` OIDC context,
   set up with `aspect infra auth`): cluster-wide read plus port-forward, and the

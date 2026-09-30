@@ -1,28 +1,36 @@
 #!/usr/bin/env bash
-# Keep the guardian-mgmt apiserver reachable from a macOS workstation.
+# Keep the guardian-mgmt Kubernetes and Talos APIs reachable from a macOS
+# workstation.
 #
-# The apiserver firewall admits only the operations VPS (operatorSubnets in
-# src/infrastructure/talm/values.yaml). Every other workstation reaches it
-# through an SSH tunnel that binds https://127.0.0.1:16443 to the stable API
-# endpoint via a host that IS allowlisted. guardian_auth probes that loopback
-# port automatically, so once this launchd agent is installed, `aspect infra
-# auth` and kubectl need no flags and no manual tunnel management: launchd
-# restarts the tunnel on boot, wake, and network changes.
+# Neither API admits a workstation directly. The in-cluster Cloudflare Tunnel
+# (src/infrastructure/base/dns/codex-cloud-tunnel.yaml) carries both behind
+# founder-only Cloudflare Access applications (guardian-mgmt-dns), and this
+# script installs one launchd agent per API that runs `cloudflared access
+# tcp` on a loopback port:
 #
-# Usage: tools/ops/mgmt-tunnel install [--via <ssh-host>]
+#   https://127.0.0.1:16443  Kubernetes (guardian_auth probes it first, so
+#                            `aspect infra auth` and kubectl need no flags)
+#   127.0.0.1:50000          Talos (talosctl/talm -e 127.0.0.1; 127.0.0.1 is
+#                            in every node's certSANs)
+#
+# The first connection after install, and after each Access session expires,
+# opens a browser for Cloudflare's one-time PIN; the token is cached under
+# ~/.cloudflared. Access is transport only: kubectl still needs a Keycloak
+# persona and talosctl its talosconfig. launchd restarts each listener on
+# boot, wake, and network changes.
+#
+# Usage: tools/ops/mgmt-tunnel install
 #        tools/ops/mgmt-tunnel uninstall
 #        tools/ops/mgmt-tunnel status
-#
-# The ssh host (default: rust-forge-01) must be connectable non-interactively;
-# its address and identity live in your ~/.ssh/config, never in this repo.
 set -euo pipefail
 
-LABEL="org.guardianintelligence.mgmt-tunnel"
-LOCAL_PORT=16443
-API_HOST="k8s.guardianintelligence.org"
-API_PORT=6443
-PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
-LOG="${HOME}/Library/Logs/${LABEL}.log"
+LABEL_PREFIX="org.guardianintelligence.mgmt-tunnel"
+ROUTES=(
+  "kubernetes|${LABEL_PREFIX}|k8s-operator.guardianintelligence.org|16443"
+  "talos|${LABEL_PREFIX}-talos|talos-operator.guardianintelligence.org|50000"
+)
+# The primary checkout, not a worktree that may be removed under launchd.
+REPO_ROOT="$(dirname "$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --path-format=absolute --git-common-dir)")"
 
 die() {
   echo "ERROR: $*" >&2
@@ -30,47 +38,58 @@ die() {
 }
 
 require_darwin() {
-  [[ "$(uname -s)" == "Darwin" ]] || die "launchd tunnel management is macOS-only; on the operations VPS the apiserver is reachable directly"
+  [[ "$(uname -s)" == "Darwin" ]] || die "launchd tunnel management is macOS-only"
+}
+
+plist_path() {
+  echo "${HOME}/Library/LaunchAgents/$1.plist"
+}
+
+log_path() {
+  echo "${HOME}/Library/Logs/$1.log"
+}
+
+listening() {
+  nc -z 127.0.0.1 "$1" 2>/dev/null
+}
+
+# launchd needs an absolute path that outlives this shell; prefer the
+# repo-pinned binary from `aspect tools install`.
+resolve_cloudflared() {
+  local pinned="${REPO_ROOT}/.guardian/tools/bin/cloudflared"
+  if [[ -x "${pinned}" ]]; then
+    echo "${pinned}"
+  elif command -v cloudflared >/dev/null 2>&1; then
+    command -v cloudflared
+  else
+    die "cloudflared not found; run: eval \"\$(scripts/bootstrap.sh path)\" && aspect tools install"
+  fi
 }
 
 install() {
-  local via="rust-forge-01"
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --via)
-        [[ $# -ge 2 ]] || die "--via requires an ssh host"
-        via="$2"
-        shift 2
-        ;;
-      *)
-        die "unknown argument: $1"
-        ;;
-    esac
-  done
+  [[ $# -eq 0 ]] || die "install takes no arguments"
+  local cloudflared name label hostname port plist log
+  cloudflared="$(resolve_cloudflared)"
 
-  echo "checking non-interactive ssh to ${via}..."
-  ssh -o BatchMode=yes -o ConnectTimeout=10 "${via}" true ||
-    die "cannot reach ${via} non-interactively; add it to ~/.ssh/config with a key identity first"
-
-  mkdir -p "$(dirname "${PLIST}")"
-  cat >"${PLIST}" <<EOF
+  for route in "${ROUTES[@]}"; do
+    IFS='|' read -r name label hostname port <<<"${route}"
+    plist="$(plist_path "${label}")"
+    log="$(log_path "${label}")"
+    mkdir -p "$(dirname "${plist}")"
+    cat >"${plist}" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${LABEL}</string>
+  <string>${label}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/ssh</string>
-    <string>-N</string>
-    <string>-o</string><string>BatchMode=yes</string>
-    <string>-o</string><string>ExitOnForwardFailure=yes</string>
-    <string>-o</string><string>ConnectTimeout=10</string>
-    <string>-o</string><string>ServerAliveInterval=15</string>
-    <string>-o</string><string>ServerAliveCountMax=4</string>
-    <string>-L</string><string>127.0.0.1:${LOCAL_PORT}:${API_HOST}:${API_PORT}</string>
-    <string>${via}</string>
+    <string>${cloudflared}</string>
+    <string>access</string>
+    <string>tcp</string>
+    <string>--hostname</string><string>${hostname}</string>
+    <string>--url</string><string>127.0.0.1:${port}</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -79,47 +98,62 @@ install() {
   <key>ThrottleInterval</key>
   <integer>15</integer>
   <key>StandardOutPath</key>
-  <string>${LOG}</string>
+  <string>${log}</string>
   <key>StandardErrorPath</key>
-  <string>${LOG}</string>
+  <string>${log}</string>
 </dict>
 </plist>
 EOF
-
-  launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "${PLIST}"
-  echo "installed ${LABEL} (via ${via}); waiting for the tunnel..."
-  for _ in $(seq 1 20); do
-    if nc -z 127.0.0.1 "${LOCAL_PORT}" 2>/dev/null; then
-      echo "tunnel is listening on 127.0.0.1:${LOCAL_PORT}"
-      return 0
-    fi
-    sleep 1
+    launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "${plist}"
+    echo "installed ${label} (${name}: ${hostname} -> 127.0.0.1:${port})"
   done
-  die "tunnel did not come up within 20s; check ${LOG}"
+
+  for route in "${ROUTES[@]}"; do
+    IFS='|' read -r name label hostname port <<<"${route}"
+    local ready=""
+    for _ in $(seq 1 20); do
+      if listening "${port}"; then
+        ready=1
+        break
+      fi
+      sleep 1
+    done
+    [[ -n "${ready}" ]] || die "${name} listener did not come up within 20s; check $(log_path "${label}")"
+    echo "${name}: listening on 127.0.0.1:${port}"
+  done
+  echo "first use opens a browser for the Cloudflare Access one-time PIN"
 }
 
 uninstall() {
-  launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true
-  rm -f "${PLIST}"
-  echo "removed ${LABEL}"
+  local name label hostname port
+  for route in "${ROUTES[@]}"; do
+    IFS='|' read -r name label hostname port <<<"${route}"
+    launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || true
+    rm -f "$(plist_path "${label}")"
+    echo "removed ${label}"
+  done
 }
 
 status() {
-  if launchctl print "gui/$(id -u)/${LABEL}" >/dev/null 2>&1; then
-    echo "launchd agent: loaded"
-  else
-    echo "launchd agent: not loaded"
-  fi
-  if nc -z 127.0.0.1 "${LOCAL_PORT}" 2>/dev/null; then
-    echo "tunnel: listening on 127.0.0.1:${LOCAL_PORT}"
-  else
-    echo "tunnel: not listening on 127.0.0.1:${LOCAL_PORT}"
-  fi
+  local name label hostname port
+  for route in "${ROUTES[@]}"; do
+    IFS='|' read -r name label hostname port <<<"${route}"
+    if launchctl print "gui/$(id -u)/${label}" >/dev/null 2>&1; then
+      echo "${name} launchd agent: loaded"
+    else
+      echo "${name} launchd agent: not loaded"
+    fi
+    if listening "${port}"; then
+      echo "${name} tunnel: listening on 127.0.0.1:${port}"
+    else
+      echo "${name} tunnel: not listening on 127.0.0.1:${port}"
+    fi
+  done
 }
 
 main() {
-  [[ $# -ge 1 ]] || die "usage: tools/ops/mgmt-tunnel install [--via <ssh-host>] | uninstall | status"
+  [[ $# -ge 1 ]] || die "usage: tools/ops/mgmt-tunnel install | uninstall | status"
   local action="$1"
   shift
   case "${action}" in

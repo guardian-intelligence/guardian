@@ -28,10 +28,9 @@ const (
 	defaultKubeAPIServer = "https://k8s.guardianintelligence.org:6443"
 	defaultTalosEndpoint = "k8s.guardianintelligence.org"
 
-	// The apiserver firewall admits only the operations VPS
-	// (operatorSubnets in src/infrastructure/talm/values.yaml); every other
-	// operator workstation reaches it through the SSH tunnel that
-	// tools/ops/mgmt-tunnel keeps bound to this loopback port. Probed before
+	// The apiserver firewall admits no workstation; operators reach it
+	// through the Cloudflare Access TCP tunnel that tools/ops/mgmt-tunnel
+	// keeps bound to this loopback port. Probed before
 	// the direct endpoint because a missing listener refuses in microseconds
 	// while the firewalled direct path burns the whole probe timeout.
 	tunnelKubeAPIServer = "https://127.0.0.1:16443"
