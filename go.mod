@@ -29,7 +29,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.45.0
 	go.opentelemetry.io/otel/trace v1.45.0
 	golang.org/x/crypto v0.56.0
-	golang.org/x/crypto/x509roots/fallback v0.0.0-20260819204246-82adefa711cb
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20260929172509-b39ff6d641ec
 	golang.org/x/net v0.57.0
 	golang.org/x/term v0.45.0
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
