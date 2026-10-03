@@ -55,7 +55,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: keycloak
-          image: quay.io/keycloak/keycloak@sha256:3d911baa186f352563854039b95f21a7e2c01c76b527fdc64f24a0885b927bdf # 26.6.2
+          image: quay.io/keycloak/keycloak@sha256:d79bc4bf1c54e802735ef91926b5c003de1fbb50b1a93382611972277219c9ad # 26.6.2
           imagePullPolicy: IfNotPresent
           # start (not start --optimized): the official image augments at
           # startup for KC_DB=postgres; baking an optimized image is a later
