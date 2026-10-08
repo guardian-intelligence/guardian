@@ -111,6 +111,7 @@ function Thread() {
   );
 }
 
+// The waveform glyph iOS puts at the end of a message field for dictation.
 const MicIcon = () => (
   <svg
     width="20"
@@ -120,11 +121,9 @@ const MicIcon = () => (
     stroke="currentColor"
     strokeWidth="2"
     strokeLinecap="round"
-    strokeLinejoin="round"
     aria-hidden="true"
   >
-    <rect x="9" y="3" width="6" height="11" rx="3" />
-    <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+    <path d="M4 10.5v3M8 8v8M12 4.5v15M16 8v8M20 10.5v3" />
   </svg>
 );
 
@@ -314,7 +313,7 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
       <canvas ref={glassRef} className="layer-glass" aria-hidden="true" />
 
       <div className="controls">
-        <Glass key={flow.line} radius={22} className="bubble enter">
+        <Glass key={flow.line} radius={18} className="bubble enter">
           <div className="t-body" role="status" aria-live="polite">
             <span>{flow.shown}</span>
             <span className="unsaid">{flow.rest}</span>
@@ -340,7 +339,7 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
             <Glass radius="capsule" className="field">
               <button type="button" className="tap field-tap t-body" onClick={flow.leave}>
                 <span>Leave a message</span>
-                <span className="field-icon tint">
+                <span className="field-icon">
                   <MicIcon />
                 </span>
               </button>

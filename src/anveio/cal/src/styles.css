@@ -10,6 +10,13 @@
   --fill: #2c2c2e;
   --fill3: rgba(118, 118, 128, 0.24);
   --tint: #0a84ff;
+  --gray: #8e8e93;
+  --placeholder: #636366;
+  /* iOS 26 Messages chrome: matte dark surfaces outlined by a soft hairline */
+  --bubble: rgb(38 38 40 / 0.86);
+  --well: rgb(28 28 30 / 0.72);
+  --hairline: rgb(255 255 255 / 0.1);
+  --control: 44px;
   --red: #ff453a;
   --green: #30d158;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", system-ui, sans-serif;
@@ -473,10 +480,15 @@ h2 {
 
 .bubble {
   position: absolute;
-  left: 16px;
-  bottom: 98px;
-  max-width: 300px;
-  padding: 11px 16px 12px;
+  left: 20px;
+  bottom: 90px;
+  max-width: 310px;
+  border-radius: 18px;
+}
+.bubble > div {
+  padding: 8px 14px 9px;
+  border-radius: inherit;
+  background: var(--bubble);
 }
 .unsaid {
   color: transparent;
@@ -484,12 +496,12 @@ h2 {
 
 .bar {
   position: absolute;
-  left: 16px;
-  right: 16px;
+  left: 20px;
+  right: 20px;
   bottom: 30px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 .orb-button {
   width: 52px;
@@ -506,19 +518,27 @@ h2 {
 }
 .field {
   flex: 1;
-  height: 52px;
+  height: var(--control);
+  border-radius: 999px;
 }
-/* The message field stands up off the ink like a physical key, lit by Rumi:
-   its edge facing her catches her light, its far bottom-right side falls into
-   shade, and it casts a soft shadow away from her. */
+/* The message field stands up off the ink like a physical key, lit by Rumi as
+   if she were a candle: its edge facing her catches her light, its far
+   bottom-right falls into shade, and it casts a shadow away from her. The
+   --flame* vars (src/rumi/flame.ts) make that light wax, wane and flicker. */
+.phone {
+  --flame: 1;
+  --flame-size: 1;
+  --flame-x: 0;
+  --flame-y: 0;
+}
 .bar .field {
   box-shadow:
-    calc(var(--raise) * 6px) calc(var(--raise) * 8px) calc(var(--raise) * 18px)
-      calc(var(--raise) * -4px) rgb(0 0 0 / calc(var(--raise) * 0.85)),
+    calc(var(--raise) * (5px + var(--flame) * 2px)) calc(var(--raise) * 8px)
+      calc(var(--raise) * 18px) calc(var(--raise) * -4px) rgb(0 0 0 / calc(var(--raise) * 0.85)),
     inset calc(var(--raise) * -3px) calc(var(--raise) * -4px) calc(var(--raise) * 8px)
-      rgb(0 0 0 / calc(var(--raise) * 0.55)),
+      rgb(0 0 0 / calc(var(--raise) * (0.7 - var(--flame) * 0.18))),
     inset calc(var(--raise) * 1.5px) 0 calc(var(--raise) * 1px)
-      rgb(var(--orb-rgb) / calc(var(--orb-light) * 0.35));
+      rgb(var(--orb-rgb) / calc(var(--orb-light) * 0.32 * var(--flame)));
 }
 .bar .field::before {
   content: "";
@@ -527,10 +547,14 @@ h2 {
   border-radius: inherit;
   pointer-events: none;
   background: radial-gradient(
-    140px 70px at 0% 40%,
-    rgb(var(--orb-rgb) / calc(var(--orb-light) * 0.12)),
-    transparent 70%
+    calc(150px * var(--flame-size)) calc(64px * var(--flame-size)) at calc(var(--flame-x) * 10%)
+      calc(42% + var(--flame-y) * 16%),
+    rgb(var(--orb-rgb) / calc(var(--orb-light) * 0.15 * var(--flame))),
+    transparent 72%
   );
+}
+.bar .orb-button {
+  filter: brightness(calc(0.9 + 0.12 * var(--flame)));
 }
 .field-tap {
   width: 100%;
@@ -538,8 +562,11 @@ h2 {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 8px 0 20px;
-  color: var(--label2);
+  padding: 0 6px 0 16px;
+  border: 1px solid var(--hairline);
+  border-radius: inherit;
+  background: var(--well);
+  color: var(--placeholder);
   text-align: left;
 }
 .field-tap > span:first-child {
@@ -550,8 +577,9 @@ h2 {
   color: var(--label);
 }
 .field-icon {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
+  color: var(--gray);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -565,9 +593,9 @@ h2 {
   animation: pulse 1.1s ease-in-out infinite;
 }
 .send {
-  width: 36px;
-  height: 36px;
-  border-radius: 18px;
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
   background: var(--tint);
   color: #fff;
   display: flex;
@@ -575,9 +603,10 @@ h2 {
   justify-content: center;
 }
 .discard {
-  width: 52px;
-  height: 52px;
+  width: var(--control);
+  height: var(--control);
   flex: none;
+  border-radius: 50%;
 }
 .discard .tap {
   width: 100%;
@@ -585,14 +614,16 @@ h2 {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--label2);
+  color: var(--label);
+  border: 1px solid var(--hairline);
   border-radius: 50%;
+  background: var(--well);
 }
 .google {
   flex: 1;
-  height: 52px;
+  height: var(--control);
   border: 0;
-  border-radius: 26px;
+  border-radius: 999px;
   background: #fff;
   color: #000;
   display: flex;
@@ -605,7 +636,9 @@ h2 {
 .host-note {
   display: flex;
   align-items: center;
-  padding: 0 20px;
+  padding: 0 16px;
+  border: 1px solid var(--hairline);
+  background: var(--well);
 }
 @keyframes pulse {
   0%,
