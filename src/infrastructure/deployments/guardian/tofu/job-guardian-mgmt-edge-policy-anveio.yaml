@@ -1,19 +1,19 @@
-# One-time, Flux-managed apply of guardian-mgmt-dns's one-time PIN login, the
-# identity provider the operator Access applications need: without it the
-# founder address in the operator policy has no way to authenticate. The
-# lane token holds Access identity-provider Write since the grant before
-# this. The root stays plan-only; the runner applies only its saved plan,
-# targeted at that one resource. No TTL: remove this completed Job through
-# Git after the root's scheduled plan reads back clean.
+# One-time, Flux-managed apply of guardian-mgmt-edge-policy's anveio.com
+# posture: Authenticated Origin Pulls with the tls_client_auth switch, strict
+# origin TLS, and Bot Fight Mode off. The edge-policy lane token holds the
+# anveio.com zone since the grant before this. The root's scheduled run stays
+# plan-only; the runner applies only its saved plan, targeted at those
+# settings. No TTL: remove this completed Job through Git after the root's
+# scheduled plan reads back clean.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: tofu-guardian-mgmt-dns-one-time-pin
+  name: tofu-guardian-mgmt-edge-policy-anveio
   namespace: tofu-system
   labels:
     app.kubernetes.io/name: tofu-runner
     app.kubernetes.io/part-of: guardian
-    guardian.dev/tofu-root: guardian-mgmt-dns
+    guardian.dev/tofu-root: guardian-mgmt-edge-policy
 spec:
   backoffLimit: 1
   activeDeadlineSeconds: 3000
@@ -21,7 +21,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: tofu-runner
-        guardian.dev/tofu-root: guardian-mgmt-dns
+        guardian.dev/tofu-root: guardian-mgmt-edge-policy
     spec:
       serviceAccountName: tofu-runner
       restartPolicy: Never
@@ -45,11 +45,11 @@ spec:
             - name: MODE
               value: apply
             - name: TF_CLI_ARGS_plan
-              value: -target=cloudflare_zero_trust_access_identity_provider.one_time_pin
+              value: -target=cloudflare_authenticated_origin_pulls_settings.anveio_com -target=cloudflare_zone_setting.anveio_origin_ssl -target=cloudflare_bot_management.anveio_com -target=cloudflare_zone_setting.anveio_tls_client_auth
             - name: ROOT_NAME
-              value: guardian-mgmt-dns
+              value: guardian-mgmt-edge-policy
             - name: ROOT_PATH
-              value: ./src/infrastructure/bootstrap/guardian-mgmt-dns
+              value: ./src/infrastructure/bootstrap/guardian-mgmt-edge-policy
             - name: SOURCE_KIND
               value: ${GUARDIAN_SOURCE_KIND:=GitRepository}
             - name: SOURCE_NAME
@@ -65,7 +65,7 @@ spec:
             - secretRef:
                 name: tofu-state-encryption
             - secretRef:
-                name: tofu-cloudflare-dns
+                name: tofu-cloudflare-edge-policy
           volumeMounts:
             - name: workspace
               mountPath: /workspace

@@ -198,3 +198,38 @@ resource "cloudflare_zone_setting" "mythra_tls_client_auth" {
   setting_id = "tls_client_auth"
   value      = "on"
 }
+
+# anveio.com (Shovon's contact card) carries the same origin-trust posture:
+# AOP on with the legacy tls_client_auth switch that makes the edge present
+# the certificate, strict origin TLS, and no Bot Fight Mode. The site is
+# static with no /api/, so it needs no cache ruleset.
+data "cloudflare_zone" "anveio_com" {
+  filter = {
+    name = "anveio.com"
+    account = {
+      id = var.cloudflare_account_id
+    }
+  }
+}
+
+resource "cloudflare_authenticated_origin_pulls_settings" "anveio_com" {
+  zone_id = data.cloudflare_zone.anveio_com.id
+  enabled = true
+}
+
+resource "cloudflare_zone_setting" "anveio_origin_ssl" {
+  zone_id    = data.cloudflare_zone.anveio_com.id
+  setting_id = "ssl"
+  value      = "strict"
+}
+
+resource "cloudflare_bot_management" "anveio_com" {
+  zone_id    = data.cloudflare_zone.anveio_com.id
+  fight_mode = false
+}
+
+resource "cloudflare_zone_setting" "anveio_tls_client_auth" {
+  zone_id    = data.cloudflare_zone.anveio_com.id
+  setting_id = "tls_client_auth"
+  value      = "on"
+}

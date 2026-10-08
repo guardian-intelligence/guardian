@@ -551,3 +551,56 @@ resource "cloudflare_dns_record" "wakeupmythra_com_caa" {
     prevent_destroy = true
   }
 }
+
+# anveio.com — Shovon's contact card (src/anveio/cal). Proxied A records to
+# the three ASH origins for the apex and www (the origin redirects www to the
+# apex), with the same no-Load-Balancer trade-off as rumi.engineering. The
+# zone's pre-Guardian records were retired; only its Resend/SES mail-sending
+# records remain outside this root.
+data "cloudflare_zone" "anveio_com" {
+  filter = {
+    name = "anveio.com"
+    account = {
+      id = var.cloudflare_account_id
+    }
+  }
+}
+
+resource "cloudflare_dns_record" "anveio_com_web" {
+  for_each = {
+    for pair in setproduct(["anveio.com", "www.anveio.com"], keys(local.public_ingress_origins)) :
+    "${pair[0]}/${pair[1]}" => { name = pair[0], origin = pair[1] }
+  }
+
+  zone_id = data.cloudflare_zone.anveio_com.id
+  name    = each.value.name
+  type    = "A"
+  content = local.public_ingress_origins[each.value.origin].public_ipv4
+  ttl     = 1
+  proxied = true
+  comment = "anveio ${each.value.origin} product edge"
+}
+
+# CAA policy, as for rumi.engineering: Cloudflare edge certificates issue via
+# Google Trust Services or Let's Encrypt; nothing else may issue for the zone.
+resource "cloudflare_dns_record" "anveio_com_caa" {
+  for_each = {
+    letsencrypt = "letsencrypt.org"
+    google      = "pki.goog"
+  }
+
+  zone_id = data.cloudflare_zone.anveio_com.id
+  name    = "anveio.com"
+  type    = "CAA"
+  ttl     = 1
+  data = {
+    flags = 0
+    tag   = "issue"
+    value = each.value
+  }
+  comment = "anveio edge certificate issuance policy"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
