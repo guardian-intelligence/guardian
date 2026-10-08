@@ -1,4 +1,4 @@
-import type { Tuning } from "../tuning-schema.ts";
+import { DESIGN } from "../design.ts";
 import {
   BUFFER,
   compilePipeline,
@@ -9,6 +9,7 @@ import {
   hexToRgb,
   reducedMotion,
 } from "./gpu.ts";
+import { emissionTexture } from "../rumi/emission.ts";
 
 // The phone's GPU scene, drawn every frame:
 //   ink water -> offscreen texture -> background canvas
@@ -30,7 +31,14 @@ export type SceneShaders = { ink: string; blur: string; blit: string; glass: str
 const MAX_RIPPLES = 8;
 const MAX_SHAPES = 6;
 const MAX_BLUR = 40;
-const INK_FLOATS = 4 * (5 + MAX_RIPPLES);
+/** How far behind Rumi the wall her light bounces off is (css px): it sets how widely that light spreads. */
+export const SUN_REACH = 160;
+
+/** The colour of Rumi's light before her first emission frame comes back: her cream, lit from behind. */
+export function sunLight(): [number, number, number] {
+  return hexToRgb(DESIGN.orb.cream);
+}
+const INK_FLOATS = 4 * (6 + MAX_RIPPLES);
 const GLASS_FLOATS = 4 * (7 + 2 * MAX_SHAPES);
 
 type Targets = {
@@ -76,6 +84,7 @@ export class Scene {
   private readonly bg: GPUCanvasContext;
   private readonly glass: GPUCanvasContext;
   private readonly sampler: GPUSampler;
+  private readonly ringSampler: GPUSampler;
   private readonly inkUniforms: GPUBuffer;
   private readonly glassUniforms: GPUBuffer;
   private readonly hblurUniforms: GPUBuffer;
@@ -107,6 +116,12 @@ export class Scene {
     const format = canvasFormat();
     this.bg = this.context(bgCanvas, format, "opaque");
     this.glass = this.context(glassCanvas, format, "premultiplied");
+    this.ringSampler = device.createSampler({
+      magFilter: "linear",
+      minFilter: "linear",
+      addressModeU: "repeat",
+      addressModeV: "clamp-to-edge",
+    });
     this.sampler = device.createSampler({
       magFilter: "linear",
       minFilter: "linear",
@@ -131,7 +146,12 @@ export class Scene {
   private makeInkGroup(): GPUBindGroup {
     return this.device.createBindGroup({
       layout: this.pipelines.ink.getBindGroupLayout(0),
-      entries: [{ binding: 0, resource: { buffer: this.inkUniforms } }],
+      entries: [
+        { binding: 0, resource: { buffer: this.inkUniforms } },
+        // Rumi's light toward the wall, by direction (orb.wgsl's fs_emission)
+        { binding: 1, resource: emissionTexture(this.device).createView() },
+        { binding: 2, resource: this.ringSampler },
+      ],
     });
   }
 
@@ -237,7 +257,6 @@ export class Scene {
   }
 
   frame(
-    t: Tuning,
     shapes: readonly GlassShape[],
     cssWidth: number,
     cssHeight: number,
@@ -257,20 +276,21 @@ export class Scene {
 
     const ink = new Float32Array(INK_FLOATS);
     ink.set([width, height, now, dpr], 0);
-    ink.set([t.ink.rippleSpeed, reducedMotion() ? 0 : t.ink.swell, t.ink.gloss, t.ink.lifetime], 4);
-    ink.set([...hexToRgb(t.ink.tint), 1], 8);
+    ink.set([DESIGN.ink.rippleSpeed, reducedMotion() ? 0 : DESIGN.ink.swell, DESIGN.ink.gloss, DESIGN.ink.lifetime], 4);
+    ink.set([...hexToRgb(DESIGN.ink.tint), 1], 8);
     const vo = this.voice;
     const dt = Math.min(0.1, Math.max(0, now - vo.last));
     vo.last = now;
     vo.strength +=
-      ((vo.on && !reducedMotion() ? 1 : 0) - vo.strength) * Math.min(1, dt * t.ink.voiceEase);
-    vo.phase += (dt * Math.PI * 2 * t.ink.voiceSpeed) / Math.max(t.ink.voiceWavelength, 1);
+      ((vo.on && !reducedMotion() ? 1 : 0) - vo.strength) * Math.min(1, dt * DESIGN.ink.voiceEase);
+    vo.phase += (dt * Math.PI * 2 * DESIGN.ink.voiceSpeed) / Math.max(DESIGN.ink.voiceWavelength, 1);
     ink.set([vo.x, vo.y, vo.strength, vo.phase], 12);
-    ink.set([t.ink.voiceWavelength, t.ink.voiceAmp, t.ink.voiceReach, 0], 16);
-    this.ripples.forEach((r, i) => ink.set(r, 20 + i * 4));
+    ink.set([DESIGN.ink.voiceWavelength, DESIGN.ink.voiceAmp, DESIGN.ink.voiceReach, 0], 16);
+    ink.set([1, 0, 0, SUN_REACH], 20);
+    this.ripples.forEach((r, i) => ink.set(r, 24 + i * 4));
     q.writeBuffer(this.inkUniforms, 0, ink);
 
-    const radius = Math.round(Math.min(MAX_BLUR, Math.max(1, t.glass.blurRadius * dpr)));
+    const radius = Math.round(Math.min(MAX_BLUR, Math.max(1, DESIGN.glass.blurRadius * dpr)));
     if (radius !== this.blurRadius) {
       this.blurRadius = radius;
       q.writeBuffer(this.weights, 0, gaussian(radius));
@@ -278,7 +298,7 @@ export class Scene {
     q.writeBuffer(this.hblurUniforms, 0, new Float32Array([1 / width, 0, radius, 0]));
     q.writeBuffer(this.vblurUniforms, 0, new Float32Array([0, 1 / height, radius, 0]));
 
-    const g = t.glass;
+    const g = DESIGN.glass;
     const glass = new Float32Array(GLASS_FLOATS);
     const count = Math.min(shapes.length, MAX_SHAPES);
     glass.set([width, height, dpr, count], 0);

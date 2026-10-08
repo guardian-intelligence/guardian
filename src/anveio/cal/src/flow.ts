@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { STAGE_LINE, type Stage } from "./content.ts";
 
-// Samantha's run through the page. A forced stage (from the studio) freezes
+// Samantha's run through the page. A forced stage (from ?frame=) freezes
 // the flow on that frame with Rumi's line fully shown.
 
 export type CardKind = "draft1" | "fri" | "draft2" | "thu";
@@ -75,7 +75,6 @@ export function useFlow(forced: Stage | null) {
   );
 
   useEffect(() => clear, []);
-  const restart = useCallback(() => go("arrive"), [go]);
 
   const recording = stage === "listening" || stage === "updating";
   const thinking = stage === "thinking" || stage === "thinking2";
@@ -108,6 +107,5 @@ export function useFlow(forced: Stage | null) {
     signIn: () => go("listening"),
     send: () => go(stage === "updating" ? "thinking2" : "thinking"),
     cancel: () => go(stage === "updating" ? "return" : "arrive"),
-    restart,
   } as const;
 }

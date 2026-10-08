@@ -33,6 +33,13 @@ body {
   color: var(--label);
   font-family: var(--font);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* an app, not a page: no rubber-band past the ink, no pull-to-refresh,
+     no double-tap zoom (pinch zoom still works) */
+  overscroll-behavior: none;
+  touch-action: manipulation;
 }
 
 /* iOS type ramp, with web-calibrated tracking */
@@ -91,7 +98,6 @@ h2 {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  gap: 32px;
   padding: 32px;
 }
 
@@ -108,6 +114,21 @@ h2 {
     0 40px 120px -30px rgba(120, 100, 255, 0.12);
   user-select: none;
   -webkit-user-select: none;
+  /* no long-press link or image menu, no grey flash on tap */
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.phone img {
+  -webkit-user-drag: none;
+}
+/* Like a note in Contacts, Shovon's note can be selected and copied. */
+.note p {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+}
+::selection {
+  background: rgb(10 132 255 / 0.4);
 }
 
 @media (max-width: 760px) {
@@ -166,7 +187,8 @@ h2 {
   inset: 0;
   z-index: 1;
   overflow-y: auto;
-  padding: 64px 16px 200px;
+  overscroll-behavior: contain;
+  padding: max(64px, env(safe-area-inset-top)) 16px 200px;
   display: flex;
   flex-direction: column;
   gap: 32px;
@@ -198,6 +220,26 @@ h2 {
     inset 0 1px 0 rgba(255, 255, 255, 0.28),
     inset 0 0 0 0.5px rgba(255, 255, 255, 0.18),
     0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* Rumi's light, bounced off the wall behind her, reflecting on every glass
+   element: a soft pool where she is nearest and a bright edge on the side that
+   faces her. Glass.tsx's lightGlass sets the vars each frame. */
+.glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  --sun-a: calc(var(--lit, 0) * var(--orb-light));
+  background: radial-gradient(
+    circle 240px at var(--lx, -999px) var(--ly, -999px),
+    rgb(var(--sun-rgb) / calc(var(--sun-a) * 0.08)),
+    transparent
+  );
+  box-shadow: inset calc(var(--ldx, 0) * -1.5px) calc(var(--ldy, 0) * -1.5px) 1px
+    rgb(var(--sun-rgb) / calc(var(--sun-a) * 0.3));
 }
 
 .tap {
@@ -314,7 +356,17 @@ h2 {
   color: var(--label2);
 }
 
-/* Recently: rows straight on the black, soft ink */
+/* Recently: rows etched into the dark metal of the room. Plain reading is the
+   soft ink, solid and crisp; the etching only shows in how the glyphs catch
+   Rumi's light (etch.ts sets the vars each frame). */
+.recently-section {
+  /* how strongly the grooves catch her: the sheen on their faces, and the
+     brighter wall on the side of each stroke that faces her */
+  --etch-sheen: 0.8;
+  --etch-wall: 1.8;
+  /* the metal's grain: fine speckle in the alpha channel, used as a mask */
+  --etch-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.15' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 2.4 0 0 0 -0.75'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+}
 .recently {
   list-style: none;
   margin: 0;
@@ -324,7 +376,7 @@ h2 {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 15px;
+  gap: 12px;
   min-height: 44px;
   padding: 0 16px;
   text-decoration: none;
@@ -341,12 +393,12 @@ h2 {
   border-radius: 10px;
 }
 .row-sub {
-  padding-left: 60px;
+  padding-left: 52px;
 }
 .row-tile {
-  width: 29px;
-  height: 29px;
-  border-radius: 7px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
   background: #000;
   box-shadow: inset 0 0 0 0.5px rgba(235, 235, 245, 0.12);
   color: rgba(235, 235, 245, 0.62);
@@ -354,39 +406,42 @@ h2 {
   align-items: center;
   justify-content: center;
   flex: none;
+  --glyph-size: 15px;
 }
 .row-text {
   flex: 1;
   min-width: 0;
-  font-size: 17px;
-  line-height: 22px;
-  letter-spacing: -0.37px;
+  font-size: 15px;
+  line-height: 20px;
+  letter-spacing: -0.23px;
   color: var(--soft);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .row-sub .row-text {
-  font-size: 15px;
-  line-height: 20px;
-  letter-spacing: -0.23px;
+  font-size: 13px;
+  line-height: 18px;
+  letter-spacing: -0.08px;
 }
 .row-date {
   flex: none;
-  font-size: 15px;
-  line-height: 20px;
-  letter-spacing: -0.23px;
+  font-size: 13px;
+  line-height: 18px;
+  letter-spacing: -0.08px;
   color: var(--label2);
   font-variant-numeric: tabular-nums;
 }
 .row-chevron {
   flex: none;
-  margin-left: -5px;
+  display: flex;
+  margin-left: -4px;
   color: var(--label3);
+  --glyph-size: 7px 11px;
 }
 .sep {
   position: absolute;
-  left: 60px;
+  left: 52px;
   right: 0;
   bottom: 0;
   height: 0.5px;
@@ -404,12 +459,74 @@ h2 {
   align-items: center;
   min-height: 44px;
   width: 100%;
-  padding: 0 16px 4px 60px;
+  padding: 0 16px 4px 52px;
   color: var(--tint);
-  font-size: 15px;
-  line-height: 20px;
-  letter-spacing: -0.23px;
+  font-size: 13px;
+  line-height: 18px;
+  letter-spacing: -0.08px;
   text-align: left;
+}
+
+/* Each etched glyph gets two copies of itself lit by Rumi, both masked by the
+   grain: a faint sheen over its face (::after), and behind it, nudged away
+   from her, the groove wall that faces her (::before) as a thin bright rim.
+   Her light falls off as e^(-d/reach) from her rim, sampled at four reaches. */
+.etch {
+  position: relative;
+  isolation: isolate;
+}
+.etch::before,
+.etch::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  --etch-a: calc(var(--etch-k) * var(--orb-light, 1));
+  --etch-c: var(--etch-rgb, var(--sun-rgb));
+  background: radial-gradient(
+    circle at var(--ex, -999px) var(--ey, -999px),
+    rgb(var(--etch-c) / var(--etch-a)) 22px,
+    rgb(var(--etch-c) / calc(var(--etch-a) * 0.368)) calc(22px + var(--etch-reach, 200px)),
+    rgb(var(--etch-c) / calc(var(--etch-a) * 0.135)) calc(22px + 2 * var(--etch-reach, 200px)),
+    rgb(var(--etch-c) / calc(var(--etch-a) * 0.05)) calc(22px + 3 * var(--etch-reach, 200px)),
+    transparent calc(22px + 4 * var(--etch-reach, 200px))
+  );
+}
+.etch::before {
+  --etch-k: var(--etch-wall);
+  z-index: -1;
+  translate: calc(var(--edx, 0) * 0.75px) calc(var(--edy, 0) * 0.75px);
+}
+.etch::after {
+  --etch-k: var(--etch-sheen);
+  mix-blend-mode: screen;
+}
+.etch-text::before,
+.etch-text::after {
+  content: attr(data-text);
+  padding: inherit;
+  color: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-mask: var(--etch-grain);
+  mask: var(--etch-grain);
+}
+.etch-icon::before,
+.etch-icon::after {
+  content: "";
+  -webkit-mask:
+    var(--glyph) center / var(--glyph-size) no-repeat,
+    var(--etch-grain);
+  -webkit-mask-composite: source-in;
+  mask:
+    var(--glyph) center / var(--glyph-size) no-repeat,
+    var(--etch-grain);
+  mask-composite: intersect;
+}
+.etch-icon > svg {
+  position: relative;
 }
 
 /* Shovon's view of the thread */
@@ -481,7 +598,7 @@ h2 {
 .bubble {
   position: absolute;
   left: 20px;
-  bottom: 90px;
+  bottom: calc(var(--bar-bottom) + 60px);
   max-width: 310px;
   border-radius: 18px;
 }
@@ -494,11 +611,16 @@ h2 {
   color: transparent;
 }
 
+/* iOS 26 Messages sits its input bar 28pt above the screen's bottom edge,
+   and never inside the home indicator's area */
+.phone {
+  --bar-bottom: max(28px, env(safe-area-inset-bottom));
+}
 .bar {
   position: absolute;
   left: 20px;
   right: 20px;
-  bottom: 30px;
+  bottom: var(--bar-bottom);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -521,40 +643,15 @@ h2 {
   height: var(--control);
   border-radius: 999px;
 }
-/* The message field stands up off the ink like a physical key, lit by Rumi as
-   if she were a candle: its edge facing her catches her light, its far
-   bottom-right falls into shade, and it casts a shadow away from her. The
-   --flame* vars (src/rumi/flame.ts) make that light wax, wane and flicker. */
-.phone {
-  --flame: 1;
-  --flame-size: 1;
-  --flame-x: 0;
-  --flame-y: 0;
-}
+/* The message field stands up off the ink like a physical key: it casts a
+   soft shadow away from Rumi and its far bottom-right side falls into shade.
+   Her light on its near edge comes from .glass::after, like all glass. */
 .bar .field {
   box-shadow:
-    calc(var(--raise) * (5px + var(--flame) * 2px)) calc(var(--raise) * 8px)
-      calc(var(--raise) * 18px) calc(var(--raise) * -4px) rgb(0 0 0 / calc(var(--raise) * 0.85)),
+    calc(var(--raise) * 6px) calc(var(--raise) * 8px) calc(var(--raise) * 18px)
+      calc(var(--raise) * -4px) rgb(0 0 0 / calc(var(--raise) * 0.85)),
     inset calc(var(--raise) * -3px) calc(var(--raise) * -4px) calc(var(--raise) * 8px)
-      rgb(0 0 0 / calc(var(--raise) * (0.7 - var(--flame) * 0.18))),
-    inset calc(var(--raise) * 1.5px) 0 calc(var(--raise) * 1px)
-      rgb(var(--orb-rgb) / calc(var(--orb-light) * 0.32 * var(--flame)));
-}
-.bar .field::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background: radial-gradient(
-    calc(150px * var(--flame-size)) calc(64px * var(--flame-size)) at calc(var(--flame-x) * 10%)
-      calc(42% + var(--flame-y) * 16%),
-    rgb(var(--orb-rgb) / calc(var(--orb-light) * 0.15 * var(--flame))),
-    transparent 72%
-  );
-}
-.bar .orb-button {
-  filter: brightness(calc(0.9 + 0.12 * var(--flame)));
+      rgb(0 0 0 / calc(var(--raise) * 0.55));
 }
 .field-tap {
   width: 100%;
@@ -633,6 +730,11 @@ h2 {
   cursor: pointer;
   font-family: inherit;
 }
+.google:focus-visible,
+.voice:focus-visible {
+  outline: 2px solid var(--tint);
+  outline-offset: 3px;
+}
 .host-note {
   display: flex;
   align-items: center;
@@ -658,9 +760,6 @@ h2 {
   flex: none;
   border-radius: 50%;
 }
-.orb[data-mode="idle"] {
-  animation: orb-breathe 4s ease-in-out infinite;
-}
 .orb-flat {
   position: absolute;
   inset: 0;
@@ -674,17 +773,9 @@ h2 {
   pointer-events: none;
   transition: opacity 0.4s ease;
 }
+/* She never changes size (scaling her canvas aliases); a press just dims her. */
 .tap:active .orb {
-  transform: scale(0.94);
-}
-@keyframes orb-breathe {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.035);
-  }
+  filter: brightness(0.82);
 }
 
 .enter {
@@ -703,182 +794,8 @@ h2 {
 
 @media (prefers-reduced-motion: reduce) {
   .enter,
-  .orb,
   .rec-dot,
   .voice-prog.playing {
     animation: none !important;
   }
-}
-
-/* ---------- studio ---------- */
-
-.studio {
-  position: sticky;
-  top: 32px;
-  width: 340px;
-  max-height: calc(100dvh - 64px);
-  overflow-y: auto;
-  background: #111113;
-  border: 1px solid #222226;
-  border-radius: 16px;
-  padding: 14px 16px 16px;
-  font-size: 13px;
-  color: rgba(235, 235, 245, 0.86);
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-@media (max-width: 760px) {
-  .studio {
-    position: static;
-    width: auto;
-    max-height: none;
-    margin: 16px;
-  }
-}
-.st-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-}
-.st-head h2 {
-  font-size: 15px;
-  font-weight: 600;
-}
-.st-status {
-  color: var(--green);
-}
-.st-error {
-  margin: 0;
-  padding: 10px;
-  border-radius: 8px;
-  background: rgba(255, 69, 58, 0.12);
-  color: #ff8a80;
-  white-space: pre-wrap;
-  font-size: 12px;
-}
-.st-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.st-section {
-  appearance: none;
-  border: 0;
-  background: none;
-  color: var(--label);
-  font: inherit;
-  font-weight: 600;
-  text-align: left;
-  padding: 6px 0 2px;
-  border-top: 1px solid #222226;
-  cursor: pointer;
-}
-.st-section::after {
-  content: " ▾";
-  color: var(--label2);
-}
-.st-section[aria-expanded="false"]::after {
-  content: " ▸";
-}
-.st-field {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 26px;
-}
-.st-field label {
-  color: var(--label2);
-}
-.st-range {
-  display: grid;
-  grid-template-columns: 1fr 120px 44px;
-}
-.st-range input {
-  width: 100%;
-  accent-color: #8e7cf0;
-}
-.st-range output {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.st-color {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.st-color input {
-  width: 32px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  background: none;
-}
-.st-color code {
-  font-size: 12px;
-  color: var(--label2);
-}
-.st-field select {
-  background: #1c1c1e;
-  color: inherit;
-  border: 1px solid #333;
-  border-radius: 6px;
-  padding: 4px 6px;
-  font: inherit;
-}
-.st-preview {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 0;
-  background: radial-gradient(circle at 50% 40%, #15131c, #0b0b0d 70%);
-  border-radius: 12px;
-}
-.st-orb {
-  appearance: none;
-  background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  border-radius: 50%;
-}
-.st-modes {
-  display: flex;
-  gap: 4px;
-}
-.st-modes button,
-.st-btn {
-  appearance: none;
-  border: 1px solid #2c2c30;
-  background: #1c1c1e;
-  color: inherit;
-  font: inherit;
-  border-radius: 8px;
-  padding: 6px 10px;
-  cursor: pointer;
-}
-.st-modes button[aria-pressed="true"] {
-  background: #2d2547;
-  border-color: #5b4aa8;
-  color: #fff;
-}
-.st-hint {
-  color: var(--label2);
-  font-size: 12px;
-}
-.st-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  position: sticky;
-  bottom: -16px;
-  background: #111113;
-  padding: 10px 0 2px;
-}
-.st-primary {
-  background: #3a2f6b;
-  border-color: #5b4aa8;
-  color: #fff;
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 
 import { ENTRIES, GROUP_NOUN, type Entry, type EntryKind } from "../content.ts";
 
@@ -15,6 +15,20 @@ const ICONS = {
     stroke: "none",
   },
 } as const satisfies Record<EntryKind, { d: string; fill: string; stroke: string }>;
+
+const CHEVRON = "M1.5 1.5l5 5-5 5";
+
+// An icon's own shape as a mask image, so its etched sheen (.etch-icon) lands
+// only on the glyph.
+const glyph = (viewBox: string, d: string, fill: string, stroke: string, width: number) =>
+  ({
+    "--glyph": `url("data:image/svg+xml,${encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" fill="${fill}" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`.replaceAll(
+        "currentColor",
+        "#000",
+      ),
+    )}")`,
+  }) as CSSProperties;
 
 const MONTHS = [
   "Jan",
@@ -45,10 +59,13 @@ function Item({ entry, sub, sep }: { entry: Entry; sub: boolean; sep: boolean })
     <li>
       <a className={sub ? "row row-sub" : "row"} href={entry.url} target="_blank" rel="noreferrer">
         {!sub && (
-          <span className="row-tile">
+          <span
+            className="row-tile etch etch-icon"
+            style={glyph("0 0 24 24", icon.d, icon.fill, icon.stroke, 2.2)}
+          >
             <svg
-              width="18"
-              height="18"
+              width="15"
+              height="15"
               viewBox="0 0 24 24"
               fill={icon.fill}
               stroke={icon.stroke}
@@ -61,24 +78,34 @@ function Item({ entry, sub, sep }: { entry: Entry; sub: boolean; sep: boolean })
             </svg>
           </span>
         )}
-        <span className="row-text">{entry.text}</span>
-        <time className="row-date" dateTime={entry.date}>
+        <span className="row-text etch etch-text" data-text={entry.text}>
+          {entry.text}
+        </span>
+        <time
+          className="row-date etch etch-text"
+          dateTime={entry.date}
+          data-text={dateLabel(entry.date)}
+        >
           {dateLabel(entry.date)}
         </time>
-        <svg
-          className="row-chevron"
-          width="8"
-          height="13"
-          viewBox="0 0 8 13"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
+        <span
+          className="row-chevron etch etch-icon"
+          style={glyph("0 0 8 13", CHEVRON, "none", "#000", 2)}
         >
-          <path d="M1.5 1.5l5 5-5 5" />
-        </svg>
+          <svg
+            width="7"
+            height="11"
+            viewBox="0 0 8 13"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d={CHEVRON} />
+          </svg>
+        </span>
         {sep && <span className="sep" />}
       </a>
     </li>
@@ -117,8 +144,10 @@ export function Recently() {
   }
 
   return (
-    <section>
-      <h2 className="section-header t-foot">Recently</h2>
+    <section className="recently-section">
+      <h2 className="section-header t-cap etch etch-text" data-text="Recently">
+        Recently
+      </h2>
       <ol className="recently">
         {rows.map((r, i) => {
           const sep = i < rows.length - 1 && rows[i + 1]?.type !== "more";
@@ -132,7 +161,9 @@ export function Recently() {
                 aria-expanded={r.open}
                 onClick={() => setOpen({ ...open, [r.kind]: !r.open })}
               >
-                {r.text}
+                <span className="etch etch-text" data-text={r.text}>
+                  {r.text}
+                </span>
                 {sep && <span className="sep" />}
               </button>
             </li>

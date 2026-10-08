@@ -19,8 +19,14 @@ export function getDevice(): Promise<GPUDevice | null> {
 }
 
 // TypeScript's DOM lib types WebGPU objects but not these flag namespaces; values per the spec.
-export const BUFFER = { COPY_DST: 0x0008, UNIFORM: 0x0040, STORAGE: 0x0080 } as const;
-export const TEXTURE = { TEXTURE_BINDING: 0x04, RENDER_ATTACHMENT: 0x10 } as const;
+export const BUFFER = {
+  MAP_READ: 0x0001,
+  COPY_DST: 0x0008,
+  UNIFORM: 0x0040,
+  STORAGE: 0x0080,
+} as const;
+export const TEXTURE = { COPY_SRC: 0x01, TEXTURE_BINDING: 0x04, RENDER_ATTACHMENT: 0x10 } as const;
+export const MAP_MODE_READ = 0x0001;
 
 export function webgpuContext(canvas: HTMLCanvasElement): GPUCanvasContext | null {
   const ctx = canvas.getContext("webgpu");
@@ -84,6 +90,7 @@ export async function compilePipeline(
   fragment: string,
   format: GPUTextureFormat,
   file: string,
+  entryPoint = "fs_main",
 ): Promise<GPURenderPipeline> {
   const { code, origin } = assemble(fragment, file);
   const module = device.createShaderModule({ label: file, code });
@@ -96,7 +103,7 @@ export async function compilePipeline(
     label: file,
     layout: "auto",
     vertex: { module, entryPoint: "vs_main" },
-    fragment: { module, entryPoint: "fs_main", targets: [{ format }] },
+    fragment: { module, entryPoint, targets: [{ format }] },
     primitive: { topology: "triangle-list" },
   });
 }

@@ -17,18 +17,15 @@ falls back to a frosted CSS surface and the ink to flat black.
 
 ## The loop
 
-- **Studio** (right of the phone in dev; add `?studio` elsewhere): sliders and
-  colours for Rumi, the Liquid Glass and the ink. Everything updates live.
-  Your working draft survives reloads.
-  - **Save as defaults** writes the draft into `src/tuning.ts` (dev server only).
-  - **Copy as TS** copies it as a `const` you can paste anywhere.
-  - **Revert to saved** throws the draft away.
-- **Frames:** the studio's Frame menu (or `?frame=booked`, `?frame=host`, …)
-  freezes the page on one step of Samantha's run. "Live prototype" plays the
-  whole flow: tap Leave a message → Continue with Google → send → booked.
+- **Design values:** the colours and dials for Rumi, the Liquid Glass and the
+  ink are plain constants in `src/design.ts`; Vite picks up edits to them.
+- **Frames:** `?frame=booked`, `?frame=host`, … freezes the page on one step of
+  Samantha's run. Without `?frame=` the page plays the whole flow: tap Leave a
+  message → Continue with Google → send → booked.
 - **Shaders hot-reload:** edit any file in `src/shaders/` and the running
-  scene recompiles in place without a page reload. A WGSL error shows in the
-  studio with its file and line, while the last good shader keeps drawing.
+  scene recompiles in place without a page reload. A WGSL error is logged to
+  the browser console with its file and line, while the last good shader keeps
+  drawing.
 - **Screenshots:** with the dev server up, `node scripts/shot.mjs arrive booked host`
   writes `shots/<frame>.png` plus a 1:1 close-up of the glass controls
   (`shots/<frame>-glass.png`).
@@ -37,7 +34,7 @@ falls back to a frosted CSS surface and the ink to flat black.
 
 | Layer (back to front) | What                                                                              |
 | --------------------- | --------------------------------------------------------------------------------- |
-| `layer-ink` canvas    | `ink.wgsl`: the swell plus tap ripples, rendered to a texture and shown           |
+| `layer-ink` canvas    | `ink.wgsl`: the swell and Rumi's voice waves, rendered to a texture and shown     |
 | `.scroll`             | the contact card: plain DOM, iOS type ramp and system colours (`styles.css`)      |
 | `.underlay`           | backdrop-blur boxes under each glass shape, so the page blurs beneath the glass   |
 | `layer-glass` canvas  | `glass.wgsl`: Liquid Glass optics for every `<Glass>` element, refracting the ink |
@@ -45,14 +42,25 @@ falls back to a frosted CSS surface and the ink to flat black.
 
 `<Glass radius=…>` registers its element. Each frame the scene reads every
 glass box and draws them as one liquid-merged SDF, so neighbouring glass can
-melt together (Studio → Liquid merge). The bezel refraction (Snell's law),
+melt together (`glass.mergeRate` in `src/design.ts`). The bezel refraction (Snell's law),
 RGB dispersion, fresnel and glare come from
 [liquid-glass-studio](https://github.com/iyinchao/liquid-glass-studio) (MIT,
 vendored WGSL in `src/shaders/`, license alongside).
 
-Rumi (`src/rumi/Orb.tsx` + `orb.wgsl`) is her own small WebGPU canvas. Her
-states are `idle`, `listening`, `thinking` and `speaking`, and tapping her
-mutes her.
+Rumi (`src/rumi/Orb.tsx` + `orb.wgsl`) is her own small WebGPU canvas:
+pastel oil droplets in water, lit from behind, seen down a defocused
+microscope. The droplets pack like foam, filter the cream light behind them
+and are drawn only by faint rims. Her states are `idle` (slow drift, focus
+breathing), `listening` (focus pulls in), `thinking` (faster drift, droplets
+gather and merge) and `speaking` (a soft brightness pulse); tapping her mutes
+her. With reduced motion she holds still and only her focus breathes, and
+`public/rumi.png` stands in for her without WebGPU.
+
+She is also the page's light. Each frame `orb.wgsl`'s `fs_emission` raymarches
+her from the far wall behind her into a 64-texel strip, one texel per direction
+around her (`src/rumi/emission.ts`). `ink.wgsl` samples it for the tight halo
+her light leaves on the wall, and a CPU copy colours the reflection on every
+glass element (`lightGlass` in `src/glass/Glass.tsx`, painted by `.glass::after`).
 
 Copy and timeline entries live in `src/content.ts`. Rumi's lines and Shovon's
 note are verbatim, so don't paraphrase them.

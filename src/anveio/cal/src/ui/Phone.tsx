@@ -1,17 +1,17 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import { LINES, NOTE, type Stage } from "../content.ts";
+import { DESIGN } from "../design.ts";
 import { useFlow, type CardKind } from "../flow.ts";
-import { Glass, readShapes } from "../glass/Glass.tsx";
-import { getDevice, hexToRgb } from "../gpu/gpu.ts";
-import { Scene, type GlassShape } from "../gpu/scene.ts";
-import { light } from "../rumi/light.ts";
+import { Glass, lightGlass, readShapes } from "../glass/Glass.tsx";
+import { getDevice } from "../gpu/gpu.ts";
+import { Scene, SUN_REACH, sunLight, type GlassShape } from "../gpu/scene.ts";
 import { Orb } from "../rumi/Orb.tsx";
 import blitShader from "../shaders/blit.wgsl?raw";
 import blurShader from "../shaders/blur.wgsl?raw";
 import glassShader from "../shaders/glass.wgsl?raw";
 import inkShader from "../shaders/ink.wgsl?raw";
-import { tuning, useTuning } from "../studio/store.ts";
+import { lightEtchings } from "./etch.ts";
 import { Recently } from "./Recently.tsx";
 
 const SHADERS = { ink: inkShader, blur: blurShader, blit: blitShader, glass: glassShader };
@@ -162,9 +162,9 @@ function syncUnderlay(layer: HTMLDivElement, shapes: readonly GlassShape[]): voi
   });
 }
 
-type Props = { forced: Stage | null; restartKey: number; onGpuError: (msg: string | null) => void };
+type Props = { forced: Stage | null };
 
-export function Phone({ forced, restartKey, onGpuError }: Props) {
+export function Phone({ forced }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const bgRef = useRef<HTMLCanvasElement>(null);
   const glassRef = useRef<HTMLCanvasElement>(null);
@@ -172,17 +172,11 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
   const sceneRef = useRef<Scene | null>(null);
   const [gpu, setGpu] = useState<"pending" | "on" | "off">("pending");
   const [muted, setMuted] = useState(true);
-  const t = useTuning();
 
-  const ripple = (x: number, y: number, amp: number) => sceneRef.current?.ripple(x, y, amp);
   const orbRef = useRef<HTMLDivElement>(null);
   const flow = useFlow(forced);
   const speakingRef = useRef(false);
   speakingRef.current = flow.speaking;
-  const { restart } = flow;
-  useEffect(() => {
-    if (restartKey > 0) restart();
-  }, [restartKey, restart]);
 
   useEffect(() => {
     let raf = 0;
@@ -197,7 +191,7 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
         return;
       }
       const scene = await Scene.create(device, bg, glass, SHADERS).catch((err: unknown) => {
-        onGpuError(err instanceof Error ? err.message : String(err));
+        console.error(err);
         return null;
       });
       if (!scene || dead) {
@@ -215,19 +209,13 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
         if (orb) {
           const r = root.getBoundingClientRect();
           const o = orb.getBoundingClientRect();
-          scene.setVoice(
-            o.left - r.left + o.width / 2,
-            o.top - r.top + o.height / 2,
-            speakingRef.current,
-          );
+          const x = o.left - r.left + o.width / 2;
+          const y = o.top - r.top + o.height / 2;
+          scene.setVoice(x, y, speakingRef.current);
+          lightGlass(root, x, y, SUN_REACH);
+          lightEtchings(root, x, y);
         }
-        scene.frame(
-          tuning.get(),
-          shapes,
-          root.clientWidth,
-          root.clientHeight,
-          Math.min(devicePixelRatio, 2),
-        );
+        scene.frame(shapes, root.clientWidth, root.clientHeight, Math.min(devicePixelRatio, 2));
       };
       tick();
     });
@@ -238,49 +226,32 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
       sceneRef.current = null;
     };
     // mount once; shader edits are applied by the effect below
-  }, [onGpuError]);
-
-  // Rumi's candle also lights the message field; its shine reads these vars.
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
-    return light.subscribe((f) => {
-      root.style.setProperty("--flame", f.brightness.toFixed(4));
-      root.style.setProperty("--flame-size", f.size.toFixed(4));
-      root.style.setProperty("--flame-x", f.swayX.toFixed(4));
-      root.style.setProperty("--flame-y", f.swayY.toFixed(4));
-    });
   }, []);
 
   // Editing any .wgsl file hot-reloads it into the running scene.
   useEffect(() => {
-    void sceneRef.current?.setShaders(SHADERS).then(onGpuError);
-  }, [inkShader, blurShader, blitShader, glassShader, onGpuError]);
-
-  // Tap ripples are a debugging aid only (Studio → Ink → Tap ripples).
-  const press = (e: PointerEvent<HTMLDivElement>) => {
-    if (!tuning.get().ink.tapRipples) return;
-    const r = e.currentTarget.getBoundingClientRect();
-    ripple(e.clientX - r.left, e.clientY - r.top, 3);
-  };
+    void sceneRef.current?.setShaders(SHADERS).then((err) => {
+      if (err) console.error(err);
+    });
+  }, [inkShader, blurShader, blitShader, glassShader]);
 
   const glassVars: CSSProperties & Record<`--${string}`, string> = {
-    "--glass-blur": `${t.glass.domBlur}px`,
-    "--raise": String(t.glass.raise),
-    "--orb-light": String(t.glass.orbLight),
-    "--orb-rgb": hexToRgb(t.orb.glow)
+    "--glass-blur": `${DESIGN.glass.domBlur}px`,
+    "--raise": String(DESIGN.glass.raise),
+    "--orb-light": String(DESIGN.glass.orbLight),
+    "--sun-rgb": sunLight()
       .map((c) => Math.round(c * 255))
       .join(" "),
   };
 
   return (
-    <div ref={rootRef} className={`phone gpu-${gpu}`} onPointerDown={press} style={glassVars}>
+    <div ref={rootRef} className={`phone gpu-${gpu}`} style={glassVars}>
       <canvas ref={bgRef} className="layer-ink" aria-hidden="true" />
 
       <div className="scroll">
         {!flow.host && (
           <header className="hero">
-            <img src="/shovon.jpg" alt="Shovon Hasan" width={120} height={120} />
+            <img src="/shovon.jpg" alt="Shovon Hasan" width={120} height={120} draggable={false} />
             <h1 className="t-title1">Shovon Hasan</h1>
             <p className="t-sub secondary">Founder, Guardian</p>
           </header>
@@ -330,7 +301,7 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
                 aria-pressed={muted}
                 onClick={() => setMuted(!muted)}
               >
-                <Orb mode={flow.orbMode} muted={muted} size={t.orb.size} />
+                <Orb mode={flow.orbMode} muted={muted} size={DESIGN.orb.size} />
               </button>
             </div>
           </div>

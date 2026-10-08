@@ -1,21 +1,36 @@
-// Jet-black ink water: a slow swell, up to 8 damped tap ripples, and the
-// gentle standing waves that spread from Rumi while she speaks.
+// Jet-black ink water: a slow swell, up to 8 damped tap ripples, the gentle
+// standing waves that spread from Rumi while she speaks, and her light on the
+// wall behind her. The page's glass refracts this, so it picks her light up too.
 struct Params {
   frame: vec4f,
   look: vec4f,
   tint: vec4f,
   voice: vec4f,
   voice2: vec4f,
+  sun: vec4f,
   r0: vec4f, r1: vec4f, r2: vec4f, r3: vec4f,
   r4: vec4f, r5: vec4f, r6: vec4f, r7: vec4f,
 }
 @group(0) @binding(0) var<uniform> u: Params;
+// Rumi's light toward the far wall, one texel per direction around her (y up,
+// 0 = right), sRGB; raymarched each frame by orb.wgsl's fs_emission
+@group(0) @binding(1) var u_emission: texture_2d<f32>;
+@group(0) @binding(2) var u_ring: sampler;
 
 // frame: x,y canvas pixels, z time (s), w device pixel ratio
 // look: x ripple speed (css px/s), y ambient swell, z gloss, w ripple lifetime (s)
 // voice: x,y Rumi's centre (css px), z strength 0..1 (eased in/out), w phase (rad)
 // voice2: x wavelength (css px), y amplitude, z reach (css px), w unused
+// sun: x brightness of Rumi's light, yz unused, w the far wall's distance behind her (css px); centred on voice.xy
 // rN: x,y centre (css px), z start time (s), w amplitude
+
+// Rumi's radius (css px), the dark gap kept at her rim, how bright her light
+// on the far wall is, and how much its colour leans toward her nearer face.
+// Glass.tsx's lightGlass uses the same falloff for the page's glass.
+const ORB_RADIUS: f32 = 22.0;
+const RIM_GAP: f32 = 2.0;
+const WALL_BRIGHTNESS: f32 = 0.005;
+const FACE_TINT: f32 = 0.3;
 
 fn ripple(p: vec2f, r: vec4f) -> f32 {
   let age = u.frame.z - r.z;
@@ -69,6 +84,27 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
   var col = vec3f(sheen);
   col += vec3f(spec + glint);
   col += u.tint.rgb * fres * 1.2;
+  // Rumi lights a wall far behind her (u.sun.w css px away), and we see that
+  // wall past her: a small light on a distant wall spreads into a broad, soft
+  // pool, its brightness falling as (1 + (d/D)^2)^-1.5 (inverse square times
+  // the slant), with no detail near her. Every point of the wall sees nearly
+  // all of her, so its colour is her average, tinted a little toward the face
+  // of her turned that way.
+  if (u.sun.w > 0.0) {
+    let off = p - u.voice.xy;
+    let d = length(off);
+    // a thin dark ring right at her rim keeps her edge crisp against her glow
+    let wall = pow(1.0 + (d * d) / (u.sun.w * u.sun.w), -1.5)
+      * smoothstep(ORB_RADIUS, ORB_RADIUS + RIM_GAP, d);
+    let turn = fract(atan2(-off.y, off.x) / 6.2831853 + 1.0);
+    var mean = vec3f(0.0);
+    for (var i = 0; i < 8; i = i + 1) {
+      mean += pow(textureSampleLevel(u_emission, u_ring, vec2f(f32(i) / 8.0, 0.5), 0.0).rgb, vec3f(2.2));
+    }
+    let toward = pow(textureSampleLevel(u_emission, u_ring, vec2f(turn, 0.5), 0.0).rgb, vec3f(2.2));
+    let face = mix(mean / 8.0, toward, FACE_TINT);
+    col += face * u.sun.x * WALL_BRIGHTNESS * wall;
+  }
   let vig = 1.0 - 0.35 * pow(length(uv - vec2f(0.5, 0.45)) * 1.3, 2.0);
   col *= vig;
   // black floor: the faint everywhere-sheen of the swell would read as grey after gamma
