@@ -176,14 +176,9 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
 
   const ripple = (x: number, y: number, amp: number) => sceneRef.current?.ripple(x, y, amp);
   const orbRef = useRef<HTMLDivElement>(null);
-  const flow = useFlow(forced, () => {
-    const root = rootRef.current;
-    const orb = orbRef.current;
-    if (!root || !orb) return;
-    const r = root.getBoundingClientRect();
-    const o = orb.getBoundingClientRect();
-    ripple(o.left - r.left + o.width / 2, o.top - r.top + o.height / 2, 0.8);
-  });
+  const flow = useFlow(forced);
+  const speakingRef = useRef(false);
+  speakingRef.current = flow.speaking;
   const { restart } = flow;
   useEffect(() => {
     if (restartKey > 0) restart();
@@ -216,6 +211,16 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
         raf = requestAnimationFrame(tick);
         const shapes = readShapes(root);
         if (underlayRef.current) syncUnderlay(underlayRef.current, shapes);
+        const orb = orbRef.current;
+        if (orb) {
+          const r = root.getBoundingClientRect();
+          const o = orb.getBoundingClientRect();
+          scene.setVoice(
+            o.left - r.left + o.width / 2,
+            o.top - r.top + o.height / 2,
+            speakingRef.current,
+          );
+        }
         scene.frame(
           tuning.get(),
           shapes,

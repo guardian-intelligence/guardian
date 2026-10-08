@@ -77,6 +77,11 @@ export const CONTROLS = {
     rippleSpeed: range("Ripple speed", 40, 600, 1),
     lifetime: range("Ripple life (s)", 1, 10, 0.1),
     gloss: range("Gloss", 0, 2, 0.01),
+    voiceAmp: range("Rumi's waves · height", 0, 4, 0.01),
+    voiceWavelength: range("Rumi's waves · length", 40, 600, 1),
+    voiceSpeed: range("Rumi's waves · speed", 2, 200, 1),
+    voiceReach: range("Rumi's waves · reach", 40, 900, 1),
+    voiceEase: range("Rumi's waves · fade rate", 0.1, 4, 0.01),
   },
 } as const;
 
@@ -135,6 +140,11 @@ export const TuningSchema = v.object({
     rippleSpeed: v.number(),
     lifetime: v.number(),
     gloss: v.number(),
+    voiceAmp: v.number(),
+    voiceWavelength: v.number(),
+    voiceSpeed: v.number(),
+    voiceReach: v.number(),
+    voiceEase: v.number(),
   }),
 });
 

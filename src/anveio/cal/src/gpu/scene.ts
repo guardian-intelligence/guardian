@@ -30,7 +30,7 @@ export type SceneShaders = { ink: string; blur: string; blit: string; glass: str
 const MAX_RIPPLES = 8;
 const MAX_SHAPES = 6;
 const MAX_BLUR = 40;
-const INK_FLOATS = 4 * (3 + MAX_RIPPLES);
+const INK_FLOATS = 4 * (5 + MAX_RIPPLES);
 const GLASS_FLOATS = 4 * (7 + 2 * MAX_SHAPES);
 
 type Targets = {
@@ -86,6 +86,7 @@ export class Scene {
   private targets: Targets | null = null;
   private ripples: number[][] = [];
   private blurRadius = -1;
+  private voice = { x: 0, y: 0, on: false, strength: 0, phase: 0, last: 0 };
   private readonly t0 = performance.now();
 
   static async create(
@@ -170,6 +171,13 @@ export class Scene {
     if (this.ripples.length > MAX_RIPPLES) this.ripples.shift();
   }
 
+  /** Rumi's centre (css px) and whether she's speaking; her waves ease in and out. */
+  setVoice(x: number, y: number, on: boolean): void {
+    this.voice.x = x;
+    this.voice.y = y;
+    this.voice.on = on;
+  }
+
   private ensureTargets(width: number, height: number): Targets {
     if (this.targets && this.targets.width === width && this.targets.height === height)
       return this.targets;
@@ -251,7 +259,15 @@ export class Scene {
     ink.set([width, height, now, dpr], 0);
     ink.set([t.ink.rippleSpeed, reducedMotion() ? 0 : t.ink.swell, t.ink.gloss, t.ink.lifetime], 4);
     ink.set([...hexToRgb(t.ink.tint), 1], 8);
-    this.ripples.forEach((r, i) => ink.set(r, 12 + i * 4));
+    const vo = this.voice;
+    const dt = Math.min(0.1, Math.max(0, now - vo.last));
+    vo.last = now;
+    vo.strength +=
+      ((vo.on && !reducedMotion() ? 1 : 0) - vo.strength) * Math.min(1, dt * t.ink.voiceEase);
+    vo.phase += (dt * Math.PI * 2 * t.ink.voiceSpeed) / Math.max(t.ink.voiceWavelength, 1);
+    ink.set([vo.x, vo.y, vo.strength, vo.phase], 12);
+    ink.set([t.ink.voiceWavelength, t.ink.voiceAmp, t.ink.voiceReach, 0], 16);
+    this.ripples.forEach((r, i) => ink.set(r, 20 + i * 4));
     q.writeBuffer(this.inkUniforms, 0, ink);
 
     const radius = Math.round(Math.min(MAX_BLUR, Math.max(1, t.glass.blurRadius * dpr)));

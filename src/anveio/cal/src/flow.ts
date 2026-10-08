@@ -34,13 +34,11 @@ function cardFor(stage: Stage, heard: boolean): CardKind | null {
   }
 }
 
-export function useFlow(forced: Stage | null, onSpeakTick: () => void) {
+export function useFlow(forced: Stage | null) {
   const [liveStage, setLiveStage] = useState<Stage>("arrive");
   const [heard, setHeard] = useState(false);
   const [typed, setTyped] = useState(0);
   const timers = useRef<number[]>([]);
-  const tickRef = useRef(onSpeakTick);
-  tickRef.current = onSpeakTick;
 
   const stage = forced ?? liveStage;
   const line = STAGE_LINE[stage];
@@ -51,7 +49,6 @@ export function useFlow(forced: Stage | null, onSpeakTick: () => void) {
     let n = 0;
     const iv = window.setInterval(() => {
       n += 1;
-      if (n % 70 === 1) tickRef.current();
       setTyped(Math.min(n, line.length));
       if (n >= line.length) window.clearInterval(iv);
     }, 26);
@@ -92,6 +89,7 @@ export function useFlow(forced: Stage | null, onSpeakTick: () => void) {
     line,
     shown: line.slice(0, shown),
     rest: line.slice(shown),
+    speaking,
     orbMode: speaking ? "speaking" : recording ? "listening" : thinking ? "thinking" : "idle",
     control:
       stage === "host"

@@ -1,8 +1,11 @@
-// Jet-black ink water: a slow swell plus up to 8 damped tap ripples.
+// Jet-black ink water: a slow swell, up to 8 damped tap ripples, and the
+// gentle standing waves that spread from Rumi while she speaks.
 struct Params {
   frame: vec4f,
   look: vec4f,
   tint: vec4f,
+  voice: vec4f,
+  voice2: vec4f,
   r0: vec4f, r1: vec4f, r2: vec4f, r3: vec4f,
   r4: vec4f, r5: vec4f, r6: vec4f, r7: vec4f,
 }
@@ -10,6 +13,8 @@ struct Params {
 
 // frame: x,y canvas pixels, z time (s), w device pixel ratio
 // look: x ripple speed (css px/s), y ambient swell, z gloss, w ripple lifetime (s)
+// voice: x,y Rumi's centre (css px), z strength 0..1 (eased in/out), w phase (rad)
+// voice2: x wavelength (css px), y amplitude, z reach (css px), w unused
 // rN: x,y centre (css px), z start time (s), w amplitude
 
 fn ripple(p: vec2f, r: vec4f) -> f32 {
@@ -23,11 +28,19 @@ fn ripple(p: vec2f, r: vec4f) -> f32 {
   return sin(x * 0.16) * env * fade * r.w / (1.0 + d * 0.004);
 }
 
+fn voiceWaves(p: vec2f) -> f32 {
+  if (u.voice.z <= 0.0) { return 0.0; }
+  let d = distance(p, u.voice.xy);
+  let env = exp(-d / max(u.voice2.z, 1.0));
+  return sin(d * 6.2831853 / max(u.voice2.x, 1.0) - u.voice.w) * env * u.voice2.y * u.voice.z;
+}
+
 fn height(p: vec2f) -> f32 {
   let t = u.frame.z;
   var h = u.look.y * (sin(p.x * 0.011 + t * 0.55) * sin(p.y * 0.008 - t * 0.37)
           + 0.5 * sin((p.x + p.y) * 0.019 - t * 0.81));
   h += ripple(p, u.r0) + ripple(p, u.r1) + ripple(p, u.r2) + ripple(p, u.r3);
+  h += voiceWaves(p);
   h += ripple(p, u.r4) + ripple(p, u.r5) + ripple(p, u.r6) + ripple(p, u.r7);
   return h;
 }
