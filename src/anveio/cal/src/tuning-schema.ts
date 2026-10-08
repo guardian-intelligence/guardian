@@ -40,6 +40,7 @@ export const CONTROLS = {
     drift: range("Colour drift", 0, 3, 0.01),
     breatheHz: range("Breath (Hz)", 0.05, 1, 0.01),
     gloss: range("Gloss", 0, 2, 0.01),
+    matte: range("Matte (frosted)", 0, 1, 0.01),
     muteDrain: range("Muted grey", 0, 1, 0.01),
   },
   glass: {
@@ -94,6 +95,7 @@ export const TuningSchema = v.object({
     drift: v.number(),
     breatheHz: v.number(),
     gloss: v.number(),
+    matte: v.number(),
     muteDrain: v.number(),
   }),
   glass: v.object({

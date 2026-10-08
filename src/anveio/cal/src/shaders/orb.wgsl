@@ -32,6 +32,7 @@ fn rot(a: f32) -> mat2x2f {
 }
 
 // wave: x energy, y ripple phase, z swirl angle, w muted 0..1
+// frame: x,y canvas px, z time, w matte (0 polished .. 1 frosted)
 // look: x gloss, y ripple density, z drift time, w how far muting drains the colour
 @fragment
 fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
@@ -64,14 +65,20 @@ fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
   col = mix(col, mix(c1, c3, 0.35 + 0.4 * ripple), band * 0.5);
   col += c3 * band * 0.12;
 
-  // glass: soft light from the top left, bright rim
+  // glass lit from the top left. matte (frame.w) frosts it: the glint spreads
+  // into a broad soft highlight, the bright rim fades, and fine grain scatters
+  // the surface, while light passing through gathers at the lower-right edge.
+  let m = u.frame.w;
   let l = normalize(vec3f(-0.45, 0.55, 0.7));
   let h = normalize(l + vec3f(0.0, 0.0, 1.0));
   let fres = pow(1.0 - n.z, 2.5);
-  let diffuse = 0.78 + 0.22 * dot(n, l);
-  let spec = pow(max(dot(n, h), 0.0), 60.0) * 0.55 * u.look.x;
-  let sheen = pow(max(dot(n, normalize(vec3f(-0.3, 0.75, 0.6))), 0.0), 9.0) * 0.14 * u.look.x;
-  col = col * diffuse + vec3f(spec + sheen) + mix(c2, vec3f(1.0), 0.5) * fres * 0.35;
+  let diffuse = mix(0.78 + 0.22 * dot(n, l), 0.9 + 0.1 * dot(n, l), m);
+  let spec = pow(max(dot(n, h), 0.0), mix(60.0, 5.0, m)) * mix(0.55, 0.14, m) * u.look.x;
+  let sheen = pow(max(dot(n, normalize(vec3f(-0.3, 0.75, 0.6))), 0.0), mix(9.0, 3.0, m)) * mix(0.14, 0.08, m) * u.look.x;
+  let through = pow(max(dot(n, normalize(vec3f(0.45, -0.55, 0.45))), 0.0), 3.0) * 0.14 * m;
+  let rim = mix(c2, vec3f(1.0), 0.5) * fres * mix(0.35, 0.06, m);
+  col = col * diffuse + vec3f(spec + sheen) + c2 * through + rim;
+  col += vec3f((hash(uv * u.frame.xy) - 0.5) * 0.04 * m);
 
   // muted: the colour drains to a cool grey
   let lum = dot(col, vec3f(0.2126, 0.7152, 0.0722));

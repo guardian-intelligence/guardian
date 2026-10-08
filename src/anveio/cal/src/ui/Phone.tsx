@@ -298,7 +298,7 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
 
         <div className="bar">
           <div ref={orbRef}>
-            <Glass radius="capsule" className="orb-button">
+            <div className="orb-button">
               <button
                 type="button"
                 className="tap"
@@ -308,7 +308,7 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
               >
                 <Orb mode={flow.orbMode} muted={muted} size={t.orb.size} />
               </button>
-            </Glass>
+            </div>
           </div>
 
           {flow.control === "idle" && (

@@ -6,7 +6,7 @@ export const DEFAULT_TUNING = {
     accent: "#6A45D9",
     soft: "#C9B8F7",
     blush: "#E9A3D4",
-    size: 44,
+    size: 52,
     energyIdle: 0.15,
     energyListen: 0.55,
     energyThink: 0.3,
@@ -17,6 +17,7 @@ export const DEFAULT_TUNING = {
     drift: 1,
     breatheHz: 0.25,
     gloss: 1,
+    matte: 0.85,
     muteDrain: 0.9,
   },
   glass: {

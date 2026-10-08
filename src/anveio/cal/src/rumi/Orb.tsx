@@ -101,7 +101,7 @@ export function Orb({ mode, muted, size }: Props) {
             px,
             px,
             now,
-            0,
+            o.matte,
             a.energy,
             a.phase,
             a.swirl,

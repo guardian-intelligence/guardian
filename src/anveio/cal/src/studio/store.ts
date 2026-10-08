@@ -13,11 +13,28 @@ const DRAFT_KEY = "anveio-cal:tuning-draft";
 let defaults: Tuning = DEFAULT_TUNING;
 const saved = (): Tuning => structuredClone(defaults);
 
+const DraftShape = v.object({
+  orb: v.record(v.string(), v.unknown()),
+  glass: v.record(v.string(), v.unknown()),
+  ink: v.record(v.string(), v.unknown()),
+});
+
 function readDraft(): Tuning | null {
   try {
     const raw = localStorage.getItem(DRAFT_KEY);
     if (!raw) return null;
-    const parsed = v.safeParse(TuningSchema, JSON.parse(raw));
+    // Layer the draft over the saved defaults so levers added since it was
+    // written pick up their defaults instead of invalidating the whole draft.
+    const draft: unknown = JSON.parse(raw);
+    const base = saved();
+    const merged = v.is(DraftShape, draft)
+      ? {
+          orb: { ...base.orb, ...draft.orb },
+          glass: { ...base.glass, ...draft.glass },
+          ink: { ...base.ink, ...draft.ink },
+        }
+      : draft;
+    const parsed = v.safeParse(TuningSchema, merged);
     return parsed.success ? parsed.output : null;
   } catch {
     return null;
