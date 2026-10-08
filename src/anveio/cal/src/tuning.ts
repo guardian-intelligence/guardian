@@ -46,6 +46,8 @@ export const DEFAULT_TUNING = {
     shadowExpand: 25,
     shadowFactor: 15,
     cover: 0.6,
+    raise: 1,
+    orbLight: 1,
     domBlur: 14,
   },
   ink: {

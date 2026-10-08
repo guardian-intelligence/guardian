@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } fr
 import { LINES, NOTE, type Stage } from "../content.ts";
 import { useFlow, type CardKind } from "../flow.ts";
 import { Glass, readShapes } from "../glass/Glass.tsx";
-import { getDevice } from "../gpu/gpu.ts";
+import { getDevice, hexToRgb } from "../gpu/gpu.ts";
 import { Scene, type GlassShape } from "../gpu/scene.ts";
 import { Orb } from "../rumi/Orb.tsx";
 import blitShader from "../shaders/blit.wgsl?raw";
@@ -254,6 +254,11 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
 
   const glassVars: CSSProperties & Record<`--${string}`, string> = {
     "--glass-blur": `${t.glass.domBlur}px`,
+    "--raise": String(t.glass.raise),
+    "--orb-light": String(t.glass.orbLight),
+    "--orb-rgb": hexToRgb(t.orb.soft)
+      .map((c) => Math.round(c * 255))
+      .join(" "),
   };
 
   return (

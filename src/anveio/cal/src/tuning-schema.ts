@@ -69,6 +69,8 @@ export const CONTROLS = {
     shadowExpand: range("Shadow spread", 0, 100, 0.1),
     shadowFactor: range("Shadow strength", 0, 100, 0.1),
     cover: range("Hide page under glass", 0, 1, 0.01),
+    raise: range("Message field · raised", 0, 2, 0.01),
+    orbLight: range("Message field · Rumi's light", 0, 2, 0.01),
     domBlur: range("Page blur under glass", 0, 40, 1),
   },
   ink: {
@@ -133,6 +135,8 @@ export const TuningSchema = v.object({
     shadowExpand: v.number(),
     shadowFactor: v.number(),
     cover: v.number(),
+    raise: v.number(),
+    orbLight: v.number(),
     domBlur: v.number(),
   }),
   ink: v.object({

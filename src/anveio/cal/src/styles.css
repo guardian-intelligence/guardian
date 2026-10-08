@@ -508,6 +508,30 @@ h2 {
   flex: 1;
   height: 52px;
 }
+/* The message field stands up off the ink like a physical key, lit by Rumi:
+   its edge facing her catches her light, its far bottom-right side falls into
+   shade, and it casts a soft shadow away from her. */
+.bar .field {
+  box-shadow:
+    calc(var(--raise) * 6px) calc(var(--raise) * 8px) calc(var(--raise) * 18px)
+      calc(var(--raise) * -4px) rgb(0 0 0 / calc(var(--raise) * 0.85)),
+    inset calc(var(--raise) * -3px) calc(var(--raise) * -4px) calc(var(--raise) * 8px)
+      rgb(0 0 0 / calc(var(--raise) * 0.55)),
+    inset calc(var(--raise) * 1.5px) 0 calc(var(--raise) * 1px)
+      rgb(var(--orb-rgb) / calc(var(--orb-light) * 0.35));
+}
+.bar .field::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(
+    140px 70px at 0% 40%,
+    rgb(var(--orb-rgb) / calc(var(--orb-light) * 0.12)),
+    transparent 70%
+  );
+}
 .field-tap {
   width: 100%;
   height: 100%;
