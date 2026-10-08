@@ -51,7 +51,7 @@ export function useFlow(forced: Stage | null, onSpeakTick: () => void) {
     let n = 0;
     const iv = window.setInterval(() => {
       n += 1;
-      if (n % 22 === 1) tickRef.current();
+      if (n % 70 === 1) tickRef.current();
       setTyped(Math.min(n, line.length));
       if (n >= line.length) window.clearInterval(iv);
     }, 26);

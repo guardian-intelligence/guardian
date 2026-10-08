@@ -182,7 +182,7 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
     if (!root || !orb) return;
     const r = root.getBoundingClientRect();
     const o = orb.getBoundingClientRect();
-    ripple(o.left - r.left + o.width / 2, o.top - r.top + o.height / 2, 1.4);
+    ripple(o.left - r.left + o.width / 2, o.top - r.top + o.height / 2, 0.8);
   });
   const { restart } = flow;
   useEffect(() => {

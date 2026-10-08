@@ -54,6 +54,7 @@ export function Orb({ mode, muted, size }: Props) {
         last: performance.now() / 1000,
         energy: 0.15,
         phase: 0,
+        swell: 0,
         swirl: 0,
         mute: live.current.muted ? 1 : 0,
       };
@@ -84,12 +85,13 @@ export function Orb({ mode, muted, size }: Props) {
           thinking: o.energyThink,
           speaking: o.energySpeak,
         }[m];
-        let target = base;
-        if (m === "speaking")
-          target *= 0.7 + 0.35 * Math.abs(Math.sin(now * 6.1) * Math.sin(now * 2.3 + 0.5));
-        if (m === "listening")
-          target *= 0.7 + 0.4 * Math.abs(Math.sin(now * 5.3) * Math.sin(now * 1.7 + 0.4));
-        a.energy += (target - a.energy) * Math.min(1, dt * 6);
+        // While she speaks or listens her waves swell and ebb on one slow, smooth
+        // sine. The phase is integrated so retuning the rate never jumps.
+        a.swell += dt * Math.PI * 2 * o.swellHz;
+        const voiced = m === "speaking" || m === "listening";
+        const target = voiced ? base * (1 - o.swellDepth * (0.5 - 0.5 * Math.sin(a.swell))) : base;
+        // ease between states over a couple of seconds rather than snapping
+        a.energy += (target - a.energy) * Math.min(1, dt * o.ease);
         const dir = m === "speaking" ? 1 : m === "listening" ? -0.7 : 0.25;
         a.phase += dt * Math.PI * 2 * o.rippleSpeed * dir;
         a.swirl += dt * (m === "thinking" ? o.swirl : 0.04);
