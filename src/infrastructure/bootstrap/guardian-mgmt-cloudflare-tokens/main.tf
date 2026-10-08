@@ -11,10 +11,12 @@ locals {
   zone_id              = "c952fb5989d232593ec9cca71030cb58" # guardianintelligence.org
   rumi_zone_id         = "034bf5d0a4ff33b0e9965f50be70d8d0" # rumi.engineering
   mythra_zone_id       = "4bfa5c0e3d0183dc0e30b9c4cbc17d47" # wakeupmythra.com
+  anveio_zone_id       = "0b88424c2b5543145c1d492149db2b1a" # anveio.com
   account_resource     = "com.cloudflare.api.account.${var.cloudflare_account_id}"
   zone_resource        = "com.cloudflare.api.account.zone.${local.zone_id}"
   rumi_zone_resource   = "com.cloudflare.api.account.zone.${local.rumi_zone_id}"
   mythra_zone_resource = "com.cloudflare.api.account.zone.${local.mythra_zone_id}"
+  anveio_zone_resource = "com.cloudflare.api.account.zone.${local.anveio_zone_id}"
 
   # Stable identifiers from GET /accounts/<id>/tokens/permission_groups.
   permission_groups = {
@@ -93,7 +95,7 @@ resource "cloudflare_account_token" "dns_lb_provisioner" {
         { id = local.permission_groups.load_balancers_write },
         { id = local.permission_groups.email_rules_write },
       ]
-      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*", (local.mythra_zone_resource) = "*" })
+      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*", (local.mythra_zone_resource) = "*", (local.anveio_zone_resource) = "*" })
     },
   ]
 }
@@ -140,7 +142,7 @@ resource "cloudflare_account_token" "edge_policy_provisioner" {
         { id = local.permission_groups.ssl_certificates_write },
         { id = local.permission_groups.firewall_services_write },
       ]
-      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*", (local.mythra_zone_resource) = "*" })
+      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*", (local.mythra_zone_resource) = "*", (local.anveio_zone_resource) = "*" })
     },
   ]
 }
