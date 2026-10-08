@@ -16,6 +16,7 @@ on:
     # itself in a loop with no breaker.
     paths:
       - "src/alerting/**"
+      - "src/anveio/**"
       - "src/authorization/**"
       - "src/payments/**"
       - "src/flags/notify/**"
@@ -72,7 +73,7 @@ jobs:
           names=(alert-relay analytics-ingest authorization
             chunkies-gateway chunkies-chunkie feature-flags-notify payments payments-canary
             postflight-controlplane tofu-runner company-site privatecut-web
-            wake-up-mythra-web)
+            wake-up-mythra-web anveio-cal)
           declare -A watch=(
             [alert-relay]='^src/alerting/'
             [analytics-ingest]='^src/analytics/|^src/proto/'
@@ -87,6 +88,7 @@ jobs:
             [company-site]='^src/company/web/|^src/shared/ts/(brand|telemetry)/'
             [privatecut-web]='^src/privatecut/web/|^src/shared/ts/(brand|telemetry)/'
             [wake-up-mythra-web]='^src/games/wake-up-mythra/|^src/chunkies/|^src/shared/ts/telemetry/'
+            [anveio-cal]='^src/anveio/cal/'
           )
           declare -A push_target=(
             [alert-relay]='//src/alerting/relay:push'
@@ -102,6 +104,7 @@ jobs:
             [company-site]='//src/company/web/site:push'
             [privatecut-web]='//src/privatecut/web/site:push'
             [wake-up-mythra-web]='//src/games/wake-up-mythra/web/site:push'
+            [anveio-cal]='//src/anveio/cal/site:push'
           )
           go_images=' alert-relay analytics-ingest authorization chunkies-gateway chunkies-chunkie feature-flags-notify payments payments-canary postflight-controlplane tofu-runner '
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'

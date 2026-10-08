@@ -1,6 +1,7 @@
 # The web workspace is pnpm/vite-plus territory. Keep bazel's package walk
 # out of node_modules.
 node_modules
+src/anveio/cal/node_modules
 src/chunkies/host/ts/node_modules
 src/chunkies/testkit/ts/node_modules
 src/chunkies/transport/ts/node_modules

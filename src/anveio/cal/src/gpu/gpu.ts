@@ -11,7 +11,7 @@ export function getDevice(): Promise<GPUDevice | null> {
     if (!adapter) return null;
     const device = await adapter.requestDevice();
     void device.lost.then((info) => {
-      console.warn(`WebGPU device lost (${info.reason}): ${info.message}`);
+      console.error(`WebGPU device lost (${info.reason}): ${info.message}`);
       devicePromise = null;
     });
     device.addEventListener("uncapturederror", (e) => {
