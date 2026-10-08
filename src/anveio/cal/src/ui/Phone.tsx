@@ -245,7 +245,9 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
     void sceneRef.current?.setShaders(SHADERS).then(onGpuError);
   }, [inkShader, blurShader, blitShader, glassShader, onGpuError]);
 
+  // Tap ripples are a debugging aid only (Studio → Ink → Tap ripples).
   const press = (e: PointerEvent<HTMLDivElement>) => {
+    if (!tuning.get().ink.tapRipples) return;
     const r = e.currentTarget.getBoundingClientRect();
     ripple(e.clientX - r.left, e.clientY - r.top, 3);
   };

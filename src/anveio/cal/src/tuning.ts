@@ -49,6 +49,7 @@ export const DEFAULT_TUNING = {
     domBlur: 14,
   },
   ink: {
+    tapRipples: false,
     tint: "#1A1238",
     swell: 0.6,
     rippleSpeed: 260,

@@ -72,6 +72,7 @@ export const CONTROLS = {
     domBlur: range("Page blur under glass", 0, 40, 1),
   },
   ink: {
+    tapRipples: toggle("Tap ripples (debug)"),
     tint: color("Slope sheen"),
     swell: range("Swell", 0, 2, 0.01),
     rippleSpeed: range("Ripple speed", 40, 600, 1),
@@ -135,6 +136,7 @@ export const TuningSchema = v.object({
     domBlur: v.number(),
   }),
   ink: v.object({
+    tapRipples: v.boolean(),
     tint: Hex,
     swell: v.number(),
     rippleSpeed: v.number(),
