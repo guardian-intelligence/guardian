@@ -1,0 +1,186 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anveio-cal
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: anveio-cal
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: web
+    guardian.dev/product: anveio
+    guardian.dev/stage: prod
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anveio-cal
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: anveio-cal
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: web
+        guardian.dev/product: anveio
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: anveio-cal
+              app.kubernetes.io/part-of: guardian
+              guardian.dev/stage: prod
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: ghcr.io/guardian-intelligence/anveio-cal:edge@sha256:431b3c469687daa8abcc85223afee4d8085ee8f1d4cf2f03cdcf16b38fc7c9b9 # {"$imagepolicy": "guardian-imageops:anveio-cal"}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          # The server preloads dist/ and answers from memory; /healthz
+          # turns 503 on SIGTERM so the endpoint drains before it closes.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+              ephemeral-storage: 16Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+              ephemeral-storage: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anveio-cal
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: anveio-cal
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: web
+    guardian.dev/product: anveio
+    guardian.dev/stage: prod
+spec:
+  type: ClusterIP
+  internalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: anveio-cal
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: anveio-cal
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: anveio-cal
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: anveio
+    guardian.dev/stage: prod
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anveio-cal
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: anveio-cal
+  namespace: tenant-guardian-prod
+  annotations:
+    # Same edge trust chain as the apex: Cloudflare terminates public TLS,
+    # proves itself to the origin via AOP mTLS, and only then is the
+    # verified-IP header chain trustworthy. The origin-pull CA Secret
+    # already lives in this namespace (company kustomization).
+    nginx.ingress.kubernetes.io/auth-tls-secret: tenant-guardian-prod/cloudflare-origin-pull-ca
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+    nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  labels:
+    app.kubernetes.io/name: anveio-cal
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: anveio
+    guardian.dev/stage: prod
+spec:
+  ingressClassName: tenant-root
+  # anveio.com is not covered by the controller's default certificate (the
+  # guardianintelligence.org Origin CA cert); this per-Ingress tls block
+  # registers the zone's own Origin CA cert for SNI selection.
+  tls:
+    - hosts:
+        - anveio.com
+        - www.anveio.com
+      secretName: anveio-origin-tls
+  # www is routed to the same pods rather than redirected here: the server
+  # answers it with a 301 to the apex, so both hosts keep the AOP mTLS gate
+  # above (an ingress-nginx from-to-www server block would not carry it).
+  rules:
+    - host: anveio.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: anveio-cal
+                port:
+                  number: 80
+    - host: www.anveio.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: anveio-cal
+                port:
+                  number: 80
