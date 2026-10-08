@@ -12,10 +12,20 @@ import {
 } from "../gpu/gpu.ts";
 import orbShader from "../shaders/orb.wgsl?raw";
 import { tuning, useTuning } from "../studio/store.ts";
+import { light } from "./light.ts";
 
 export type OrbMode = "idle" | "listening" | "thinking" | "speaking";
 
 type Props = { mode: OrbMode; muted: boolean; size: number };
+
+// Per state: paint-wave direction (+ out, - in) and strength, how much the
+// smear warps, and swirl speed (rad/s; working multiplies it by the studio's swirl).
+const PAINT_STATES = {
+  idle: { dir: 0.15, wave: 0, warp: 1, swirl: 0.03 },
+  listening: { dir: -1, wave: 0.6, warp: 1, swirl: 0.05 },
+  thinking: { dir: 0.3, wave: 0.15, warp: 1.35, swirl: 1 },
+  speaking: { dir: 1, wave: 1, warp: 1.1, swirl: 0.06 },
+} as const satisfies Record<OrbMode, { dir: number; wave: number; warp: number; swirl: number }>;
 
 // The orb canvas is drawn a little larger than her circle so the antialiased rim isn't clipped.
 const BLEED = 1.12;
@@ -45,17 +55,25 @@ export function Orb({ mode, muted, size }: Props) {
       const ctx = webgpuContext(canvas);
       if (!ctx) return;
       ctx.configure({ device, format: canvasFormat(), alphaMode: "premultiplied" });
-      const buffer = device.createBuffer({ size: 6 * 16, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
+      const buffer = device.createBuffer({
+        size: 10 * 16,
+        usage: BUFFER.UNIFORM | BUFFER.COPY_DST,
+      });
       const group = device.createBindGroup({
         layout: pipeline.getBindGroupLayout(0),
         entries: [{ binding: 0, resource: { buffer } }],
       });
+      // Eased copies of the state targets, plus the integrated clocks the paint
+      // moves on (integrated so retuning a speed never makes the paint jump).
       const a = {
         last: performance.now() / 1000,
-        energy: 0.15,
-        phase: 0,
-        swell: 0,
+        stir: 0.25,
+        wave: 0,
+        warp: 1,
+        swirlRate: 0.03,
+        paintTime: 0,
         swirl: 0,
+        phase: 0,
         mute: live.current.muted ? 1 : 0,
       };
       let visible = true;
@@ -63,6 +81,8 @@ export function Orb({ mode, muted, size }: Props) {
         visible = e[0]?.isIntersecting ?? true;
       });
       io.observe(canvas);
+      // keep the shared candle burning while she's on screen
+      const unlight = light.subscribe(() => {});
 
       const tick = () => {
         raf = requestAnimationFrame(tick);
@@ -76,26 +96,30 @@ export function Orb({ mode, muted, size }: Props) {
         }
         const o = tuning.get().orb;
         const { mode: m, muted: mu } = live.current;
-        const now = reducedMotion() ? 3 : performance.now() / 1000;
-        const dt = Math.min(0.1, Math.max(0, now - a.last));
+        const now = performance.now() / 1000;
+        const dt = reducedMotion() ? 0 : Math.min(0.1, Math.max(0, now - a.last));
         a.last = now;
-        const base = {
+
+        // Rumi's state machine: each state sets how hard the paint is stirred,
+        // which way paint waves travel, how much the smear warps, how fast it swirls.
+        const target = PAINT_STATES[m];
+        const stir = {
           idle: o.energyIdle,
           listening: o.energyListen,
           thinking: o.energyThink,
           speaking: o.energySpeak,
         }[m];
-        // While she speaks or listens her waves swell and ebb on one slow, smooth
-        // sine. The phase is integrated so retuning the rate never jumps.
-        a.swell += dt * Math.PI * 2 * o.swellHz;
-        const voiced = m === "speaking" || m === "listening";
-        const target = voiced ? base * (1 - o.swellDepth * (0.5 - 0.5 * Math.sin(a.swell))) : base;
-        // ease between states over a couple of seconds rather than snapping
-        a.energy += (target - a.energy) * Math.min(1, dt * o.ease);
-        const dir = m === "speaking" ? 1 : m === "listening" ? -0.7 : 0.25;
-        a.phase += dt * Math.PI * 2 * o.rippleSpeed * dir;
-        a.swirl += dt * (m === "thinking" ? o.swirl : 0.04);
-        a.mute += ((mu ? 1 : 0) - a.mute) * Math.min(1, dt * 6);
+        const k = Math.min(1, dt * o.ease);
+        a.stir += (stir - a.stir) * k;
+        a.wave += (target.wave - a.wave) * k;
+        a.warp += (target.warp - a.warp) * k;
+        a.swirlRate += (target.swirl * (m === "thinking" ? o.swirl : 1) - a.swirlRate) * k;
+        a.paintTime += dt * (0.12 + a.stir);
+        a.swirl += dt * a.swirlRate;
+        a.phase += dt * Math.PI * 2 * o.rippleSpeed * target.dir;
+        a.mute += ((mu ? 1 : 0) - a.mute) * Math.min(1, dt * 3);
+        const f = light.get();
+
         device.queue.writeBuffer(
           buffer,
           0,
@@ -104,20 +128,34 @@ export function Orb({ mode, muted, size }: Props) {
             px,
             now,
             o.matte,
-            a.energy,
-            a.phase,
+            a.paintTime,
             a.swirl,
+            a.phase,
+            a.wave,
+            o.smearScale,
+            o.warp * a.warp,
+            o.sharpness,
             a.mute,
-            ...hexToRgb(o.accent),
-            1,
-            ...hexToRgb(o.soft),
-            1,
-            ...hexToRgb(o.blush),
-            1,
-            o.gloss,
-            o.rippleDensity,
-            now * o.drift,
-            o.muteDrain,
+            ...hexToRgb(o.green),
+            o.greenAmount,
+            ...hexToRgb(o.red),
+            o.redAmount,
+            ...hexToRgb(o.indigo),
+            o.indigoAmount,
+            ...hexToRgb(o.glow),
+            o.glowStrength * (1 - 0.7 * a.mute),
+            f.brightness,
+            f.size,
+            f.swayX,
+            f.swayY,
+            o.blur,
+            o.bezel,
+            o.refIndex,
+            o.dispersion,
+            o.glare,
+            o.fresnel,
+            o.glowRadius,
+            0,
           ]),
         );
         const enc = device.createCommandEncoder();
@@ -127,6 +165,7 @@ export function Orb({ mode, muted, size }: Props) {
       };
       tick();
       cleanup = () => {
+        unlight();
         io.disconnect();
         buffer.destroy();
         ctx.unconfigure();
@@ -151,7 +190,7 @@ export function Orb({ mode, muted, size }: Props) {
         aria-hidden="true"
         style={{
           opacity: gpu ? 0 : 1,
-          background: `radial-gradient(circle at 38% 32%, #fff 0%, ${t.soft} 28%, ${t.accent} 72%, ${t.blush} 100%)`,
+          background: `radial-gradient(circle at 36% 34%, ${t.glow} 0%, ${t.green} 34%, ${t.indigo} 70%, ${t.red} 100%)`,
           filter: muted ? "saturate(.12) brightness(1.08)" : "none",
         }}
       />

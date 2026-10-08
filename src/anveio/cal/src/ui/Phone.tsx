@@ -5,6 +5,7 @@ import { useFlow, type CardKind } from "../flow.ts";
 import { Glass, readShapes } from "../glass/Glass.tsx";
 import { getDevice, hexToRgb } from "../gpu/gpu.ts";
 import { Scene, type GlassShape } from "../gpu/scene.ts";
+import { light } from "../rumi/light.ts";
 import { Orb } from "../rumi/Orb.tsx";
 import blitShader from "../shaders/blit.wgsl?raw";
 import blurShader from "../shaders/blur.wgsl?raw";
@@ -240,6 +241,18 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
     // mount once; shader edits are applied by the effect below
   }, [onGpuError]);
 
+  // Rumi's candle also lights the message field; its shine reads these vars.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    return light.subscribe((f) => {
+      root.style.setProperty("--flame", f.brightness.toFixed(4));
+      root.style.setProperty("--flame-size", f.size.toFixed(4));
+      root.style.setProperty("--flame-x", f.swayX.toFixed(4));
+      root.style.setProperty("--flame-y", f.swayY.toFixed(4));
+    });
+  }, []);
+
   // Editing any .wgsl file hot-reloads it into the running scene.
   useEffect(() => {
     void sceneRef.current?.setShaders(SHADERS).then(onGpuError);
@@ -256,7 +269,7 @@ export function Phone({ forced, restartKey, onGpuError }: Props) {
     "--glass-blur": `${t.glass.domBlur}px`,
     "--raise": String(t.glass.raise),
     "--orb-light": String(t.glass.orbLight),
-    "--orb-rgb": hexToRgb(t.orb.soft)
+    "--orb-rgb": hexToRgb(t.orb.glow)
       .map((c) => Math.round(c * 255))
       .join(" "),
   };
