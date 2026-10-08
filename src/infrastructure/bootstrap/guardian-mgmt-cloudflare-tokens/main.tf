@@ -11,10 +11,12 @@ locals {
   zone_id              = "c952fb5989d232593ec9cca71030cb58" # guardianintelligence.org
   rumi_zone_id         = "034bf5d0a4ff33b0e9965f50be70d8d0" # rumi.engineering
   mythra_zone_id       = "4bfa5c0e3d0183dc0e30b9c4cbc17d47" # wakeupmythra.com
+  anveio_zone_id       = "0b88424c2b5543145c1d492149db2b1a" # anveio.com
   account_resource     = "com.cloudflare.api.account.${var.cloudflare_account_id}"
   zone_resource        = "com.cloudflare.api.account.zone.${local.zone_id}"
   rumi_zone_resource   = "com.cloudflare.api.account.zone.${local.rumi_zone_id}"
   mythra_zone_resource = "com.cloudflare.api.account.zone.${local.mythra_zone_id}"
+  anveio_zone_resource = "com.cloudflare.api.account.zone.${local.anveio_zone_id}"
 
   # Stable identifiers from GET /accounts/<id>/tokens/permission_groups.
   permission_groups = {
@@ -28,6 +30,7 @@ locals {
     cloudflare_tunnel_write = "c07321b023e944ff818fec44d8203567" # Cloudflare Tunnel Write (account)
     access_apps_write       = "1e13c5124ca64b72b1969a67e8829049" # Access: Apps and Policies Write (account); gitleaks:allow -- public permission identifier
     access_tokens_write     = "a1c0fec57cf94af79479a6d827fa518c" # Access: Service Tokens Write (account); gitleaks:allow -- public permission identifier
+    access_idps_write       = "bfe0d8686a584fa680f4c53b5eb0de6d" # Access: Organizations, Identity Providers, and Groups Write (account); gitleaks:allow -- public permission identifier
     zone_settings_write     = "3030687196b94b638145a3953da2b699" # Zone Settings Write (zone)
     zone_dns_settings_write = "c4df38be41c247b3b4b7702e76eadae0" # Zone DNS Settings Write (zone)
     cache_settings_write    = "9ff81cbbe65c400b97d92c3c1033cab6" # Cache Settings Write (zone)
@@ -60,8 +63,9 @@ locals {
 
 # Apply-time credential for the guardian-mgmt-dns root:
 #   CLOUDFLARE_API_TOKEN=$(tofu output -raw dns_lb_provisioner_token_value)
-# Monitors, pools, and Email Routing destination addresses are account-level
-# objects in Cloudflare's model, hence the two policy statements.
+# Monitors, pools, Access identity providers, and Email Routing destination
+# addresses are account-level objects in Cloudflare's model, hence the two
+# policy statements.
 resource "cloudflare_account_token" "dns_lb_provisioner" {
   account_id = var.cloudflare_account_id
   name       = "guardian-dns-lb-provisioner"
@@ -76,6 +80,7 @@ resource "cloudflare_account_token" "dns_lb_provisioner" {
         { id = local.permission_groups.cloudflare_tunnel_write },
         { id = local.permission_groups.access_apps_write },
         { id = local.permission_groups.access_tokens_write },
+        { id = local.permission_groups.access_idps_write },
         { id = local.permission_groups.email_addresses_write },
       ]
       resources = jsonencode({ (local.account_resource) = "*" })
@@ -90,7 +95,7 @@ resource "cloudflare_account_token" "dns_lb_provisioner" {
         { id = local.permission_groups.load_balancers_write },
         { id = local.permission_groups.email_rules_write },
       ]
-      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*", (local.mythra_zone_resource) = "*" })
+      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*", (local.mythra_zone_resource) = "*", (local.anveio_zone_resource) = "*" })
     },
   ]
 }
@@ -137,7 +142,7 @@ resource "cloudflare_account_token" "edge_policy_provisioner" {
         { id = local.permission_groups.ssl_certificates_write },
         { id = local.permission_groups.firewall_services_write },
       ]
-      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*", (local.mythra_zone_resource) = "*" })
+      resources = jsonencode({ (local.zone_resource) = "*", (local.rumi_zone_resource) = "*", (local.mythra_zone_resource) = "*", (local.anveio_zone_resource) = "*" })
     },
   ]
 }

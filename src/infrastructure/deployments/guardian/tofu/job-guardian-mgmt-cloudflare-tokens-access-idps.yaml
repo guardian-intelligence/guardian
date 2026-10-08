@@ -1,0 +1,92 @@
+# One-time, Flux-managed apply of two lane-token grants. The guardian-mgmt-dns
+# token (dns_lb_provisioner) gains Access: Organizations, Identity Providers,
+# and Groups Write, so that root can declare the one-time PIN login the
+# operator Access applications need: the account's only identity provider is
+# Cloudflare account login, which admits account members alone, so the
+# founder address in the operator policy had no way to authenticate. It and
+# the edge-policy token (edge_policy_provisioner) also gain the anveio.com
+# zone, which those roots onboard next. Policies update in place
+# in cloudflare provider v5 (only account_id forces replacement), so the token
+# value is unchanged and nothing needs relaying to OpenBao. The scheduled root
+# stays plan-only and is suspended while this runs, so its PAGE_ON_DRIFT plan
+# cannot page on the change it is about to see. The runner applies only its
+# saved plan, targeted at those two tokens. No TTL: remove this completed Job
+# and resume the CronJob through Git after the resumed plan reads back clean.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tofu-guardian-mgmt-cloudflare-tokens-access-idps
+  namespace: tofu-system
+  labels:
+    app.kubernetes.io/name: tofu-runner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tofu-root: guardian-mgmt-cloudflare-tokens
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 3000
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tofu-runner
+        guardian.dev/tofu-root: guardian-mgmt-cloudflare-tokens
+    spec:
+      serviceAccountName: tofu-runner
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tofu
+          image: ghcr.io/guardian-intelligence/tofu-runner:edge@sha256:def592e8d063d20f5fb2ac12987f238d69d2ffb53fd06d91ceb3a43243e93966
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: MODE
+              value: apply
+            - name: TF_CLI_ARGS_plan
+              value: -target=cloudflare_account_token.dns_lb_provisioner -target=cloudflare_account_token.edge_policy_provisioner
+            - name: ROOT_NAME
+              value: guardian-mgmt-cloudflare-tokens
+            - name: ROOT_PATH
+              value: ./src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens
+            - name: SOURCE_KIND
+              value: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+            - name: SOURCE_NAME
+              value: ${GUARDIAN_SOURCE_NAME:=guardian}
+            - name: TF_VAR_cloudflare_account_id
+              valueFrom:
+                configMapKeyRef:
+                  name: tofu-vars
+                  key: cloudflare_account_id
+          envFrom:
+            - secretRef:
+                name: tofu-backend-r2
+            - secretRef:
+                name: tofu-state-encryption
+            - secretRef:
+                name: tofu-cloudflare-minter
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
