@@ -34,9 +34,9 @@ const MAX_BLUR = 40;
 /** How far behind Rumi the wall her light bounces off is (css px): it sets how widely that light spreads. */
 export const SUN_REACH = 160;
 
-/** The colour of Rumi's light before her first emission frame comes back: her cream, lit from behind. */
+/** The colour of Rumi's light before her first emission frame comes back: her backlight. */
 export function sunLight(): [number, number, number] {
-  return hexToRgb(DESIGN.orb.cream);
+  return hexToRgb(DESIGN.orb.light);
 }
 const INK_FLOATS = 4 * (6 + MAX_RIPPLES);
 const GLASS_FLOATS = 4 * (7 + 2 * MAX_SHAPES);
@@ -256,12 +256,7 @@ export class Scene {
     return this.targets;
   }
 
-  frame(
-    shapes: readonly GlassShape[],
-    cssWidth: number,
-    cssHeight: number,
-    dpr: number,
-  ): void {
+  frame(shapes: readonly GlassShape[], cssWidth: number, cssHeight: number, dpr: number): void {
     const width = Math.max(1, Math.round(cssWidth * dpr));
     const height = Math.max(1, Math.round(cssHeight * dpr));
     for (const c of [this.bgCanvas, this.glassCanvas]) {
@@ -276,14 +271,23 @@ export class Scene {
 
     const ink = new Float32Array(INK_FLOATS);
     ink.set([width, height, now, dpr], 0);
-    ink.set([DESIGN.ink.rippleSpeed, reducedMotion() ? 0 : DESIGN.ink.swell, DESIGN.ink.gloss, DESIGN.ink.lifetime], 4);
+    ink.set(
+      [
+        DESIGN.ink.rippleSpeed,
+        reducedMotion() ? 0 : DESIGN.ink.swell,
+        DESIGN.ink.gloss,
+        DESIGN.ink.lifetime,
+      ],
+      4,
+    );
     ink.set([...hexToRgb(DESIGN.ink.tint), 1], 8);
     const vo = this.voice;
     const dt = Math.min(0.1, Math.max(0, now - vo.last));
     vo.last = now;
     vo.strength +=
       ((vo.on && !reducedMotion() ? 1 : 0) - vo.strength) * Math.min(1, dt * DESIGN.ink.voiceEase);
-    vo.phase += (dt * Math.PI * 2 * DESIGN.ink.voiceSpeed) / Math.max(DESIGN.ink.voiceWavelength, 1);
+    vo.phase +=
+      (dt * Math.PI * 2 * DESIGN.ink.voiceSpeed) / Math.max(DESIGN.ink.voiceWavelength, 1);
     ink.set([vo.x, vo.y, vo.strength, vo.phase], 12);
     ink.set([DESIGN.ink.voiceWavelength, DESIGN.ink.voiceAmp, DESIGN.ink.voiceReach, 0], 16);
     ink.set([1, 0, 0, SUN_REACH], 20);

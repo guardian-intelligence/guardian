@@ -31,7 +31,6 @@ export function readShapes(root: HTMLElement): GlassShape[] {
   return out;
 }
 
-
 /**
  * Rumi's light reflecting onto every glass element: each gets the light's
  * position in its own box (--lx/--ly, px), the direction it comes from

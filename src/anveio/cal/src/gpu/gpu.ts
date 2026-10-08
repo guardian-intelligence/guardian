@@ -10,8 +10,12 @@ export function getDevice(): Promise<GPUDevice | null> {
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) return null;
     const device = await adapter.requestDevice();
-    void device.lost.then(() => {
+    void device.lost.then((info) => {
+      console.warn(`WebGPU device lost (${info.reason}): ${info.message}`);
       devicePromise = null;
+    });
+    device.addEventListener("uncapturederror", (e) => {
+      console.error(`WebGPU: ${(e as GPUUncapturedErrorEvent).error.message}`);
     });
     return device;
   })().catch(() => null);
@@ -91,6 +95,7 @@ export async function compilePipeline(
   format: GPUTextureFormat,
   file: string,
   entryPoint = "fs_main",
+  layout: GPUPipelineLayout | "auto" = "auto",
 ): Promise<GPURenderPipeline> {
   const { code, origin } = assemble(fragment, file);
   const module = device.createShaderModule({ label: file, code });
@@ -101,7 +106,7 @@ export async function compilePipeline(
   }
   return device.createRenderPipelineAsync({
     label: file,
-    layout: "auto",
+    layout,
     vertex: { module, entryPoint: "vs_main" },
     fragment: { module, entryPoint, targets: [{ format }] },
     primitive: { topology: "triangle-list" },

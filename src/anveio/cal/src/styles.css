@@ -754,6 +754,14 @@ h2 {
 
 /* ---------- Rumi ---------- */
 
+/* ?lab: Rumi alone, large, on black */
+.lab {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  background: #000;
+}
+
 .orb {
   position: relative;
   display: block;

@@ -1,14 +1,30 @@
 export const DESIGN = {
   orb: {
-    // oil in water, lit from behind, seen down a defocused microscope; sampled
-    // from the reference micrograph: verdant green with teal-blue bleeding into it
-    cream: "#F0E2CC",
-    butter: "#DEB249",
-    sage: "#6A8E4A",
-    teal: "#2F857C",
-    rim: "#FFF8E8",
-    rimOpacity: 0.5,
-    fringe: 0.12,
+    // A microscope's magnified view of chlorophyll and a teal-blue dye
+    // drifting in water deep inside her, lit from behind (orb.wgsl). Each
+    // liquid's colour is what a unit thickness of it shows over the light;
+    // thicker areas absorb more and deepen.
+    light: "#FFF7E8", // the light behind: bright, barely warm
+    chlorophyll: "#86C15C", // leaf green, as chlorophyll looks with light through it
+    dye: "#5BB3AA", // teal-blue
+    chlorophyllThickness: 1.15,
+    dyeThickness: 1.05,
+    // the steam (steam.wgsl): the wind carrying it, its direction across her
+    // (degrees from horizontal) and speed (orb radii/s), pulsing in one gentle
+    // rhythm (period s, depth); how quickly the air settles to the wind (1/s),
+    // how strongly warm gas rises, how fast it diffuses and fades (1/s), how
+    // strongly a slow swirl stirs the air, and how much gas the four drifting
+    // sources feed in (thickness/s)
+    driftAngle: 51,
+    driftSpeed: 0.05,
+    rhythmSeconds: 4.5,
+    pulse: 0.35,
+    steamSettle: 0.25,
+    steamBuoyancy: 0.012,
+    steamDiffusion: 0.15,
+    steamFading: 0.05,
+    steamSwirl: 0.035,
+    steamFeed: 0.9,
     size: 44,
   },
   glass: {

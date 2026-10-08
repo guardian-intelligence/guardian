@@ -47,14 +47,21 @@ RGB dispersion, fresnel and glare come from
 [liquid-glass-studio](https://github.com/iyinchao/liquid-glass-studio) (MIT,
 vendored WGSL in `src/shaders/`, license alongside).
 
-Rumi (`src/rumi/Orb.tsx` + `orb.wgsl`) is her own small WebGPU canvas:
-pastel oil droplets in water, lit from behind, seen down a defocused
-microscope. The droplets pack like foam, filter the cream light behind them
-and are drawn only by faint rims. Her states are `idle` (slow drift, focus
-breathing), `listening` (focus pulls in), `thinking` (faster drift, droplets
-gather and merge) and `speaking` (a soft brightness pulse); tapping her mutes
-her. With reduced motion she holds still and only her focus breathes, and
-`public/rumi.png` stands in for her without WebGPU.
+Rumi (`src/rumi/Orb.tsx` + `orb.wgsl`) is her own small WebGPU canvas: a
+microscope's view of two coloured gases, green and teal, drifting and diffusing
+like steam inside her, lit from behind. The steam is a real fluid simulation
+(`src/rumi/steam.ts` + `steam.wgsl`, Stam's stable fluids on a 96x96
+wrap-around grid): the air carries itself, settles toward a gentle wind,
+rises where the gas is warm, and stays incompressible, so it curls and
+billows; the gases ride it, diffuse and fade, fed by four drifting sources.
+Each gas absorbs light by thickness (Beer-Lambert), so dense plumes deepen and
+thin wisps glow, and a fine film grain sits over everything. Colours, the wind
+and the steam's physics live in `DESIGN.orb` (`src/design.ts`). Her states are
+`idle`, `listening` (focus pulls in), `thinking` (stronger wind) and
+`speaking` (a soft brightness pulse); tapping her mutes her. With reduced
+motion the steam holds still and only the focus breathes; `public/rumi.png`
+stands in for her without WebGPU. `?lab` (with `&mode=` and `&size=`) shows her
+alone at 640px.
 
 She is also the page's light. Each frame `orb.wgsl`'s `fs_emission` raymarches
 her from the far wall behind her into a 64-texel strip, one texel per direction
