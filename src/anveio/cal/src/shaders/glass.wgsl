@@ -14,7 +14,7 @@ const MAX_SHAPES: u32 = 6u;
 
 struct Shape {
   rect: vec4f, // centre x, centre y, half width, half height (css px)
-  look: vec4f, // corner radius (css px), squircle exponent (2 = circular corners), unused x2
+  look: vec4f, // corner radius (css px), squircle exponent (2 = circular corners), shine (0..1), unused
 }
 
 struct Uniforms {
@@ -77,6 +77,24 @@ fn mainSDF(pixel: vec2f) -> f32 {
     if (i == 0u) { d = di; } else { d = smin(d, di, k); }
   }
   return d;
+}
+
+// How reflective the glass is here: the shine of the nearest shape. Interactive
+// glass catches the light; static glass (Rumi's bubble) stays nearly matte.
+fn shineAt(pixel: vec2f) -> f32 {
+  let s = u.dpr / u.res.y;
+  let p = pixel / u.res.y;
+  var best = 1e5;
+  var shine = 1.0;
+  for (var i = 0u; i < MAX_SHAPES; i = i + 1u) {
+    if (f32(i) >= u.count) { break; }
+    let sh = u.shapes[i];
+    let half = sh.rect.zw * s;
+    let cr = min(sh.look.x * s, min(half.x, half.y));
+    let di = roundedRectSDF(p - sh.rect.xy * s, half, cr, sh.look.y);
+    if (di < best) { best = di; shine = sh.look.z; }
+  }
+  return shine;
 }
 
 fn getNormal(p: vec2f) -> vec2f {
@@ -143,11 +161,12 @@ fn fs_main(@builtin(position) frag: vec4f, @location(0) v_uv: vec2f) -> @locatio
   } else {
     let edgeH = nmerged / u.refr.x;
     let normal = getNormal(pixel);
+    let shine = shineAt(pixel);
     var blurMixRate = edgeH;
     if (u.glare2.w > 0.5) { blurMixRate = 1.0; }
 
-    let refOffset = -normal * edgeFactor * u.refr.w * u.dpr * vec2f(u.res.y / u.res.x, 1.0);
-    let blurredPixel = getTextureDispersion(v_uv, blurMixRate, refOffset, u.refr.z);
+    let refOffset = -normal * edgeFactor * shine * u.refr.w * u.dpr * vec2f(u.res.y / u.res.x, 1.0);
+    let blurredPixel = getTextureDispersion(v_uv, blurMixRate, refOffset, u.refr.z * shine);
 
     outColor = mix(blurredPixel, vec4f(tint, 1.0), tintA * 0.8);
 
@@ -158,7 +177,7 @@ fn fs_main(@builtin(position) frag: vec4f, @location(0) v_uv: vec2f) -> @locatio
     );
     var fresnelTintLCH = SRGB_TO_LCH(mix(vec3f(1.0), tint, tintA * 0.5));
     fresnelTintLCH.x = clamp(fresnelTintLCH.x + 20.0 * fresnelFactor * u.fres.z, 0.0, 100.0);
-    outColor = mix(outColor, vec4f(LCH_TO_SRGB(fresnelTintLCH), 1.0), fresnelFactor * u.fres.z * 0.7 * length(normal));
+    outColor = mix(outColor, vec4f(LCH_TO_SRGB(fresnelTintLCH), 1.0), fresnelFactor * u.fres.z * shine * 0.7 * length(normal));
 
     // glare (angle measured y-up, as upstream)
     let glareGeoFactor = clamp(
@@ -170,7 +189,7 @@ fn fs_main(@builtin(position) frag: vec4f, @location(0) v_uv: vec2f) -> @locatio
     if ((glareAngle > PI * 1.5 && glareAngle < PI * 3.5) || glareAngle < PI * -0.5) { farside = true; }
     var sideFactor = 1.2;
     if (farside) { sideFactor = 1.2 * u.glare.w; }
-    var glareAngleFactor = (0.5 + sin(glareAngle) * 0.5) * sideFactor * u.glare2.x;
+    var glareAngleFactor = (0.5 + sin(glareAngle) * 0.5) * sideFactor * u.glare2.x * shine;
     glareAngleFactor = clamp(pow(glareAngleFactor, 0.1 + u.glare.z * 2.0), 0.0, 1.0);
 
     var glareTintLCH = SRGB_TO_LCH(mix(blurredPixel.rgb, tint, tintA * 0.5));

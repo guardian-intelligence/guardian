@@ -7,13 +7,13 @@ import { emissionAt } from "../rumi/emission.ts";
 // (CSS backdrop-filter); the glass optics are drawn by the scene's overlay
 // pass, which reads every registered element's box each frame.
 
-type Entry = { el: HTMLElement; radius: number | "capsule" };
+type Entry = { el: HTMLElement; radius: number | "capsule"; shine: number };
 const registry = new Set<Entry>();
 
 export function readShapes(root: HTMLElement): GlassShape[] {
   const r = root.getBoundingClientRect();
   const out: GlassShape[] = [];
-  registry.forEach(({ el, radius }) => {
+  registry.forEach(({ el, radius, shine }) => {
     if (!root.contains(el)) return;
     const b = el.getBoundingClientRect();
     if (b.width === 0 || b.height === 0) return;
@@ -26,6 +26,7 @@ export function readShapes(root: HTMLElement): GlassShape[] {
       hh,
       radius: radius === "capsule" ? Math.min(hw, hh) : radius,
       capsule: radius === "capsule",
+      shine,
     });
   });
   return out;
@@ -66,27 +67,33 @@ export function lightGlass(root: HTMLElement, x: number, y: number, reach: numbe
 
 type Props = {
   radius: number | "capsule";
+  /** How much it reflects, 0..1: interactive glass 1, static glass less. */
+  shine?: number;
   className?: string;
   style?: CSSProperties;
   children?: ReactNode;
 };
 
-export function Glass({ radius, className, style, children }: Props) {
+export function Glass({ radius, shine = 1, className, style, children }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const entry = { el, radius };
+    const entry = { el, radius, shine };
     registry.add(entry);
     return () => {
       registry.delete(entry);
     };
-  }, [radius]);
+  }, [radius, shine]);
   return (
     <div
       ref={ref}
       className={className ? `glass ${className}` : "glass"}
-      style={{ borderRadius: radius === "capsule" ? 9999 : radius, ...style }}
+      style={{
+        borderRadius: radius === "capsule" ? 9999 : radius,
+        ["--shine" as string]: shine,
+        ...style,
+      }}
     >
       {children}
     </div>

@@ -51,7 +51,7 @@ const dateLabel = (iso: string) => {
 
 type Row =
   | { type: "item"; entry: Entry; sub: boolean }
-  | { type: "more"; kind: keyof typeof GROUP_NOUN; text: string; open: boolean };
+  | { type: "more"; kind: keyof typeof GROUP_NOUN; text: string; label: string; open: boolean };
 
 function Item({ entry, sub, sep }: { entry: Entry; sub: boolean; sep: boolean }) {
   const icon = ICONS[entry.kind];
@@ -118,7 +118,7 @@ export function Recently() {
     .sort((a, b) => (a.e.date < b.e.date ? 1 : a.e.date > b.e.date ? -1 : a.i - b.i))
     .map(({ e }) => e);
 
-  // Grouped kinds collapse to their newest item, then "N more recent …".
+  // Grouped kinds collapse to their newest item, then "N more".
   const rows: Row[] = [];
   const placed = new Set<EntryKind>();
   for (const e of sorted) {
@@ -138,7 +138,10 @@ export function Recently() {
       type: "more",
       kind,
       open: isOpen,
-      text: isOpen ? "Show fewer" : `${rest.length} more recent ${GROUP_NOUN[kind]}…`,
+      text: isOpen ? "Show fewer" : `${rest.length} more`,
+      label: isOpen
+        ? `Show fewer ${GROUP_NOUN[kind]}`
+        : `${rest.length} more recent ${GROUP_NOUN[kind]}`,
     });
     if (isOpen) rest.forEach((x) => rows.push({ type: "item", entry: x, sub: true }));
   }
@@ -159,6 +162,7 @@ export function Recently() {
                 type="button"
                 className="row-more"
                 aria-expanded={r.open}
+                aria-label={r.label}
                 onClick={() => setOpen({ ...open, [r.kind]: !r.open })}
               >
                 <span className="etch etch-text" data-text={r.text}>

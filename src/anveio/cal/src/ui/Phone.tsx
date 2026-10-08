@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
+import type { AuthState } from "../auth/google.ts";
 import { LINES, NOTE, type Stage } from "../content.ts";
 import { DESIGN } from "../design.ts";
 import { useFlow, type CardKind } from "../flow.ts";
@@ -13,6 +14,8 @@ import glassShader from "../shaders/glass.wgsl?raw";
 import inkShader from "../shaders/ink.wgsl?raw";
 import { lightEtchings } from "./etch.ts";
 import { Recently } from "./Recently.tsx";
+import { Slab, SlabButton } from "./Slab.tsx";
+import { Stack } from "./Stack.tsx";
 
 const SHADERS = { ink: inkShader, blur: blurShader, blit: blitShader, glass: glassShader };
 
@@ -128,7 +131,7 @@ const MicIcon = () => (
 );
 
 const GoogleIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
     <path
       d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3z"
       fill="#4285F4"
@@ -162,6 +165,123 @@ function syncUnderlay(layer: HTMLDivElement, shapes: readonly GlassShape[]): voi
   });
 }
 
+// The message card: Samantha's one way to reach Shovon, in whatever state
+// the conversation has it.
+function MessageField({ flow }: { flow: ReturnType<typeof useFlow> }) {
+  switch (flow.control) {
+    case "idle":
+      return (
+        <Glass radius="capsule" className="field">
+          <button type="button" className="tap field-tap t-body" onClick={flow.leave}>
+            <span>Leave a message</span>
+            <span className="field-icon">
+              <MicIcon />
+            </span>
+          </button>
+        </Glass>
+      );
+    case "recording":
+      return (
+        <Glass radius="capsule" className="field">
+          <button
+            type="button"
+            className="tap field-tap t-body"
+            aria-label="Send message"
+            onClick={flow.send}
+          >
+            <span className="rec-dot" />
+            <span className="field-label">Listening…</span>
+            <span className="send">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 19V5M6 11l6-6 6 6" />
+              </svg>
+            </span>
+          </button>
+        </Glass>
+      );
+    case "thinking":
+      return (
+        <Glass radius="capsule" className="field">
+          <button type="button" className="tap field-tap t-body secondary" disabled>
+            Rumi is on it…
+          </button>
+        </Glass>
+      );
+    case "host":
+      return (
+        <Glass radius="capsule" className="field host-note">
+          <p className="t-foot secondary">Only Samantha can leave messages here.</p>
+        </Glass>
+      );
+  }
+}
+
+// Rumi's sign-in card: one chip per way in. While there's only one way in,
+// the whole card is the button; with more, each chip is its own.
+type Provider = { readonly name: string; readonly icon: () => ReactNode };
+const PROVIDERS = [{ name: "Google", icon: GoogleIcon }] as const satisfies readonly Provider[];
+
+function SignIn({
+  auth,
+  onSignIn,
+}: {
+  auth: AuthState;
+  onSignIn: (provider: Provider["name"]) => void;
+}) {
+  // while Google's window is open the chip's logo turns into a spinner
+  const busy = auth.status === "waiting" || auth.status === "verifying";
+  const chip = (p: Provider) => (
+    <>
+      {busy ? <span className="spinner" aria-hidden="true" /> : <p.icon />}
+      {p.name}
+    </>
+  );
+  const label = (
+    <span className="signin-label t-body" aria-live="polite">
+      {busy ? "Signing in…" : "Sign in"}
+    </span>
+  );
+  const [only] = PROVIDERS;
+  if (PROVIDERS.length === 1)
+    return (
+      <SlabButton
+        className="signin signin-whole"
+        aria-label={busy ? `Signing in with ${only.name}` : `Sign in with ${only.name}`}
+        aria-busy={busy}
+        onClick={() => onSignIn(only.name)}
+      >
+        {label}
+        <span className="slab slab-faint signin-option t-body">{chip(only)}</span>
+      </SlabButton>
+    );
+  return (
+    <Slab className="signin" role="group" aria-label="Sign in" aria-busy={busy}>
+      {label}
+      {PROVIDERS.map((p: Provider) => (
+        <SlabButton
+          key={p.name}
+          faint
+          className="signin-option t-body"
+          aria-label={`Sign in with ${p.name}`}
+          onClick={() => onSignIn(p.name)}
+        >
+          {chip(p)}
+        </SlabButton>
+      ))}
+    </Slab>
+  );
+}
+
 type Props = { forced: Stage | null };
 
 export function Phone({ forced }: Props) {
@@ -177,6 +297,13 @@ export function Phone({ forced }: Props) {
   const flow = useFlow(forced);
   const speakingRef = useRef(false);
   speakingRef.current = flow.speaking;
+
+  // Dev: drive Rumi's stack by hand, e.g. rumi.stack({ op: "add", card: "signin" }).
+  const { rumi } = flow;
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    Object.assign(window, { rumi: { stack: rumi } });
+  }, [rumi]);
 
   useEffect(() => {
     let raf = 0;
@@ -284,12 +411,31 @@ export function Phone({ forced }: Props) {
       <canvas ref={glassRef} className="layer-glass" aria-hidden="true" />
 
       <div className="controls">
-        <Glass key={flow.line} radius={18} className="bubble enter">
-          <div className="t-body" role="status" aria-live="polite">
-            <span>{flow.shown}</span>
-            <span className="unsaid">{flow.rest}</span>
+        {flow.typing ? (
+          <div className="typing enter">
+            <Slab role="status" aria-label="Rumi is typing">
+              <i />
+              <i />
+              <i />
+            </Slab>
           </div>
-        </Glass>
+        ) : (
+          <div key={flow.line} className="bubble land">
+            <Slab role="status" aria-live="polite">
+              {flow.line}
+              <svg className="tail" viewBox="0 0 16 9" aria-hidden="true">
+                <path
+                  className="tail-fill"
+                  d="M0 1h16c-2.6 0-4.4 2.2-5.6 5.6a2.6 2.6 0 0 1-4.8 0C4.4 3.2 2.6 1 0 1z"
+                />
+                <path
+                  className="tail-edge"
+                  d="M1 1.5c1.9.5 3.3 2.3 4.6 5.1a2.6 2.6 0 0 0 4.8 0c1.3-2.8 2.7-4.6 4.6-5.1"
+                />
+              </svg>
+            </Slab>
+          </div>
+        )}
 
         <div className="bar">
           <div ref={orbRef}>
@@ -306,83 +452,38 @@ export function Phone({ forced }: Props) {
             </div>
           </div>
 
-          {flow.control === "idle" && (
-            <Glass radius="capsule" className="field">
-              <button type="button" className="tap field-tap t-body" onClick={flow.leave}>
-                <span>Leave a message</span>
-                <span className="field-icon">
-                  <MicIcon />
-                </span>
-              </button>
-            </Glass>
-          )}
-          {flow.control === "signin" && (
-            <button type="button" className="google t-headline" onClick={flow.signIn}>
-              <GoogleIcon />
-              Continue with Google
-            </button>
-          )}
+          <Stack
+            cards={flow.stack}
+            onDismiss={flow.dismiss}
+            render={(card) =>
+              card === "signin" ? (
+                <SignIn auth={flow.auth} onSignIn={flow.signIn} />
+              ) : (
+                <MessageField flow={flow} />
+              )
+            }
+          />
           {flow.control === "recording" && (
-            <>
-              <Glass radius="capsule" className="field">
-                <button
-                  type="button"
-                  className="tap field-tap t-body"
-                  aria-label="Send message"
-                  onClick={flow.send}
+            <Glass radius="capsule" className="discard">
+              <button
+                type="button"
+                className="tap"
+                aria-label="Discard this message"
+                onClick={flow.cancel}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.6"
+                  strokeLinecap="round"
+                  aria-hidden="true"
                 >
-                  <span className="rec-dot" />
-                  <span className="field-label">Listening…</span>
-                  <span className="send">
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M12 19V5M6 11l6-6 6 6" />
-                    </svg>
-                  </span>
-                </button>
-              </Glass>
-              <Glass radius="capsule" className="discard">
-                <button
-                  type="button"
-                  className="tap"
-                  aria-label="Discard this message"
-                  onClick={flow.cancel}
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.6"
-                    strokeLinecap="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M6 6l12 12M18 6L6 18" />
-                  </svg>
-                </button>
-              </Glass>
-            </>
-          )}
-          {flow.control === "thinking" && (
-            <Glass radius="capsule" className="field">
-              <button type="button" className="tap field-tap t-body secondary" disabled>
-                Rumi is on it…
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
               </button>
-            </Glass>
-          )}
-          {flow.control === "host" && (
-            <Glass radius="capsule" className="field host-note">
-              <p className="t-foot secondary">Only Samantha can leave messages here.</p>
             </Glass>
           )}
         </div>

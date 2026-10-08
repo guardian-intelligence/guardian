@@ -5,7 +5,11 @@ export const NOTE =
 
 export const LINES = {
   greet: "Hi, I'm Rumi. I can take a message or schedule time with you and Shovon.",
-  signin: "Before I listen, who's calling? Sign in so Shovon knows it's you.",
+  signin: "Please sign in first so Shovon knows who's calling.",
+  // sign-in that didn't finish (auth/google.ts Failure)
+  signinCancelled: "No problem. Sign in whenever you're ready.",
+  signinBlocked: "Your browser blocked the Google window. Tap Sign in to try again.",
+  signinInvalid: "Google's sign-in didn't go through. Tap Sign in to try again.",
   listening: "Go ahead, I'm listening.",
   think1: "Friday at 2:30 looks open…",
   booked: "Friday at 2:30 it is. I've sent the invitation to you both.",
@@ -19,6 +23,7 @@ export const LINES = {
 export const STAGES = [
   "arrive",
   "signin",
+  "signing",
   "listening",
   "thinking",
   "booked",
@@ -34,6 +39,7 @@ export type Stage = (typeof STAGES)[number];
 export const STAGE_LINE = {
   arrive: LINES.greet,
   signin: LINES.signin,
+  signing: LINES.signin,
   listening: LINES.listening,
   thinking: LINES.think1,
   booked: LINES.booked,
@@ -141,7 +147,7 @@ export const ENTRIES: readonly Entry[] = [
   },
 ];
 
-// Kinds that collapse to their newest item plus "N more recent …".
+// Kinds that collapse to their newest item plus "N more" (the noun names it for screen readers).
 export const GROUP_NOUN = { post: "tweets", code: "commits" } as const satisfies Partial<
   Record<EntryKind, string>
 >;

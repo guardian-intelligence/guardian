@@ -24,6 +24,7 @@ export type GlassShape = {
   hh: number;
   radius: number;
   capsule: boolean;
+  shine: number; // 0..1: how much the glass reflects (interactive 1, static less)
 };
 
 export type SceneShaders = { ink: string; blur: string; blit: string; glass: string };
@@ -322,7 +323,7 @@ export class Scene {
       .slice(0, count)
       .forEach((s, i) =>
         glass.set(
-          [s.cx, s.cy, s.hw, s.hh, s.radius, s.capsule ? 2 : g.roundness, 0, 0],
+          [s.cx, s.cy, s.hw, s.hh, s.radius, s.capsule ? 2 : g.roundness, s.shine, 0],
           28 + i * 8,
         ),
       );
