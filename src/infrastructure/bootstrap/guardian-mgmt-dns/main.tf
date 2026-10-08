@@ -337,6 +337,16 @@ resource "cloudflare_dns_record" "guardian_operator_tunnel" {
   }
 }
 
+# How the founder proves the operator policy's address: Cloudflare mails a
+# one-time PIN to it. The account's other login, Cloudflare account sign-in,
+# admits account members only, and the founder address is not one.
+resource "cloudflare_zero_trust_access_identity_provider" "one_time_pin" {
+  account_id = var.cloudflare_account_id
+  name       = "One-time PIN"
+  type       = "onetimepin"
+  config     = {}
+}
+
 resource "cloudflare_zero_trust_access_policy" "guardian_operator" {
   account_id = var.cloudflare_account_id
   name       = "Guardian operator identity"
