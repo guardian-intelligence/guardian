@@ -35,6 +35,7 @@ export default {
           "src/**/web/perf/**",
           "src/**/web/e2e/**",
           "src/**/web/*.mjs",
+          "src/anveio/cal/scripts/**",
         ],
         rules: {
           "no-console": "off",

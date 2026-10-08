@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Signing in…</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #000;
+        color: rgba(235, 235, 245, 0.6);
+        font:
+          15px/20px -apple-system,
+          BlinkMacSystemFont,
+          system-ui,
+          sans-serif;
+        display: grid;
+        place-items: center;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="msg">Signing in…</p>
+    <script>
+      // Google's answer lands here in the URL fragment. Hand it to the page
+      // that opened this window (src/auth/google.ts checks it), then close.
+      const fragment = location.hash;
+      const state = new URLSearchParams(fragment.slice(1)).get("state") ?? "";
+      history.replaceState(null, "", location.pathname);
+      const ch = new BroadcastChannel("rumi-google-oauth");
+      ch.postMessage({ state, fragment });
+      ch.close();
+      window.close();
+      setTimeout(() => {
+        document.getElementById("msg").textContent = "You're signed in. You can close this window.";
+      }, 400);
+    </script>
+  </body>
+</html>

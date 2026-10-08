@@ -1,0 +1,493 @@
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+
+import type { AuthState } from "../auth/google.ts";
+import { LINES, NOTE, type Stage } from "../content.ts";
+import { DESIGN } from "../design.ts";
+import { useFlow, type CardKind } from "../flow.ts";
+import { Glass, lightGlass, readShapes } from "../glass/Glass.tsx";
+import { getDevice } from "../gpu/gpu.ts";
+import { Scene, SUN_REACH, sunLight, type GlassShape } from "../gpu/scene.ts";
+import { Orb } from "../rumi/Orb.tsx";
+import blitShader from "../shaders/blit.wgsl?raw";
+import blurShader from "../shaders/blur.wgsl?raw";
+import glassShader from "../shaders/glass.wgsl?raw";
+import inkShader from "../shaders/ink.wgsl?raw";
+import { lightEtchings } from "./etch.ts";
+import { Recently } from "./Recently.tsx";
+import { Slab, SlabButton } from "./Slab.tsx";
+import { Stack } from "./Stack.tsx";
+
+const SHADERS = { ink: inkShader, blur: blurShader, blit: blitShader, glass: glassShader };
+
+function Invitation({ kind, host }: { kind: CardKind; host: boolean }) {
+  const draft = kind === "draft1" || kind === "draft2";
+  const thursday = kind === "draft2" || kind === "thu";
+  return (
+    <section className="enter">
+      <h2 className="section-header t-foot">Invitation</h2>
+      <div className="cell">
+        <div className="invite-head">
+          <div className="invite-who">
+            <div className="t-headline">Samantha &amp; Shovon</div>
+            <div className="t-sub secondary">to talk open source</div>
+          </div>
+          <span className={draft ? "pill pill-draft" : "pill pill-booked"}>
+            {draft ? "Drafting" : "Booked"}
+          </span>
+        </div>
+        <div className="hairline" />
+        <div className="invite-when">
+          {kind === "draft2" && <div className="t-sub struck">Friday, October 9 · 2:30 PM</div>}
+          <div className={draft ? "t-body secondary" : "t-body"}>
+            {thursday ? "Thursday, October 8" : "Friday, October 9"}
+          </div>
+          <div className="t-sub secondary">2:30 – 3:00 PM · Zoom</div>
+        </div>
+      </div>
+      <p className="section-footer t-foot">
+        {host ? "Only Samantha can change this." : "Only you and Shovon can see this."}
+      </p>
+    </section>
+  );
+}
+
+function Thread() {
+  const rumi = (text: string) => (
+    <div className="msg-rumi">
+      <span className="t-foot msg-name">Rumi</span>
+      <p className="t-body">{text}</p>
+    </div>
+  );
+  const voice = (playing: boolean) => (
+    <div className="msg-voice">
+      <span className="t-foot msg-name">Samantha</span>
+      <button
+        type="button"
+        className="voice"
+        aria-label={`${playing ? "Pause" : "Play"} Samantha's voice message`}
+      >
+        <svg width="38" height="38" viewBox="0 0 40 40" aria-hidden="true">
+          <circle cx="20" cy="20" r="18" fill="none" stroke="#48484A" strokeWidth="2.5" />
+          <circle
+            className={playing ? "voice-prog playing" : "voice-prog"}
+            cx="20"
+            cy="20"
+            r="18"
+            fill="none"
+            stroke="#0A84FF"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeDasharray="113.1"
+            transform="rotate(-90 20 20)"
+          />
+          <path
+            d={playing ? "M15 13h3.5v14H15zM21.5 13H25v14h-3.5z" : "M16.5 13.5 L27 20 L16.5 26.5 Z"}
+            fill="#FFFFFF"
+          />
+        </svg>
+        <span className="t-sub">Voice message</span>
+      </button>
+    </div>
+  );
+  const day = (time: string) => (
+    <div className="t-cap msg-day">
+      <b>Wed, Oct 7</b> at {time}
+    </div>
+  );
+  return (
+    <section>
+      <h2 className="section-header t-foot">Messages</h2>
+      <div className="cell thread">
+        {day("1:05 PM")}
+        {rumi(LINES.greet)}
+        <div className="t-cap msg-note">Samantha signed in with Google</div>
+        {voice(false)}
+        {rumi(LINES.booked)}
+        <div className="t-cap msg-note struck">Friday, October 9 · 2:30 PM</div>
+        {day("4:12 PM")}
+        {rumi(LINES.greet)}
+        {voice(true)}
+        {rumi(LINES.rebooked)}
+        <div className="t-cap msg-note">Thursday, October 8 · 2:30 PM · Booked</div>
+      </div>
+    </section>
+  );
+}
+
+// The waveform glyph iOS puts at the end of a message field for dictation.
+const MicIcon = () => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    aria-hidden="true"
+  >
+    <path d="M4 10.5v3M8 8v8M12 4.5v15M16 8v8M20 10.5v3" />
+  </svg>
+);
+
+const GoogleIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+    <path
+      d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3z"
+      fill="#4285F4"
+    />
+    <path
+      d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z"
+      fill="#34A853"
+    />
+    <path d="M6.4 14a6 6 0 0 1 0-3.9V7.5H3.1a10 10 0 0 0 0 9z" fill="#FBBC05" />
+    <path
+      d="M12 6c1.5 0 2.8.5 3.8 1.5l2.9-2.9A10 10 0 0 0 3.1 7.5l3.3 2.6C7.2 7.8 9.4 6 12 6z"
+      fill="#EA4335"
+    />
+  </svg>
+);
+
+// The page under each glass shape is blurred by a backdrop-filter box that sits
+// below the optics overlay (a blur on the glass element itself would blur the
+// optics too). Kept in step with the shapes every frame.
+function syncUnderlay(layer: HTMLDivElement, shapes: readonly GlassShape[]): void {
+  while (layer.children.length < shapes.length) layer.appendChild(document.createElement("div"));
+  while (layer.children.length > shapes.length) layer.lastElementChild?.remove();
+  shapes.forEach((s, i) => {
+    const el = layer.children[i];
+    if (!(el instanceof HTMLDivElement)) return;
+    el.style.left = `${s.cx - s.hw}px`;
+    el.style.top = `${s.cy - s.hh}px`;
+    el.style.width = `${s.hw * 2}px`;
+    el.style.height = `${s.hh * 2}px`;
+    el.style.borderRadius = `${s.radius}px`;
+  });
+}
+
+// The message card: Samantha's one way to reach Shovon, in whatever state
+// the conversation has it.
+function MessageField({ flow }: { flow: ReturnType<typeof useFlow> }) {
+  switch (flow.control) {
+    case "idle":
+      return (
+        <Glass radius="capsule" className="field">
+          <button type="button" className="tap field-tap t-body" onClick={flow.leave}>
+            <span>Leave a message</span>
+            <span className="field-icon">
+              <MicIcon />
+            </span>
+          </button>
+        </Glass>
+      );
+    case "recording":
+      return (
+        <Glass radius="capsule" className="field">
+          <button
+            type="button"
+            className="tap field-tap t-body"
+            aria-label="Send message"
+            onClick={flow.send}
+          >
+            <span className="rec-dot" />
+            <span className="field-label">Listening…</span>
+            <span className="send">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 19V5M6 11l6-6 6 6" />
+              </svg>
+            </span>
+          </button>
+        </Glass>
+      );
+    case "thinking":
+      return (
+        <Glass radius="capsule" className="field">
+          <button type="button" className="tap field-tap t-body secondary" disabled>
+            Rumi is on it…
+          </button>
+        </Glass>
+      );
+    case "host":
+      return (
+        <Glass radius="capsule" className="field host-note">
+          <p className="t-foot secondary">Only Samantha can leave messages here.</p>
+        </Glass>
+      );
+  }
+}
+
+// Rumi's sign-in card: one chip per way in. While there's only one way in,
+// the whole card is the button; with more, each chip is its own.
+type Provider = { readonly name: string; readonly icon: () => ReactNode };
+const PROVIDERS = [{ name: "Google", icon: GoogleIcon }] as const satisfies readonly Provider[];
+
+function SignIn({
+  auth,
+  onSignIn,
+}: {
+  auth: AuthState;
+  onSignIn: (provider: Provider["name"]) => void;
+}) {
+  // while Google's window is open the chip's logo turns into a spinner
+  const busy = auth.status === "waiting" || auth.status === "verifying";
+  const chip = (p: Provider) => (
+    <>
+      {busy ? <span className="spinner" aria-hidden="true" /> : <p.icon />}
+      {p.name}
+    </>
+  );
+  const label = (
+    <span className="signin-label t-body" aria-live="polite">
+      {busy ? "Signing in…" : "Sign in"}
+    </span>
+  );
+  const [only] = PROVIDERS;
+  if (PROVIDERS.length === 1)
+    return (
+      <SlabButton
+        className="signin signin-whole"
+        aria-label={busy ? `Signing in with ${only.name}` : `Sign in with ${only.name}`}
+        aria-busy={busy}
+        onClick={() => onSignIn(only.name)}
+      >
+        {label}
+        <span className="slab slab-faint signin-option t-body">{chip(only)}</span>
+      </SlabButton>
+    );
+  return (
+    <Slab className="signin" role="group" aria-label="Sign in" aria-busy={busy}>
+      {label}
+      {PROVIDERS.map((p: Provider) => (
+        <SlabButton
+          key={p.name}
+          faint
+          className="signin-option t-body"
+          aria-label={`Sign in with ${p.name}`}
+          onClick={() => onSignIn(p.name)}
+        >
+          {chip(p)}
+        </SlabButton>
+      ))}
+    </Slab>
+  );
+}
+
+type Props = { forced: Stage | null };
+
+export function Phone({ forced }: Props) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const bgRef = useRef<HTMLCanvasElement>(null);
+  const glassRef = useRef<HTMLCanvasElement>(null);
+  const underlayRef = useRef<HTMLDivElement>(null);
+  const sceneRef = useRef<Scene | null>(null);
+  const [gpu, setGpu] = useState<"pending" | "on" | "off">("pending");
+  const [muted, setMuted] = useState(true);
+
+  const orbRef = useRef<HTMLDivElement>(null);
+  const flow = useFlow(forced);
+  const speakingRef = useRef(false);
+  speakingRef.current = flow.speaking;
+
+  // Dev: drive Rumi's stack by hand, e.g. rumi.stack({ op: "add", card: "signin" }).
+  const { rumi } = flow;
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    Object.assign(window, { rumi: { stack: rumi } });
+  }, [rumi]);
+
+  useEffect(() => {
+    let raf = 0;
+    let dead = false;
+    void getDevice().then(async (device) => {
+      const root = rootRef.current;
+      const bg = bgRef.current;
+      const glass = glassRef.current;
+      if (dead || !root || !bg || !glass) return;
+      if (!device) {
+        setGpu("off");
+        return;
+      }
+      const scene = await Scene.create(device, bg, glass, SHADERS).catch((err: unknown) => {
+        console.error(err);
+        return null;
+      });
+      if (!scene || dead) {
+        scene?.dispose();
+        if (!scene) setGpu("off");
+        return;
+      }
+      sceneRef.current = scene;
+      setGpu("on");
+      const tick = () => {
+        raf = requestAnimationFrame(tick);
+        const shapes = readShapes(root);
+        if (underlayRef.current) syncUnderlay(underlayRef.current, shapes);
+        const orb = orbRef.current;
+        if (orb) {
+          const r = root.getBoundingClientRect();
+          const o = orb.getBoundingClientRect();
+          const x = o.left - r.left + o.width / 2;
+          const y = o.top - r.top + o.height / 2;
+          scene.setVoice(x, y, speakingRef.current);
+          lightGlass(root, x, y, SUN_REACH);
+          lightEtchings(root, x, y);
+        }
+        scene.frame(shapes, root.clientWidth, root.clientHeight, Math.min(devicePixelRatio, 2));
+      };
+      tick();
+    });
+    return () => {
+      dead = true;
+      cancelAnimationFrame(raf);
+      sceneRef.current?.dispose();
+      sceneRef.current = null;
+    };
+    // mount once; shader edits are applied by the effect below
+  }, []);
+
+  // Editing any .wgsl file hot-reloads it into the running scene.
+  useEffect(() => {
+    void sceneRef.current?.setShaders(SHADERS).then((err) => {
+      if (err) console.error(err);
+    });
+  }, [inkShader, blurShader, blitShader, glassShader]);
+
+  const glassVars: CSSProperties & Record<`--${string}`, string> = {
+    "--glass-blur": `${DESIGN.glass.domBlur}px`,
+    "--raise": String(DESIGN.glass.raise),
+    "--orb-light": String(DESIGN.glass.orbLight),
+    "--sun-rgb": sunLight()
+      .map((c) => Math.round(c * 255))
+      .join(" "),
+  };
+
+  return (
+    <div ref={rootRef} className={`phone gpu-${gpu}`} style={glassVars}>
+      <canvas ref={bgRef} className="layer-ink" aria-hidden="true" />
+
+      <div className="scroll">
+        {!flow.host && (
+          <header className="hero">
+            <img src="/shovon.jpg" alt="Shovon Hasan" width={120} height={120} draggable={false} />
+            <h1 className="t-title1">Shovon Hasan</h1>
+            <p className="t-sub secondary">Founder, Guardian</p>
+          </header>
+        )}
+        {flow.host && (
+          <>
+            <header className="hero">
+              <div className="monogram" aria-hidden="true">
+                S
+              </div>
+              <h1 className="t-title1">Samantha</h1>
+              <p className="t-sub secondary">Your thread, kept by Rumi</p>
+            </header>
+            <Thread />
+          </>
+        )}
+        {flow.card && <Invitation key={flow.card} kind={flow.card} host={flow.host} />}
+        {!flow.host && (
+          <>
+            <div className="cell note">
+              <div className="t-foot secondary">Note</div>
+              <p className="t-body">{NOTE}</p>
+            </div>
+            <Recently />
+          </>
+        )}
+      </div>
+
+      <div ref={underlayRef} className="underlay" aria-hidden="true" />
+      <canvas ref={glassRef} className="layer-glass" aria-hidden="true" />
+
+      <div className="controls">
+        {flow.typing ? (
+          <div className="typing enter">
+            <Slab role="status" aria-label="Rumi is typing">
+              <i />
+              <i />
+              <i />
+            </Slab>
+          </div>
+        ) : (
+          <div key={flow.line} className="bubble land">
+            <Slab role="status" aria-live="polite">
+              {flow.line}
+              <svg className="tail" viewBox="0 0 16 9" aria-hidden="true">
+                <path
+                  className="tail-fill"
+                  d="M0 1h16c-2.6 0-4.4 2.2-5.6 5.6a2.6 2.6 0 0 1-4.8 0C4.4 3.2 2.6 1 0 1z"
+                />
+                <path
+                  className="tail-edge"
+                  d="M1 1.5c1.9.5 3.3 2.3 4.6 5.1a2.6 2.6 0 0 0 4.8 0c1.3-2.8 2.7-4.6 4.6-5.1"
+                />
+              </svg>
+            </Slab>
+          </div>
+        )}
+
+        <div className="bar">
+          <div ref={orbRef}>
+            <div className="orb-button">
+              <button
+                type="button"
+                className="tap"
+                aria-label={muted ? "Unmute Rumi" : "Mute Rumi"}
+                aria-pressed={muted}
+                onClick={() => setMuted(!muted)}
+              >
+                <Orb mode={flow.orbMode} muted={muted} size={DESIGN.orb.size} />
+              </button>
+            </div>
+          </div>
+
+          <Stack
+            cards={flow.stack}
+            onDismiss={flow.dismiss}
+            render={(card) =>
+              card === "signin" ? (
+                <SignIn auth={flow.auth} onSignIn={flow.signIn} />
+              ) : (
+                <MessageField flow={flow} />
+              )
+            }
+          />
+          {flow.control === "recording" && (
+            <Glass radius="capsule" className="discard">
+              <button
+                type="button"
+                className="tap"
+                aria-label="Discard this message"
+                onClick={flow.cancel}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.6"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </Glass>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,139 @@
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+
+npm_link_all_packages()
+
+filegroup(
+    name = "package_manifest",
+    srcs = ["package.json"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "sources",
+    srcs = glob([
+        "index.html",
+        "package.json",
+        "public/**/*",
+        "server/**/*",
+        "src/**/*",
+        "tsconfig.json",
+        "vite.config.ts",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+genrule(
+    name = "static_output_layer",
+    srcs = [
+        ":node_modules",
+        ":node_modules/vite-plus",
+        ":sources",
+        "//:.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@0.2.6/dir",
+        "//:vp_node",
+        "//:workspace_sources",
+        ":node_modules/typescript",
+    ],
+    outs = ["anveio-cal-output.tar"],
+    cmd = """
+set -euo pipefail
+execroot="$$(pwd)"
+node="$$execroot/$(location //:vp_node)"
+app_node_modules="$$execroot/$(BINDIR)/src/anveio/cal/node_modules"
+vp="$$app_node_modules/vite-plus/bin/vp"
+tsc="$$app_node_modules/typescript/bin/tsc"
+test -x "$$vp"
+test -f "$$tsc"
+export PATH="$$(dirname "$$node"):$${PATH:-/usr/bin:/bin}"
+export NODE_OPTIONS="--preserve-symlinks-main $${NODE_OPTIONS:-}"
+export NODE_PATH="$$app_node_modules$${NODE_PATH:+:$$NODE_PATH}"
+export CI=true
+# Same scratch-tree build as the other web images: the source tree's
+# node_modules stays under pnpm's control and the build sees only
+# Bazel-declared inputs.
+work="$$(mktemp -d)"
+trap 'rm -rf "$$work"' EXIT
+for f in $(locations //:workspace_sources); do
+  mkdir -p "$$work/$$(dirname "$$f")"
+  cp "$$f" "$$work/$$f"
+done
+link_node_modules() {
+  mkdir -p "$$2"
+  find "$$1" -mindepth 1 -maxdepth 1 -exec ln -s {} "$$2/" \\;
+}
+mkdir -p "$$work/node_modules"
+link_node_modules "$$app_node_modules" "$$work/src/anveio/cal/node_modules"
+cd "$$work/src/anveio/cal"
+# Mirrors package.json's "build" script (typecheck, then build); tsc by its
+# Bazel-resolved path for the same reason as privatecut-web's genrule.
+"$$node" "$$tsc" -p tsconfig.json
+"$$node" "$$vp" build
+test -s dist/index.html
+test -s dist/oauth/google.html
+test -s dist/privacy.html
+# The image is the static output plus the dependency-free server that
+# serves it: /app/dist and /app/server/index.mjs.
+stage="$$work/stage"
+mkdir -p "$$stage"
+cp -R dist server "$$stage/"
+tar_bin=tar
+if [[ -x /opt/homebrew/bin/gtar ]]; then
+  tar_bin=/opt/homebrew/bin/gtar
+elif command -v gtar >/dev/null 2>&1; then
+  tar_bin=gtar
+fi
+"$$tar_bin" --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+  --mode=u=rwX,go=rX \
+  --transform 's#^\\./#app/#' \
+  -cf "$$execroot/$@" -C "$$stage" .
+""",
+    tags = [
+        "no-remote",
+        "no-sandbox",
+    ],
+)
+
+pkg_tar(
+    name = "node_layer",
+    files = {
+        "//:vp_node": "usr/bin/node",
+        "@cacert_pem//file": "etc/ssl/certs/ca-certificates.crt",
+    },
+    modes = {
+        "usr/bin/node": "0755",
+        "etc/ssl/certs/ca-certificates.crt": "0644",
+    },
+)
+
+oci_image(
+    name = "image",
+    annotations = {
+        "org.opencontainers.image.description": "anveio.com — Shovon's contact card and Rumi's scheduler",
+        "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
+        "org.opencontainers.image.title": "guardian-anveio-cal",
+    },
+    base = "@distroless_cc_base_linux_amd64",
+    entrypoint = [
+        "/usr/bin/node",
+        "/app/server/index.mjs",
+    ],
+    env = {
+        "HOST": "0.0.0.0",
+        "NODE_ENV": "production",
+        "PORT": "8080",
+        "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
+    },
+    exposed_ports = ["8080/tcp"],
+    tars = [
+        ":node_layer",
+        ":static_output_layer",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+oci_load(
+    name = "load",
+    image = ":image",
+    repo_tags = ["guardian/anveio-cal:dev"],
+)

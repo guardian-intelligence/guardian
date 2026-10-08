@@ -21,6 +21,10 @@
 # The pnpm workspace root is the repo root, so its install tree lands here.
 /node_modules/
 /.pnpm-store/
+/src/anveio/cal/node_modules/
+/src/anveio/cal/dist/
+/src/anveio/cal/.vite/
+/src/anveio/cal/shots/
 /src/chunkies/host/ts/node_modules/
 /src/chunkies/host/ts/.output/
 /src/chunkies/host/ts/.vite/
