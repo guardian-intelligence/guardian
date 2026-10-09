@@ -233,3 +233,11 @@ resource "cloudflare_zone_setting" "anveio_tls_client_auth" {
   setting_id = "tls_client_auth"
   value      = "on"
 }
+
+# Email Routing on anveio.com: enabling it adds and locks the zone's MX
+# records. It needs Zone Settings Write, which only this lane holds. The
+# careers@ rule, the catch-all and the apex SPF record (with the Email Routing
+# include) live in guardian-mgmt-dns.
+resource "cloudflare_email_routing_dns" "anveio_com" {
+  zone_id = data.cloudflare_zone.anveio_com.id
+}
