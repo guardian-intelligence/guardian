@@ -13,6 +13,7 @@ resources:
   - cronjob-guardian-mgmt-dns.yaml
   - cronjob-guardian-mgmt-cloudflare-tokens.yaml
   - job-guardian-mgmt-dns-anveio-mail.yaml
+  - job-guardian-mgmt-edge-policy-anveio-mail.yaml
   - cronjob-guardian-mgmt.yaml
 
 # One copy of the non-secret account id every Cloudflare root's CronJob

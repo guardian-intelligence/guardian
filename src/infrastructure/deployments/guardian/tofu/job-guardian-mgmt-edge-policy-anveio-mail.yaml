@@ -1,0 +1,86 @@
+# One-time, Flux-managed apply of guardian-mgmt-edge-policy's Email Routing
+# switch for anveio.com, which adds and locks the zone's MX records. The
+# careers@ rule, catch-all and Email Routing SPF record were applied by
+# tofu-guardian-mgmt-dns-anveio-mail first, so enabling finds its SPF already
+# in place. The edge-policy lane token holds Zone Settings Write on
+# anveio.com. The root's scheduled run stays plan-only; the runner applies
+# only its saved plan, targeted at that resource. No TTL: remove this
+# completed Job through Git after the root's scheduled plan reads back clean.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tofu-guardian-mgmt-edge-policy-anveio-mail
+  namespace: tofu-system
+  labels:
+    app.kubernetes.io/name: tofu-runner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tofu-root: guardian-mgmt-edge-policy
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 3000
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tofu-runner
+        guardian.dev/tofu-root: guardian-mgmt-edge-policy
+    spec:
+      serviceAccountName: tofu-runner
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tofu
+          image: ghcr.io/guardian-intelligence/tofu-runner:edge@sha256:def592e8d063d20f5fb2ac12987f238d69d2ffb53fd06d91ceb3a43243e93966
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: MODE
+              value: apply
+            - name: TF_CLI_ARGS_plan
+              value: -target=cloudflare_email_routing_dns.anveio_com
+            - name: ROOT_NAME
+              value: guardian-mgmt-edge-policy
+            - name: ROOT_PATH
+              value: ./src/infrastructure/bootstrap/guardian-mgmt-edge-policy
+            - name: SOURCE_KIND
+              value: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+            - name: SOURCE_NAME
+              value: ${GUARDIAN_SOURCE_NAME:=guardian}
+            - name: TF_VAR_cloudflare_account_id
+              valueFrom:
+                configMapKeyRef:
+                  name: tofu-vars
+                  key: cloudflare_account_id
+          envFrom:
+            - secretRef:
+                name: tofu-backend-r2
+            - secretRef:
+                name: tofu-state-encryption
+            - secretRef:
+                name: tofu-cloudflare-edge-policy
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
