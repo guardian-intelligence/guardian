@@ -9,6 +9,7 @@ src/company/web/node_modules
 src/games/wake-up-mythra/client/node_modules
 src/games/wake-up-mythra/web/node_modules
 src/postflight/checkout/node_modules
+src/anveio/web/node_modules
 src/privatecut/web/node_modules
 src/shared/ts/brand/node_modules
 src/shared/ts/telemetry/node_modules
