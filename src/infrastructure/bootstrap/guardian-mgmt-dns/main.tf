@@ -556,7 +556,8 @@ resource "cloudflare_dns_record" "wakeupmythra_com_caa" {
 # the three ASH origins for the apex and www (the origin redirects www to the
 # apex), with the same no-Load-Balancer trade-off as rumi.engineering. The
 # zone's pre-Guardian records were retired; only its Resend/SES mail-sending
-# records remain outside this root.
+# records (send.anveio.com, notify.anveio.com, DKIM, DMARC) remain outside
+# this root.
 data "cloudflare_zone" "anveio_com" {
   filter = {
     name = "anveio.com"
@@ -603,4 +604,77 @@ resource "cloudflare_dns_record" "anveio_com_caa" {
   lifecycle {
     prevent_destroy = true
   }
+}
+
+# Inbound mail for anveio.com: careers@, the address on the job descriptions,
+# forwarded to the founder inbox; everything else is dropped, as for
+# guardianintelligence.org. Email Routing itself is enabled on the zone by the
+# edge-policy root (it needs Zone Settings Write); it adds and locks the MX
+# records. The apex SPF record is owned here, carrying the Email Routing
+# include so forwarded mail passes SPF on its rewritten envelope. Resend sends
+# from send.anveio.com, which has its own SPF, so the apex carries no SES
+# include.
+resource "cloudflare_email_routing_rule" "anveio_careers" {
+  zone_id  = data.cloudflare_zone.anveio_com.id
+  name     = "careers@ to the founder inbox"
+  enabled  = true
+  priority = 0
+
+  matchers = [
+    {
+      type  = "literal"
+      field = "to"
+      value = "careers@anveio.com"
+    },
+  ]
+
+  actions = [
+    {
+      type  = "forward"
+      value = [cloudflare_email_routing_address.founder_inbox.email]
+    },
+  ]
+}
+
+resource "cloudflare_email_routing_catch_all" "anveio_com" {
+  zone_id = data.cloudflare_zone.anveio_com.id
+  name    = "drop everything but careers@"
+  enabled = true
+
+  matchers = [
+    {
+      type = "all"
+    },
+  ]
+
+  actions = [
+    {
+      type = "drop"
+    },
+  ]
+}
+
+# The zone's pre-Guardian SPF record (v=spf1 mx include:notify.anveio.com
+# -all) is adopted in place and rewritten; the lookup finds its id so the
+# import needs no hand-copied record id.
+data "cloudflare_dns_records" "anveio_com_apex_txt" {
+  zone_id = data.cloudflare_zone.anveio_com.id
+  type    = "TXT"
+  name = {
+    exact = "anveio.com"
+  }
+}
+
+import {
+  to = cloudflare_dns_record.anveio_com_spf
+  id = "${data.cloudflare_zone.anveio_com.id}/${one([for r in data.cloudflare_dns_records.anveio_com_apex_txt.result : r.id if startswith(trim(r.content, "\""), "v=spf1")])}"
+}
+
+resource "cloudflare_dns_record" "anveio_com_spf" {
+  zone_id = data.cloudflare_zone.anveio_com.id
+  name    = "anveio.com"
+  type    = "TXT"
+  content = "\"v=spf1 include:_spf.mx.cloudflare.net ~all\""
+  ttl     = 1
+  comment = "anveio Email Routing SPF"
 }
