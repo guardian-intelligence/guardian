@@ -1,26 +1,19 @@
-# One-time, Flux-managed apply of two lane-token grants. The guardian-mgmt-dns
-# token (dns_lb_provisioner) gains Access: Organizations, Identity Providers,
-# and Groups Write, so that root can declare the one-time PIN login the
-# operator Access applications need: the account's only identity provider is
-# Cloudflare account login, which admits account members alone, so the
-# founder address in the operator policy had no way to authenticate. It and
-# the edge-policy token (edge_policy_provisioner) also gain the anveio.com
-# zone, which those roots onboard next. Policies update in place
-# in cloudflare provider v5 (only account_id forces replacement), so the token
-# value is unchanged and nothing needs relaying to OpenBao. The scheduled root
-# stays plan-only and is suspended while this runs, so its PAGE_ON_DRIFT plan
-# cannot page on the change it is about to see. The runner applies only its
-# saved plan, targeted at those two tokens. No TTL: remove this completed Job
-# and resume the CronJob through Git after the resumed plan reads back clean.
+# One-time, Flux-managed apply of guardian-mgmt-edge-policy's anveio.com
+# posture: Authenticated Origin Pulls with the tls_client_auth switch, strict
+# origin TLS, and Bot Fight Mode off. The edge-policy lane token holds the
+# anveio.com zone since the grant before this. The root's scheduled run stays
+# plan-only; the runner applies only its saved plan, targeted at those
+# settings. No TTL: remove this completed Job through Git after the root's
+# scheduled plan reads back clean.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: tofu-guardian-mgmt-cloudflare-tokens-access-idps
+  name: tofu-guardian-mgmt-edge-policy-anveio
   namespace: tofu-system
   labels:
     app.kubernetes.io/name: tofu-runner
     app.kubernetes.io/part-of: guardian
-    guardian.dev/tofu-root: guardian-mgmt-cloudflare-tokens
+    guardian.dev/tofu-root: guardian-mgmt-edge-policy
 spec:
   backoffLimit: 1
   activeDeadlineSeconds: 3000
@@ -28,7 +21,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: tofu-runner
-        guardian.dev/tofu-root: guardian-mgmt-cloudflare-tokens
+        guardian.dev/tofu-root: guardian-mgmt-edge-policy
     spec:
       serviceAccountName: tofu-runner
       restartPolicy: Never
@@ -52,11 +45,11 @@ spec:
             - name: MODE
               value: apply
             - name: TF_CLI_ARGS_plan
-              value: -target=cloudflare_account_token.dns_lb_provisioner -target=cloudflare_account_token.edge_policy_provisioner
+              value: -target=cloudflare_authenticated_origin_pulls_settings.anveio_com -target=cloudflare_zone_setting.anveio_origin_ssl -target=cloudflare_bot_management.anveio_com -target=cloudflare_zone_setting.anveio_tls_client_auth
             - name: ROOT_NAME
-              value: guardian-mgmt-cloudflare-tokens
+              value: guardian-mgmt-edge-policy
             - name: ROOT_PATH
-              value: ./src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens
+              value: ./src/infrastructure/bootstrap/guardian-mgmt-edge-policy
             - name: SOURCE_KIND
               value: ${GUARDIAN_SOURCE_KIND:=GitRepository}
             - name: SOURCE_NAME
@@ -72,7 +65,7 @@ spec:
             - secretRef:
                 name: tofu-state-encryption
             - secretRef:
-                name: tofu-cloudflare-minter
+                name: tofu-cloudflare-edge-policy
           volumeMounts:
             - name: workspace
               mountPath: /workspace

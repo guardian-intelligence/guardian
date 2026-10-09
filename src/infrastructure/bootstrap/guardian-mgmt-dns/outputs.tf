@@ -28,6 +28,11 @@ output "rumi_engineering_zone_id" {
   value       = data.cloudflare_zone.rumi_engineering.id
 }
 
+output "anveio_com_zone_id" {
+  description = "Cloudflare zone id for the anveio.com contact card."
+  value       = data.cloudflare_zone.anveio_com.id
+}
+
 output "codex_cloud_tunnel_token" {
   description = "Connector token relayed to OpenBao for the in-cluster cloudflared Deployment."
   value       = data.cloudflare_zero_trust_tunnel_cloudflared_token.guardian_codex_cloud.token

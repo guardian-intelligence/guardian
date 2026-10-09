@@ -337,6 +337,23 @@ resource "cloudflare_dns_record" "guardian_operator_tunnel" {
   }
 }
 
+# How the founder proves the operator policy's address: Cloudflare mails a
+# one-time PIN to it. The account's other login, Cloudflare account sign-in,
+# admits account members only, and the founder address is not one. Created
+# in the dashboard to restore operator access while the root could not yet
+# apply it, and adopted here.
+import {
+  to = cloudflare_zero_trust_access_identity_provider.one_time_pin
+  id = "accounts/c3eaeffaadf7d4847684d4775c16d598/88a8a812-0088-440a-9691-9c0b36d0e8db"
+}
+
+resource "cloudflare_zero_trust_access_identity_provider" "one_time_pin" {
+  account_id = var.cloudflare_account_id
+  name       = "One-time PIN"
+  type       = "onetimepin"
+  config     = {}
+}
+
 resource "cloudflare_zero_trust_access_policy" "guardian_operator" {
   account_id = var.cloudflare_account_id
   name       = "Guardian operator identity"
@@ -536,6 +553,59 @@ resource "cloudflare_dns_record" "wakeupmythra_com_caa" {
     value = each.value
   }
   comment = "wake up mythra certificate issuance policy"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# anveio.com — Shovon's contact card (src/anveio/cal). Proxied A records to
+# the three ASH origins for the apex and www (the origin redirects www to the
+# apex), with the same no-Load-Balancer trade-off as rumi.engineering. The
+# zone's pre-Guardian records were retired; only its Resend/SES mail-sending
+# records remain outside this root.
+data "cloudflare_zone" "anveio_com" {
+  filter = {
+    name = "anveio.com"
+    account = {
+      id = var.cloudflare_account_id
+    }
+  }
+}
+
+resource "cloudflare_dns_record" "anveio_com_web" {
+  for_each = {
+    for pair in setproduct(["anveio.com", "www.anveio.com"], keys(local.public_ingress_origins)) :
+    "${pair[0]}/${pair[1]}" => { name = pair[0], origin = pair[1] }
+  }
+
+  zone_id = data.cloudflare_zone.anveio_com.id
+  name    = each.value.name
+  type    = "A"
+  content = local.public_ingress_origins[each.value.origin].public_ipv4
+  ttl     = 1
+  proxied = true
+  comment = "anveio ${each.value.origin} product edge"
+}
+
+# CAA policy, as for rumi.engineering: Cloudflare edge certificates issue via
+# Google Trust Services or Let's Encrypt; nothing else may issue for the zone.
+resource "cloudflare_dns_record" "anveio_com_caa" {
+  for_each = {
+    letsencrypt = "letsencrypt.org"
+    google      = "pki.goog"
+  }
+
+  zone_id = data.cloudflare_zone.anveio_com.id
+  name    = "anveio.com"
+  type    = "CAA"
+  ttl     = 1
+  data = {
+    flags = 0
+    tag   = "issue"
+    value = each.value
+  }
+  comment = "anveio edge certificate issuance policy"
 
   lifecycle {
     prevent_destroy = true
