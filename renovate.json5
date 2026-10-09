@@ -35,6 +35,7 @@
   ignorePaths: [
     "**/node_modules/**",
     "**/bower_components/**",
+    "src/infrastructure/deployments/anveio/**",
     "src/infrastructure/deployments/company/**",
     "src/infrastructure/deployments/payments/**",
     "src/infrastructure/deployments/privatecut/**",

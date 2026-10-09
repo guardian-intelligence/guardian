@@ -91,6 +91,7 @@ go_test(
         "//src/infrastructure/cmd/tofu_runner:build_file",
         "//src/infrastructure/deployments/alerting:manifests",
         "//src/infrastructure/deployments/analytics/system:manifests",
+        "//src/infrastructure/deployments/anveio/prod:manifests",
         "//src/infrastructure/deployments/authorization/data:manifests",
         "//src/infrastructure/deployments/authorization/operator:manifests",
         "//src/infrastructure/deployments/authorization/prod:manifests",

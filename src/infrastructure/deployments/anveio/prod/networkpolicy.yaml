@@ -1,0 +1,34 @@
+# anveio-cal's own flows. The site is static: sign-in, token verification and
+# everything else the page does run in the visitor's browser, so beyond DNS
+# the server has nothing to say to anyone.
+# Public ingress arrives with node identity (hostNetwork root ingress) and is
+# admitted by the additive CCNP in root-ingress-networkpolicy.yaml; selecting
+# only egress here leaves that admit intact.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: anveio-cal
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: anveio-cal
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - anveio-cal
+          - anveio-cal-primary
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP

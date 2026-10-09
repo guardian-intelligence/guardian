@@ -1,0 +1,11 @@
+filegroup(
+    name = "manifests",
+    srcs = [
+        "kustomization.yaml",
+        "networkpolicy.yaml",
+        "root-ingress-networkpolicy.yaml",
+        "secrets.yaml",
+        "web.yaml",
+    ],
+    visibility = ["//visibility:public"],
+)
