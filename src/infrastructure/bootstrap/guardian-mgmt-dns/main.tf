@@ -339,14 +339,7 @@ resource "cloudflare_dns_record" "guardian_operator_tunnel" {
 
 # How the founder proves the operator policy's address: Cloudflare mails a
 # one-time PIN to it. The account's other login, Cloudflare account sign-in,
-# admits account members only, and the founder address is not one. Created
-# in the dashboard to restore operator access while the root could not yet
-# apply it, and adopted here.
-import {
-  to = cloudflare_zero_trust_access_identity_provider.one_time_pin
-  id = "accounts/c3eaeffaadf7d4847684d4775c16d598/88a8a812-0088-440a-9691-9c0b36d0e8db"
-}
-
+# admits account members only, and the founder address is not one.
 resource "cloudflare_zero_trust_access_identity_provider" "one_time_pin" {
   account_id = var.cloudflare_account_id
   name       = "One-time PIN"
