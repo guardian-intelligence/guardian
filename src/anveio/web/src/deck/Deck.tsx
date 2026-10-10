@@ -1,80 +1,54 @@
 import { useEffect, type ReactNode } from "react";
-import { northStar, scenarioInputs } from "~/model/model";
-import { MarginChart, ScalingLaws } from "./charts";
 import { LOGO_SOURCES, SAMPLE_SOURCES, ValueChain } from "./ValueChain";
 import { Lockup } from "./Brand";
+import { Title } from "./Title";
 import { GrowthChart, type RunRateSeries } from "./RunRates";
-import { PhasePath } from "./PhasePath";
+import { Month1Flow } from "./Month1Flow";
+import { Month2Flow } from "./Month2Flow";
+import { Buyers } from "./Buyers";
+import { DroneMarginFigure } from "./DroneMargin";
 import { LastMile } from "./LastMile";
-
-const INPUTS = scenarioInputs("base");
-const STAR = northStar(INPUTS);
+import { PhasePath } from "./PhasePath";
+import { ASSUMPTIONS } from "~/model/roadmap";
+import { Fill } from "./Fill";
+import { PHASE_2, PhaseBody } from "./Phases";
+import { ROADMAP_SOURCES } from "./roadmapSources";
 const SLIDES = [
   { id: "title", title: "Anveio" },
   { id: "who", title: "Who We Are" },
   { id: "cover", title: "What we do" },
-  { id: "moats", title: "Why us" },
-  { id: "market", title: "Market" },
+  { id: "market", title: "Why Now" },
   { id: "why", title: "Why Bangladesh" },
-  { id: "economics", title: "Phase 1 Economics" },
-  { id: "path", title: "Path to $1B" },
-  { id: "vision", title: "Where This Goes" },
+  { id: "roadmap", title: "Where this is going" },
+  { id: "p0-m1", title: "Month 1" },
+  { id: "p0-m2", title: "Month 2" },
+  { id: "p2", title: "Phase 2 · Scale to more farms" },
   { id: "ask", title: "The Ask" },
   { id: "sources", title: "Sources" },
+  { id: "sources-roadmap", title: "Sources: Roadmap" },
 ] as const;
 
 type SlideId = (typeof SLIDES)[number]["id"];
 
-function Slide({ id, note, children }: { id: SlideId; note?: string; children: ReactNode }) {
+function Slide({
+  id,
+  note,
+  children,
+}: {
+  id: SlideId;
+  note?: string | undefined;
+  children: ReactNode;
+}) {
   const slide = SLIDES.find((s) => s.id === id)!;
   return (
     <section id={slide.id} className="slide" aria-label={slide.title}>
       <div className="slide-frame">
         <div className="slide-inner">
-          <header className="slide-head">
-            <Lockup />
-          </header>
           <h2 className="slide-heading">{slide.title}</h2>
           {children}
           <footer className="slide-foot">
-            <span>Anveio</span>
+            <Lockup />
             {note && <span>{note}</span>}
-          </footer>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-const MARGINS = [
-  { label: "Driving", cost: 4, price: 8 },
-  { label: "Egocentric", cost: 6, price: 15 },
-  { label: "Drone", cost: 8, price: 25 },
-] as const;
-
-// The opening slide: name, mission and strategy, set full-bleed in ink.
-function Title() {
-  return (
-    <section id="title" className="slide" aria-label="Anveio">
-      <div className="slide-frame">
-        <div className="slide-inner title-slide">
-          <header className="slide-head">
-            <Lockup onInk />
-          </header>
-          <dl className="title-body">
-            <dt>Mission</dt>
-            <dd className="title-mission">
-              Deploy AGI for the benefit of all humans in Bangladesh.
-            </dd>
-            <dt>Strategy</dt>
-            <dd className="title-strategy">
-              Turn Bangladesh into the world’s most efficient source of AI data and the best place
-              to deploy AI‑powered innovation.
-            </dd>
-          </dl>
-          <footer className="title-foot">
-            <span>anveio.com</span>
-            <span>Investor preview · October 2026</span>
           </footer>
         </div>
       </div>
@@ -84,28 +58,35 @@ function Title() {
 
 function Cover() {
   return (
-    <Slide id="cover" note="Photos: Wikimedia Commons, Build AI">
+    <Slide id="cover" note="Photos: Wikimedia Commons">
       <div className="cover">
         <p className="pitch-lead">
-          We collect high quality video in Bangladesh and license access to buyers.
+          We pay farms in Bangladesh to record drone video, then we enrich it and format it, and
+          then license it to AI companies.
         </p>
         <div className="cover-figure">
           <ValueChain />
         </div>
-        <p className="cover-foot">
-          We work closely with our customers to rapidly translate unmet demand into low-cost work
-          contracts with our partners who subcontract out data collection.
-        </p>
+        <div className="cover-margin">
+          <DroneMarginFigure width={200} />
+          <ul className="cover-margin-notes">
+            <li>
+              Licenses renew yearly, so the same hour of footage is sold per customer per year.
+            </li>
+            <li>$40/hr for exclusive contracts.</li>
+          </ul>
+        </div>
       </div>
     </Slide>
   );
 }
 
 const WHY = [
-  "AI is accelerating innovation. Deployment is now the bottleneck.",
+  "AI is accelerating innovation. Data is the bottleneck. Later, deployment will be.",
   "Bangladesh has a malleable bureaucracy, the highest population density of any large country, and a US-friendly government.",
-  "Deploying here is hard: a river delta, monsoons, Bangla, local politics and culture. That difficulty is our moat.",
-  "A small economy is winner-take-all.",
+  "Bangladesh is rich in farms and fertile, low-cost land.",
+  "Natural moat: first company to deploy data collection infrastructure at scale will win. Small economy = winner-take-all.",
+  "Long term: become default data partner for buyers of high quality physical world-data in the region.",
 ] as const;
 
 function WhyBangladesh() {
@@ -121,10 +102,6 @@ function WhyBangladesh() {
               <li key={point}>{point}</li>
             ))}
           </ul>
-          <p className="why-therefore">
-            So we make Bangladesh the world’s best place to deploy AI‑powered innovation, and become
-            the obvious partner for doing it.
-          </p>
         </div>
         <LastMile />
       </div>
@@ -132,43 +109,91 @@ function WhyBangladesh() {
   );
 }
 
-function Economics() {
+// The deployment work, from the AI Deployment Engine plan.
+const DEPLOYMENTS = [
+  "Last-mile delivery of breakthrough medicine",
+  "Specialized vehicles that make supplying the most remote villages economical",
+  "Building materials and construction standards tuned to Bangladesh’s climate and geography",
+  "Safer roads and self-driving public transit",
+  "Pollution removal, sanitation, garbage collection and water treatment",
+  "Cheap lab-grown meat to fight malnutrition",
+] as const;
+
+function Roadmap() {
   return (
-    <Slide id="economics">
-      <div className="economics">
-        <MarginChart rows={MARGINS} />
-        <ScalingLaws star={STAR} />
+    <Slide
+      id="roadmap"
+      note="Gross ARR · illustrative, assumptions to confirm · eval pricing: Epoch, Jan 2026"
+    >
+      <div className="where">
+        <ul className="where-points">
+          <li>First, we become the #1 trusted data source.</li>
+          <li>
+            Second, we become the deployment vehicle for all AI-powered innovation:
+            <ul>
+              {DEPLOYMENTS.map((d) => (
+                <li key={d}>{d}</li>
+              ))}
+            </ul>
+          </li>
+        </ul>
+        <div className="where-plan">
+          <PhasePath />
+          <ul className="where-assumptions">
+            <li>
+              Evals: ${ASSUMPTIONS.evalQuarter / 1000}k/quarter per contract (Phase 0 ={" "}
+              {ASSUMPTIONS.evalsPhase0} contract, {ASSUMPTIONS.evalsEnd} by {ASSUMPTIONS.endYear})
+            </li>
+            <li>
+              Drone video: {ASSUMPTIONS.plots} plots × {ASSUMPTIONS.hrsPerDay} hrs/day at $
+              {ASSUMPTIONS.rate}/hr, licensed to {ASSUMPTIONS.buyersPhase0} labs, rising to{" "}
+              {ASSUMPTIONS.buyersEnd} by {ASSUMPTIONS.endYear}; licenses renew yearly
+            </li>
+            <li>
+              Price per hour rises {ASSUMPTIONS.historyPremium * 100}% for each year of history on
+              the plot: more history gives new footage more context
+            </li>
+            <li>
+              Phase 1: {ASSUMPTIONS.onboardingStart}–{ASSUMPTIONS.onboardingEarly} new plots a month
+              from Apr 2027, rising to {ASSUMPTIONS.onboardingFull} a month by{" "}
+              {ASSUMPTIONS.onboardingFullFrom}
+            </li>
+          </ul>
+        </div>
       </div>
     </Slide>
   );
 }
 
-function PathToBillion() {
+// Month 1 for the family on the farm: how drone video reaches Anveio.
+function Month1() {
   return (
-    <Slide id="path" note="Gross ARR · Illustrative path; Phase 1 is modelled bottom-up">
-      <PhasePath />
+    <Slide id="p0-m1">
+      <div className="month-1">
+        <p className="phase-lead">Goal: Collect at least 20 hours of high quality drone footage.</p>
+        <Month1Flow />
+      </div>
     </Slide>
   );
 }
 
-const VISION = [
-  "Become the largest company in Bangladesh.",
-  "Automate all agriculture and manufacturing with robots.",
-  "End childhood hunger. Guarantee clean water, clean air, reliable electricity and sanitation.",
-  // World Bank Bangladesh Development Update (2026): 21.4% below the national
-  // poverty line in 2025, about 37 million people.
-  "Lift 37 million Bangladeshis out of poverty: invest in AI-native companies that put them to work and lay the foundation for a services economy.",
-  "Write the playbook for ensuring AGI benefits all of humanity.",
-] as const;
-
-function WhereThisGoes() {
+// Month 2: label the footage and take it to brokers.
+function Month2() {
   return (
-    <Slide id="vision">
-      <ul className="vision">
-        {VISION.map((point) => (
-          <li key={point}>{point}</li>
-        ))}
-      </ul>
+    <Slide id="p0-m2">
+      <div className="month-1 month-2">
+        <p className="phase-lead">Goal: Go to market, get one buyer commitment.</p>
+        <Month2Flow />
+        <Buyers />
+      </div>
+    </Slide>
+  );
+}
+
+function Phase2() {
+  return (
+    <Slide id="p2" note="Land Reforms Act 2023">
+      <PhaseBody copy={PHASE_2} />
     </Slide>
   );
 }
@@ -228,7 +253,7 @@ const RUN_RATES: RunRateSeries[] = [
     name: "Mercor",
     founded: "2023-01",
     logo: "/deck/logos/mercor.png",
-    logoAt: { dx: -7, dy: -6 },
+    logoAt: { dx: 13, dy: 0 },
     points: [
       { date: "2025-02", value: 75e6 },
       { date: "2025-03", value: 100e6 },
@@ -265,6 +290,18 @@ const RUN_RATES: RunRateSeries[] = [
 // where rounds don't sum). See Sources.
 const RAISES: RunRateSeries[] = [
   {
+    name: "Mecka",
+    // 2024 (approx).
+    founded: "2024-07",
+    logo: "/deck/logos/mecka.png",
+    logoAt: { dx: 14, dy: 0 },
+    points: [
+      { date: "2025-11", value: 25e6 },
+      { date: "2026-06", value: 60e6 },
+      { date: "2026-10", value: 120e6 },
+    ],
+  },
+  {
     name: "Protege",
     // Early 2024 (approx).
     founded: "2024-02",
@@ -277,23 +314,23 @@ const RAISES: RunRateSeries[] = [
     ],
   },
   {
-    name: "Wirestock",
-    // Mar 2019; pivoted from stock distribution to AI training data in 2023.
-    founded: "2019-03",
-    logo: "/deck/logos/wirestock.png",
+    name: "Luel",
+    // 2025 (approx; YC W26, so late in the year).
+    founded: "2025-12",
+    logo: "/deck/logos/luel.png",
     logoAt: { dx: 13, dy: -4 },
-    points: [
-      { date: "2022-01", value: 2.3e6 },
-      { date: "2026-05", value: 26e6 },
-    ],
+    points: [{ date: "2026-05", value: 31.2e6 }],
   },
   {
-    name: "Origin Lab",
-    // Undisclosed (one directory says 2022, unconfirmed); seed announced May 2026.
+    name: "Build AI",
+    // Undisclosed; first seen raising in Sep 2025.
     founded: "2025-01",
-    logo: "/deck/logos/originlab.png",
-    logoAt: { dx: 13, dy: 4 },
-    points: [{ date: "2026-05", value: 8e6 }],
+    logo: "/deck/logos/buildai.png",
+    logoAt: { dx: 9, dy: -14 },
+    points: [
+      { date: "2025-09", value: 5e6 },
+      { date: "2025-12", value: 15e6 },
+    ],
   },
   {
     name: "Kled",
@@ -342,6 +379,14 @@ const MARKET_SOURCES = [
     url: "https://dealroom.co/news/127345-handshakes-arr-crosses-1b-as-ai-training-revenue-surges/",
   },
   {
+    label: "BetaKit, Mecka AI $60M Series B led by Sequoia (Oct 2026)",
+    url: "https://betakit.com/mecka-ai-reveals-60-million-usd-series-b-round-backed-by-sequoia-nvidia/",
+  },
+  {
+    label: "Fortune via RuntimeWire, Mecka AI raises $60M (Jun 2026)",
+    url: "https://runtimewire.com/article/mecka-ai-raised-60m-to-train-robots-on-human-motion-data",
+  },
+  {
     label: "Protege, $10M seed (Sep 2024)",
     url: "https://withprotege.substack.com/p/protege-raises-10-million-and-launches",
   },
@@ -354,16 +399,12 @@ const MARKET_SOURCES = [
     url: "https://www.lowenstein.com/news-insights/firm-news/lowenstein-represents-protege-in-30m-series-a-funding-round-lead-by-a16z",
   },
   {
-    label: "EIF, Wirestock raises $2.3M (Jan 2022)",
-    url: "https://blog.eif.am/img-grantee-wirestock-raises-usd-2-3m-in-funding-round/",
+    label: "Lightspeed, Luel $31.2M (May 2026)",
+    url: "https://lsvp.com/stories/our-investment-in-luel-the-marketplace-for-multimodal-ai-training-data/",
   },
   {
-    label: "TechCrunch, Wirestock raises $23M Series A (May 2026)",
-    url: "https://techcrunch.com/2026/05/14/wirestock-raises-23m-to-supply-multi-modal-data-to-ai-labs/",
-  },
-  {
-    label: "TechCrunch, Origin Lab raises $8M seed (May 2026)",
-    url: "https://techcrunch.com/2026/05/13/origin-lab-raises-8m-to-help-video-game-companies-sell-data-to-world-model-builders/",
+    label: "Humanoids Daily, Build AI $15M (Dec 2025)",
+    url: "https://www.humanoidsdaily.com/news/build-ai-scales-to-100-000-hours-as-data-scaling-becomes-robotics-new-frontier",
   },
   {
     label: "OurCryptoTalk, Kled $5.5M seed (Mar 2026)",
@@ -384,10 +425,21 @@ function Market() {
     <Slide id="market" note="Sources: Gartner, TechCrunch, The Information, company releases">
       <div className="market">
         <ul className="market-points">
-          {/* Largest first-to-latest multiple charted: micro1, $7M (Jan 2025) to $500M (Aug 2026). */}
-          <li>Seller revenue grew up to 71× between 2025 and 2026.</li>
-          {/* Gartner, May 2026 "AI Data" spend: $0.83B (2025) → $3.1B (2026) → $6.5B (2027). */}
-          <li>Buyer spending is expected to grow 7.8× between 2025 and 2027.</li>
+          <li>
+            AI data industry is seeing unprecedented growth.
+            <ul>
+              {/* Largest first-to-latest multiple charted: micro1, $7M (Jan 2025) to $500M (Aug 2026). */}
+              <li>Seller revenue grew up to 71× between 2025 and 2026.</li>
+              {/* Gartner, May 2026 "AI Data" spend: $0.83B (2025) → $3.1B (2026) → $6.5B (2027). */}
+              <li>Buyer spending is expected to grow 7.8× between 2025 and 2027.</li>
+            </ul>
+          </li>
+          <li>
+            Thesis: agricultural data (video, sensors) for the same plot of land over long time
+            horizons is more valuable than one-off, context-free snapshots, and underpins a wide
+            array of useful AI capabilities (food production, climate change mitigation, bio,
+            world-modeling, etc.).
+          </li>
         </ul>
         <div className="market-charts">
           <GrowthChart
@@ -411,68 +463,6 @@ function Market() {
   );
 }
 
-// [Bracketed] text is a placeholder until data collection starts.
-const MOATS = [
-  {
-    name: "Already on the ground",
-    points: [
-      "Bangladeshi entity: [name, registered date]",
-      "[N] acres under agreement in Khulna",
-      "[N] hours collected · [N] contributors",
-    ],
-  },
-  {
-    name: "Relationships",
-    points: [
-      "Political and social connections in SF, Seattle, and Bangladesh",
-      "Existing relationships at OpenAI: [DevDay 2026, contacts]",
-    ],
-  },
-  {
-    name: "Talent",
-    points: [
-      "We hire in and out of Bangladesh: a larger pool than competitors",
-      "Above-market pay",
-      "A positive mission",
-    ],
-  },
-  {
-    name: "Data nobody else has",
-    points: [
-      "Same fields, recorded every season: [N] acres × [N] seasons",
-      "[N] buyers · [N] repeat orders",
-    ],
-  },
-] as const;
-
-// Renders [bracketed] runs as visible placeholders.
-function Fill({ text }: { text: string }) {
-  return text
-    .split(/(\[[^\]]*\])/)
-    .map((part, i) => (part.startsWith("[") ? <mark key={i}>{part}</mark> : part));
-}
-
-function Moats() {
-  return (
-    <Slide id="moats">
-      <ul className="moats">
-        {MOATS.map((m, i) => (
-          <li key={m.name} style={{ borderColor: `var(--series-${(i % 3) + 1})` }}>
-            <strong>{m.name}</strong>
-            <ul>
-              {m.points.map((pt) => (
-                <li key={pt}>
-                  <Fill text={pt} />
-                </li>
-              ))}
-            </ul>
-          </li>
-        ))}
-      </ul>
-    </Slide>
-  );
-}
-
 type Logo = { src: string; alt: string };
 // Hand placement in the logo box (px): deliberately uneven, as if dragged in.
 type Placed = Logo & { x: number; y: number; h: number };
@@ -482,46 +472,57 @@ type Member = {
   role: string;
   photo: string | null;
   url: string | null;
-  // A line, a bullet list, or a line led by an inline logo.
-  bio: readonly (string | readonly string[] | { text: string; logo: Logo })[];
+  // Plain bullet points.
+  bio: readonly string[];
   logos: readonly Placed[];
 };
 
-const TEAM: readonly Member[] = [
-  {
-    name: "Shovon Hasan",
-    role: "Founder, CEO",
-    photo: "/deck/team/shovon.jpg",
-    url: "https://x.com/anveio",
-    bio: [
-      "Modernizing ops at AWS EC2 & Bedrock",
-      ["Capacity Reservations, UltraServers, Auto Scaling, Spot", "Mantle, Playground"],
-      "Payments, Fraud, and Risk at Patreon.",
-      "From Queens, New York. Born in Bangladesh to a landowning family.",
-      { text: "DevDay 2026 Attendee", logo: { src: "/deck/logos/openai.svg", alt: "OpenAI" } },
-    ],
-    logos: [
-      { src: "/deck/logos/aws.svg", alt: "AWS", x: 6, y: 18, h: 52 },
-      { src: "/deck/logos/patreon-mark.svg", alt: "Patreon", x: 148, y: 4, h: 58 },
-      { src: "/deck/logos/madhive-mark.png", alt: "MadHive", x: 214, y: 78, h: 50 },
-      { src: "/deck/logos/emory-mark.svg", alt: "Emory University", x: 52, y: 92, h: 64 },
-    ],
-  },
+const FOUNDER: Member = {
+  name: "Shovon Hasan",
+  role: "Founder, CEO",
+  photo: "/deck/team/shovon.jpg",
+  url: "https://x.com/anveio",
+  bio: [
+    "10+ YoE, AWS (EC2, Bedrock) & Patreon (Payments)",
+    "Seattle-based, born in Bangladesh.",
+    "Anveio is a US‑based C‑corp with a subsidiary in Bangladesh.",
+    "Mission: Turn Bangladesh into the world’s most efficient source of AI data.",
+  ],
+  logos: [
+    { src: "/deck/logos/aws.svg", alt: "AWS", x: 6, y: 18, h: 52 },
+    { src: "/deck/logos/patreon-mark.svg", alt: "Patreon", x: 148, y: 4, h: 58 },
+    { src: "/deck/logos/madhive-mark.png", alt: "MadHive", x: 214, y: 78, h: 50 },
+    { src: "/deck/logos/emory-mark.svg", alt: "Emory University", x: 52, y: 92, h: 64 },
+  ],
+};
+
+// Advisors carry a placeholder avatar and their name; companies carry their
+// full logo, which names them, and what they've put in.
+const PARTNERS: readonly {
+  name: string;
+  url: string | null;
+  // Full logo, at a height that gives every logo the same ink area
+  // (about 3,300 px²), so a wide wordmark and a squarer mark read alike.
+  logo?: Logo & { h: number };
+  detail: string;
+}[] = [
   {
     name: "Dr. Tazia Sardar, DPT",
-    role: "Advisor",
-    photo: null,
     url: "https://www.linkedin.com/in/dr-tazia-sardar-dpt-2751b1a8/",
-    bio: [],
-    logos: [],
+    detail: "Advisor",
+  },
+  { name: "Dr. Md Abdullah Yousuf, DO", url: null, detail: "Advisor" },
+  {
+    name: "OpenAI",
+    url: null,
+    logo: { src: "/deck/logos/openai-wordmark.svg", alt: "OpenAI", h: 30 },
+    detail: "$1,600 · Daybreak Blue",
   },
   {
-    name: "Dr. Md Abdullah Yousuf, DO",
-    role: "Advisor",
-    photo: null,
+    name: "Anthropic",
     url: null,
-    bio: [],
-    logos: [],
+    logo: { src: "/deck/logos/anthropic-wordmark.svg", alt: "Anthropic", h: 19 },
+    detail: "$2,500",
   },
 ];
 
@@ -536,61 +537,69 @@ function BlankAvatar() {
   );
 }
 
+const Linked = ({ name, url }: { name: string; url: string | null }) =>
+  url ? (
+    <a href={url} target="_blank" rel="noreferrer">
+      {name}
+    </a>
+  ) : (
+    name
+  );
+
+// The founder and plain bullet points across the top; the partners below.
 function WhoWeAre() {
+  const f = FOUNDER;
   return (
     <Slide id="who">
-      <ul className="team">
-        {TEAM.map((person) => (
-          <li key={person.name}>
-            <div className="team-who">
-              {person.photo ? (
-                <img className="avatar" src={person.photo} alt={person.name} />
-              ) : (
-                <BlankAvatar />
-              )}
-              <strong>
-                {person.url ? (
-                  <a href={person.url} target="_blank" rel="noreferrer">
-                    {person.name}
-                  </a>
+      <div className="who">
+        <section className="who-founder">
+          <div className="team-who">
+            {f.photo ? <img className="avatar" src={f.photo} alt={f.name} /> : <BlankAvatar />}
+            <strong>
+              <Linked name={f.name} url={f.url} />
+            </strong>
+            <span className="team-role">{f.role}</span>
+          </div>
+          <ul className="team-bio">
+            {f.bio.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <div className="team-logos">
+            {f.logos.map((logo) => (
+              <img
+                key={logo.src}
+                className="team-logo"
+                src={logo.src}
+                alt={logo.alt}
+                style={{ left: logo.x, top: logo.y, height: logo.h }}
+              />
+            ))}
+          </div>
+        </section>
+        <section className="who-advisors">
+          <h3 className="who-partners-heading">Partners</h3>
+          <ul>
+            {PARTNERS.map((p) => (
+              <li key={p.name}>
+                {p.logo ? (
+                  <span className="who-partner-logo">
+                    <img src={p.logo.src} alt={p.logo.alt} style={{ height: p.logo.h }} />
+                  </span>
                 ) : (
-                  person.name
+                  <>
+                    <BlankAvatar />
+                    <strong>
+                      <Linked name={p.name} url={p.url} />
+                    </strong>
+                  </>
                 )}
-              </strong>
-              <span className="team-role">{person.role}</span>
-            </div>
-            <div className="team-bio">
-              {person.bio.map((line) =>
-                typeof line === "string" ? (
-                  <p key={line}>{line}</p>
-                ) : "text" in line ? (
-                  <p key={line.text} className="team-badge">
-                    <img src={line.logo.src} alt={line.logo.alt} />
-                    {line.text}
-                  </p>
-                ) : (
-                  <ul key={line.join()}>
-                    {line.map((point) => (
-                      <li key={point}>{point}</li>
-                    ))}
-                  </ul>
-                ),
-              )}
-            </div>
-            <div className="team-logos">
-              {person.logos.map((logo) => (
-                <img
-                  key={logo.src}
-                  className="team-logo"
-                  src={logo.src}
-                  alt={logo.alt}
-                  style={{ left: logo.x, top: logo.y, height: logo.h }}
-                />
-              ))}
-            </div>
-          </li>
-        ))}
-      </ul>
+                <span>{p.detail}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
     </Slide>
   );
 }
@@ -614,21 +623,32 @@ function useDeckScale() {
   }, []);
 }
 
-function Sources() {
-  const groups = [
-    { name: "Market", items: MARKET_SOURCES },
-    { name: "Photos", items: SAMPLE_SOURCES },
-    { name: "Logos", items: LOGO_SOURCES },
-  ] as const;
+type SourceGroup = {
+  name: string;
+  items: readonly { label: string; url: string }[];
+  columns?: number;
+};
+
+// A slide holding a single group is titled after it, so its eyebrow is
+// dropped.
+function Sources({
+  id,
+  groups,
+  note,
+}: {
+  id: SlideId;
+  groups: readonly SourceGroup[];
+  note?: string;
+}) {
   return (
-    <Slide id="sources">
+    <Slide id={id} note={note}>
       <div className="sources">
         {groups.map((g) => (
           <section key={g.name}>
-            <h2 className="sources-head">{g.name}</h2>
-            <ol>
+            {groups.length > 1 && <h2 className="sources-head">{g.name}</h2>}
+            <ol style={{ columns: g.columns ?? 2 }}>
               {g.items.map((src) => (
-                <li key={src.url}>
+                <li key={src.url + src.label}>
                   <a href={src.url} target="_blank" rel="noreferrer">
                     {src.label}
                   </a>
@@ -684,14 +704,22 @@ export function Deck() {
         <Title />
         <WhoWeAre />
         <Cover />
-        <Moats />
         <Market />
         <WhyBangladesh />
-        <Economics />
-        <PathToBillion />
-        <WhereThisGoes />
+        <Roadmap />
+        <Month1 />
+        <Month2 />
+        <Phase2 />
         <Ask />
-        <Sources />
+        <Sources
+          id="sources"
+          groups={[
+            { name: "Market", items: MARKET_SOURCES },
+            { name: "Photos", items: SAMPLE_SOURCES },
+            { name: "Logos", items: LOGO_SOURCES, columns: 3 },
+          ]}
+        />
+        <Sources id="sources-roadmap" groups={[{ name: "Roadmap", items: ROADMAP_SOURCES }]} />
       </main>
     </>
   );

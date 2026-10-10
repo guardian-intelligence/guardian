@@ -120,22 +120,33 @@ export function GrowthChart({
     const a = toYear(s.founded);
     const b = toYear(s.points.at(-1)!.date);
     const steps = 300;
-    const samples = Array.from({ length: steps + 1 }, (_, i) => a + ((b - a) * i) / steps).map(
-      (t) => ({ x: x(t), y: y(f(t)) }),
-    );
-    // Fade every line in from transparent where it starts (its founding, or
-    // the window's left edge for older companies) until it has left the
-    // baseline, and over at least FADE units, so no line starts as a hard edge.
-    const FADE = 48;
-    const fadeFrom = Math.max(M.left, x(a));
-    const lift = samples.find((p) => p.x >= fadeFrom && p.y <= M.top + PLOT.h - 10);
+    // Each line starts where it lifts off the baseline rather than at founding,
+    // so lines don't run along zero on top of each other; it fades in from
+    // transparent there until clear of the baseline, over at least FADE units.
+    const FADE = 36;
+    const base = M.top + PLOT.h;
+    const all = Array.from({ length: steps + 1 }, (_, i) => a + ((b - a) * i) / steps).map((t) => ({
+      x: x(t),
+      y: y(f(t)),
+    }));
+    const samples = all.slice(all.findIndex((p) => p.x >= M.left && p.y <= base - 10));
+    const fadeFrom = samples[0]!.x;
+    const lift = samples.find((p) => p.y <= base - 26);
     const fadeTo = Math.max(lift?.x ?? fadeFrom, fadeFrom + FADE);
     return { s, samples, fadeFrom, fadeTo, end: { x: x(b), y: y(s.points.at(-1)!.value) } };
   });
 
+  // Heading and legend span the plot's x axis, as fractions of the chart width.
+  const plotSpan = {
+    marginLeft: `${(100 * M.left) / W}%`,
+    width: `${(100 * PLOT.w) / W}%`,
+  };
+
   return (
     <figure className="chart growth">
-      <figcaption className="growth-heading">{heading}</figcaption>
+      <figcaption className="growth-heading" style={plotSpan}>
+        {heading}
+      </figcaption>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={title}>
         <defs>
           <clipPath id={`logo-${id}`} clipPathUnits="objectBoundingBox">
@@ -170,12 +181,14 @@ export function GrowthChart({
         </text>
         {ticks.map((v) => (
           <g key={v}>
+            {/* Zero's tick runs on as the baseline across the plot; the others
+                stay short. One line per value, so no stroke is drawn twice. */}
             <line
-              x1={M.left}
-              x2={M.left + PLOT.w}
+              x1={M.left - 4}
+              x2={v === 0 ? M.left + PLOT.w : M.left}
               y1={y(v)}
               y2={y(v)}
-              className={v === 0 ? "axis" : "grid"}
+              className="axis"
             />
             <text
               x={M.left - 8}
@@ -261,7 +274,7 @@ export function GrowthChart({
           );
         })}
       </svg>
-      <ul className="growth-legend">
+      <ul className="growth-legend" style={plotSpan}>
         {[...series]
           .sort((a, b) => b.points.at(-1)!.value - a.points.at(-1)!.value)
           .map((s) => (

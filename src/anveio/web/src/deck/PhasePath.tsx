@@ -1,107 +1,90 @@
 import {
-  PATH_END,
-  PATH_TARGET,
+  PHASE_0_ARR,
+  PHASE_0_END,
   PHASES,
+  PLAN_END,
+  ROADMAP_END,
+  ROADMAP_START,
   STREAMS,
-  TARGET_MARGIN,
-  phaseGate,
-  streamArr,
-  targetYear,
-} from "~/model/phases";
+} from "~/model/roadmap";
 import { money } from "./format";
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const monthYear = (year: number) => {
-  const months = Math.round(year * 12);
-  return `${MONTHS[months % 12]} ${Math.floor(months / 12)}`;
-};
-const pct = (v: number) => `${Math.round(v * 100)}%`;
-const marginText = (m: number) => (m === 0 ? "EBITDA breakeven" : `${pct(m)} EBITDA`);
+// The roadmap: gross ARR stacked by revenue stream, each phase a tinted band.
+// The only words on the plot are its milestones, each a pointer to its point.
 
-const W = 1120;
-const H = 400;
-// Phase headers sit above the plot; stream labels to its right.
-const m = { left: 56, right: 170, top: 96, bottom: H - 28 };
-// Height of the phase header strip above the plot.
-const HEAD = 90;
-const X0 = PHASES[0].start;
-const X1 = PATH_END;
-const STEPS = 240;
+const W = 780;
+const H = 330;
+const m = { left: 52, right: 24, top: 14, bottom: H - 26 };
+const X0 = ROADMAP_START;
+const X1 = ROADMAP_END;
+const STEPS = 62 * 4;
 const YEARS = Array.from({ length: STEPS + 1 }, (_, i) => X0 + ((X1 - X0) * i) / STEPS);
+// A round top just above the plan's end.
+// The smallest round step that keeps the axis to six ticks or fewer.
+const TICK = [5e6, 10e6, 20e6, 25e6, 50e6, 100e6].find((t) => PLAN_END / t <= 5)!;
+const Y1 = Math.ceil(PLAN_END / TICK) * TICK;
+const Y_TICKS = Array.from({ length: Y1 / TICK + 1 }, (_, i) => i * TICK);
+// Year starts; the axis ends at the start of 2030.
+const X_TICKS = [2027, 2028, 2029, 2030];
+
+const x = (year: number) => m.left + ((W - m.left - m.right) * (year - X0)) / (X1 - X0);
+const y = (v: number) => m.bottom - ((m.bottom - m.top) * v) / Y1;
+const path = (pts: readonly (readonly [number, number])[]) =>
+  pts.map(([px, py], k) => `${k ? "L" : "M"}${px.toFixed(1)},${py.toFixed(1)}`).join(" ");
 
 // Cumulative stack: TOPS[i][j] is the top of stream i at YEARS[j].
 const TOPS = STREAMS.reduce<number[][]>((acc, s) => {
   const below = acc[acc.length - 1];
-  return [...acc, YEARS.map((yr, j) => (below?.[j] ?? 0) + streamArr(s, yr))];
+  return [...acc, YEARS.map((yr, j) => (below?.[j] ?? 0) + s.arr(yr))];
 }, []);
-const PEAK = Math.max(...TOPS[TOPS.length - 1]!);
-const Y1 = Math.ceil(PEAK / 1e9) * 1e9;
-
-const x = (year: number) => m.left + ((W - m.left - m.right) * (year - X0)) / (X1 - X0);
-const y = (v: number) => m.bottom - ((m.bottom - m.top) * v) / Y1;
 
 const AREAS = STREAMS.map((s, i) => {
   const top = YEARS.map((yr, j) => [x(yr), y(TOPS[i]![j]!)] as const);
   const bottom = YEARS.map((yr, j) => [x(yr), y(TOPS[i - 1]?.[j] ?? 0)] as const).reverse();
-  const d = [...top, ...bottom]
-    .map(([px, py], k) => `${k ? "L" : "M"}${px.toFixed(1)},${py.toFixed(1)}`)
-    .join(" ");
-  return { stream: s, d: `${d} Z` };
+  return { stream: s, d: `${path([...top, ...bottom])} Z` };
 });
 
-// Stream labels at the right edge, centred on each band and pushed apart
-// so thin bands don't overprint.
-const LABEL_GAP = 17;
-const LABELS = (() => {
-  const last = YEARS.length - 1;
-  const wanted = STREAMS.map((s, i) => ({
-    stream: s,
-    y: (y(TOPS[i]![last]!) + y(TOPS[i - 1]?.[last] ?? 0)) / 2,
-  }));
-  // Bottom of the stack first, so walk upward.
-  for (let i = 1; i < wanted.length; i++) {
-    wanted[i]!.y = Math.min(wanted[i]!.y, wanted[i - 1]!.y - LABEL_GAP);
-  }
-  return wanted;
-})();
-
-const BANDS = PHASES.map((p, i) => ({ phase: p, from: p.start, to: PHASES[i + 1]?.start ?? X1 }));
-
-const Y_TICKS = Array.from({ length: Y1 / 1e9 + 1 }, (_, i) => i * 1e9);
-const X_TICKS = Array.from(
-  { length: Math.floor(X1) - Math.ceil(X0) + 1 },
-  (_, i) => Math.ceil(X0) + i,
-);
-
-const TARGET = { x: x(targetYear), y: y(PATH_TARGET) };
+// Milestones: a dot on the curve and a short leader up and to the right to
+// its label.
+const MILESTONES = [
+  {
+    id: "p0",
+    at: { x: x(PHASE_0_END), y: y(PHASE_0_ARR) },
+    label: `End of Phase 0: ${money(PHASE_0_ARR)} ARR`,
+  },
+] as const;
+const LEADER = { dx: 30, dy: -120 };
 
 export function PhasePath() {
   return (
     <figure className="chart phase-path">
+      <ul className="phase-path-legend">
+        {STREAMS.map((s) => (
+          <li key={s.id}>
+            <span style={{ background: `var(--stream-${s.color})` }} />
+            {s.name}
+          </li>
+        ))}
+      </ul>
       <svg
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={`ARR by revenue stream, reaching ${money(PATH_TARGET)} in ${monthYear(targetYear)}. ${PHASES.map(
-          (p) => {
-            const g = phaseGate(p);
-            return `Phase ${p.number}, ${p.name}, opens ${monthYear(g.year)} at ${money(g.arr)} ARR`;
-          },
-        ).join("; ")}`}
+        aria-label={`Gross ARR, Nov 2026 to Dec 2029: ${money(PHASE_0_ARR)} at the end of Phase 0, ${money(PLAN_END)} by Dec 2029.`}
       >
-        {BANDS.map((b) => (
+        {PHASES.map((p) => (
           <rect
-            key={b.phase.id}
-            x={x(b.from)}
-            y={m.top - HEAD}
-            width={x(b.to) - x(b.from)}
-            height={m.bottom - m.top + HEAD}
+            key={p.id}
+            x={x(p.start)}
+            y={m.top}
+            width={x(p.end) - x(p.start)}
+            height={m.bottom - m.top}
             className="phase-band"
-            style={{ fill: `var(--phase-${b.phase.id})` }}
+            style={{ fill: `var(--phase-${p.id})` }}
           />
         ))}
         {Y_TICKS.map((v) => (
           <g key={v}>
-            <line x1={m.left} x2={W - m.right} y1={y(v)} y2={y(v)} className="grid" />
+            <line x1={m.left} x2={x(X1)} y1={y(v)} y2={y(v)} className="grid" />
             <text
               x={m.left - 10}
               y={y(v)}
@@ -114,55 +97,29 @@ export function PhasePath() {
           </g>
         ))}
         {AREAS.map((a) => (
-          <path key={a.stream.id} d={a.d} style={{ fill: `var(--stream-${a.stream.id})` }} />
+          <path key={a.stream.id} d={a.d} style={{ fill: `var(--stream-${a.stream.color})` }} />
         ))}
-        <line x1={m.left} x2={W - m.right} y1={m.bottom} y2={m.bottom} className="axis" />
+        <line x1={m.left} x2={x(X1)} y1={m.bottom} y2={m.bottom} className="axis" />
         {X_TICKS.map((yr) => (
-          <text key={yr} x={x(yr)} y={m.bottom + 20} className="tick" textAnchor="middle">
+          <text key={yr} x={x(yr)} y={m.bottom + 18} className="tick" textAnchor="middle">
             {yr}
           </text>
         ))}
-        {BANDS.map((b) => {
-          const g = phaseGate(b.phase);
-          const tx = x(b.from) + 10;
+        {MILESTONES.map((ms) => {
+          const end = { x: ms.at.x + LEADER.dx, y: ms.at.y + LEADER.dy };
           return (
-            <g key={b.phase.id}>
-              <text x={tx} y={m.top - 68} className="gate-label">
-                {`Phase ${b.phase.number} · ${b.phase.name}`}
+            <g key={ms.id}>
+              <path
+                d={`M${ms.at.x},${ms.at.y - 6} L${end.x},${end.y}`}
+                className="milestone-leader"
+              />
+              <circle cx={ms.at.x} cy={ms.at.y} r={4.5} className="gate-dot" />
+              <text x={end.x + 6} y={end.y} className="milestone-label" dominantBaseline="middle">
+                {ms.label}
               </text>
-              <text x={tx} y={m.top - 50} className="gate-date">
-                {monthYear(g.year)}
-              </text>
-              {g.margin !== null && (
-                <>
-                  <text x={tx} y={m.top - 32} className="gate-figure">
-                    {`${money(g.arr)} ARR`}
-                  </text>
-                  <text x={tx} y={m.top - 14} className="gate-figure">
-                    {marginText(g.margin)}
-                  </text>
-                </>
-              )}
             </g>
           );
         })}
-        <line x1={m.left} x2={TARGET.x} y1={TARGET.y} y2={TARGET.y} className="target-rule" />
-        <circle cx={TARGET.x} cy={TARGET.y} r={5} className="gate-dot" />
-        <text x={TARGET.x - 10} y={TARGET.y - 12} className="target-label" textAnchor="end">
-          {`${money(PATH_TARGET)} ARR · ${monthYear(targetYear)} · ${marginText(TARGET_MARGIN)}`}
-        </text>
-        {LABELS.map((l) => (
-          <text
-            key={l.stream.id}
-            x={W - m.right + 10}
-            y={l.y}
-            className="stream-label"
-            dominantBaseline="middle"
-          >
-            <tspan style={{ fill: `var(--stream-${l.stream.id})` }}>■ </tspan>
-            {l.stream.name}
-          </text>
-        ))}
       </svg>
     </figure>
   );
