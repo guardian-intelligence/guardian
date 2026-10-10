@@ -1,0 +1,24 @@
+load("@npm//:defs.bzl", "npm_link_all_packages")
+
+# The Anveio Data investor deck (anveio.com/data). A workspace member only
+# for now: its image and deployment land with the anveio.com delivery lane.
+npm_link_all_packages()
+
+filegroup(
+    name = "package_manifest",
+    srcs = ["package.json"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "sources",
+    srcs = glob([
+        "package.json",
+        "public/**/*",
+        "scripts/**/*",
+        "src/**/*",
+        "tsconfig.json",
+        "vite.config.ts",
+    ]),
+    visibility = ["//visibility:public"],
+)

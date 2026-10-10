@@ -25,6 +25,10 @@
 /src/anveio/cal/dist/
 /src/anveio/cal/.vite/
 /src/anveio/cal/shots/
+/src/anveio/web/node_modules/
+/src/anveio/web/.output/
+/src/anveio/web/.vite/
+/src/anveio/web/.tanstack/
 /src/chunkies/host/ts/node_modules/
 /src/chunkies/host/ts/.output/
 /src/chunkies/host/ts/.vite/

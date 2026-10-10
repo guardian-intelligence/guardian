@@ -14,6 +14,7 @@ package(default_visibility = ["//visibility:public"])
 # package is a one-line edit rather than a sweep through this file.
 WORKSPACE_PACKAGES = [
     "src/anveio/cal",
+    "src/anveio/web",
     "src/company/web",
     "src/privatecut/web",
     "src/games/wake-up-mythra/web",
