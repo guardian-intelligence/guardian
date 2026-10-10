@@ -5,7 +5,7 @@ import { DataMark, dataMarkHalf, type Grade } from "./DataMark";
 // who buys. Video moves right along the chain; money moves back left.
 
 // Line icons (24px grid, Lucide geometry).
-const ICONS = {
+export const ICONS = {
   hire: (
     <>
       <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
@@ -34,7 +34,7 @@ const ICONS = {
 // leaving it (one "+" per stage of refinement).
 const STATIONS = [
   { kind: "crowd", icon: "record", name: "Individuals", money: "$", data: 1 },
-  { kind: "stack", icon: "hire", name: "Agencies", money: "$$", data: 2 },
+  { kind: "stack", icon: "hire", name: "Farms", money: "$$", data: 2 },
   { kind: "us", name: null, money: "$$$", data: 3 },
   { kind: "icon", icon: "buyers", name: "Buyers", money: null, data: null },
 ] as const;
@@ -46,10 +46,8 @@ const BUYER_GROUPS = [
   { name: "Brokers", logos: ["protege.png", "troveo.png", "wirestock.png"] },
 ] as const;
 
-// Placeholder stills (Wikimedia Commons, Build AI Egocentric-10K) until we have our own footage.
-const SAMPLE_GROUPS = [
-  { label: "Driving", files: ["driving-1.jpg", "driving-2.jpg", "driving-3.jpg"] },
-  { label: "Egocentric", files: ["egocentric-1.jpg", "egocentric-2.jpg", "egocentric-3.jpg"] },
+// Placeholder drone stills (Wikimedia Commons) until we have our own footage.
+export const SAMPLE_GROUPS = [
   { label: "Drone", files: ["drone-1.jpg", "drone-2.jpg", "drone-3.jpg"] },
 ] as const;
 export const LOGO_SOURCES = [
@@ -69,33 +67,31 @@ export const LOGO_SOURCES = [
   { label: "MadHive logo: madhive.com", url: "https://www.madhive.com" },
   { label: "Emory University logo: emory.edu", url: "https://www.emory.edu" },
   { label: "Skild AI logo: skild.ai", url: "https://www.skild.ai" },
+  {
+    label: "Google DeepMind logo: Wikimedia Commons",
+    url: "https://commons.wikimedia.org/wiki/File:Google_DeepMind_logo.png",
+  },
+  {
+    label: "Physical Intelligence logo: Wikimedia Commons",
+    url: "https://commons.wikimedia.org/wiki/File:Physical_Intelligence_logo.png",
+  },
+  { label: "Figure logo: figure.ai", url: "https://www.figure.ai" },
   { label: "Protege logo: withprotege.ai", url: "https://withprotege.ai" },
   { label: "Troveo logo: troveo.ai", url: "https://www.troveo.ai" },
   { label: "Wirestock logo: wirestock.io", url: "https://wirestock.io" },
   { label: "micro1 logo: micro1.ai", url: "https://www.micro1.ai" },
+  { label: "Mecka logo: mecka.ai", url: "https://mecka.ai" },
   { label: "Kled logo: kled.ai", url: "https://www.kled.ai" },
   { label: "Origin Lab logo: originlab.ai", url: "https://originlab.ai" },
+  { label: "TollBit logo: tollbit.com", url: "https://tollbit.com" },
+  { label: "Build AI logo: build.ai", url: "https://www.build.ai" },
+  { label: "Luel logo: luel.ai", url: "https://www.luel.ai" },
   { label: "Mercor logo: mercor.com", url: "https://mercor.com" },
   { label: "Snorkel AI logo: snorkel.ai", url: "https://snorkel.ai" },
   { label: "Handshake logo: joinhandshake.com", url: "https://joinhandshake.com" },
 ] as const;
 
 export const SAMPLE_SOURCES = [
-  {
-    label:
-      "Driving: A S M Jobaer, inside an auto rickshaw under Dhaka Elevated Expressway, 01 and 02 (CC BY-SA 4.0, cropped)",
-    url: "https://commons.wikimedia.org/wiki/File:View_from_inside_an_auto_rickshaw_on_a_rainy_day_under_Dhaka_Elevated_Expressway,_Bangladesh_02.jpg",
-  },
-  {
-    label:
-      "Driving: Pratheepps, Autorickshaw view of windshield from inside (public domain, cropped)",
-    url: "https://commons.wikimedia.org/wiki/File:Autorickshaw_view_of_windshield_from_inside.jpg",
-  },
-  {
-    label:
-      "Egocentric: Build AI, Egocentric-10K evaluation set, Egocentric-10K frames only (Apache-2.0, cropped)",
-    url: "https://huggingface.co/datasets/builddotai/Egocentric-10K-Evaluation",
-  },
   {
     label: "Drone: Mahinur11, Hands planting hope, Dinajpur (CC BY-SA 4.0, cropped)",
     url: "https://commons.wikimedia.org/wiki/File:Hands_planting_hope.jpg",
@@ -104,6 +100,10 @@ export const SAMPLE_SOURCES = [
     label:
       "Drone: Sultan Ahmed Niloy, Sweet noodles and rice field, Bogura (CC BY-SA 4.0, cropped)",
     url: "https://commons.wikimedia.org/wiki/File:Sweet_noodles_and_rice_field.jpg",
+  },
+  {
+    label: "Drone: ZLEA, DJI Mavic 3M Multispectral at Sun 'n Fun 2024 (CC BY-SA 4.0, cropped)",
+    url: "https://commons.wikimedia.org/wiki/File:DJI_Mavic_3M_Multispectral_FA373WYPN9_(4-9-2024)_(cropped).jpg",
   },
   {
     label: "Drone: Azimronnie, Drying rice 18 (CC BY-SA 4.0, cropped)",
@@ -149,12 +149,11 @@ const KEY_GAP = 10;
 const BUYER_LABEL_W = 52;
 const BUYER_LOGO = { logo: TILE, gap: 6 };
 const most = (counts: number[]) => Math.max(...counts);
-// The data key: three card stacks (Driving above, Egocentric and Drone
-// below, staggered), a brace gathering them, and an italic "D" beside
-// Individuals.
-const CARD = { w: 78, h: 54, step: 7, r: 7 };
-const STACK_W = CARD.w + 2 * CARD.step;
-const STACK_H = CARD.h + 2 * CARD.step;
+// The data key: three drone stills (one above, two below, staggered), a
+// brace gathering them, and an italic "D" beside Individuals.
+export const CARD = { w: 78, h: 54, step: 7, r: 7 };
+export const STACK_W = CARD.w + 2 * CARD.step;
+export const STACK_H = CARD.h + 2 * CARD.step;
 const STACK_LABEL = 20;
 const STACK_COL = 100;
 const BRACE = { w: 22, gap: 14 };
@@ -175,13 +174,13 @@ const STATION_XS = (() => {
   return STATIONS.map((_, i) => start + i * STATION_GAP);
 })();
 
-// Agencies: a short stack of coins building up and to the right (the front
+// Farms: a short stack of coins building up and to the right (the front
 // coin on top, the others peeking out down-left). The whole stack fits inside
 // a single station circle, so arrows keep the same clearance as elsewhere.
-const AGENCY_DEPTH = 3;
-const AGENCY_STEP = 5;
-const AGENCY_SPREAD = (AGENCY_DEPTH - 1) * AGENCY_STEP;
-const AGENCY_R = NODE_R - (AGENCY_SPREAD * Math.SQRT2) / 2;
+const FARM_DEPTH = 3;
+const FARM_STEP = 5;
+const FARM_SPREAD = (FARM_DEPTH - 1) * FARM_STEP;
+const FARM_R = NODE_R - (FARM_SPREAD * Math.SQRT2) / 2;
 
 function CoinStack({
   x,
@@ -197,20 +196,20 @@ function CoinStack({
   // Coin k (0 = front) sits k steps down-left of the front coin; the front
   // coin is offset up-right so the stack is centred on (x, y).
   const coin = (k: number) => ({
-    cx: x + AGENCY_SPREAD / 2 - k * AGENCY_STEP,
-    cy: y - AGENCY_SPREAD / 2 + k * AGENCY_STEP,
+    cx: x + FARM_SPREAD / 2 - k * FARM_STEP,
+    cy: y - FARM_SPREAD / 2 + k * FARM_STEP,
   });
   const front = coin(0);
   return (
     <g>
-      {Array.from({ length: AGENCY_DEPTH }, (_, i) => AGENCY_DEPTH - 1 - i).map((k) => {
+      {Array.from({ length: FARM_DEPTH }, (_, i) => FARM_DEPTH - 1 - i).map((k) => {
         const { cx, cy } = coin(k);
         return (
           <circle
             key={k}
             cx={cx}
             cy={cy}
-            r={AGENCY_R}
+            r={FARM_R}
             className={k === 0 ? "chain-node" : "chain-node chain-node-back"}
           />
         );
@@ -297,16 +296,19 @@ function Crowd({ x, y, label }: { x: number; y: number; label: string }) {
   );
 }
 
-function CardStack({
+export function CardStack({
   x,
   y,
   files,
   label,
+  clip = "chain-thumb",
 }: {
   x: number;
   y: number;
   files: readonly string[];
   label: string;
+  // Id of the rounded-corner clipPath in the host SVG's defs.
+  clip?: string;
 }) {
   // The front card (the first still) sits top-left and fully visible; the
   // back cards peek out below and to the right. Drawn back to front.
@@ -327,7 +329,7 @@ function CardStack({
                 width={CARD.w}
                 height={CARD.h}
                 preserveAspectRatio="xMidYMid slice"
-                clipPath="url(#chain-thumb)"
+                clipPath={`url(#${clip})`}
               />
             )}
             <rect x={cx} y={cy} width={CARD.w} height={CARD.h} rx={CARD.r} className="card-edge" />
@@ -342,6 +344,24 @@ function CardStack({
       >
         {label}
       </text>
+    </g>
+  );
+}
+
+// One still on the card-stack footprint, no cards behind it.
+function Still({ x, y, file }: { x: number; y: number; file: string }) {
+  return (
+    <g>
+      <image
+        href={`/deck/${file}`}
+        x={x}
+        y={y}
+        width={STACK_W}
+        height={STACK_H}
+        preserveAspectRatio="xMidYMid slice"
+        clipPath="url(#chain-still)"
+      />
+      <rect x={x} y={y} width={STACK_W} height={STACK_H} rx={CARD.r} className="card-edge" />
     </g>
   );
 }
@@ -370,16 +390,16 @@ function DataKey({ x, y }: { x: number; y: number }) {
   const braceX = dLeft - D_LABEL.gap - BRACE.w;
   const right = braceX - BRACE.gap - STACK_W;
   const left = right - STACK_COL;
-  const block = STACK_H + STACK_LABEL;
+  const block = STACK_H;
   const rowGap = 14;
   const top = y - (2 * block + rowGap) / 2;
   const lower = top + block + rowGap;
-  const [driving, egocentric, drone] = SAMPLE_GROUPS;
+  const [a, b, c] = SAMPLE_GROUPS[0].files;
   return (
     <g>
-      <CardStack x={right - STACK_COL / 2} y={top} files={driving.files} label={driving.label} />
-      <CardStack x={left} y={lower} files={egocentric.files} label={egocentric.label} />
-      <CardStack x={right} y={lower} files={drone.files} label={drone.label} />
+      <Still x={right - STACK_COL / 2} y={top} file={a} />
+      <Still x={left} y={lower} file={b} />
+      <Still x={right} y={lower} file={c} />
       <Brace x={braceX} top={top} bottom={lower + block} />
       <DataMark x={(dLeft + dRight) / 2} y={y} size={40} grade={0} />
     </g>
@@ -432,7 +452,7 @@ export function ValueChain() {
       <svg
         viewBox={`0 ${VIEW_TOP} ${W} ${H}`}
         role="img"
-        aria-label="Individuals record video for agencies, who deliver it to us; we license it to buyers: labs, robotics firms and data brokers. Money flows back the other way."
+        aria-label="Individuals record video for farms, who deliver it to us; we license it to buyers: labs, robotics firms and data brokers. Money flows back the other way."
       >
         <defs>
           <marker
@@ -459,6 +479,9 @@ export function ValueChain() {
           </marker>
           <clipPath id="chain-thumb" clipPathUnits="objectBoundingBox">
             <rect width="1" height="1" rx="0.05" ry="0.07" />
+          </clipPath>
+          <clipPath id="chain-still" clipPathUnits="objectBoundingBox">
+            <rect width="1" height="1" rx={CARD.r / STACK_W} ry={CARD.r / STACK_H} />
           </clipPath>
         </defs>
 

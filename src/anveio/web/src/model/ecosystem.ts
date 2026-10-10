@@ -24,19 +24,17 @@ export const ECOSYSTEM = [
   {
     id: "brokers",
     name: "Data brokers",
-    role: "License and label it",
+    role: "License and resell it",
+    // Brokers only: they license data from collectors like us and resell it
+    // to labs. Companies running their own workforce (Scale, Surge, Mercor)
+    // are left out. No figures needed here.
     members: [
-      { name: "Scale AI", valueB: 29, logo: "/deck/logos/scale.png" }, // Meta's June 2025 stake.
-      { name: "Surge AI", valueB: 25, logo: "/deck/logos/surge.png" }, // Talks (Bloomberg).
-      { name: "Mercor", valueB: 10, logo: "/deck/logos/mercor.png" },
-      { name: "micro1", valueB: 4, logo: "/deck/logos/micro1.png" },
-      { name: "Snorkel AI", valueB: 3.5, logo: "/deck/logos/snorkel.png" },
-      { name: "Turing", valueB: 2.2 },
-      { name: "Handshake AI", valueB: null, logo: "/deck/logos/handshake.png" },
       { name: "Protege", valueB: null, logo: "/deck/logos/protege.png" },
       { name: "Troveo", valueB: null, logo: "/deck/logos/troveo.png" },
       { name: "Wirestock", valueB: null, logo: "/deck/logos/wirestock.png" },
       { name: "Kled", valueB: null, logo: "/deck/logos/kled.png" },
+      { name: "Origin Lab", valueB: null, logo: "/deck/logos/originlab.png" },
+      { name: "TollBit", valueB: null, logo: "/deck/logos/tollbit.png" },
     ],
   },
   {

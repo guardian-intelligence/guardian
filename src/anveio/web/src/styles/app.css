@@ -27,17 +27,20 @@
   --orbit-rl: #1f7d8c;
   --orbit-labs: #138175;
   --orbit-applied: #006a4e;
-  --stream-driving: #8fd1b4;
-  --stream-egocentric: #0e8a62;
-  --stream-drone: #0b4f3a;
-  --stream-sensor: #e07a1f;
-  --stream-materials: #4a5fc1;
-  --stream-medicine: #97a5e4;
-  --stream-energy: #d9a521;
-  --phase-collect: var(--stream-egocentric);
-  --phase-sense: var(--stream-sensor);
-  --phase-make: var(--stream-materials);
-  --phase-power: var(--stream-energy);
+  /* Roadmap streams: Phase 0 grey, Phase 1 greens with the sensor-synced
+     ambers, Phase 2 blues and gold. */
+  --stream-agency: #b9c4bf;
+  --stream-mobility: #8fd1b4;
+  --stream-custom: #0e8a62;
+  --stream-annotation: #0b4f3a;
+  --stream-catalogue: #5bb08b;
+  --stream-premium: #e07a1f;
+  --stream-bench: #f2b366;
+  --stream-farmdata: #4a5fc1;
+  --phase-p0: var(--ink-3);
+  --phase-p1: var(--stream-custom);
+  --phase-p2: var(--stream-farmdata);
+  --comp: #9aa7a1;
   --good: #0b6e47;
   --good-tint: #e5f4ec;
   --bad: #b42318;
@@ -45,10 +48,14 @@
   --warn: #8a4b00;
   --warn-tint: #fdf2e2;
 
-  /* One face throughout: Geist, the Guardian house sans. The single
-     exception is the D and I marks, set in Instrument Serif Italic. */
+  /* One face throughout: Geist, the Guardian house sans. The exceptions
+     are the D and I marks, set in Instrument Serif Italic, and the title
+     slide, whose wordmark is set in Archivo Semi Expanded and whose line
+     is set in Noto Serif Display Extra Condensed caps. */
   --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-mark: "Instrument Serif", Georgia, serif;
+  --font-title: "Noto Serif Display", Georgia, serif;
+  --font-wide: "Archivo", var(--font-sans);
 
   /* Flag of Bangladesh. */
   --bd-green: #006a4e;
@@ -68,6 +75,22 @@
   src: url("/fonts/InstrumentSerif-Italic.woff2") format("woff2");
   font-weight: 400;
   font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Archivo";
+  src: url("/fonts/Archivo-Variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Noto Serif Display";
+  src: url("/fonts/NotoSerifDisplay-ExtraCondensedSemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-stretch: 62.5%;
+  font-style: normal;
   font-display: swap;
 }
 @font-face {
@@ -172,22 +195,12 @@ a {
   flex-direction: column;
   gap: 22px;
   padding: 36px 48px 24px;
+  --head-gap: 10px;
   background: var(--paper);
   border: 1px solid var(--rule);
   box-shadow:
     0 1px 2px rgb(19 32 27 / 0.06),
     0 8px 28px rgb(19 32 27 / 0.06);
-}
-/* Guardian chrome geometry, Letters treatment: the lockup sits an equal
-   gap from the slide's top and left edges and above a 3px ink masthead
-   rule, which stops the same gap short of the right edge. */
-.slide-head {
-  --head-gap: 10px;
-  display: flex;
-  align-items: center;
-  margin: -36px calc(var(--head-gap) - 48px) 0;
-  padding: var(--head-gap) 0;
-  border-bottom: 2px solid #0b0b0b;
 }
 .slide-heading {
   margin: 6px 0 0;
@@ -238,14 +251,10 @@ a {
   background: linear-gradient(to bottom in oklch, var(--bd-green) 85%, var(--bd-red));
   clip-path: polygon(0 0, 100% var(--ruler), 100% 100%, 0 100%);
 }
-.slide-inner:not(.title-slide) .slide-head {
-  margin-top: calc(var(--ruler) - 36px);
+.slide-inner:not(.title-slide) .slide-foot {
   margin-left: calc(var(--head-gap) + var(--ruler) - 48px);
 }
 /* Title slide: full-bleed ink, the lockup inverted. */
-.title-slide .slide-head {
-  border-bottom-color: #fff;
-}
 /* Bare argent wings ink about 9x11 of their 22px slot (measured at 2x,
    anti-aliased); pull the slot in by the transparent margin so the visible
    wings keep the same clearspace as the chip. */
@@ -254,47 +263,93 @@ a {
   gap: calc(var(--head-gap) - 6.5px) !important;
 }
 .slide-inner.title-slide {
+  position: relative;
   gap: 0;
   background: #000;
   color: #fff;
   border: 1px solid #000;
 }
-.title-body {
-  margin: auto 0;
+/* The hero lockup sits dead centre on the slide; the rule and the line
+   hang below it, out of flow, so they don't move it. At this size the
+   footer lockup's 800 weight, wide tracking and gap read heavy and loose,
+   so the hero sets the wordmark lighter and tighter, with the wings close
+   in. The wordmark is Archivo at 112.5% width, where each capital's ink is
+   about as wide as it is tall. Trimmed to cap top and baseline, it sits on
+   the lower wing's tip, and the wings stand 8% taller than its 38px caps,
+   so their upper tip just clears the lettering. */
+.title-center {
+  position: absolute;
+  inset: 0;
   display: grid;
-  grid-template-columns: 120px 1fr;
-  column-gap: 32px;
-  row-gap: 40px;
-  align-items: baseline;
+  place-items: center;
 }
-.title-body dt {
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #8a8a8a;
+.title-stack {
+  position: relative;
 }
-.title-body dd {
+.title-hero {
   margin: 0;
-  text-wrap: balance;
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  font: 500 semi-expanded 55px/1 var(--font-wide);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
-.title-mission {
-  max-width: 22ch;
-  font: 500 60px/1.05 var(--font-sans);
-  letter-spacing: -0.035em;
+.title-hero svg {
+  height: 41px;
+  fill: #fff;
 }
-.title-strategy {
-  max-width: 44ch;
-  font: 400 24px/1.35 var(--font-sans);
-  letter-spacing: -0.01em;
-  color: #c4c4c4;
+/* Drop the tracking after the last letter so the lockup centres on its ink. */
+.title-hero span {
+  margin-right: -0.03em;
+  text-box: trim-both cap alphabetic;
 }
-.title-foot {
+/* The rule spans the lockup; the line is centred beneath it. */
+.title-below {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  padding-top: 22px;
+  display: grid;
+  gap: 22px;
+}
+.title-rule {
+  margin: 0;
+  border: 0;
+  height: 1.5px;
+  background: #fff;
+}
+/* Condensed, high-contrast serif caps, after the Wall Street Journal's
+   masthead, in a narrower justified block centred under the lockup. Every
+   line shares one letter-spacing, so the texture stays even; the longest
+   line, BANGLADESH, sets the block's width and the other lines' word gaps
+   take up the rest. Each word is trimmed to its caps, so the lines sit an
+   even distance apart. */
+.title-line {
+  --track: 0.2em;
+  margin: 0;
+  justify-self: center;
+  display: grid;
+  gap: 10px;
+  font: 600 extra-condensed 30px/1 var(--font-title);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+}
+.title-line > span {
   display: flex;
   justify-content: space-between;
-  padding-top: 14px;
-  border-top: 1px solid #333;
-  font-size: 13px;
+}
+.title-line > span > span {
+  display: block;
+  text-box: trim-both cap alphabetic;
+}
+/* No tracking after a line's last letter, so it ends flush. */
+.title-line > span > span:last-child {
+  margin-right: calc(-1 * var(--track));
+}
+.title-slide .slide-foot {
+  margin-left: calc(var(--head-gap) - 48px);
   color: #8a8a8a;
 }
 .slide-title {
@@ -307,14 +362,16 @@ a {
   letter-spacing: -0.01em;
   text-wrap: balance;
 }
+/* Guardian chrome geometry, Letters treatment: the lockup sits an equal
+   gap from the slide's bottom and left edges, and the note ends the same
+   gap short of the right edge. */
 .slide-foot {
-  margin-top: auto;
+  margin: auto calc(var(--head-gap) - 48px) -24px;
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--rule);
+  gap: 24px;
+  padding: var(--head-gap) 0;
   font-size: 11px;
   color: var(--ink-3);
 }
@@ -327,13 +384,30 @@ a {
   flex-direction: column;
   align-items: center;
 }
-.cover-foot {
+/* The cost-and-price figure, tucked into the bottom-right corner, with its
+   footnotes beside it. */
+.cover-margin {
+  align-self: flex-end;
+  margin-top: -40px;
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+}
+.cover .drone-margin-figure {
   margin: 0;
-  max-width: 760px;
-  text-align: center;
-  font: 400 19px/1.4 var(--font-sans);
-  color: var(--ink-2);
-  text-wrap: balance;
+}
+.cover-margin-notes {
+  margin: 0 0 6px;
+  padding-left: 1em;
+  max-width: 220px;
+  display: grid;
+  gap: 6px;
+  font: 400 12px/1.35 var(--font-sans);
+  color: var(--ink);
+}
+.drone-margin-figure svg {
+  display: block;
+  overflow: visible;
 }
 .cover-figure {
   flex: 1;
@@ -462,50 +536,12 @@ a {
   font: 600 14px var(--font-sans);
   fill: var(--ink-2);
 }
-.economics {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 64px;
-}
-.economics > .chart {
-  flex: 0 1 640px;
-}
-
 /* Market */
 .bar {
   fill: var(--series-1);
 }
 .bar-cost {
   fill: var(--ink-3);
-}
-.margin-price {
-  font: 600 16px var(--font-sans);
-  fill: var(--ink);
-}
-.margin-cost {
-  font: 600 14px var(--font-sans);
-  fill: var(--ink-2);
-}
-.margin-markup {
-  font: 600 14px var(--font-sans);
-  fill: var(--series-2);
-}
-.margin-arrow {
-  fill: none;
-  stroke: var(--ink-3);
-  stroke-width: 1;
-  opacity: 0.6;
-}
-.margin-arrowhead {
-  fill: var(--ink-3);
-  opacity: 0.6;
-}
-.margin-legend text {
-  font: 400 12px var(--font-sans);
-  fill: var(--ink-2);
 }
 .bar-label {
   font: 500 16px var(--font-sans);
@@ -556,9 +592,15 @@ a {
 .market-points li::marker {
   color: var(--ink-3);
 }
+.market-points ul {
+  margin: 0;
+  padding-left: 1.4em;
+  list-style: circle;
+}
 .growth-heading {
   font: 600 14px var(--font-sans);
   color: var(--ink);
+  text-align: center;
 }
 .market-charts {
   display: grid;
@@ -569,22 +611,22 @@ a {
   gap: 4px;
 }
 .chart.growth {
-  align-items: center;
+  align-items: stretch;
 }
 .chart.growth svg {
   width: 100%;
   height: auto;
 }
 .growth .axis {
-  stroke: var(--rule);
+  stroke: var(--ink-3);
 }
 .growth-tag {
-  font: 700 12px var(--font-body);
+  font: 700 12px var(--font-sans);
   fill: var(--ink);
 }
 .growth-tag-multiple {
-  font-weight: 500;
-  fill: var(--ink-3);
+  font-weight: 700;
+  fill: var(--ink-2);
 }
 .growth-badge {
   fill: var(--paper);
@@ -597,10 +639,13 @@ a {
 }
 .growth-legend {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   margin: 0;
   padding: 0;
   list-style: none;
+}
+.growth-legend li {
   white-space: nowrap;
 }
 .growth-legend li {
@@ -653,7 +698,7 @@ a {
 /* Sources */
 .sources {
   display: grid;
-  gap: 28px;
+  gap: 10px;
   align-content: start;
 }
 .sources section {
@@ -669,11 +714,15 @@ a {
   color: var(--ink-3);
 }
 .sources ol {
-  display: grid;
-  gap: 6px;
   margin: 0;
-  padding-left: 20px;
-  font-size: 15px;
+  padding-left: 22px;
+  column-gap: 40px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.sources li {
+  break-inside: avoid;
+  margin-bottom: 3px;
 }
 .sources a {
   color: var(--ink);
@@ -681,62 +730,77 @@ a {
   text-underline-offset: 3px;
 }
 
-/* Why us */
-.moats {
-  flex: 1;
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  align-content: center;
-  gap: 20px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.moats > li {
-  display: grid;
-  align-content: start;
-  gap: 10px;
-  padding: 22px 26px;
-  border-top: 6px solid;
-  background: var(--desk);
-}
-.moats strong {
-  font-family: var(--font-sans);
-  font-size: 28px;
-  line-height: 1.15;
-}
-.moats ul {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  padding-left: 18px;
-  font-size: 16px;
-  line-height: 1.4;
-  color: var(--ink-2);
-}
-.moats mark {
-  padding: 0 3px;
-  background: var(--brand-tint);
-  color: var(--brand);
-  outline: 1px dashed var(--brand);
-}
-
 /* Who we are */
 /* One equal row per person: who | what they've done | where. */
-.team {
+/* Who we are: the founder and plain bullet points across the top, and the
+   partners in a row below. */
+.who {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-rows: repeat(3, 1fr);
+  grid-template-rows: 1fr auto;
   margin: 0 8px;
-  padding: 0;
-  list-style: none;
 }
-.team > li {
+.who > section {
+  min-width: 0;
+}
+.who-founder {
   display: grid;
-  grid-template-columns: 260px 1fr 300px;
+  grid-template-columns: 220px 1fr 300px;
   align-items: center;
   gap: 40px;
+}
+.who-advisors {
+  padding-bottom: 44px;
+  display: grid;
+  justify-items: center;
+  gap: 34px;
+}
+.who-partners-heading {
+  margin: 0;
+  font: 600 26px/1.2 var(--font-sans);
+  color: var(--ink);
+}
+/* Partners in one row, evenly spaced, each a centred stack of mark, name
+   and what they bring, aligned along the top. */
+.who-advisors ul {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  justify-content: space-evenly;
+  align-items: flex-start;
+}
+.who-advisors li {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  text-align: center;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--ink);
+}
+.who-advisors li strong {
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+/* Every partner gets the same footprint: a 40px-tall mark slot, then its
+   lines. Avatars fill the slot; each full logo is centred in it at the
+   height that evens out its ink area. */
+.who-advisors .avatar {
+  width: 40px;
+  height: 40px;
+}
+.who-partner-logo {
+  height: 40px;
+  display: grid;
+  place-items: center;
+}
+.who a {
+  color: inherit;
+  text-decoration: none;
 }
 .team-who {
   display: grid;
@@ -745,36 +809,19 @@ a {
   text-align: center;
 }
 .team-who .avatar {
-  width: 80px;
-  height: 80px;
+  width: 112px;
+  height: 112px;
   margin-bottom: 6px;
 }
 .team-bio {
+  margin: 0;
+  padding-left: 22px;
   display: grid;
-  align-content: center;
-  gap: 6px;
-}
-.team-bio p {
-  margin: 0;
-  font-size: 16px;
-  line-height: 1.4;
-  color: var(--ink-2);
-}
-.team-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.team-badge img {
-  height: 1.1em;
-}
-.team-bio ul {
-  margin: 0;
-  padding-left: 18px;
+  gap: 10px;
   list-style: disc;
-  font-size: 15px;
-  line-height: 1.4;
-  color: var(--ink-2);
+  font-size: 19px;
+  line-height: 1.35;
+  color: var(--ink);
 }
 .team-logos {
   position: relative;
@@ -782,6 +829,7 @@ a {
 }
 .team-logo {
   position: absolute;
+  opacity: 0.8;
   max-width: none;
 }
 .avatar {
@@ -798,14 +846,10 @@ a {
   fill: var(--ink-3);
   opacity: 0.45;
 }
-.team strong {
+.team-who strong {
   font-size: 19px;
   line-height: 1.2;
   letter-spacing: -0.01em;
-}
-.team a {
-  color: inherit;
-  text-decoration: none;
 }
 .team-role {
   font-size: 14px;
@@ -853,52 +897,100 @@ a {
   stroke: var(--rule);
   stroke-dasharray: 3 4;
 }
-.scaling {
-  flex: 0 0 auto;
-  display: grid;
-  gap: 20px;
-}
-.chart-square {
-  gap: 14px;
-}
-.curve-area {
-  fill: var(--series-1);
-  opacity: 0.12;
-}
-.curve-line {
-  fill: none;
-  stroke: var(--series-1);
-  stroke-width: 3;
-  stroke-linejoin: round;
-}
-.curve-dot {
-  fill: var(--series-1);
-}
 .end-note {
   font: 400 13px var(--font-sans);
   fill: var(--ink-3);
 }
 
-/* Path to $1B */
-.phase-path {
+/* Roadmap */
+/* Where this is going: two plain bullets, the second with its list, over
+   the roadmap chart. */
+.where {
   flex: 1;
   min-height: 0;
-  align-content: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+}
+.where-points {
+  margin: 0;
+  padding-left: 1.2em;
+  display: grid;
+  gap: 8px;
+  font: 400 19px/1.35 var(--font-sans);
+  color: var(--ink);
+}
+/* The roadmap chart on two-thirds, its assumptions on the last third. */
+.where-plan {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  align-items: center;
+  gap: 32px;
+}
+.where-plan .phase-path {
+  margin: 0;
+}
+.phase-path-legend {
+  margin: 0 0 8px 52px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  gap: 20px;
+  font: 500 13px var(--font-sans);
+  color: var(--ink);
+}
+.phase-path-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.phase-path-legend span {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+}
+.where-assumptions {
+  margin: 0;
+  padding-left: 1.1em;
+  display: grid;
+  gap: 12px;
+  font: 400 16px/1.4 var(--font-sans);
+  color: var(--ink);
+}
+.where-points ul {
+  margin: 6px 0 0;
+  padding-left: 1.3em;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 32px;
+  row-gap: 2px;
+  list-style: circle;
+  font-size: 15px;
 }
 .phase-band {
-  opacity: 0.09;
+  opacity: 0.08;
 }
 .gate-label {
-  font: 600 14px var(--font-sans);
+  font: 650 14px var(--font-sans);
   fill: var(--ink);
 }
-.gate-figure {
-  font: 600 13px var(--font-sans);
+.gate-name {
+  font: 500 13px var(--font-sans);
   fill: var(--ink-2);
 }
-.gate-date {
-  font: 400 12px var(--font-sans);
+.callout-rule {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+}
+.p0-callout circle {
   fill: var(--ink-3);
+}
+.p0-callout text {
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-width: 4px;
+  stroke-linejoin: round;
 }
 .gate-dot {
   fill: var(--ink);
@@ -906,16 +998,341 @@ a {
   stroke-width: 2;
 }
 .target-rule {
-  stroke: var(--ink);
-  stroke-dasharray: 3 4;
+  stroke: var(--ink-2);
+  stroke-dasharray: 2 4;
 }
 .target-label {
+  font: 650 14px var(--font-sans);
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+.billion-label {
+  font: 600 12px var(--font-sans);
+  fill: var(--ink-2);
+}
+.stream-label {
+  font: 600 12.5px var(--font-sans);
+  fill: var(--ink-2);
+}
+.stream-sub {
+  font: 400 12px var(--font-sans);
+  fill: var(--ink-3);
+}
+.end-label {
+  font: 700 13px var(--font-sans);
+  fill: var(--ink);
+}
+.milestone-leader {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1;
+}
+.milestone-label {
   font: 600 14px var(--font-sans);
   fill: var(--ink);
 }
-.stream-label {
-  font: 600 13px var(--font-sans);
+
+/* Phase slides: headline, bullets beside one chart, scaling law, gates. */
+.phase {
+  /* Window, scaling-law and gate labels share one column, so the headline,
+     law and gates start on the same x on every phase slide. */
+  --phase-label-w: 150px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: -6px;
+}
+.phase-lead {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  font: 500 23px/1.2 var(--font-sans);
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+.phase-window {
+  flex: none;
+  width: var(--phase-label-w);
+  font: 600 12px var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.phase-main {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 430px 1fr;
+  align-items: start;
+  gap: 36px;
+}
+/* With no chart, the bullets take the full width. */
+.phase-main:not(:has(.phase-chart)) {
+  grid-template-columns: 1fr;
+}
+.phase-points {
+  margin: 0;
+  padding-left: 1.1em;
+  display: grid;
+  gap: 9px;
+  font: 400 15px/1.38 var(--font-sans);
+  color: var(--ink);
+}
+.phase-points li {
+  padding-left: 0.2em;
+  text-wrap: pretty;
+}
+.phase-points li::marker {
+  color: var(--ink-3);
+}
+.phase-points .phase-quote {
+  list-style: none;
+  margin: 8px 0 0 -1.1em;
+  padding: 2px 0 2px 14px;
+  border-left: 3px solid var(--brand);
+  font: 500 17px/1.35 var(--font-sans);
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.phase-chart {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+}
+.phase-law {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  font: 500 14px/1.35 var(--font-sans);
+  color: var(--ink);
+}
+.phase-law > span:first-child,
+.phase-gates-head {
+  flex: none;
+  width: var(--phase-label-w);
+  font: 600 11px var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.phase-gates {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+.phase-gates ul {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 16px;
+}
+.phase-gates li {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding-left: 10px;
+  padding-right: 8px;
+  border-left: 3px solid var(--brand);
+  font: 500 13px/1.3 var(--font-sans);
+  color: var(--ink);
+}
+.phase-actual {
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+/* Phase 0 results: the four exit KPIs as tiles. */
+.kpis {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.kpis > div {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--brand);
+  background: var(--brand-tint);
+}
+.kpis dt {
+  font: 600 11px var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.kpis dd {
+  margin: 0;
+}
+.kpi-value {
+  font: 600 30px/1.1 var(--font-sans);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.kpi-measure {
+  font: 400 13px/1.35 var(--font-sans);
+  color: var(--ink-2);
+}
+.kpi-gate {
+  font: 500 12.5px/1.3 var(--font-sans);
+  color: var(--ink);
+}
+.comps-title {
+  display: grid;
+  gap: 2px;
+  font: 600 14px/1.3 var(--font-sans);
+  color: var(--ink);
+}
+.comps-title span {
+  font: 400 12px/1.35 var(--font-sans);
+  color: var(--ink-2);
+}
+.axis-note {
+  font: 400 12.5px var(--font-sans);
+  fill: var(--ink-3);
+}
+.comp-line {
+  fill: none;
+  stroke: var(--comp);
+  stroke-width: 1.5;
+}
+.comp-dotted {
+  stroke-dasharray: 2 3;
+}
+.comp-dot {
+  fill: var(--comp);
+}
+.comp-dot-hollow {
+  fill: var(--paper);
+  stroke: var(--comp);
+  stroke-width: 1.5;
+}
+.comp-hatch {
+  stroke: var(--comp);
+  stroke-width: 2;
+}
+.comp-range {
+  stroke: var(--comp);
+  stroke-width: 0.75;
+}
+.comp-range-solid {
+  fill: var(--comp);
+  opacity: 0.55;
+}
+.comp-label {
+  font: 500 12.5px var(--font-sans);
   fill: var(--ink-2);
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.demand-bridge {
+  margin: 0;
+  font: 400 12.5px/1.4 var(--font-sans);
+  color: var(--ink-2);
+}
+.demand-bridge span {
+  margin-right: 8px;
+  font: 600 11px var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.anveio-line {
+  fill: none;
+  stroke: var(--series-1);
+  stroke-width: 3;
+  stroke-linejoin: round;
+}
+.anveio-upside {
+  stroke-width: 2.25;
+  stroke-dasharray: 7 5;
+}
+.anveio-dot {
+  fill: var(--series-1);
+  stroke: var(--paper);
+  stroke-width: 2;
+}
+.anveio-label {
+  font: 700 12.5px var(--font-sans);
+  fill: var(--series-1);
+}
+.anveio-note {
+  font: 650 12px var(--font-sans);
+  fill: var(--series-1);
+  paint-order: stroke;
+  stroke: var(--paper);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.comps-legend {
+  margin: 4px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font: 400 12.5px var(--font-sans);
+  color: var(--ink-2);
+}
+.comps-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.comps-legend i {
+  display: inline-block;
+  flex: none;
+}
+.key-line {
+  width: 16px;
+  border-top: 1.5px solid var(--comp);
+}
+.key-dot {
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--comp);
+  border-radius: 50%;
+}
+.key-range {
+  width: 16px;
+  height: 8px;
+  border: 0.75px solid var(--comp);
+  background: repeating-linear-gradient(45deg, var(--comp) 0 1.5px, transparent 1.5px 4px);
+}
+.margin-note {
+  font: 400 12.5px var(--font-sans);
+  fill: var(--ink-3);
+}
+.bar-hatch-bg {
+  fill: var(--good-tint);
+}
+.bar-hatch {
+  stroke: var(--series-1);
+  stroke-width: 2.5;
+}
+.bar-hatch-light {
+  stroke: var(--series-1);
+  stroke-width: 1.25;
+  opacity: 0.55;
+}
+.bar-value-sm {
+  font: 650 16px var(--font-sans);
+  fill: var(--ink);
 }
 
 /* Why Bangladesh */
@@ -923,7 +1340,7 @@ a {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 390px 1fr;
   align-items: center;
   gap: 24px;
 }
@@ -935,16 +1352,9 @@ a {
   margin: 0;
   padding-left: 1.1em;
   display: grid;
-  gap: 10px;
-  font: 400 16.5px/1.35 var(--font-sans);
+  gap: 9px;
+  font: 400 15.5px/1.35 var(--font-sans);
   color: var(--ink);
-}
-.why-therefore {
-  margin: 0;
-  font: 500 18px/1.3 var(--font-sans);
-  letter-spacing: -0.01em;
-  color: var(--ink);
-  text-wrap: balance;
 }
 .why-points li {
   padding-left: 0.2em;
@@ -1193,26 +1603,6 @@ a {
   fill: var(--ink);
 }
 
-/* Where this goes */
-.vision {
-  flex: 1;
-  min-height: 0;
-  margin: 0 auto;
-  padding: 0 0 0 1.1em;
-  width: 100%;
-  max-width: 940px;
-  display: grid;
-  align-content: center;
-  gap: 28px;
-  font: 400 27px/1.3 var(--font-sans);
-  letter-spacing: -0.01em;
-  color: var(--ink);
-}
-.vision li {
-  padding-left: 0.3em;
-  text-wrap: pretty;
-}
-
 /* The ask */
 .ask {
   flex: 1;
@@ -1248,4 +1638,86 @@ a {
   margin: 0;
   font: 400 20px/1.35 var(--font-sans);
   color: var(--ink);
+}
+
+/* Month 1: one pipeline, centred on the slide. */
+.month-1 {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  align-items: center;
+}
+/* Month 2: the goal centred over the flow, then the buyers band. */
+.month-2 {
+  grid-template-rows: auto 1fr auto;
+}
+.month-2 .phase-lead {
+  justify-content: center;
+  text-align: center;
+}
+.drone-margin svg {
+  overflow: visible;
+}
+/* Buyers: a heading like Who We Are's Partners, over a band of logos
+   scattered at hand-placed centres. */
+/* The whole section is set at 70% and eased back, so it reads as context
+   under the flow rather than competing with it. */
+.buyers {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  zoom: 0.7;
+  opacity: 0.75;
+}
+.buyers-heading {
+  margin: 0;
+  font: 600 26px/1.2 var(--font-sans);
+  color: var(--ink);
+}
+.buyers-band {
+  position: relative;
+}
+.buyers-band img {
+  position: absolute;
+  width: auto;
+  max-width: none;
+  transform: translate(-50%, -50%);
+}
+.drone-cost {
+  fill: var(--ink);
+}
+.drone-price {
+  fill: #fff;
+  stroke: var(--ink);
+  stroke-width: 1.25;
+}
+.drone-axis {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1;
+}
+.drone-tick {
+  font: 400 11px var(--font-sans);
+  fill: var(--ink);
+}
+.drone-axis-label {
+  font: 700 11px var(--font-sans);
+  fill: var(--ink);
+}
+.flow-name {
+  font: 600 19px var(--font-sans);
+  fill: var(--ink);
+}
+.label-region {
+  fill-opacity: 0.2;
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+.label-tag {
+  font: 700 19px var(--font-sans);
+  fill: #111;
+}
+.broker-name {
+  font: 600 16px var(--font-sans);
+  fill: var(--ink);
 }

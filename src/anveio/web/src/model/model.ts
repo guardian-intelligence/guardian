@@ -1,8 +1,6 @@
 // Anveio Data operating model: 60 monthly periods starting November 2026.
 // Pure functions only; the deck renders whatever runModel returns.
 
-import { phaseArr, targetYear } from "./phases";
-
 export const MONTHS = 60;
 export const FIRST_MONTH = { year: 2026, month: 10 } as const; // 0-based month: November
 
@@ -1505,71 +1503,4 @@ export const sensitivity = (a: Inputs): { baseline: number; rows: SensitivityRow
   });
   rows.sort((x, y) => Math.abs(y.high - y.low) - Math.abs(x.high - x.low));
   return { baseline, rows };
-};
-
-// North star: two scaling curves in hours of recorded (QC-accepted) data,
-// anchored on the plan at December 2028 and extended out to the ARR target.
-//  - Contractors -> recorded hours (cumulative). Each contractor records a
-//    baseline number of hours per month (the plan's December 2028 mix) and the
-//    network grows at a steady hiring pace, so hours = rate * c^2 / (2 * pace):
-//    every new contractor adds more hours per month than the one before.
-//  - Recorded hours -> ARR, at the December run-rate and one blended net
-//    $/hour, then an idealized power curve.
-export const NORTH_STAR_MONTHS = 26;
-// Phase 1's own ARR when the company reaches $1B (see phases.ts); the
-// scaling curves describe the video business only.
-export const ARR_TARGET = phaseArr("collect", targetYear);
-// Assumption: value per hour rises as the catalogue fills in (exponent > 1).
-export const CURVE_EXPONENT = 1.5;
-
-export type NorthStar = {
-  valuePerHour: number;
-  anchor: { hours: number; arr: number; contractors: number };
-  targetHours: number;
-  targetContractors: number;
-  hoursPerContractor: number;
-  hiringPace: number;
-  arrAt: (hours: number) => number;
-  hoursAt: (contractors: number) => number;
-};
-
-export const northStar = (a: Inputs, months = NORTH_STAR_MONTHS): NorthStar => {
-  const r = runModel(a);
-  const net = Object.fromEntries(
-    unitEconomics(a).map((u) => [u.stream, u.netRevenuePerAcceptedHour]),
-  ) as Record<StreamId, number>;
-  let recorded = 0;
-  let lastMonthHours = 0;
-  let contractors = 0;
-  let value = 0;
-  for (let t = 1; t <= months; t++) {
-    for (const { id } of STREAMS) {
-      const accepted = r.streams[id].accepted[t] ?? 0;
-      recorded += accepted;
-      value += accepted * net[id];
-      if (t === months) {
-        lastMonthHours += accepted;
-        contractors += r.streams[id].units[t] ?? 0;
-      }
-    }
-  }
-  const valuePerHour = recorded > 0 ? value / recorded : 0;
-  const anchor = { hours: recorded, arr: 12 * lastMonthHours * valuePerHour, contractors };
-  const arrAt = (h: number) => anchor.arr * (h / anchor.hours) ** CURVE_EXPONENT;
-  const hoursPerContractor = contractors > 0 ? lastMonthHours / contractors : 0;
-  // Hiring pace (contractors per month) that puts the curve through the anchor.
-  const hiringPace = (hoursPerContractor * contractors ** 2) / (2 * recorded);
-  const hoursAt = (c: number) => (hoursPerContractor * c ** 2) / (2 * hiringPace);
-  const targetHours = anchor.hours * (ARR_TARGET / anchor.arr) ** (1 / CURVE_EXPONENT);
-  const targetContractors = Math.sqrt((2 * hiringPace * targetHours) / hoursPerContractor);
-  return {
-    valuePerHour,
-    anchor,
-    targetHours,
-    targetContractors,
-    hoursPerContractor,
-    hiringPace,
-    arrAt,
-    hoursAt,
-  };
 };
