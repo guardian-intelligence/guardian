@@ -41,6 +41,49 @@ export default {
           "no-console": "off",
         },
       },
+      {
+        // The Anveio deck is laid out entirely by CSS so its server-rendered
+        // HTML is already final: no browser globals or state/effect hooks,
+        // whose results the server can't know and would repaint on hydration.
+        files: ["src/anveio/web/src/**"],
+        rules: {
+          "no-restricted-globals": [
+            "error",
+            ...["window", "document", "innerWidth", "innerHeight", "matchMedia", "screen"].map(
+              (name) => ({
+                name,
+                message: "The deck must lay out identically on the server; use CSS.",
+              }),
+            ),
+          ],
+          "no-restricted-imports": [
+            "error",
+            {
+              paths: [
+                {
+                  name: "react",
+                  importNames: [
+                    "useState",
+                    "useReducer",
+                    "useEffect",
+                    "useLayoutEffect",
+                    "useSyncExternalStore",
+                  ],
+                  message: "The deck must lay out identically on the server; use CSS.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        // Keyboard navigation: behaviour only, never layout.
+        files: ["src/anveio/web/src/deck/keyboardNav.ts"],
+        rules: {
+          "no-restricted-globals": "off",
+          "no-restricted-imports": "off",
+        },
+      },
     ],
   },
   test: {

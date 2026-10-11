@@ -170,8 +170,14 @@ a {
 }
 
 /* Slides */
-/* Each slide is a fixed 1280x720 canvas scaled to fit the window
-   (--deck-scale is set from script); the frame reserves the scaled box. */
+/* Each slide is a fixed 1280x720 canvas scaled so one whole slide fits the
+   window, less a 16px gutter each side; the frame reserves the scaled box.
+   The scale is pure CSS -- tan(atan2(a, b)) is a / b as a plain number --
+   so the server-rendered page lays out exactly as the hydrated one: no
+   script ever sizes anything. */
+:root {
+  --deck-scale: min(tan(atan2(100vw - 32px, 1280px)), tan(atan2(100dvh - 32px, 720px)));
+}
 .deck {
   display: grid;
   justify-items: center;
@@ -182,13 +188,13 @@ a {
   scroll-margin-top: 16px;
 }
 .slide-frame {
-  width: calc(1280px * var(--deck-scale, 1));
-  height: calc(720px * var(--deck-scale, 1));
+  width: calc(1280px * var(--deck-scale));
+  height: calc(720px * var(--deck-scale));
 }
 .slide-inner {
   width: 1280px;
   height: 720px;
-  transform: scale(var(--deck-scale, 1));
+  transform: scale(var(--deck-scale));
   transform-origin: top left;
   overflow: hidden;
   display: flex;
