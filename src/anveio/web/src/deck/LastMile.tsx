@@ -122,6 +122,8 @@ const GUIDES = (() => {
 const CELL = 25;
 const LOGO_TILE = 23;
 const LOGO = 17;
+// Our own mark is drawn at twice the size, alone in a column twice as wide.
+const isOurs = (m: { logo?: string }) => m.logo === "anveio";
 const LOGOS = (() => {
   const total = BAND.to - BAND.from;
   const colDeg = (CELL / R) * (180 / Math.PI);
@@ -129,16 +131,27 @@ const LOGOS = (() => {
   const PAD = 0.75;
   const rowsAt = (deg: number) => Math.max(1, Math.floor((thickness(deg) - 3) / CELL));
   const stages = ECOSYSTEM.map((stage) => stage.members.flatMap((m) => ("logo" in m ? [m] : [])));
-  // Column heights for a section starting at `start`.
-  const columns = (logos: readonly unknown[], start: number) => {
-    const cols: number[] = [];
-    for (let n = 0, deg = start + colDeg * (PAD + 0.5); n < logos.length; deg += colDeg) {
-      const rows = Math.min(rowsAt(deg), logos.length - n);
-      cols.push(rows);
+  type Column = { rows: number; width: number };
+  // Columns for a section starting at `start`; width is in columns.
+  const columns = (logos: readonly { logo?: string }[], start: number) => {
+    const cols: Column[] = [];
+    for (let n = 0, deg = start + colDeg * PAD; n < logos.length;) {
+      if (isOurs(logos[n]!)) {
+        cols.push({ rows: 1, width: 2 });
+        n += 1;
+        deg += 2 * colDeg;
+        continue;
+      }
+      let rows = Math.min(rowsAt(deg + colDeg / 2), logos.length - n);
+      const ours = logos.slice(n, n + rows).findIndex(isOurs);
+      if (ours >= 0) rows = ours;
+      cols.push({ rows, width: 1 });
       n += rows;
+      deg += colDeg;
     }
     return cols;
   };
+  const widthOf = (cols: readonly Column[]) => cols.reduce((a, c) => a + c.width, 0);
   // Size each section by the columns it needs, then lay it out again from
   // its real start (the band is thicker further along, so it may need fewer).
   const layout = (widths: readonly number[]) => {
@@ -153,14 +166,15 @@ const LOGOS = (() => {
   };
   const even = stages.map(() => 1);
   const first = layout(even);
-  const sections = layout(first.map((sec) => sec.cols.length + 2 * PAD));
+  const sections = layout(first.map((sec) => widthOf(sec.cols) + 2 * PAD));
   return sections.flatMap(({ logos, start, span, cols }) => {
-    const shift = (span - cols.length * colDeg) / 2;
+    let deg = start + (span - widthOf(cols) * colDeg) / 2;
     let n = 0;
-    return cols.flatMap((rows, j) => {
-      const deg = start + shift + colDeg * (j + 0.5);
+    return cols.flatMap(({ rows, width }) => {
+      const centre = deg + (colDeg * width) / 2;
+      deg += colDeg * width;
       return Array.from({ length: rows }, (_, r) => {
-        const at = pt(deg, R + (r - (rows - 1) / 2) * CELL);
+        const at = pt(centre, R + (r - (rows - 1) / 2) * CELL);
         return { ...logos[n++]!, x: at.x, y: at.y };
       });
     });
@@ -445,28 +459,37 @@ export function LastMile() {
           ))}
           <path d={HEAD} style={{ fill: "var(--innovation)" }} />
         </g>
-        {LOGOS.map((logo) => (
-          <g key={logo.name}>
-            <rect
-              x={logo.x - LOGO_TILE / 2}
-              y={logo.y - LOGO_TILE / 2}
-              width={LOGO_TILE}
-              height={LOGO_TILE}
-              rx={4}
-              className="cycle-logo-tile"
-            />
-            <image
-              href={logo.logo}
-              x={logo.x - LOGO / 2}
-              y={logo.y - LOGO / 2}
-              width={LOGO}
-              height={LOGO}
-              preserveAspectRatio="xMidYMid meet"
-            >
-              <title>{logo.name}</title>
-            </image>
-          </g>
-        ))}
+        {LOGOS.map((logo) => {
+          // Our own mark stands out at twice the size of the others.
+          const ours = isOurs(logo);
+          const tile = ours ? LOGO_TILE * 2 : LOGO_TILE;
+          return (
+            <g key={logo.name}>
+              <rect
+                x={logo.x - tile / 2}
+                y={logo.y - tile / 2}
+                width={tile}
+                height={tile}
+                rx={ours ? 8 : 4}
+                className={ours ? "mark-tile" : "cycle-logo-tile"}
+              />
+              {ours ? (
+                <Wings x={logo.x} y={logo.y} size={tile * 0.62} />
+              ) : (
+                <image
+                  href={logo.logo}
+                  x={logo.x - LOGO / 2}
+                  y={logo.y - LOGO / 2}
+                  width={LOGO}
+                  height={LOGO}
+                  preserveAspectRatio="xMidYMid meet"
+                >
+                  <title>{logo.name}</title>
+                </image>
+              )}
+            </g>
+          );
+        })}
         {/* Guide ring: Data along the first half, Innovation along the second */}
         {GUIDES.map((g) => (
           <g key={g.id}>

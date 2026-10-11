@@ -1,6 +1,10 @@
 // Every source the Roadmap and phase slides cite.
 export const ROADMAP_SOURCES = [
   {
+    label: "Financial Express 2022-12-28: Agriculture Census 2019, 16.88M farm households",
+    url: "https://thefinancialexpress.com.bd/trade/bd-losing-farm-land-by-019pc-a-year-1672196259",
+  },
+  {
     label: "TechCrunch 2025-09-09: Mercor $75M (Feb 2025), $100M (Mar 2025), ~$450M gross",
     url: "https://techcrunch.com/?p=3044695",
   },

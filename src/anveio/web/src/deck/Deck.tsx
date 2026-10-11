@@ -10,8 +10,7 @@ import { DroneMarginFigure } from "./DroneMargin";
 import { LastMile } from "./LastMile";
 import { PhasePath } from "./PhasePath";
 import { ASSUMPTIONS } from "~/model/roadmap";
-import { Fill } from "./Fill";
-import { PHASE_2, PhaseBody } from "./Phases";
+import { ICONS, LoopFlow } from "./LoopFlow";
 import { ROADMAP_SOURCES } from "./roadmapSources";
 const SLIDES = [
   { id: "title", title: "Anveio" },
@@ -22,8 +21,9 @@ const SLIDES = [
   { id: "roadmap", title: "Where this is going" },
   { id: "p0-m1", title: "Month 1" },
   { id: "p0-m2", title: "Month 2" },
-  { id: "p2", title: "Phase 2 · Scale to more farms" },
-  { id: "ask", title: "The Ask" },
+  { id: "p0-m3", title: "Month 3" },
+  { id: "p0-m4", title: "Month 4" },
+  { id: "numbers", title: "By the Numbers" },
   { id: "sources", title: "Sources" },
   { id: "sources-roadmap", title: "Sources: Roadmap" },
 ] as const;
@@ -109,6 +109,16 @@ function WhyBangladesh() {
   );
 }
 
+// How we become the most trusted source: drone video, paired with sensors
+// and evals on the same plots, then more farms.
+const DATA_PLAN = [
+  "Drone video",
+  "Physical sensors (salinity, temperature, moisture)",
+  "Evals (AgricultureBench 1.0, RL Envs)",
+  // BBS Agriculture Census 2019: 16.88M farm households.
+  "Scale horizontally: 2 → 16.9M farms",
+] as const;
+
 // The deployment work, from the AI Deployment Engine plan.
 const DEPLOYMENTS = [
   "Last-mile delivery of breakthrough medicine",
@@ -121,13 +131,17 @@ const DEPLOYMENTS = [
 
 function Roadmap() {
   return (
-    <Slide
-      id="roadmap"
-      note="Gross ARR · illustrative, assumptions to confirm · eval pricing: Epoch, Jan 2026"
-    >
+    <Slide id="roadmap" note="BBS Agriculture Census 2019">
       <div className="where">
         <ul className="where-points">
-          <li>First, we become the #1 trusted data source.</li>
+          <li>
+            First, we become the world’s most trusted source of AI data in Bangladesh. (Q4 2028)
+            <ul>
+              {DATA_PLAN.map((d) => (
+                <li key={d}>{d}</li>
+              ))}
+            </ul>
+          </li>
           <li>
             Second, we become the deployment vehicle for all AI-powered innovation:
             <ul>
@@ -139,28 +153,36 @@ function Roadmap() {
         </ul>
         <div className="where-plan">
           <PhasePath />
-          <ul className="where-assumptions">
-            <li>
-              Evals: ${ASSUMPTIONS.evalQuarter / 1000}k/quarter per contract (Phase 0 ={" "}
-              {ASSUMPTIONS.evalsPhase0} contract, {ASSUMPTIONS.evalsEnd} by {ASSUMPTIONS.endYear})
-            </li>
-            <li>
-              Drone video: {ASSUMPTIONS.plots} plots × {ASSUMPTIONS.hrsPerDay} hrs/day at $
-              {ASSUMPTIONS.rate}/hr, licensed to {ASSUMPTIONS.buyersPhase0} labs, rising to{" "}
-              {ASSUMPTIONS.buyersEnd} by {ASSUMPTIONS.endYear}; licenses renew yearly
-            </li>
-            <li>
-              Price per hour rises {ASSUMPTIONS.historyPremium * 100}% for each year of history on
-              the plot: more history gives new footage more context
-            </li>
-            <li>
-              Phase 1: {ASSUMPTIONS.onboardingStart}–{ASSUMPTIONS.onboardingEarly} new plots a month
-              from Apr 2027, rising to {ASSUMPTIONS.onboardingFull} a month by{" "}
-              {ASSUMPTIONS.onboardingFullFrom}
-            </li>
-          </ul>
         </div>
       </div>
+    </Slide>
+  );
+}
+
+// The roadmap chart's assumptions, read at its end.
+function Numbers() {
+  return (
+    <Slide id="numbers" note="Epoch, Jan 2026">
+      <ul className="numbers">
+        <li>
+          Evals: ${ASSUMPTIONS.evalQuarter / 1000}k/quarter per contract (Phase 0 ={" "}
+          {ASSUMPTIONS.evalsPhase0} contract, {ASSUMPTIONS.evalsEnd} by {ASSUMPTIONS.endYear})
+        </li>
+        <li>
+          Drone video: {ASSUMPTIONS.plots} farms × {ASSUMPTIONS.hrsPerDay} hrs/day at $
+          {ASSUMPTIONS.rate}/hr, licensed to {ASSUMPTIONS.buyersPhase0} labs, rising to{" "}
+          {ASSUMPTIONS.buyersEnd} by {ASSUMPTIONS.endYear}; licenses renew yearly
+        </li>
+        <li>
+          Price per hour rises {ASSUMPTIONS.historyPremium * 100}% for each year of history on the
+          plot: more history gives new footage more context
+        </li>
+        <li>
+          Partner farms: {ASSUMPTIONS.onboardingStart}–{ASSUMPTIONS.onboardingEarly} new farms a
+          month from {ASSUMPTIONS.onboardingFrom}, rising to {ASSUMPTIONS.onboardingFull} a month by{" "}
+          {ASSUMPTIONS.onboardingFullFrom}
+        </li>
+      </ul>
     </Slide>
   );
 }
@@ -190,39 +212,49 @@ function Month2() {
   );
 }
 
-function Phase2() {
+// Month 3: hire drone operators; license fees pay for the next hires.
+function Month3() {
   return (
-    <Slide id="p2" note="Land Reforms Act 2023">
-      <PhaseBody copy={PHASE_2} />
+    <Slide id="p0-m3">
+      <div className="month-1 month-2">
+        <p className="phase-lead">Goal: Record 10hrs/day/farm of drone video.</p>
+        <LoopFlow
+          id="m3"
+          start="Hire operators"
+          steps={[
+            { label: "Record more hours a day", icon: ICONS.video },
+            { label: "Improve data pipeline", icon: ICONS.pipeline },
+            { label: "License data", icon: ICONS.money },
+          ]}
+          loopTo="start"
+          loop={{ text: "Reinvest", icon: ICONS.money }}
+          label="Anveio hires drone operators, records more hours a day, improves the data pipeline and licenses the data; the license fees pay for more operators."
+        />
+      </div>
     </Slide>
   );
 }
 
-// [Bracketed] text is a placeholder until the round is set.
-const ASK_TERMS = [
-  { term: "Raising", value: "[amount] at [valuation]" },
-  { term: "Use of funds", value: "[collector pay · sensors · sales]" },
-  { term: "Milestones", value: "[ARR and collectors by next round]" },
-] as const;
-
-function Ask() {
+// Month 4: turn the dataset into AgricultureBench, sold through buyers until
+// we go direct to AI labs.
+function Month4() {
   return (
-    <Slide id="ask">
-      <div className="ask">
-        <p className="pitch-lead">
-          We expect this to be a winner-take-all market. We aim to move fast and capture the best
-          talent, investing rapidly to pay above market.
-        </p>
-        <dl className="ask-terms">
-          {ASK_TERMS.map((t) => (
-            <div key={t.term}>
-              <dt>{t.term}</dt>
-              <dd>
-                <Fill text={t.value} />
-              </dd>
-            </div>
-          ))}
-        </dl>
+    <Slide id="p0-m4">
+      <div className="month-1 month-2">
+        <div>
+          <p className="phase-lead">Goal: Release AgricultureBench-1.0</p>
+          <p className="month-sub">Eval = Benchmark + RL Env</p>
+        </div>
+        <LoopFlow
+          id="m4"
+          start="Create eval"
+          steps={[
+            { label: "Sell to buyers", icon: ICONS.money },
+            { label: "Collect more raw video", icon: ICONS.video },
+            { label: "Improve eval", anveio: true },
+          ]}
+          label="Anveio creates an eval (a benchmark plus an RL environment); then, on repeat: sell it to buyers, collect more raw video, improve the eval."
+        />
       </div>
     </Slide>
   );
@@ -435,10 +467,12 @@ function Market() {
             </ul>
           </li>
           <li>
-            Thesis: agricultural data (video, sensors) for the same plot of land over long time
-            horizons is more valuable than one-off, context-free snapshots, and underpins a wide
-            array of useful AI capabilities (food production, climate change mitigation, bio,
-            world-modeling, etc.).
+            Latest models are powerful enough to create overwhelming comparative advantage against
+            non-AI incumbents in Bangladesh.
+          </li>
+          <li>
+            Historical farming data becomes more valuable over time and makes AI better at
+            agriculture, business, world-modeling, and more.
           </li>
         </ul>
         <div className="market-charts">
@@ -709,8 +743,9 @@ export function Deck() {
         <Roadmap />
         <Month1 />
         <Month2 />
-        <Phase2 />
-        <Ask />
+        <Month3 />
+        <Month4 />
+        <Numbers />
         <Sources
           id="sources"
           groups={[

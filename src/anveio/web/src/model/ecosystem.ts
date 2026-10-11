@@ -8,6 +8,7 @@ export type CategoryId = "brokers" | "platforms" | "rl" | "labs" | "applied";
 export type Member = {
   readonly name: string;
   readonly valueB: number | null;
+  // A path under /public, or "anveio" for our own mark.
   readonly logo?: string;
 };
 
@@ -50,7 +51,9 @@ export const ECOSYSTEM = [
     id: "rl",
     name: "RL environments",
     role: "Make training tasks",
+    // We build and sell RL environments on our own data, so we lead this stage.
     members: [
+      { name: "Anveio", valueB: null, logo: "anveio" },
       { name: "Prime Intellect", valueB: 1, logo: "/deck/logos/primeintellect.png" },
       { name: "Mechanize", valueB: 0.5, logo: "/deck/logos/mechanize.png" },
       { name: "Applied Compute", valueB: 3, logo: "/deck/logos/appliedcompute.png" }, // Talks.

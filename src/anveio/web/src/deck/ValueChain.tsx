@@ -367,7 +367,7 @@ function Still({ x, y, file }: { x: number; y: number; file: string }) {
 }
 
 // A right-facing curly brace from top to bottom, its point at mid-height.
-function Brace({ x, top, bottom }: { x: number; top: number; bottom: number }) {
+export function Brace({ x, top, bottom }: { x: number; top: number; bottom: number }) {
   const mid = (top + bottom) / 2;
   const half = BRACE.w / 2;
   const r = half;

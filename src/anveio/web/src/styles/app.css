@@ -921,41 +921,25 @@ a {
   font: 400 19px/1.35 var(--font-sans);
   color: var(--ink);
 }
-/* The roadmap chart on two-thirds, its assumptions on the last third. */
+/* The roadmap chart, centred at the width it was drawn for. */
 .where-plan {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  align-items: center;
-  gap: 32px;
+  display: flex;
+  justify-content: center;
 }
 .where-plan .phase-path {
   margin: 0;
+  width: 100%;
 }
-.phase-path-legend {
-  margin: 0 0 8px 52px;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  gap: 20px;
-  font: 500 13px var(--font-sans);
-  color: var(--ink);
+.phase-path-title {
+  margin: 0 0 8px;
 }
-.phase-path-legend li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.phase-path-legend span {
-  width: 11px;
-  height: 11px;
-  border-radius: 2px;
-}
-.where-assumptions {
+/* By the Numbers: the roadmap's assumptions as plain bullets. */
+.numbers {
   margin: 0;
-  padding-left: 1.1em;
+  padding-left: 1.2em;
   display: grid;
-  gap: 12px;
-  font: 400 16px/1.4 var(--font-sans);
+  gap: 16px;
+  font: 400 22px/1.4 var(--font-sans);
   color: var(--ink);
 }
 .where-points ul {
@@ -1024,6 +1008,17 @@ a {
 .end-label {
   font: 700 13px var(--font-sans);
   fill: var(--ink);
+}
+.end-value {
+  font: 500 17px var(--font-sans);
+  fill: var(--ink);
+}
+.phase-path .brace {
+  stroke-width: 1.5;
+}
+.end-name {
+  font: 500 13px var(--font-sans);
+  fill: var(--ink-2);
 }
 .milestone-leader {
   fill: none;
@@ -1603,43 +1598,6 @@ a {
   fill: var(--ink);
 }
 
-/* The ask */
-.ask {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  align-content: center;
-  gap: 48px;
-}
-.ask .pitch-lead {
-  max-width: 960px;
-  justify-self: center;
-  text-align: center;
-}
-.ask-terms {
-  margin: 0;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 32px;
-}
-.ask-terms div {
-  display: grid;
-  gap: 8px;
-  padding-left: 14px;
-  border-left: 3px solid var(--brand);
-}
-.ask-terms dt {
-  font: 600 13px var(--font-sans);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
-.ask-terms dd {
-  margin: 0;
-  font: 400 20px/1.35 var(--font-sans);
-  color: var(--ink);
-}
-
 /* Month 1: one pipeline, centred on the slide. */
 .month-1 {
   flex: 1;
@@ -1650,6 +1608,12 @@ a {
 /* Month 2: the goal centred over the flow, then the buyers band. */
 .month-2 {
   grid-template-rows: auto 1fr auto;
+}
+.month-sub {
+  margin: 8px 0 0;
+  text-align: center;
+  font: 400 18px var(--font-sans);
+  color: var(--ink-2);
 }
 .month-2 .phase-lead {
   justify-content: center;
@@ -1703,6 +1667,11 @@ a {
 .drone-axis-label {
   font: 700 11px var(--font-sans);
   fill: var(--ink);
+}
+.loop-node {
+  fill: var(--paper);
+  stroke: var(--ink);
+  stroke-width: 2;
 }
 .flow-name {
   font: 600 19px var(--font-sans);
