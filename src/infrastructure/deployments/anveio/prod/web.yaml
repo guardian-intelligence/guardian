@@ -167,6 +167,15 @@ spec:
     - host: anveio.com
       http:
         paths:
+          # The investor deck (deck.yaml) serves everything under /deck; www
+          # stays on anveio-cal, which redirects it here.
+          - path: /deck
+            pathType: Prefix
+            backend:
+              service:
+                name: anveio-web
+                port:
+                  number: 80
           - path: /
             pathType: Prefix
             backend:
