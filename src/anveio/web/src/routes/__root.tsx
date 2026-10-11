@@ -10,14 +10,14 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#ffffff" },
     ],
     links: [
-      { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+      { rel: "icon", type: "image/svg+xml", href: "/deck/favicon.svg" },
       ...[
         "Geist-Variable",
         "InstrumentSerif-Italic",
         "NotoSerifDisplay-ExtraCondensedSemiBold",
       ].map((font) => ({
         rel: "preload",
-        href: `/fonts/${font}.woff2`,
+        href: `/deck/fonts/${font}.woff2`,
         as: "font",
         type: "font/woff2",
         crossOrigin: "anonymous" as const,

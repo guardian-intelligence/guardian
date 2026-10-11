@@ -73,7 +73,7 @@ jobs:
           names=(alert-relay analytics-ingest authorization
             chunkies-gateway chunkies-chunkie feature-flags-notify payments payments-canary
             postflight-controlplane tofu-runner company-site privatecut-web
-            wake-up-mythra-web anveio-cal)
+            wake-up-mythra-web anveio-cal anveio-web)
           declare -A watch=(
             [alert-relay]='^src/alerting/'
             [analytics-ingest]='^src/analytics/|^src/proto/'
@@ -89,6 +89,7 @@ jobs:
             [privatecut-web]='^src/privatecut/web/|^src/shared/ts/(brand|telemetry)/'
             [wake-up-mythra-web]='^src/games/wake-up-mythra/|^src/chunkies/|^src/shared/ts/telemetry/'
             [anveio-cal]='^src/anveio/cal/'
+            [anveio-web]='^src/anveio/web/|^src/shared/ts/brand/'
           )
           declare -A push_target=(
             [alert-relay]='//src/alerting/relay:push'
@@ -105,6 +106,7 @@ jobs:
             [privatecut-web]='//src/privatecut/web/site:push'
             [wake-up-mythra-web]='//src/games/wake-up-mythra/web/site:push'
             [anveio-cal]='//src/anveio/cal/site:push'
+            [anveio-web]='//src/anveio/web/site:push'
           )
           go_images=' alert-relay analytics-ingest authorization chunkies-gateway chunkies-chunkie feature-flags-notify payments payments-canary postflight-controlplane tofu-runner '
           common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'

@@ -22,8 +22,12 @@ const stripRouteManifestPaths = {
 // The investor deck is unlisted: reachable by link, never indexed.
 const unlisted = { headers: { "x-robots-tag": "noindex, nofollow, noarchive" } } as const;
 
+// anveio.com routes only /deck/** to this app (the rest of the site is
+// anveio-cal), so every URL it serves lives under /deck: the page, public/deck
+// and the built chunks.
 export default defineConfig({
   build: {
+    assetsDir: "deck/assets",
     rollupOptions: {
       // Debug region comments embed machine-specific paths into hashed chunks.
       experimental: { attachDebugInfo: "none" },
@@ -43,8 +47,8 @@ export default defineConfig({
     viteReact(),
     nitro({
       routeRules: {
-        "/data": unlisted,
-        "/data/**": unlisted,
+        "/deck": unlisted,
+        "/deck/**": unlisted,
       },
     }),
   ],

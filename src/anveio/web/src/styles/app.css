@@ -65,21 +65,21 @@
 
 @font-face {
   font-family: "Geist";
-  src: url("/fonts/Geist-Variable.woff2") format("woff2-variations");
+  src: url("/deck/fonts/Geist-Variable.woff2") format("woff2-variations");
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: "Instrument Serif";
-  src: url("/fonts/InstrumentSerif-Italic.woff2") format("woff2");
+  src: url("/deck/fonts/InstrumentSerif-Italic.woff2") format("woff2");
   font-weight: 400;
   font-style: italic;
   font-display: swap;
 }
 @font-face {
   font-family: "Archivo";
-  src: url("/fonts/Archivo-Variable.woff2") format("woff2-variations");
+  src: url("/deck/fonts/Archivo-Variable.woff2") format("woff2-variations");
   font-weight: 100 900;
   font-stretch: 62% 125%;
   font-style: normal;
@@ -87,7 +87,7 @@
 }
 @font-face {
   font-family: "Noto Serif Display";
-  src: url("/fonts/NotoSerifDisplay-ExtraCondensedSemiBold.woff2") format("woff2");
+  src: url("/deck/fonts/NotoSerifDisplay-ExtraCondensedSemiBold.woff2") format("woff2");
   font-weight: 600;
   font-stretch: 62.5%;
   font-style: normal;
@@ -95,7 +95,7 @@
 }
 @font-face {
   font-family: "Geist";
-  src: url("/fonts/Geist-Italic-Variable.woff2") format("woff2-variations");
+  src: url("/deck/fonts/Geist-Italic-Variable.woff2") format("woff2-variations");
   font-weight: 100 900;
   font-style: italic;
   font-display: swap;
