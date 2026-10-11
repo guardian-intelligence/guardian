@@ -45,6 +45,8 @@ export default {
   },
   test: {
     include: [
+      "src/anveio/web/**/*.test.ts",
+      "src/anveio/web/**/*.test.tsx",
       "src/chunkies/host/ts/**/*.test.ts",
       "src/chunkies/host/ts/**/*.test.tsx",
       "src/chunkies/testkit/ts/**/*.test.ts",

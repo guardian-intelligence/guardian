@@ -1,5 +1,6 @@
 packages:
   - src/anveio/cal
+  - src/anveio/web
   - src/chunkies/host/ts
   - src/chunkies/testkit/ts
   - src/chunkies/transport/ts
