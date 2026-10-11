@@ -2,7 +2,7 @@
 # IPs (Cloudflare origins). It runs hostNetwork, so its traffic arrives with
 # the reserved host/remote-node identities — never a pod identity — and the
 # admit must be entity-based. This additive policy admits node-identity
-# traffic to the anveio-cal pods. The -primary value is listed so a future
+# traffic to the anveio-cal and anveio-web pods. The -primary value is listed so a future
 # Flagger takeover needs no policy change.
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy
@@ -23,6 +23,8 @@ spec:
         values:
           - anveio-cal
           - anveio-cal-primary
+          - anveio-web
+          - anveio-web-primary
   ingress:
     - fromEntities:
         - host

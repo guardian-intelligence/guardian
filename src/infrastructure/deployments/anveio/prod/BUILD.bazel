@@ -1,6 +1,7 @@
 filegroup(
     name = "manifests",
     srcs = [
+        "deck.yaml",
         "kustomization.yaml",
         "networkpolicy.yaml",
         "root-ingress-networkpolicy.yaml",

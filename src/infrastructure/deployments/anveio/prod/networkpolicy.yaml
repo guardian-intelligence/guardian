@@ -1,6 +1,7 @@
-# anveio-cal's own flows. The site is static: sign-in, token verification and
-# everything else the page does run in the visitor's browser, so beyond DNS
-# the server has nothing to say to anyone.
+# anveio-cal's and anveio-web's own flows. Both serve pages that call
+# nothing server-side (anveio-cal's sign-in and token checks run in the
+# visitor's browser; the deck is self-contained), so beyond DNS neither server
+# has anything to say to anyone.
 # Public ingress arrives with node identity (hostNetwork root ingress) and is
 # admitted by the additive CCNP in root-ingress-networkpolicy.yaml; selecting
 # only egress here leaves that admit intact.
@@ -21,6 +22,8 @@ spec:
         values:
           - anveio-cal
           - anveio-cal-primary
+          - anveio-web
+          - anveio-web-primary
   egress:
     - toEndpoints:
         - matchLabels:
