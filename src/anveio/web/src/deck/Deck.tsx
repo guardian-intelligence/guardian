@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { LOGO_SOURCES, SAMPLE_SOURCES, ValueChain } from "./ValueChain";
 import { Lockup } from "./Brand";
 import { Title } from "./Title";
@@ -10,6 +10,7 @@ import { DroneMarginFigure } from "./DroneMargin";
 import { LastMile } from "./LastMile";
 import { PhasePath } from "./PhasePath";
 import { ASSUMPTIONS } from "~/model/roadmap";
+import { useKeyboardNav } from "./keyboardNav";
 import { ICONS, LoopFlow } from "./LoopFlow";
 import { ROADMAP_SOURCES } from "./roadmapSources";
 const SLIDES = [
@@ -29,6 +30,7 @@ const SLIDES = [
 ] as const;
 
 type SlideId = (typeof SLIDES)[number]["id"];
+const SLIDE_IDS = SLIDES.map((s) => s.id);
 
 function Slide({
   id,
@@ -638,25 +640,6 @@ function WhoWeAre() {
   );
 }
 
-const CANVAS = { width: 1280, height: 720 } as const;
-const GUTTER = 16;
-
-// Scales the fixed 16:9 canvas so one whole slide fits the window.
-function useDeckScale() {
-  useEffect(() => {
-    const fit = () => {
-      const scale = Math.min(
-        (window.innerWidth - 2 * GUTTER) / CANVAS.width,
-        (window.innerHeight - 2 * GUTTER) / CANVAS.height,
-      );
-      document.documentElement.style.setProperty("--deck-scale", String(Math.max(0.1, scale)));
-    };
-    fit();
-    window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
-  }, []);
-}
-
 type SourceGroup = {
   name: string;
   items: readonly { label: string; url: string }[];
@@ -696,42 +679,10 @@ function Sources({
   );
 }
 
-// Arrow and page keys step one slide at a time.
-function useKeyboardNav() {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-      const delta = {
-        ArrowDown: 1,
-        PageDown: 1,
-        ArrowRight: 1,
-        ArrowUp: -1,
-        PageUp: -1,
-        ArrowLeft: -1,
-      }[event.key];
-      if (!delta) return;
-      event.preventDefault();
-      const tops = SLIDES.map(
-        (sl) => document.getElementById(sl.id)?.getBoundingClientRect().top ?? 0,
-      );
-      const current = tops.reduce(
-        (best, top, i) => (Math.abs(top) < Math.abs(tops[best]!) ? i : best),
-        0,
-      );
-      const next = Math.max(0, Math.min(SLIDES.length - 1, current + delta));
-      document
-        .getElementById(SLIDES[next]!.id)
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-}
-
+// Layout is pure CSS (see .deck in app.css), so the server-rendered page is
+// already final; script only adds keyboard navigation.
 export function Deck() {
-  useDeckScale();
-  useKeyboardNav();
+  useKeyboardNav(SLIDE_IDS);
   return (
     <>
       <main className="deck">
