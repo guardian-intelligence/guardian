@@ -13,7 +13,9 @@
 #   127.0.0.1:50000          Talos (talosctl/talm -e 127.0.0.1; 127.0.0.1 is
 #                            in every node's certSANs)
 #
-# The first connection after install, and after each Access session expires,
+# With a Mac transport credential in login Keychain, no Access browser login
+# is needed. The wrapper supplies it to cloudflared only through process env.
+# Otherwise the first connection after install, and after each session expires,
 # opens a browser for Cloudflare's one-time PIN; the token is cached under
 # ~/.cloudflared. Access is transport only: kubectl still needs a Keycloak
 # persona and talosctl its talosconfig. launchd restarts each listener on
@@ -68,8 +70,14 @@ resolve_cloudflared() {
 
 install() {
   [[ $# -eq 0 ]] || die "install takes no arguments"
-  local cloudflared name label hostname port plist log
+  local cloudflared name label hostname port plist log wrapper
   cloudflared="$(resolve_cloudflared)"
+  # A worktree can disappear and launchd cannot assume Terminal's Documents
+  # privacy grant. Keep the small credential wrapper in the stable tool home.
+  wrapper="${HOME}/.guardian/tools/bin/guardian-mgmt-tunnel"
+  mkdir -p "$(dirname "${wrapper}")"
+  cp "$(dirname "${BASH_SOURCE[0]}")/mgmt_tunnel_credential.py" "${wrapper}"
+  chmod 700 "${wrapper}"
 
   for route in "${ROUTES[@]}"; do
     IFS='|' read -r name label hostname port <<<"${route}"
@@ -85,11 +93,12 @@ install() {
   <string>${label}</string>
   <key>ProgramArguments</key>
   <array>
+    <string>/usr/bin/python3</string>
+    <string>${wrapper}</string>
+    <string>run</string>
     <string>${cloudflared}</string>
-    <string>access</string>
-    <string>tcp</string>
-    <string>--hostname</string><string>${hostname}</string>
-    <string>--url</string><string>127.0.0.1:${port}</string>
+    <string>${hostname}</string>
+    <string>${port}</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -122,7 +131,7 @@ EOF
     [[ -n "${ready}" ]] || die "${name} listener did not come up within 20s; check $(log_path "${label}")"
     echo "${name}: listening on 127.0.0.1:${port}"
   done
-  echo "first use opens a browser for the Cloudflare Access one-time PIN"
+  /usr/bin/python3 "${wrapper}" status
 }
 
 uninstall() {

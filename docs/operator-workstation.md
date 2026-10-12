@@ -20,7 +20,20 @@
   automatically — guardian_auth probes the loopback port before the direct
   endpoint. Point talosctl/talm at the second with `-e 127.0.0.1 -n
   <node VLAN IP>`. The first connection, and each one after the Access
-  session expires, opens a browser for Cloudflare's one-time PIN.
+  session expires, opens a browser for Cloudflare's one-time PIN unless the
+  Mac transport credential has been installed. `guardian-mgmt-dns` declares
+  the dedicated `guardian-operator-shovon-mac-v1` service token and admits it
+  only to the two operator applications. Relay its sensitive
+  `operator_mac_access_credential` output directly through stdin into
+  `/usr/bin/python3 tools/ops/mgmt_tunnel_credential.py store`, then reinstall
+  the tunnel agents. The credential lives in login Keychain and reaches
+  `cloudflared` through process environment, never argv, the repo, or a plist.
+  It removes Access PIN prompts across networks; Kubernetes personas and
+  Talos mTLS remain required. It is valid for one year, with a blocking
+  plan failure 30 days before expiry; increment the declared
+  `guardian_operator_mac_rotation.input` revision and
+  re-seed Keychain to rotate it. `tools/ops/mgmt-tunnel status` checks the
+  listeners; the credential helper's `status` reports expiry without secrets.
 - The kube API is reachable via the default `~/.kube/config`, whose only
   standing identity is the `read` persona (the `platform-agent` OIDC context,
   set up with `aspect infra auth`): cluster-wide read plus port-forward, and the

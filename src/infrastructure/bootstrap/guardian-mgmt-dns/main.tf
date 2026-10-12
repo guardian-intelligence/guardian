@@ -360,6 +360,43 @@ resource "cloudflare_zero_trust_access_policy" "guardian_operator" {
   ]
 }
 
+# Standing transport access for the founder's Mac across networks. This
+# credential reaches only the two operator applications; it confers no
+# Kubernetes or Talos API authority. Relay its sensitive output into the
+# workstation's login Keychain, never a launchd plist or shell argument.
+resource "terraform_data" "guardian_operator_mac_rotation" {
+  # Increment this revision to replace the token and renew its annual term.
+  input = 1
+}
+
+resource "cloudflare_zero_trust_access_service_token" "guardian_operator_mac" {
+  account_id = var.cloudflare_account_id
+  name       = "guardian-operator-shovon-mac-v${terraform_data.guardian_operator_mac_rotation.input}"
+  duration   = "8760h"
+
+  lifecycle {
+    create_before_destroy = true
+    replace_triggered_by  = [terraform_data.guardian_operator_mac_rotation]
+    postcondition {
+      condition     = timecmp(timeadd(plantimestamp(), "720h"), self.expires_at) < 0
+      error_message = "The operator Mac Access token expires within 30 days. Increment guardian_operator_mac_rotation.input and re-seed this Mac's Keychain before expiry."
+    }
+  }
+}
+
+resource "cloudflare_zero_trust_access_policy" "guardian_operator_mac" {
+  account_id = var.cloudflare_account_id
+  name       = "Guardian operator Mac transport credential"
+  decision   = "non_identity"
+  include = [
+    {
+      service_token = {
+        token_id = cloudflare_zero_trust_access_service_token.guardian_operator_mac.id
+      }
+    },
+  ]
+}
+
 resource "cloudflare_zero_trust_access_application" "guardian_operator" {
   for_each = local.operator_tunnel_routes
 
@@ -369,8 +406,12 @@ resource "cloudflare_zero_trust_access_application" "guardian_operator" {
   domain     = each.value.hostname
   policies = [
     {
-      id         = cloudflare_zero_trust_access_policy.guardian_operator.id
+      id         = cloudflare_zero_trust_access_policy.guardian_operator_mac.id
       precedence = 1
+    },
+    {
+      id         = cloudflare_zero_trust_access_policy.guardian_operator.id
+      precedence = 2
     },
   ]
 }

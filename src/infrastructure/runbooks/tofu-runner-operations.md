@@ -53,6 +53,25 @@ deletion is the acknowledgement that closes the alert. (A failed *scheduled*
 Job pages `TofuRootJobFailed` instead, which resolves on the root's next
 scheduled success on its own.)
 
+## Apply a bounded change once while preserving plan mode
+
+A plan-mode root may execute one reviewed change through a GitOps-owned
+`batch/v1 Job`, without adopting auto-apply for the root. Copy its declared
+CronJob pod template, set `MODE=apply`, and scope `TF_CLI_ARGS_plan` to the
+reviewed resources. The runner saves that targeted plan and applies the same
+plan. This is an exceptional one-shot operation, not a second reconcile loop.
+
+Before merging, read a full root plan and require that every change belongs
+to the requested operation. The operator Mac credential's first application
+is `job-guardian-mgmt-dns-operator-mac.yaml`: only the new token/policy and
+the two operator Access applications, with no public-origin or DNS changes.
+Use a unique `tofu-<root>-manual-<purpose>-<revision>` name so the existing
+latched failure alert covers it. Do not add a TTL: Flux would recreate a
+deleted declared Job. Require Job completion, relay any sensitive outputs
+to their consumer, verify a full-root no-op plan and consumer authentication,
+then remove the Job declaration in a follow-up PR. The standing CronJob
+keeps its existing mode throughout.
+
 ## Pause a root (incident-time manual changes)
 
 An apply-mode root will revert a manual provider-console change on its next
