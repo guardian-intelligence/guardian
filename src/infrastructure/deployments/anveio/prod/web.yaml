@@ -160,27 +160,45 @@ spec:
         - anveio.com
         - www.anveio.com
       secretName: anveio-origin-tls
-  # www is routed to the same pods rather than redirected here: the server
+  # www is routed to anveio-cal rather than redirected here: the server
   # answers it with a 301 to the apex, so both hosts keep the AOP mTLS gate
   # above (an ingress-nginx from-to-www server block would not carry it).
   rules:
     - host: anveio.com
       http:
         paths:
-          # The investor deck (deck.yaml) serves everything under /deck; www
-          # stays on anveio-cal, which redirects it here.
-          - path: /deck
-            pathType: Prefix
-            backend:
-              service:
-                name: anveio-web
-                port:
-                  number: 80
-          - path: /
+          # Shovon's contact card (this Deployment) lives under /shovon. Google
+          # sign-in returns to /oauth/google.html at the root, the redirect URI
+          # registered with the anveio-cal OAuth client, and /cal is the card's
+          # old address, which the server redirects to /shovon.
+          - path: /shovon
             pathType: Prefix
             backend:
               service:
                 name: anveio-cal
+                port:
+                  number: 80
+          - path: /oauth
+            pathType: Prefix
+            backend:
+              service:
+                name: anveio-cal
+                port:
+                  number: 80
+          - path: /cal
+            pathType: Prefix
+            backend:
+              service:
+                name: anveio-cal
+                port:
+                  number: 80
+          # Everything else is anveio-web (deck.yaml): the company pages, the
+          # privacy policy and the deck.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: anveio-web
                 port:
                   number: 80
     - host: www.anveio.com

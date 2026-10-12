@@ -8,8 +8,6 @@ import { pageHead, Site } from "~/site/Site";
 // (src/infrastructure/base/apps/observability.yaml keeps logs three months),
 // the anveio.com Email Routing rules in guardian-mgmt-dns and the zone's
 // Network Error Logging headers, which Cloudflare adds at its edge.
-// TRANSITIONAL: src/anveio/cal/public/privacy.html carries a copy of this text
-// until the ingress sends /privacy here; keep the two identical.
 export const Route = createFileRoute("/privacy")({
   component: Privacy,
   head: () =>

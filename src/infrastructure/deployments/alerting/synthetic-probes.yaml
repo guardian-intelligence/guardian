@@ -153,9 +153,10 @@ spec:
         probe_namespace: postflight-runner
         guardian_surface: postflight
 ---
-# anveio.com through the full public path: the company home page, the privacy
-# policy Google's OAuth consent screen links, Shovon's contact card and its
-# Google sign-in landing page (the registered redirect URI). No service-class
+# anveio.com through the full public path: the company home page, its contact
+# page, the privacy policy Google's OAuth consent screen links, Shovon's
+# contact card and its Google sign-in landing page (the registered redirect
+# URI). No service-class
 # twin: the anveio CNPs admit only node-identity ingress, so an in-cluster
 # prober pod is deliberately not admitted.
 apiVersion: operator.victoriametrics.com/v1beta1
@@ -177,6 +178,7 @@ spec:
     staticConfig:
       targets:
         - https://anveio.com/
+        - https://anveio.com/contact
         - https://anveio.com/privacy
         - https://anveio.com/shovon
         - https://anveio.com/oauth/google.html
