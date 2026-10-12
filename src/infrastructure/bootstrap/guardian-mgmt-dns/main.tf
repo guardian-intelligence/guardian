@@ -648,7 +648,9 @@ resource "cloudflare_dns_record" "anveio_com_caa" {
 }
 
 # Inbound mail for anveio.com: careers@, the address on the job descriptions,
-# forwarded to the founder inbox; everything else is dropped, as for
+# and shovon@, the founder's company address (vendor accounts that require a
+# company domain, such as the Claude Console), both forwarded to the founder
+# inbox; everything else is dropped, as for
 # guardianintelligence.org. Email Routing itself is enabled on the zone by the
 # edge-policy root (it needs Zone Settings Write); it adds and locks the MX
 # records. The apex SPF record, adopted from the pre-Guardian zone, is owned
@@ -678,9 +680,31 @@ resource "cloudflare_email_routing_rule" "anveio_careers" {
   ]
 }
 
+resource "cloudflare_email_routing_rule" "anveio_founder" {
+  zone_id  = data.cloudflare_zone.anveio_com.id
+  name     = "shovon@ to the founder inbox"
+  enabled  = true
+  priority = 0
+
+  matchers = [
+    {
+      type  = "literal"
+      field = "to"
+      value = "shovon@anveio.com"
+    },
+  ]
+
+  actions = [
+    {
+      type  = "forward"
+      value = [cloudflare_email_routing_address.founder_inbox.email]
+    },
+  ]
+}
+
 resource "cloudflare_email_routing_catch_all" "anveio_com" {
   zone_id = data.cloudflare_zone.anveio_com.id
-  name    = "drop everything but careers@"
+  name    = "drop everything but careers@ and shovon@"
   enabled = true
 
   matchers = [
