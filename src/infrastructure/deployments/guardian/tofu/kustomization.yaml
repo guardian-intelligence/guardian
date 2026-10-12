@@ -11,7 +11,6 @@ resources:
   - cronjob-guardian-github.yaml
   - cronjob-guardian-codeql.yaml
   - cronjob-guardian-mgmt-dns.yaml
-  - job-guardian-mgmt-dns-anveio-founder-mail.yaml
   - cronjob-guardian-mgmt-cloudflare-tokens.yaml
   - cronjob-guardian-mgmt.yaml
 
