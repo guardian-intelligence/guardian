@@ -66,3 +66,13 @@ output "cloud_agent_access_client_secrets" {
   }
   sensitive = true
 }
+
+output "operator_mac_access_credential" {
+  description = "Transport-only credential relayed through stdin into this Mac's login Keychain."
+  value = {
+    client_id     = cloudflare_zero_trust_access_service_token.guardian_operator_mac.client_id
+    client_secret = cloudflare_zero_trust_access_service_token.guardian_operator_mac.client_secret
+    expires_at    = cloudflare_zero_trust_access_service_token.guardian_operator_mac.expires_at
+  }
+  sensitive = true
+}

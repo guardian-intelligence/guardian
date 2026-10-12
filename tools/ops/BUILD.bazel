@@ -38,3 +38,14 @@ py_test(
     data = ["workspace-watch"],
     python_version = "3.12",
 )
+
+py_test(
+    name = "mgmt_tunnel_credential_test",
+    srcs = [
+        "mgmt_tunnel_credential.py",
+        "mgmt_tunnel_credential_test.py",
+    ],
+    main = "mgmt_tunnel_credential_test.py",
+    imports = ["."],
+    python_version = "3.12",
+)
