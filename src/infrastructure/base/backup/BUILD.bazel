@@ -3,7 +3,6 @@ filegroup(
     srcs = [
         "clickhouse-backup-strategy.yaml",
         "etcd-snapshots.yaml",
-        "etcd-consolidation-proof.yaml",
         "postgres-backup-class.yaml",
     ],
     visibility = ["//visibility:public"],
