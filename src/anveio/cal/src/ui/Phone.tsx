@@ -386,7 +386,7 @@ export function Phone({ forced }: Props) {
               draggable={false}
             />
             <h1 className="t-title1">Shovon Hasan</h1>
-            <p className="t-sub secondary">Founder, Guardian</p>
+            <p className="t-sub secondary">Founder, Anveio</p>
           </header>
         )}
         {flow.host && (
