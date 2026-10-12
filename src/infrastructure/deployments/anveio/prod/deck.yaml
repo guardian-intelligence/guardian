@@ -1,6 +1,5 @@
-# anveio.com's company pages and investor deck (src/anveio/web): everything on
-# anveio.com except /shovon, /oauth and /cal, through the anveio-cal Ingress in
-# web.yaml. Three replicas preserve two ready servers
+# The investor deck (src/anveio/web), served at anveio.com/deck through the
+# anveio-cal Ingress in web.yaml. Three replicas preserve two ready servers
 # during a one-node management-cluster replacement. Verify placement across
 # all three control planes before draining; spread stays soft so a replacement
 # can schedule while one node is unavailable. Image automation owns the pin.

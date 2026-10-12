@@ -33,7 +33,7 @@ export function Contact() {
             </dd>
           </div>
           <div>
-            <dt>Book time with the founder</dt>
+            <dt>Shovon’s contact card (an experimental prototype)</dt>
             <dd>
               <a href="/shovon">anveio.com/shovon</a>
             </dd>

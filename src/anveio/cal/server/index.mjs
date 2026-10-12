@@ -1,8 +1,9 @@
 // anveio.com/shovon's origin: serves the `vp build` output in ../dist with no
 // dependencies beyond node: builtins. The ingress sends it /shovon/**, the
 // Google sign-in landing page under /oauth/ (its registered redirect URI stays
-// at the site root) and the whole www host; the rest of anveio.com is
-// anveio-web. Every file is read into memory at
+// at the site root), /cal and the whole www host; the rest of anveio.com is
+// anveio-web (until the ingress flips, see resolveRootTransitional). Every
+// file is read into memory at
 // startup and requests are answered from that table only, so no request path
 // ever reaches the filesystem and traversal has nothing to escape into.
 import { createHash } from "node:crypto";
@@ -104,11 +105,26 @@ function redirect(req, res, location) {
 // served at /shovon/x.
 const BASE = "/shovon";
 
+// TRANSITIONAL: the ingress still sends all of anveio.com but /deck here until
+// the follow-up PR points / at anveio-web. Until then the root keeps answering
+// as it did before the move: / and other extensionless paths with the card
+// (its assets load from /shovon/, which also reaches this server), and
+// /privacy with public/privacy.html, a static copy of anveio-web's policy.
+// The follow-up deletes this function, its call in resolve() and
+// public/privacy.html, and root paths go back to being misses.
+const transitionalPrivacy = files.get("/privacy.html");
+if (!transitionalPrivacy) throw new Error(`no privacy.html under ${root}`);
+function resolveRootTransitional(path) {
+  if (path === "/privacy") return transitionalPrivacy;
+  const last = path.slice(path.lastIndexOf("/") + 1);
+  return last.includes(".") ? undefined : index;
+}
+
 // Maps a request path to a dist file. Only /shovon/** and /oauth/** are this
 // server's; anything else is a miss.
 function resolve(path) {
   if (path.startsWith("/oauth/")) return files.get(path);
-  if (path !== BASE && !path.startsWith(`${BASE}/`)) return undefined;
+  if (path !== BASE && !path.startsWith(`${BASE}/`)) return resolveRootTransitional(path);
   const rest = path.slice(BASE.length) || "/";
   if (rest === "/") return index;
   // The sign-in landing page has one URL, the registered one.
@@ -146,6 +162,9 @@ const server = createServer((req, res) => {
   // The prototype lived at /cal, then at the site root, before /shovon.
   if (path === "/cal" || path.startsWith("/cal/"))
     return redirect(req, res, `${BASE}${url.search}`);
+  // TRANSITIONAL (removed with resolveRootTransitional): the policy's old
+  // file URL, which anveio-web also redirects once it serves the root.
+  if (path === "/privacy.html") return redirect(req, res, `/privacy${url.search}`);
 
   const file = resolve(path);
   if (!file) return text(req, res, 404, "Not found");

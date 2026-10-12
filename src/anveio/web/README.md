@@ -7,6 +7,10 @@ to Shovon's contact card (`src/anveio/cal`); `/privacy` covers both apps.
 The company pages share the deck's tokens and fonts and are laid out by CSS
 alone (`src/styles/site.css`), so they render the same without JavaScript.
 
+TRANSITIONAL: until the ingress flip lands, the ingress still sends only
+`/deck` here, and anveio-cal answers `/` with the contact card and `/privacy`
+with a static copy of this app's policy.
+
 ```sh
 vp run @guardian/anveio-web#dev   # from the repo root; http://127.0.0.1:4254
 ```

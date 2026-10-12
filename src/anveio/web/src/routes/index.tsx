@@ -6,7 +6,7 @@ const head = pageHead({
   path: "/",
   title: "Anveio — The Data Company of Bangladesh",
   description:
-    "Anveio pays farms in Bangladesh to record drone video and turns each flight into a digital twin of the farm.",
+    "Anveio pays farms in Bangladesh to record drone video. We’re building a digital twin of each farm from that footage.",
 });
 
 export const Route = createFileRoute("/")({
@@ -31,11 +31,11 @@ const WORK = [
   },
   {
     title: "Map",
-    body: "A first pass over a plot maps it into a digital twin: crop beds and trellises, drainage lines, pipes, wiring, houses and sheds. Each flight after that updates the twin with what changed, from a rusting roof to a bean plant’s new pods.",
+    body: "We’re building a digital twin of each farm from its drone footage. A first pass over a plot would map its crop beds and trellises, drainage lines, pipes, wiring, houses and sheds, and each flight after that would update the twin with what changed, from a rusting roof to a bean plant’s new pods.",
   },
   {
     title: "Ground truth",
-    body: "Footage shows what a farm looks like. The farm’s own records, of what was picked, what was sprayed and which pests turned up, show what happened after each decision. Together they make data an AI model can be tested against.",
+    body: "Footage shows what a farm looks like. The farm’s own records, of what was picked, what was sprayed and which pests turned up, show what happened after each decision. Together they could become data an AI model is tested against.",
   },
   {
     title: "License",
@@ -51,8 +51,9 @@ export function Home() {
           The Data Company of Bangladesh
         </h1>
         <p className="site-lead">
-          Fly a drone over a farm often enough and the footage becomes a digital twin of it: every
-          field, drain, pipe and plant, and how each one changes.
+          Fly a drone over a farm often enough and the footage holds everything a digital twin of it
+          needs: every field, drain, pipe and plant, and how each one changes. We’re building that
+          twin.
         </p>
       </section>
 

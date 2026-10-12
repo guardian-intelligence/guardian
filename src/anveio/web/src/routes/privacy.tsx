@@ -5,8 +5,11 @@ import { pageHead, Site } from "~/site/Site";
 // anveio-cal client links this URL, so it must stay at /privacy and keep
 // covering the sign-in on /shovon. Every line describes what the code does
 // today: src/anveio/cal/src/auth/google.ts for the sign-in, the ingress logs
-// (src/infrastructure/base/apps/observability.yaml keeps logs three months)
-// and the anveio.com Email Routing rules in guardian-mgmt-dns.
+// (src/infrastructure/base/apps/observability.yaml keeps logs three months),
+// the anveio.com Email Routing rules in guardian-mgmt-dns and the zone's
+// Network Error Logging headers, which Cloudflare adds at its edge.
+// TRANSITIONAL: src/anveio/cal/public/privacy.html carries a copy of this text
+// until the ingress sends /privacy here; keep the two identical.
 export const Route = createFileRoute("/privacy")({
   component: Privacy,
   head: () =>
@@ -24,6 +27,12 @@ const INVENTORY = [
     where:
       "Cloudflare, which carries all traffic to the site, and the access logs of our own servers",
     kept: "Our logs: up to three months, then deleted automatically. Cloudflare: under its own policy",
+  },
+  {
+    what: "Network error reports: the address your browser failed to load, the kind of error, your IP address and the time",
+    when: "Only if your browser supports Network Error Logging and a request to the site fails",
+    where: "Cloudflare, which asks browsers to send them so it can spot problems on its network",
+    kept: "Under Cloudflare’s own policy; we don’t receive them",
   },
   {
     what: "Your Google account ID, name, email address and profile picture link",
@@ -50,8 +59,9 @@ export function Privacy() {
         <p>
           This policy covers anveio.com, run by Anveio Foundation (“Anveio”, “we”), a Delaware
           corporation. That includes this website, the Anveio deck at anveio.com/deck, and
-          anveio.com/shovon, our founder Shovon Hasan’s contact card, where Rumi, an assistant,
-          takes messages and schedules time with him.
+          anveio.com/shovon, our founder Shovon Hasan’s contact card. The card is an experimental
+          prototype: Rumi, the assistant on it, follows a script, and nothing you leave there is
+          sent to anyone.
         </p>
 
         <h2>What we collect</h2>
@@ -79,8 +89,10 @@ export function Privacy() {
         </div>
         <p>
           That is everything. The site sets no cookies, stores nothing in your browser and runs no
-          analytics or advertising. The only outside service a page talks to is Google, and only
-          when you sign in with Google.
+          analytics or advertising. Apart from Cloudflare, which carries the site, the only outside
+          service a page talks to is Google, and only when you sign in with Google. Cloudflare asks
+          your browser to remember, for up to a week, where to send the network error reports above;
+          the browser keeps that instruction itself, and you can clear it with your browsing data.
         </p>
 
         <h2>Sign in with Google</h2>

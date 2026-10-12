@@ -24,7 +24,8 @@ const unlisted = { headers: { "x-robots-tag": "noindex, nofollow, noarchive" } }
 
 // This app is anveio.com: the company pages at /, /contact and /privacy and the
 // deck at /deck. The ingress sends everything here except /shovon/**, /oauth/**
-// and /cal (anveio-cal, Shovon's contact card). Every page shares the built
+// and /cal (anveio-cal, Shovon's contact card); until the ingress flip lands it
+// sends only /deck/**. Every page shares the built
 // chunks under /deck/assets and the fonts and images under public/deck.
 export default defineConfig(({ mode }) => ({
   build: {
