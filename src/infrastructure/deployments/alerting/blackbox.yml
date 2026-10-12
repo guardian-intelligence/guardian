@@ -1,4 +1,15 @@
 modules:
+  # Browser-compatible User-Agent avoids Cloudflare Browser Integrity Check's
+  # rejection of headerless HTTP clients. Keep the edge protections enabled.
+  http_anveio_deck:
+    prober: http
+    timeout: 5s
+    http:
+      preferred_ip_protocol: ip4
+      follow_redirects: false
+      valid_status_codes: [200]
+      headers:
+        User-Agent: "Mozilla/5.0 (compatible; GuardianAvailabilityProbe/1.0)"
   http_2xx:
     prober: http
     timeout: 5s

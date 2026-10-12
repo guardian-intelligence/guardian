@@ -44,6 +44,10 @@ export default function () {
       guardian_origin: __ENV.EDGE_K6_ORIGIN || "public-edge",
     });
     const response = http.get(target.url, {
+      headers:
+        target.surface === "anveio-deck"
+          ? { "User-Agent": "Mozilla/5.0 (compatible; GuardianAvailabilityProbe/1.0)" }
+          : {},
       redirects: 0,
       responseType: "none",
       timeout: __ENV.EDGE_K6_REQUEST_TIMEOUT || "10s",

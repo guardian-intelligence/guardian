@@ -71,6 +71,56 @@ spec:
         probe_namespace: tenant-guardian-prod
         guardian_surface: company-site
 ---
+# Investor-audit route: monitor the deck Service and its exact public URL.
+# Anveio uses proxied DNS origins rather than the Guardian load balancer.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: anveio-deck-prod-service
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  jobName: probe/anveio-deck/prod/service
+  interval: 15s
+  module: http_anveio_deck
+  vmProberSpec:
+    url: blackbox-exporter.tenant-root.svc:9115
+    path: /probe
+  targets:
+    staticConfig:
+      targets:
+        - http://anveio-web.tenant-guardian-prod.svc/deck
+      labels:
+        probe_class: service
+        probe_namespace: tenant-guardian-prod
+        guardian_surface: anveio-deck
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: anveio-deck-prod-edge
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  jobName: probe/anveio-deck/prod/edge
+  interval: 15s
+  module: http_anveio_deck
+  vmProberSpec:
+    url: blackbox-exporter.tenant-root.svc:9115
+    path: /probe
+  targets:
+    staticConfig:
+      targets:
+        - https://anveio.com/deck
+      labels:
+        probe_class: edge
+        probe_namespace: tenant-guardian-prod
+        guardian_surface: anveio-deck
+---
 # Postflight control-plane routes through the full public path. Both
 # endpoints are POST-only, so the http_405 module treats the router's 405
 # as success — what this watches is the connect path, which is exactly

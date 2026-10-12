@@ -1,6 +1,8 @@
 # The investor deck (src/anveio/web), served at anveio.com/deck through the
-# anveio-cal Ingress in web.yaml. Same shape as anveio-cal: two non-root
-# replicas, a PDB, and image automation owning the pin.
+# anveio-cal Ingress in web.yaml. Three replicas preserve two ready servers
+# during a one-node management-cluster replacement. Verify placement across
+# all three control planes before draining; spread stays soft so a replacement
+# can schedule while one node is unavailable. Image automation owns the pin.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,7 +15,7 @@ metadata:
     guardian.dev/product: anveio
     guardian.dev/stage: prod
 spec:
-  replicas: 2
+  replicas: 3
   revisionHistoryLimit: 3
   strategy:
     type: RollingUpdate
@@ -127,7 +129,7 @@ metadata:
     guardian.dev/product: anveio
     guardian.dev/stage: prod
 spec:
-  minAvailable: 1
+  minAvailable: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: anveio-web

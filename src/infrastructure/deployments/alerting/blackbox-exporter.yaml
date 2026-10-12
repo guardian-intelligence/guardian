@@ -154,6 +154,7 @@ spec:
               values:
                 - company-site
                 - company-site-primary
+                - anveio-web
       toPorts:
         - ports:
             - port: "8080"
@@ -197,6 +198,7 @@ spec:
         values:
           - company-site
           - company-site-primary
+          - anveio-web
   ingress:
     - fromEndpoints:
         - matchLabels:

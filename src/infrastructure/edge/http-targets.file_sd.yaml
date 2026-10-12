@@ -1,4 +1,10 @@
 - targets:
+    - https://anveio.com/deck
+  labels:
+    guardian_surface: anveio-deck
+    guardian_stage: prod
+    guardian_expected_statuses: "200"
+- targets:
     - https://guardianintelligence.org/
   labels:
     guardian_surface: company-site
