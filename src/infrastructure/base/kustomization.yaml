@@ -12,7 +12,6 @@ resources:
   - secrets/cloudflare-origin-tls.yaml
   - backup/clickhouse-backup-strategy.yaml
   - backup/etcd-snapshots.yaml
-  - backup/etcd-consolidation-proof.yaml
   - backup/postgres-backup-class.yaml
   - networking/metallb.yaml
   - networking/subnet-mtu.yaml
