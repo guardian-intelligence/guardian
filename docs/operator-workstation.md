@@ -2,9 +2,11 @@
 
 ## Talos access from the operator workstation
 
-- The live talosconfig is `src/infrastructure/talm/talosconfig` (gitignored;
-  its encrypted twin `talosconfig.encrypted` is committed — decryption is
-  covered by the cold-boot runbook). **Do not trust `~/.talos/config`**: it
+- Talos administrative credentials stay sealed between recovery ceremonies.
+  For an authorized node replacement, follow the
+  [encrypted node replacement runbook](../src/infrastructure/runbooks/wiped-node-drill.md).
+  Do not keep a plaintext administrative config in the checkout.
+  **Do not trust `~/.talos/config`**: it
   holds endpoints of a previous cluster generation and every one of them
   times out. If `talosctl` hangs on port 50000, you are almost certainly
   using the stale global config.

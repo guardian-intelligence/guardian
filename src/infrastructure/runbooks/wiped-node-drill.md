@@ -26,6 +26,11 @@ Node map:
 
 1. Restore custody to tmpfs and assemble the Talm mint root described in
    `cert-rotation.md`.
+   On macOS, use a Linux container's actual `/dev/shm` tmpfs for the ceremony.
+   A workstation Talos client can consume the restored config through an
+   anonymous descriptor without writing a plaintext credential file. Keep
+   the encrypted repository separate from restore data, then wipe the
+   custody bundle and remove the temporary container when the ceremony ends.
 2. Confirm all nodes and Flux resources are Ready:
 
    ```sh

@@ -1,0 +1,95 @@
+# One fresh encrypted snapshot for the consolidation recovery proof.
+# Same declared backup template and limited os:etcd:backup identity.
+# Remove this declaration after decrypt/status validation; no TTL to avoid
+# Flux recreating the completed Job.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: talos-backup-consolidation-proof-20261012
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/name: talos-backup
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: backup
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 1200
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: talos-backup
+        app.kubernetes.io/part-of: guardian
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      containers:
+      - name: talos-backup
+        image: ghcr.io/siderolabs/talos-backup:v0.1.0-beta.3@sha256:05c86663b251a407551dc948097e32e163a345818117eb52c573b0447bd0c7a7
+        command:
+        - /talos-backup
+        workingDir: /tmp
+        env:
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: guardian-backups-creds
+              key: accessKey
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: guardian-backups-creds
+              key: secretKey
+        - name: AWS_REGION
+          valueFrom:
+            secretKeyRef:
+              name: guardian-backups-creds
+              key: region
+        - name: CUSTOM_S3_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: guardian-backups-creds
+              key: endpoint
+        - name: BUCKET
+          valueFrom:
+            secretKeyRef:
+              name: guardian-backups-creds
+              key: bucketName
+        - name: USE_PATH_STYLE
+          value: 'false'
+        - name: CLUSTER_NAME
+          value: guardian-mgmt
+        - name: S3_PREFIX
+          value: talos-etcd/guardian-mgmt
+        - name: AGE_X25519_PUBLIC_KEY
+          value: age18ykjst8aftuesxn3z68cfjghkpsk5jft9klehlwl47ua5r9mxevqr02ygh
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp
+        - mountPath: /.talos
+          name: talos
+        - mountPath: /var/run/secrets/talos.dev
+          name: talos-secrets
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: talos
+        emptyDir: {}
+      - name: talos-secrets
+        secret:
+          secretName: talos-backup-secrets
