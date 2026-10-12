@@ -11,12 +11,6 @@ stays at the site root (`server/index.mjs` and the dev server both serve it
 there). `/cal` redirects to `/shovon`. The rest of anveio.com, including the
 privacy policy that covers this page, is `src/anveio/web`.
 
-TRANSITIONAL: until the ingress flip lands, the ingress still sends every
-path but `/deck` here, so the server keeps answering `/` (and other
-extensionless root paths) with the card and `/privacy` with
-`public/privacy.html`, a static copy of `src/anveio/web`'s policy. The flip's
-PR removes both.
-
 ## Run it
 
 ```sh

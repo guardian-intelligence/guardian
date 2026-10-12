@@ -71,9 +71,6 @@ cd "$$work/src/anveio/cal"
 "$$node" "$$vp" build
 test -s dist/index.html
 test -s dist/oauth/google.html
-# TRANSITIONAL: the root /privacy copy the server answers under the old
-# ingress; the ingress-flip follow-up deletes it.
-test -s dist/privacy.html
 # The image is the static output plus the dependency-free server that
 # serves it: /app/dist and /app/server/index.mjs.
 stage="$$work/stage"
