@@ -174,9 +174,31 @@ a {
    window, less a 16px gutter each side; the frame reserves the scaled box.
    The scale is pure CSS -- tan(atan2(a, b)) is a / b as a plain number --
    so the server-rendered page lays out exactly as the hydrated one: no
-   script ever sizes anything. */
+   script ever sizes anything.
+   iOS Safari left every slide at 1280px when atan2() was handed viewport
+   units directly (100vw - 32px), so the room is registered as <length>,
+   which computes it to plain px before it reaches atan2(), and the scale
+   is registered as <number> so transform gets a bare number. The frame is
+   sized from those lengths alone, without the scale. */
+@property --deck-room-w {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+@property --deck-room-h {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+@property --deck-scale {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
 :root {
-  --deck-scale: min(tan(atan2(100vw - 32px, 1280px)), tan(atan2(100dvh - 32px, 720px)));
+  --deck-room-w: calc(100vw - 32px);
+  --deck-room-h: calc(100dvh - 32px);
+  --deck-scale: min(tan(atan2(var(--deck-room-w), 1280px)), tan(atan2(var(--deck-room-h), 720px)));
 }
 .deck {
   display: grid;
@@ -188,8 +210,8 @@ a {
   scroll-margin-top: 16px;
 }
 .slide-frame {
-  width: calc(1280px * var(--deck-scale));
-  height: calc(720px * var(--deck-scale));
+  width: min(var(--deck-room-w), var(--deck-room-h) * 16 / 9);
+  height: min(var(--deck-room-w) * 9 / 16, var(--deck-room-h));
 }
 .slide-inner {
   width: 1280px;
