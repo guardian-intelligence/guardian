@@ -114,7 +114,18 @@ install() {
 </plist>
 EOF
     launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "${plist}"
+    # bootout can return while launchd is still removing the old service.
+    # An immediate bootstrap then returns EIO; retry this same declared
+    # plist rather than leaving the operator without an API listener.
+    local loaded=""
+    for _ in $(seq 1 20); do
+      if launchctl bootstrap "gui/$(id -u)" "${plist}" 2>/dev/null; then
+        loaded=1
+        break
+      fi
+      sleep 1
+    done
+    [[ -n "${loaded}" ]] || die "${name} agent could not be registered; inspect ${plist} with launchctl"
     echo "installed ${label} (${name}: ${hostname} -> 127.0.0.1:${port})"
   done
 

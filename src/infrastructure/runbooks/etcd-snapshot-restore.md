@@ -24,6 +24,13 @@ ash-water `206.223.228.87`.
 
 ## Fetch and decrypt
 
+Before a node replacement, prove a fresh snapshot can be decrypted with the
+sealed `guardian_etcd_snapshot_age_key` and passes `etcdutl snapshot status`
+on tmpfs. A successful upload alone does not prove recoverability. The
+CronJob's public recipient must equal the identity's `age-keygen -y` output;
+changing an operator identity also requires updating that public pin in IaC.
+Retain older encrypted snapshots when a previous identity is unavailable.
+
 ```sh
 # 1. Custody holds both the R2 credential source-of-truth and the age
 #    identity key (custody.env guardian_etcd_snapshot_age_key).
