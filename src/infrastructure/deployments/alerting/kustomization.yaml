@@ -31,3 +31,18 @@ resources:
   - trust-alerts.yaml
   - tsdb-alerts.yaml
   - vmalert-vlogs.yaml
+patches:
+  # Postflight has no public execution service while temporarily paused.
+  # Company, infrastructure, storage, and identity probes remain active.
+  - target:
+      group: operator.victoriametrics.com
+      version: v1beta1
+      kind: VMProbe
+      name: postflight-prod-edge
+    patch: |-
+      apiVersion: operator.victoriametrics.com/v1beta1
+      kind: VMProbe
+      metadata:
+        name: postflight-prod-edge
+        namespace: tenant-root
+      $patch: delete

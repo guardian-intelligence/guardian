@@ -24,6 +24,5 @@ resources:
   - kargo-state-metrics.yaml
   - kargo-alerts.yaml
   - remediator.yaml
-  - cli-nightly-promoter.yaml
-  - cli-deeptest-runner.yaml
-  - cli-install-canary.yaml
+  # The Postflight CLI release train is paused with the product. These files
+  # retain the jobs, probes, and policies needed for an explicit restart.
