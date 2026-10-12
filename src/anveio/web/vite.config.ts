@@ -25,7 +25,7 @@ const unlisted = { headers: { "x-robots-tag": "noindex, nofollow, noarchive" } }
 // anveio.com routes only /deck/** to this app (the rest of the site is
 // anveio-cal), so every URL it serves lives under /deck: the page, public/deck
 // and the built chunks.
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   build: {
     assetsDir: "deck/assets",
     rollupOptions: {
@@ -41,19 +41,23 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
-  plugins: [
-    stripRouteManifestPaths,
-    tanstackStart({ srcDirectory: "src" }),
-    viteReact(),
-    nitro({
-      routeRules: {
-        "/deck": unlisted,
-        "/deck/**": unlisted,
-      },
-    }),
-  ],
+  // Unit tests inspect source artifacts and do not need SSR worker servers.
+  plugins:
+    mode === "test"
+      ? []
+      : [
+          stripRouteManifestPaths,
+          tanstackStart({ srcDirectory: "src" }),
+          viteReact(),
+          nitro({
+            routeRules: {
+              "/deck": unlisted,
+              "/deck/**": unlisted,
+            },
+          }),
+        ],
   test: {
     exclude: ["**/node_modules/**"],
     passWithNoTests: true,
   },
-});
+}));

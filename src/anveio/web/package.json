@@ -9,7 +9,8 @@
     "build": "vp exec tsc -p tsconfig.json && vp build",
     "preview": "vp preview",
     "start": "node ./.output/server/index.mjs",
-    "typecheck": "vp exec tsc -p tsconfig.json"
+    "typecheck": "vp exec tsc -p tsconfig.json",
+    "social-preview": "node scripts/social-preview.mjs"
   },
   "dependencies": {
     "@guardian/brand": "workspace:*",
@@ -20,6 +21,7 @@
     "react-dom": "catalog:"
   },
   "devDependencies": {
+    "@playwright/test": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
