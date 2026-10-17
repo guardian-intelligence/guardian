@@ -8,6 +8,7 @@ filegroup(
         [
             "Chart.yaml",
             "secureboot-assets.yaml",
+            "annual-controlplane-assets.yaml",
             "values.yaml",
             "wum-worker-assets.yaml",
             "nodes/*.yaml",

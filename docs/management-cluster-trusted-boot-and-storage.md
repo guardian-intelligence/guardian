@@ -1,18 +1,21 @@
 # Management cluster trusted boot and data at rest
 
-This document is the current control description for the three-node
-`guardian-mgmt` cluster. It covers the boot trust chain, local NVMe
+This document describes the required controls for the `guardian-mgmt`
+control-plane and storage nodes. It covers the boot trust chain, local NVMe
 encryption, LINSTOR volume encryption, synthetic-data exceptions, and the
 evidence an operator or auditor can collect.
 
-The dedicated `ash-worker0` WUM node is outside this storage-control boundary:
-it uses the same Sidero Secure Boot chain but has no etcd, OpenBao, LINSTOR data
-pool, or TPM-sealed system volumes. Its procedure and evidence are in
-`src/infrastructure/runbooks/wum-worker-reinstall.md`.
+The annual `ash-worker0` conversion is staged in
+`src/infrastructure/runbooks/annual-controlplane-conversion.md`. Its target uses
+TPM-encrypted system volumes and the separately pinned v1.13.10 assets in
+`src/infrastructure/talm/annual-controlplane-assets.yaml`. The initial join keeps
+its WUM data SSD intact, declares no LINSTOR pool, and excludes OpenBao until the
+static seal is independently installed and verified. Source declarations do not
+prove that the conversion or these runtime controls have been applied.
 
 ## Boot trust
 
-All three nodes run Talos from a Secure Boot UKI produced by the Sidero Labs
+Control-plane nodes must run Talos from a Secure Boot UKI produced by the Sidero Labs
 Image Factory. UEFI Secure Boot is enabled in User mode. The factory
 Secure Boot ISO enrolled the Sidero Labs PK, KEK, and `db` authorization
 files while each board was in Setup mode.

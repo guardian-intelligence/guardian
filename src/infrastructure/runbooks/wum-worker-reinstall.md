@@ -1,5 +1,9 @@
 # WUM worker reinstall
 
+This is the historical disposable-worker procedure. The annual control-plane
+conversion uses `annual-controlplane-conversion.md`; do not apply this older
+worker profile to an annual control-plane node or wipe its preserved data SSD.
+
 This procedure wipes and rebuilds a disposable regional WUM worker in the
 `guardian-mgmt` Kubernetes cluster. Unlike the management control planes, this
 worker uses ordinary Talos with firmware Secure Boot disabled. It has no etcd
