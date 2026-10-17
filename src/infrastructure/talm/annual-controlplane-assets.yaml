@@ -1,0 +1,37 @@
+# Annual conversion assets; existing monthly control-plane pins stay unchanged.
+apiVersion: guardian.dev/v1alpha1
+kind: TalosSecureBootAssets
+metadata:
+  name: guardian-annual-controlplane
+spec:
+  architecture: amd64
+  talosVersion: v1.13.10
+  schematic:
+    id: be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5
+    systemExtensions:
+    - siderolabs/amd-ucode
+    - siderolabs/amdgpu
+    - siderolabs/bnx2-bnx2x
+    - siderolabs/intel-ice-firmware
+    - siderolabs/i915
+    - siderolabs/intel-ucode
+    - siderolabs/qlogic-firmware
+    - siderolabs/drbd
+    - siderolabs/zfs
+  installer:
+    image: factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.10
+    digest: sha256:e892079895b227a83fd86c1249efbbc3684c61815e5b5efcffd3cc279e56703b
+  iso:
+    url: https://factory.talos.dev/image/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5/v1.13.10/metal-amd64-secureboot.iso
+    sha256: 13644483d10040dbb30571ff2c4f0504a6a5b2073510db36095cafc5250e2d91
+    sizeBytes: 368357376
+    observedAt: '2026-10-17'
+  enrollment:
+    provider: siderolabs
+    includeWellKnownUefiCertificates: false
+    pkAuthSha256: b4bd83b5bdb5d14722163a25765bd171c4adeceb729daf10e66c993f4cd57d5a # gitleaks:allow -- public enrollment artifact digest
+    kekAuthSha256: fa45aef5ff3ec09b4d5cfaa156c117778e49c2cd44ac26bb96bfe3f137415e21 # gitleaks:allow -- public enrollment artifact digest
+    dbAuthSha256: 378cac3efa39a1d43065ec12f4445ec94ec6527a7b4b59b1429953f407b9a80d # gitleaks:allow -- public enrollment artifact digest
+  signatures:
+    secureBootCertificateSha256: 1ae5d7c8ac1032eaf0d2c1a2e6a952517342e8db6b5354d32791a9c960a9472e
+    pcrSigningPublicSpkiSha256: 9c42059148e157a030f5edc51bd4967a2a3b1bc64cdd48941a3ece3c3fdc032f
