@@ -234,6 +234,16 @@ resource "cloudflare_zone_setting" "anveio_tls_client_auth" {
   value      = "on"
 }
 
+# Email Address Obfuscation rewrites every mailto link and address in served
+# HTML to "[email protected]" plus a decoding script, so anveio.com/contact and
+# /privacy show no address with JavaScript off. The addresses are public on
+# purpose (Email Routing forwards them), so the edge serves the page as built.
+resource "cloudflare_zone_setting" "anveio_email_obfuscation" {
+  zone_id    = data.cloudflare_zone.anveio_com.id
+  setting_id = "email_obfuscation"
+  value      = "off"
+}
+
 # Email Routing on anveio.com: enabling it adds and locks the zone's MX
 # records. It needs Zone Settings Write, which only this lane holds. The
 # forward rules, the catch-all and the apex SPF record (with the Email Routing

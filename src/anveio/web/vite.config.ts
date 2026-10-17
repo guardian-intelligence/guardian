@@ -22,9 +22,11 @@ const stripRouteManifestPaths = {
 // The investor deck is unlisted: reachable by link, never indexed.
 const unlisted = { headers: { "x-robots-tag": "noindex, nofollow, noarchive" } } as const;
 
-// anveio.com routes only /deck/** to this app (the rest of the site is
-// anveio-cal), so every URL it serves lives under /deck: the page, public/deck
-// and the built chunks.
+// This app is anveio.com: the company pages at /, /contact and /privacy and the
+// deck at /deck. The ingress sends everything here except /shovon/**, /oauth/**
+// and /cal (anveio-cal, Shovon's contact card); until the ingress flip lands it
+// sends only /deck/**. Every page shares the built
+// chunks under /deck/assets and the fonts and images under public/deck.
 export default defineConfig(({ mode }) => ({
   build: {
     assetsDir: "deck/assets",
@@ -53,6 +55,8 @@ export default defineConfig(({ mode }) => ({
             routeRules: {
               "/deck": unlisted,
               "/deck/**": unlisted,
+              // The policy's address when anveio-cal served it as a file.
+              "/privacy.html": { redirect: { to: "/privacy", status: 301 } },
             },
           }),
         ],

@@ -71,6 +71,8 @@ cd "$$work/src/anveio/cal"
 "$$node" "$$vp" build
 test -s dist/index.html
 test -s dist/oauth/google.html
+# TRANSITIONAL: the root /privacy copy the server answers under the old
+# ingress; the ingress-flip follow-up deletes it.
 test -s dist/privacy.html
 # The image is the static output plus the dependency-free server that
 # serves it: /app/dist and /app/server/index.mjs.
@@ -109,7 +111,7 @@ pkg_tar(
 oci_image(
     name = "image",
     annotations = {
-        "org.opencontainers.image.description": "anveio.com — Shovon's contact card and Rumi's scheduler",
+        "org.opencontainers.image.description": "anveio.com/shovon — Shovon's contact card and Rumi's scheduler",
         "org.opencontainers.image.source": "https://github.com/guardian-intelligence/guardian",
         "org.opencontainers.image.title": "guardian-anveio-cal",
     },
