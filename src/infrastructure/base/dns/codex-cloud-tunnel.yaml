@@ -142,7 +142,7 @@ spec:
             k8s:io.kubernetes.pod.namespace: cozy-monitoring
       toPorts:
         - ports:
-            - port: '2000'
+            - port: "2000"
               protocol: TCP
   egress:
     - toEndpoints:
@@ -151,9 +151,9 @@ spec:
             k8s:k8s-app: kube-dns
       toPorts:
         - ports:
-            - port: '53'
+            - port: "53"
               protocol: UDP
-            - port: '53'
+            - port: "53"
               protocol: TCP
     - toEntities:
         - kube-apiserver
@@ -164,13 +164,13 @@ spec:
         - remote-node
       toPorts:
         - ports:
-            - port: '50000'
+            - port: "50000"
               protocol: TCP
     - toEntities:
         - world
       toPorts:
         - ports:
-            - port: '7844'
+            - port: "7844"
               protocol: TCP
 ---
 apiVersion: operator.victoriametrics.com/v1beta1

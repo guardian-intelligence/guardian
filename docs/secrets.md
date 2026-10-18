@@ -52,6 +52,7 @@ a narrow, explicit, named read grant for the agent.
    recurs in ordinary work, and it exists because tofu is applied from a
    workstation instead of reconciled from Git. Retiring it is
    [`docs/tofu-gitops-design.md`](tofu-gitops-design.md).
+
 3. **The bootstrap set** — the values bring-up machinery needs before a
    cluster exists: R2 state-backend credentials, provider keys, and the other
    inputs of `src/infrastructure/runbooks/cold-boot-bootstrap.md`. Each value
@@ -86,7 +87,7 @@ never leak the root of trust that rebuilds it.
   config: Kubernetes auth, the `kv`/`transit` mounts, and every policy/role.
   The temporary privileged token is revoked by OpenBao afterward. No root
   token or recovery keys exist.
-- OpenBao's *data* is never re-entered at recovery: a raft snapshot restore
+- OpenBao's _data_ is never re-entered at recovery: a raft snapshot restore
   brings back every secret, Transit key, and KV version in one step.
 
 ## Runtime topology
@@ -99,7 +100,7 @@ never leak the root of trust that rebuilds it.
 - Workloads never talk to OpenBao. External Secrets Operator materializes
   native Kubernetes Secrets (`creationPolicy: Orphan` /
   `deletionPolicy: Retain`, 1h refresh), so an OpenBao outage degrades secret
-  *rotation*, not running consumers.
+  _rotation_, not running consumers.
 
 ## Permission model
 
@@ -140,7 +141,7 @@ never leak the root of trust that rebuilds it.
   by construction — the deliberate boundary of the emergency rung, and why
   it is gated behind a per-session human approval.
 - OpenBao config is **O(1) in the number of integrations**: a new secret in
-  an existing namespace never touches OpenBao config. Only *structural*
+  an existing namespace never touches OpenBao config. Only _structural_
   changes (a new consumer namespace, a new mount or auth method) edit the
   self-init block and re-initialize — a raft-snapshot restore plus
   re-initialization with the new config, zero consumer downtime because
@@ -169,8 +170,8 @@ never leak the root of trust that rebuilds it.
   every integration secret.
 - Regular drills decrypt the bootstrap set and exercise the restore path;
   the drill is the proof the estate recovers.
-- Accepted worst case, stated up front: offline pulls lost *and* R2
-  unreachable *and* cluster dead means rebuild and re-issue every
+- Accepted worst case, stated up front: offline pulls lost _and_ R2
+  unreachable _and_ cluster dead means rebuild and re-issue every
   integration secret from the owning consoles. Days of outage, no leaked
   data.
 
@@ -198,13 +199,13 @@ never leak the root of trust that rebuilds it.
 The dividing line is **where the value's source of truth lives** — ask
 "after a cluster wipe, where does this come back from?":
 
-- **OpenBao (via ExternalSecret)** — the source of truth is *outside* the
+- **OpenBao (via ExternalSecret)** — the source of truth is _outside_ the
   cluster and the cluster cannot regenerate it: third-party API keys, OAuth
   client secrets, GitHub App private keys, anything a human or agent obtained
   from an external system. These must survive DR, so they live in OpenBao,
   recover through snapshot restore, and distribute through the scoped,
   audited, server-side-enforced permission model.
-- **Operator-generated Kubernetes Secret** — the credential is *born inside*
+- **Operator-generated Kubernetes Secret** — the credential is _born inside_
   the cluster and both ends live here: CNPG role passwords
   (e.g. `postgres-keycloak-app`), ClickHouse users, inter-service tokens
   minted by an operator. DR for these is **regenerate, never restore**: no
@@ -217,7 +218,7 @@ The dividing line is **where the value's source of truth lives** — ask
 
 Corollaries:
 
-- Only values consumed *before a cluster exists* belong in the bootstrap
+- Only values consumed _before a cluster exists_ belong in the bootstrap
   set; if a running cluster is what needs it, it belongs in OpenBao.
 - Rotation cadence is bounded by the consumer's pickup path: mounted Secret
   files update in place, **env-var consumers need a pod roll**. Prefer
@@ -241,7 +242,7 @@ with org-owner approval, not by minting another credential. Inventory and
 scope boundaries: `docs/github-apps.md`.
 
 Installation tokens cover the API plane (pull requests, contents, statuses,
-checks) and ghcr *reads*. They cannot push ghcr organization packages —
+checks) and ghcr _reads_. They cannot push ghcr organization packages —
 if a workload ever needs ghcr write, the shape is a `write:packages`-scoped
 classic PAT on a dedicated machine account, stored in OpenBao like any
 integration secret with its expiry recorded in Git next to its consumer's

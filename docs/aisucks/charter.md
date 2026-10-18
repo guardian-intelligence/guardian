@@ -9,6 +9,7 @@ SLOs, contracts, and code review all answer to it. It changes only by written,
 versioned amendment in this repository.
 
 Amendment record:
+
 - **v2 (2026-06-12, operator):** value 2 amended — submission IP addresses are
   retained, quarantined, for abuse and threat monitoring and for compliance
   with valid legal process. Rationale: anonymity was leaving us defenseless
@@ -197,7 +198,7 @@ ignored.
 This copy is a contract with every visitor, and each sentence binds the
 architecture:
 
-1. *"…never be sold to OpenAI, Anthropic, or anyone else"* — chat text is
+1. _"…never be sold to OpenAI, Anthropic, or anyone else"_ — chat text is
    never part of any commercial transaction; the only thing ever sold is
    the distilled product (value 4). The word is "sold", not "shared",
    deliberately: it permits transient processing of chat text by
@@ -207,12 +208,12 @@ architecture:
    self-hosting the judges is the standing roadmap priority. The promise
    only ever gets stronger; this copy may be amended toward "shared" when
    the architecture earns it, never away.
-2. *"Expert human annotators convert a PII-redacted version…"* — redaction
+2. _"Expert human annotators convert a PII-redacted version…"_ — redaction
    precedes human eyes: annotators (ours or contracted, bound to these
    values by contract) work only on the redacted rendering of a transcript,
    never the raw text. Their output — the exam question — is the only path
    out of the sealed tier and carries none of the original wording.
-3. *"Learn more…"* — a public page documenting the privacy architecture and
+3. _"Learn more…"_ — a public page documenting the privacy architecture and
    the accountability mechanism exists at launch, in plain language, and is
    kept true.
 

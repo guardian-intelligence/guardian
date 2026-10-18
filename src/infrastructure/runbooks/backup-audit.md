@@ -3,9 +3,9 @@
 How Guardian verifies its backups are secure, bounded in size, and
 actually restorable. The industry framing (what DR-focused shops converge
 on) in one paragraph: **a backup does not exist until it has been
-restored**; verification is *scheduled*, not ad-hoc; every drill leaves a
+restored**; verification is _scheduled_, not ad-hoc; every drill leaves a
 recorded artifact (that record IS the SOC2 evidence — availability
-criteria audit the *management* of backups: documented procedure,
+criteria audit the _management_ of backups: documented procedure,
 recurring execution, tested restores, measured RPO/RTO); and the checks
 run against the storage system directly, never only against the tool that
 wrote the backups (the writer lying to you is the failure mode).
@@ -25,13 +25,13 @@ ladder + drill log).
 
 ## Cadence
 
-| Check | Cadence | Section |
-|---|---|---|
-| Backup freshness (did last night's Plans run?) | Weekly, and after any platform change | 1 |
-| Security probes (token scope, bucket lock, credential residency) | Monthly, and after any credential/bucket change | 2 |
-| Size & retention audit | Monthly | 3 |
-| Restore drill (both engines, marker-row PITR for PG) | Monthly while cheap; quarterly floor once automated | 4 |
-| Full DR exercise (cold-boot + custody re-seed + restores) | Per the DR program (see static-seal runbook) | — |
+| Check                                                            | Cadence                                             | Section |
+| ---------------------------------------------------------------- | --------------------------------------------------- | ------- |
+| Backup freshness (did last night's Plans run?)                   | Weekly, and after any platform change               | 1       |
+| Security probes (token scope, bucket lock, credential residency) | Monthly, and after any credential/bucket change     | 2       |
+| Size & retention audit                                           | Monthly                                             | 3       |
+| Restore drill (both engines, marker-row PITR for PG)             | Monthly while cheap; quarterly floor once automated | 4       |
+| Full DR exercise (cold-boot + custody re-seed + restores)        | Per the DR program (see static-seal runbook)        | —       |
 
 Automation follow-up (deliberate, not yet built): each check below should
 eventually push its numbers to VictoriaMetrics as a side effect (the
@@ -196,10 +196,10 @@ Drill hygiene, learned live:
 
 Append one row per drill/audit. This table is the SOC2 evidence trail.
 
-| Date | Type | Target | Result | RTO (apply→healthy) | RPO evidence | Size | Notes |
-|---|---|---|---|---|---|---|---|
-| 2026-07-05 | Restore drill (PITR) | tenant-root/guardian PG | PASS | 68s to Succeeded, ~2min healthy | marker via WAL replay, archived ≤2s after switch | 4.1 MiB base | First drill; surfaced first-backup WAL hole → two-BackupJob rule |
-| 2026-07-05 | Restore drill (PITR) | tenant-root/guardian PG | PASS | 71s to Succeeded, ~85s healthy | marker id=3 @23:41:34 (2h08m post-base) recovered via WAL seg ...00E; archived ~2s after switch | 4.25 MiB base (guardian-second) | 2nd drill, to-copy; re-confirmed WAL-hole in guardian-initial (begin_wal ...008 absent) vs full chain in guardian-second; artifacts + PV torn down clean |
-| 2026-07-07 | Restore drill (PITR) | tenant-guardian-prod/products PG | PASS | Succeeded on clean rerun; first run blocked ~40min | post-second-backup marker recovered via WAL replay | fresh instance | Surfaced WAL-hole v2: activation-window segment (begin_wal of the SECOND backup) silently unarchived with pg_stat_archiver showing zero failures; remediated live with barman-cloud-wal-archive from the primary's pg_wal; runbook step 5 verify is mandatory |
-| 2026-07-05 | Backup verify | tenant-root/analytics CH | PASS (attempt 4) | — | nightly archive | 105 KiB | Surfaced sidecar OOM on stale local backups + service-recreate abort |
-| 2026-07-05 | Security probes | guardian-backups bucket | PASS | — | — | — | Scope denials + lock delete-refusal verified at bucket creation |
+| Date       | Type                 | Target                           | Result           | RTO (apply→healthy)                                | RPO evidence                                                                                    | Size                            | Notes                                                                                                                                                                                                                                                         |
+| ---------- | -------------------- | -------------------------------- | ---------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-07-05 | Restore drill (PITR) | tenant-root/guardian PG          | PASS             | 68s to Succeeded, ~2min healthy                    | marker via WAL replay, archived ≤2s after switch                                                | 4.1 MiB base                    | First drill; surfaced first-backup WAL hole → two-BackupJob rule                                                                                                                                                                                              |
+| 2026-07-05 | Restore drill (PITR) | tenant-root/guardian PG          | PASS             | 71s to Succeeded, ~85s healthy                     | marker id=3 @23:41:34 (2h08m post-base) recovered via WAL seg ...00E; archived ~2s after switch | 4.25 MiB base (guardian-second) | 2nd drill, to-copy; re-confirmed WAL-hole in guardian-initial (begin_wal ...008 absent) vs full chain in guardian-second; artifacts + PV torn down clean                                                                                                      |
+| 2026-07-07 | Restore drill (PITR) | tenant-guardian-prod/products PG | PASS             | Succeeded on clean rerun; first run blocked ~40min | post-second-backup marker recovered via WAL replay                                              | fresh instance                  | Surfaced WAL-hole v2: activation-window segment (begin_wal of the SECOND backup) silently unarchived with pg_stat_archiver showing zero failures; remediated live with barman-cloud-wal-archive from the primary's pg_wal; runbook step 5 verify is mandatory |
+| 2026-07-05 | Backup verify        | tenant-root/analytics CH         | PASS (attempt 4) | —                                                  | nightly archive                                                                                 | 105 KiB                         | Surfaced sidecar OOM on stale local backups + service-recreate abort                                                                                                                                                                                          |
+| 2026-07-05 | Security probes      | guardian-backups bucket          | PASS             | —                                                  | —                                                                                               | —                               | Scope denials + lock delete-refusal verified at bucket creation                                                                                                                                                                                               |

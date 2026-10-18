@@ -36,7 +36,7 @@ spec:
             severity: critical
             guardian_component: backup
           annotations:
-            summary: 'Analytics ClickHouse backup stale'
+            summary: "Analytics ClickHouse backup stale"
             description: >-
               The newest successful analytics-clickhouse-nightly backup is
               older than 26 hours (daily 05:00 UTC schedule plus slack).
@@ -55,7 +55,7 @@ spec:
             severity: warning
             guardian_component: backup
           annotations:
-            summary: 'Analytics ClickHouse backup running for over 2 hours'
+            summary: "Analytics ClickHouse backup running for over 2 hours"
             description: >-
               An analytics-clickhouse-nightly backup Job has been active for
               more than 2 hours; nightlies finish in under a minute. Each
@@ -71,7 +71,7 @@ spec:
             severity: critical
             guardian_component: backup
           annotations:
-            summary: 'Analytics ClickHouse backup Jobs missing from metrics'
+            summary: "Analytics ClickHouse backup Jobs missing from metrics"
             description: >-
               kube-state-metrics reports no Job owned by an
               analytics-clickhouse-nightly BackupJob. Either the Plan's

@@ -30,12 +30,12 @@ Renovate configuration errors do not necessarily fail scheduled runs, so
 
 ## Trust tiers
 
-| Tier | Examples | Policy |
-| --- | --- | --- |
-| First-party actions | `actions/*`, `renovatebot/*` | no cooldown |
-| Standalone tools & libs | npm catalog, go.mod, debug CLIs | 3-day cooldown (mirrors pnpm `minimumReleaseAge`) |
-| Cluster-coupled tools | talm, talosctl, flux CLI, boot-to-talos | one grouped PR, never merges ahead of the paired substrate move (version-skew test enforces) |
-| Substrate doorbells | kubectl+kubernetesVersion, Talos installer, cozy-installer, tofu providers | the PR **starts** the upgrade runbook; merging it is the runbook's **last** step, so Git never claims a version the cluster does not run |
+| Tier                    | Examples                                                                   | Policy                                                                                                                                   |
+| ----------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| First-party actions     | `actions/*`, `renovatebot/*`                                               | no cooldown                                                                                                                              |
+| Standalone tools & libs | npm catalog, go.mod, debug CLIs                                            | 3-day cooldown (mirrors pnpm `minimumReleaseAge`)                                                                                        |
+| Cluster-coupled tools   | talm, talosctl, flux CLI, boot-to-talos                                    | one grouped PR, never merges ahead of the paired substrate move (version-skew test enforces)                                             |
+| Substrate doorbells     | kubectl+kubernetesVersion, Talos installer, cozy-installer, tofu providers | the PR **starts** the upgrade runbook; merging it is the runbook's **last** step, so Git never claims a version the cluster does not run |
 
 Majors additionally wait for a dependency-dashboard click. Security PRs
 (OSV) bypass cooldown and carry the `security` label.

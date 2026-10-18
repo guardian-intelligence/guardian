@@ -21,11 +21,11 @@ ALL of them after any DR rebuild of the app: the chart regenerates every
 password when its Secret is absent, and a stale one fails closed at the
 first query.
 
-| kv property | consumer Secret (guardian-analytics) | key | consumer |
-| --- | --- | --- | --- |
-| `ingest` | `analytics-ch-ingest` | `ingest` | ingest service, OTel collector, DDL Job |
-| `payments_canary` | `payments-checkout-canary` | `clickhouse_password` | payments checkout canary (readonly) |
-| `cli_canary` | `cli-release-canary` | `clickhouse_password` | postflight CLI release canaries |
+| kv property       | consumer Secret (guardian-analytics) | key                   | consumer                                |
+| ----------------- | ------------------------------------ | --------------------- | --------------------------------------- |
+| `ingest`          | `analytics-ch-ingest`                | `ingest`              | ingest service, OTel collector, DDL Job |
+| `payments_canary` | `payments-checkout-canary`           | `clickhouse_password` | payments checkout canary (readonly)     |
+| `cli_canary`      | `cli-release-canary`                 | `clickhouse_password` | postflight CLI release canaries         |
 
 ```sh
 # guardian-writer-guardian-analytics flow, value never on argv, per property:
@@ -71,12 +71,12 @@ Cozystack upgrade.
 Alerts (`deployments/alerting/clickhouse-backup-alerts.yaml`, all from
 kube-state-metrics Job series; Cozystack exports no BackupJob metrics):
 
-| Alert | Fires when | First move |
-| --- | --- | --- |
-| `ClickHouseBackupStale` (critical) | newest succeeded nightly Job completed > 26h ago | read the latest BackupJob's Job logs, then the sidecar's |
-| `ClickHouseBackupStuck` (warning) | a nightly Job active > 2h | check the sidecar for OOMKills and local backups (below) |
-| `ClickHouseBackupMetricsAbsent` (critical) | no Job owned by a nightly BackupJob in KSM | Plan deleted or KSM blind; the other two are dark |
-| `KubeJobFailed` (warning, platform) | the Plan's latest run failed | as Stale; older failures are ignored once a newer run succeeds |
+| Alert                                      | Fires when                                       | First move                                                     |
+| ------------------------------------------ | ------------------------------------------------ | -------------------------------------------------------------- |
+| `ClickHouseBackupStale` (critical)         | newest succeeded nightly Job completed > 26h ago | read the latest BackupJob's Job logs, then the sidecar's       |
+| `ClickHouseBackupStuck` (warning)          | a nightly Job active > 2h                        | check the sidecar for OOMKills and local backups (below)       |
+| `ClickHouseBackupMetricsAbsent` (critical) | no Job owned by a nightly BackupJob in KSM       | Plan deleted or KSM blind; the other two are dark              |
+| `KubeJobFailed` (warning, platform)        | the Plan's latest run failed                     | as Stale; older failures are ignored once a newer run succeeds |
 
 The sidecar
 reads bucket coordinates from `Secret/guardian-backups-creds` directly
@@ -91,7 +91,7 @@ Postgres (see runbooks/postgres-backup-restore.md for the drill pattern).
    `_cluster` value), rendering keeper hosts as absolute FQDNs ending in
    `.svc.` that never resolve — every Replicated* engine on a chart CH app
    fails with KEEPER_EXCEPTION. Workaround: declare `clusterDomain:
-   cozy.local` on the app CR (schema allows extra fields; it feeds exactly
+cozy.local` on the app CR (schema allows extra fields; it feeds exactly
    the variable the template reads).
 2. **useSystemBucket vs https S3**: the platform credentials projector
    scheme-strips the projected `endpoint` key, and clickhouse-backup's AWS

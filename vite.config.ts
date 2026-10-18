@@ -18,7 +18,9 @@ const toolIgnorePatterns = [
 
 export default {
   fmt: {
-    ignorePatterns: [...toolIgnorePatterns],
+    // LICENSE.md is the canonical Apache-2.0 text, kept byte-for-byte; talm
+    // templates are Go templates that only render to YAML.
+    ignorePatterns: [...toolIgnorePatterns, "LICENSE.md", "src/infrastructure/talm/templates/**"],
   },
   lint: {
     ignorePatterns: [...toolIgnorePatterns],
@@ -28,12 +30,15 @@ export default {
     },
     overrides: [
       {
-        // Tool tier, not shipped code: dev, perf and drill harnesses and the
-        // app-local nitro build plugins log to the terminal by design.
+        // Tool tier, not shipped code: dev, perf, regression and drill
+        // harnesses, k6 load scripts, and the app-local nitro build plugins
+        // log to the terminal by design.
         files: [
           "src/**/web/scripts/**",
           "src/**/web/perf/**",
           "src/**/web/e2e/**",
+          "src/**/web/regression/**",
+          "src/infrastructure/load/**",
           "src/**/web/*.mjs",
           "src/anveio/cal/scripts/**",
         ],

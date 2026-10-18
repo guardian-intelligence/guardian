@@ -13,11 +13,11 @@ that cannot be verified on a listed surface is not done.
 
 ### Browsers (explicit list — nothing else is "supported")
 
-| Platform | Browsers | Engine reality |
-|---|---|---|
+| Platform     | Browsers                                              | Engine reality                                                                                  |
+| ------------ | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | iOS / iPadOS | Safari, Chrome for iOS, Firefox for iOS, Edge for iOS | All WebKit wrappers today; one engine, one bug surface. Watch item: EU DMA alternative engines. |
-| Desktop | Chrome, Firefox, Safari (macOS) | Three real engines. |
-| Android | Chrome, Samsung Internet, Firefox for Android | Two engines (Blink ×2 — Samsung Internet trails Chrome by ~2 majors — plus Gecko). |
+| Desktop      | Chrome, Firefox, Safari (macOS)                       | Three real engines.                                                                             |
+| Android      | Chrome, Samsung Internet, Firefox for Android         | Two engines (Blink ×2 — Samsung Internet trails Chrome by ~2 majors — plus Gecko).              |
 
 Backwards compatibility: for each browser, versions released up to **one
 year** before current. Opera, Brave, Arc, and other derivatives will usually
@@ -39,12 +39,12 @@ releases for them.
 
 The low-end rack device is the release gate, not the median device.
 
-| Dimension | Floor |
-|---|---|
-| CPU | 4× Cortex-A53 @ 1.4GHz class (2019 Android Go tier) |
-| Memory | 2GB device RAM; game tab/app ≤ 150MB resident |
-| Storage | Web: ≤ 25MB cached (shell + modules + assets). App: ≤ 200MB installed |
-| Network | Playable at 1Mbps / 300ms RTT / 2% loss; steady-state ≤ 20KB/s down |
+| Dimension | Floor                                                                            |
+| --------- | -------------------------------------------------------------------------------- |
+| CPU       | 4× Cortex-A53 @ 1.4GHz class (2019 Android Go tier)                              |
+| Memory    | 2GB device RAM; game tab/app ≤ 150MB resident                                    |
+| Storage   | Web: ≤ 25MB cached (shell + modules + assets). App: ≤ 200MB installed            |
+| Network   | Playable at 1Mbps / 300ms RTT / 2% loss; steady-state ≤ 20KB/s down              |
 | Rendering | 60fps target, 30fps floor without sim divergence (presentation-only degradation) |
 
 ### Per-surface release gates
@@ -86,13 +86,13 @@ Glossary:
 
 Resources:
 
-| Resource | Role | Notes |
-|---|---|---|
-| Energy | Progress toward waking Mythra | Accumulates across the cycle; the shared goal |
-| Coin | Upgrade dogs | Earned in play |
-| Favor | Level up dogs | Earned in play |
-| Fur | Limited-time item currency | Granted only by awake-Mythra; **rolls over**; **never purchasable** |
-| Crystals | Premium currency | Priced/sized identically to Clash of Clans gems; buys dog slots, rate-limit relief, cosmetics |
+| Resource | Role                          | Notes                                                                                         |
+| -------- | ----------------------------- | --------------------------------------------------------------------------------------------- |
+| Energy   | Progress toward waking Mythra | Accumulates across the cycle; the shared goal                                                 |
+| Coin     | Upgrade dogs                  | Earned in play                                                                                |
+| Favor    | Level up dogs                 | Earned in play                                                                                |
+| Fur      | Limited-time item currency    | Granted only by awake-Mythra; **rolls over**; **never purchasable**                           |
+| Crystals | Premium currency              | Priced/sized identically to Clash of Clans gems; buys dog slots, rate-limit relief, cosmetics |
 
 Core loop: dogs at the park stack Energy; scheduled events offer wake-up
 progress and require dogs physically present to win. Gameplay is occasional
@@ -108,35 +108,35 @@ sim ticks at 24Hz.
 
 ### Client-delivered
 
-| Artifact | Status | Notes |
-|---|---|---|
-| Web shell | live (single-file `mythra.html`) | Connection mgmt, DOM, input, wasm host. Grows into the product shell; stays the same artifact across desktop web, Android web, iOS web |
-| Rust→wasm sim core | live (crate, not shipped directly) | The shared deterministic core; compiled into every module below |
-| Rust→wasm **client presentation module** | live (`client.wasm`) | Interpolation/smoothing; hot-swapped via pong hash |
-| Rust→wasm **client rules module** | planned | Pack-synergy/bonus preview math for UI, compiled from the same core the server uses to compute the real thing — previews can never drift from truth |
-| Asset bundles | live (ConfigMap lane) | Content-addressed skins/tiles; graduates to CDN/R2 when size demands |
-| macOS App Store app | planned | Thin WebKit shell around the web artifacts |
-| iOS/iPadOS App Store app | planned | Own QUIC stack (WebKit's is the blocker, see gaps), wasm interpreter + AOT lane, Game Center |
-| Android app (Play) | planned | WebView or JNI runtime embedding, Play Games, Play billing |
-| Steam build | tentative | Decide after the three stores ship |
+| Artifact                                 | Status                             | Notes                                                                                                                                               |
+| ---------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web shell                                | live (single-file `mythra.html`)   | Connection mgmt, DOM, input, wasm host. Grows into the product shell; stays the same artifact across desktop web, Android web, iOS web              |
+| Rust→wasm sim core                       | live (crate, not shipped directly) | The shared deterministic core; compiled into every module below                                                                                     |
+| Rust→wasm **client presentation module** | live (`client.wasm`)               | Interpolation/smoothing; hot-swapped via pong hash                                                                                                  |
+| Rust→wasm **client rules module**        | planned                            | Pack-synergy/bonus preview math for UI, compiled from the same core the server uses to compute the real thing — previews can never drift from truth |
+| Asset bundles                            | live (ConfigMap lane)              | Content-addressed skins/tiles; graduates to CDN/R2 when size demands                                                                                |
+| macOS App Store app                      | planned                            | Thin WebKit shell around the web artifacts                                                                                                          |
+| iOS/iPadOS App Store app                 | planned                            | Own QUIC stack (WebKit's is the blocker, see gaps), wasm interpreter + AOT lane, Game Center                                                        |
+| Android app (Play)                       | planned                            | WebView or JNI runtime embedding, Play Games, Play billing                                                                                          |
+| Steam build                              | tentative                          | Decide after the three stores ship                                                                                                                  |
 
 ### Server — Go
 
-| Artifact | Status | Notes |
-|---|---|---|
-| `chunkies-gateway` | live | OIDC admission, WebTransport sessions, public HTTP, and routing to parks |
-| `chunkies-chunkie` | live | one park authority per pod: simulation, journal, snapshots, and fan-out |
-| Control plane | planned | Authentication (Guardian customer identity realm; Game Center / Play Games bridging), entitlements (SpiceDB-backed, purchase-source-neutral), billing normalization (IAP / Play / MoR / Steam → ledger), friends/social graph, dog-park registry (geo metadata + manual petition queue), feature-flag service (OpenFeature control plane with streaming subscriptions) |
-| Data plane | planned | Persistent game state, distinct from the in-memory world sim: economy ledgers (TigerBeetle), check-in service (geo attestation, 5-minute sessions, presence-bonus windows), pack membership + inventory + mood scheduler, event feed fanout (the p99 ≤ 2s SLA), month-cycle orchestrator (22/6 clock, prize distribution, Fur grants, reset) |
+| Artifact           | Status  | Notes                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chunkies-gateway` | live    | OIDC admission, WebTransport sessions, public HTTP, and routing to parks                                                                                                                                                                                                                                                                                               |
+| `chunkies-chunkie` | live    | one park authority per pod: simulation, journal, snapshots, and fan-out                                                                                                                                                                                                                                                                                                |
+| Control plane      | planned | Authentication (Guardian customer identity realm; Game Center / Play Games bridging), entitlements (SpiceDB-backed, purchase-source-neutral), billing normalization (IAP / Play / MoR / Steam → ledger), friends/social graph, dog-park registry (geo metadata + manual petition queue), feature-flag service (OpenFeature control plane with streaming subscriptions) |
+| Data plane         | planned | Persistent game state, distinct from the in-memory world sim: economy ledgers (TigerBeetle), check-in service (geo attestation, 5-minute sessions, presence-bonus windows), pack membership + inventory + mood scheduler, event feed fanout (the p99 ≤ 2s SLA), month-cycle orchestrator (22/6 clock, prize distribution, Fur grants, reset)                           |
 
 ### Tooling / QA
 
-| Artifact | Status | Notes |
-|---|---|---|
-| `//src/games/wake-up-mythra/sim:refresh` + lockstep diff tests | live | Committed wasm bytes provably match Rust source |
-| `world_hash` oracle | live | Core export, stamped on ticks 1/s, re-derived and verified by every client (world ✓ pill); the cross-surface determinism assertion |
-| `//qa:surfaces` runner | planned | One command: build → local server → scripted taps on every surface → all `world_hash` values equal at a barrier tick. `--devices` adds simulators + the physical rack |
-| Device rack | planned (~$2.4k) | Mac mini controller (iOS automation host + simulators + macOS surface), iPhone (have), base iPad, Pixel, mid-tier Samsung, low-end MediaTek (the floor gate), powered hub, scrcpy/QuickTime mirror wall |
+| Artifact                                                       | Status           | Notes                                                                                                                                                                                                   |
+| -------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `//src/games/wake-up-mythra/sim:refresh` + lockstep diff tests | live             | Committed wasm bytes provably match Rust source                                                                                                                                                         |
+| `world_hash` oracle                                            | live             | Core export, stamped on ticks 1/s, re-derived and verified by every client (world ✓ pill); the cross-surface determinism assertion                                                                      |
+| `//qa:surfaces` runner                                         | planned          | One command: build → local server → scripted taps on every surface → all `world_hash` values equal at a barrier tick. `--devices` adds simulators + the physical rack                                   |
+| Device rack                                                    | planned (~$2.4k) | Mac mini controller (iOS automation host + simulators + macOS surface), iPhone (have), base iPad, Pixel, mid-tier Samsung, low-end MediaTek (the floor gate), powered hub, scrcpy/QuickTime mirror wall |
 
 ## Gaps and sequencing
 

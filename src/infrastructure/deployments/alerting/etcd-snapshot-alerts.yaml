@@ -24,7 +24,7 @@ spec:
             severity: critical
             guardian_component: backup
           annotations:
-            summary: 'etcd snapshot stale'
+            summary: "etcd snapshot stale"
             description: >-
               The newest successful talos-backup run is older than 8 hours
               (six-hour schedule plus slack). Cluster state newer than the
@@ -38,7 +38,7 @@ spec:
             severity: warning
             guardian_component: backup
           annotations:
-            summary: 'etcd snapshot job failed'
+            summary: "etcd snapshot job failed"
             description: >-
               A talos-backup Job has failed pods and no later attempt has
               replaced it yet. This also covers the never-succeeded case
@@ -51,7 +51,7 @@ spec:
             severity: critical
             guardian_component: backup
           annotations:
-            summary: 'etcd snapshot CronJob missing from metrics'
+            summary: "etcd snapshot CronJob missing from metrics"
             description: >-
               kube-state-metrics no longer reports the talos-backup
               CronJob: either the object was deleted or KSM is blind, and

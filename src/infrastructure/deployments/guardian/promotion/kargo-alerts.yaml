@@ -72,7 +72,7 @@ spec:
             severity: critical
             guardian.dev/component: promotion
           annotations:
-            summary: 'Warehouse {{ $labels.exported_namespace }}/{{ $labels.name }} has not completed artifact discovery in over 15 minutes despite auto-remediation — the wedge survived a controller restart.'
+            summary: "Warehouse {{ $labels.exported_namespace }}/{{ $labels.name }} has not completed artifact discovery in over 15 minutes despite auto-remediation — the wedge survived a controller restart."
         - alert: KargoStateMetricsDown
           expr: up{job="kargo-state-metrics"} == 0
           for: 10m

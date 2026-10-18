@@ -119,12 +119,12 @@ The following table retains the separate Confidential and proposed
 per-lineage Turbo key design; its Turbo column is not the current
 first-party host contract. Details: [security model](postflight-security-model.md).
 
-| | Confidential | Turbo |
-| --- | --- | --- |
-| Volume key | Derived in-guest: chip half (PSP, measurement-bound) + tenant half (`transit-postflight`) | Per-lineage DEK from a `transit-postflight` data key |
-| Host sees | Ciphertext and sealed frames only | Ciphertext at rest; key transits to guest RAM at rendezvous |
-| Crypto-erase | Delete the tenant Transit key (kills the tenant half fleet-wide) | Delete the tenant Transit key (wrapped DEKs die) |
-| Rotation | New lineage, one cold build | New lineage, one cold build |
+|              | Confidential                                                                              | Turbo                                                       |
+| ------------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Volume key   | Derived in-guest: chip half (PSP, measurement-bound) + tenant half (`transit-postflight`) | Per-lineage DEK from a `transit-postflight` data key        |
+| Host sees    | Ciphertext and sealed frames only                                                         | Ciphertext at rest; key transits to guest RAM at rendezvous |
+| Crypto-erase | Delete the tenant Transit key (kills the tenant half fleet-wide)                          | Delete the tenant Transit key (wrapped DEKs die)            |
+| Rotation     | New lineage, one cold build                                                               | New lineage, one cold build                                 |
 
 ## Retention
 

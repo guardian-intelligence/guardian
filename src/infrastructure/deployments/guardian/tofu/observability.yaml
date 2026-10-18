@@ -67,7 +67,7 @@ spec:
             severity: warning
             guardian_component: iac
           annotations:
-            summary: 'tofu root reconcile failed ({{ $labels.cronjob }})'
+            summary: "tofu root reconcile failed ({{ $labels.cronjob }})"
             description: >-
               This root's most recent completed scheduled reconcile failed
               and no scheduled run has succeeded since. This is a tofu error,
@@ -100,7 +100,7 @@ spec:
             severity: warning
             guardian_component: iac
           annotations:
-            summary: 'manual tofu Job failed ({{ $labels.job_name }})'
+            summary: "manual tofu Job failed ({{ $labels.job_name }})"
             description: >-
               A hand-created tofu Job failed — with roots in plan-mode soak
               this is how an apply fails, and a scheduled plan succeeding
@@ -116,7 +116,7 @@ spec:
             severity: warning
             guardian_component: iac
           annotations:
-            summary: 'tofu root has not reconciled ({{ $labels.cronjob }})'
+            summary: "tofu root has not reconciled ({{ $labels.cronjob }})"
             description: >-
               No tofu-runner Job for this root has succeeded in over three
               hours (hourly schedule plus slack). The root is not being
@@ -132,7 +132,7 @@ spec:
             severity: warning
             guardian_component: iac
           annotations:
-            summary: 'a tofu root CronJob has never succeeded'
+            summary: "a tofu root CronJob has never succeeded"
             description: >-
               Fewer roots report a last-successful reconcile than exist. A
               CronJob that has never completed successfully is invisible to
@@ -150,7 +150,7 @@ spec:
             severity: warning
             guardian_component: iac
           annotations:
-            summary: 'CodeQL routing has never been observed by its enabled reconciler'
+            summary: "CodeQL routing has never been observed by its enabled reconciler"
             description: >-
               Inspect the CodeQL Job log, promoted tofu-runner image, and
               GitHub API permissions. A successful plan proves observation,
@@ -162,7 +162,7 @@ spec:
             severity: critical
             guardian_component: iac
           annotations:
-            summary: 'tofu token-minter drift detector is not running'
+            summary: "tofu token-minter drift detector is not running"
             description: >-
               The guardian-mgmt-cloudflare-tokens CronJob (15-minute schedule)
               has not succeeded in over an hour. Its plan is the hostile-mint
@@ -175,7 +175,7 @@ spec:
             severity: critical
             guardian_component: iac
           annotations:
-            summary: 'tofu CronJobs missing from metrics'
+            summary: "tofu CronJobs missing from metrics"
             description: >-
               kube-state-metrics no longer reports the tofu-system CronJobs:
               either the objects were deleted or KSM is blind, and in both

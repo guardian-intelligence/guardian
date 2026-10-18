@@ -4,12 +4,12 @@ Every product page runs `@guardian/telemetry` (mounted once as
 `TelemetryProbe app="…"`), which gives each browser three identities and
 makes one of them quotable:
 
-| id | scope | minted by | where it lands |
-|---|---|---|---|
-| **trace id** (32-hex, W3C) | one logical action: an rpc, an error | browser (`fetch-telemetry.ts`, `errors.ts`) | `events.trace_id`, `otel_traces.TraceId`, service log lines |
-| correlation id | visitor, 30 days | ingest HMAC cookie (server-derived) | `events.correlation_id`, span attr `guardian.correlation_id` |
-| page id (16-hex) | one page load | browser (`browser.ts`, eager) | `events.page_id` |
-| session_seq | order within a visit | browser sessionStorage counter | `events.session_seq` |
+| id                         | scope                                | minted by                                   | where it lands                                               |
+| -------------------------- | ------------------------------------ | ------------------------------------------- | ------------------------------------------------------------ |
+| **trace id** (32-hex, W3C) | one logical action: an rpc, an error | browser (`fetch-telemetry.ts`, `errors.ts`) | `events.trace_id`, `otel_traces.TraceId`, service log lines  |
+| correlation id             | visitor, 30 days                     | ingest HMAC cookie (server-derived)         | `events.correlation_id`, span attr `guardian.correlation_id` |
+| page id (16-hex)           | one page load                        | browser (`browser.ts`, eager)               | `events.page_id`                                             |
+| session_seq                | order within a visit                 | browser sessionStorage counter              | `events.session_seq`                                         |
 
 Every event also carries `event_ts` (client emission time mapped onto the
 server clock via the batch skew; equals `server_ts` when the client sent
@@ -96,7 +96,7 @@ reports through the error path), `wum.netcode_reject`, `wum.netcode_resync`,
 
 ## What deliberately does NOT join
 
-- The analytics ingest treats a client `traceparent` as a *link*, never a
+- The analytics ingest treats a client `traceparent` as a _link_, never a
   parent (`/api/events` is public and unauthenticated; an attacker must
   not choose our span parents). Its spans have their own TraceId with the
   visitor's correlation id as an attribute.

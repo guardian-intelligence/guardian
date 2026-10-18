@@ -74,13 +74,13 @@ GitHub may display `write` as **Read and write** and
 mandatory for Apps with repository permissions. Every permission not named in
 this table is **No access**.
 
-| App | App ID | Repository permissions | Organization permissions | Account permissions | Webhook |
-| - | -: | - | - | - | - |
-| `Postflight by Guardian` | `3370540` | Actions: read; Metadata: read; Pull requests: write | Self-hosted runners: write | None | Active; only `Workflow job` |
-| `Postflight by Guardian (Staging)` | Record in the environment inventory | Actions: read; Metadata: read; Pull requests: write | Self-hosted runners: write | None | Active; only `Workflow job` |
-| `Guardian Promotions` | `4206397` | Contents: write; Metadata: read; Pull requests: write | None | None | Inactive; no events |
-| `guardian-renovate` | `4260384` | Administration: read; Checks: write; Contents: write; Dependabot alerts: read; Issues: write; Metadata: read; Pull requests: write; Commit statuses: write; Workflows: write | Members: read | None | Inactive; no events |
-| `guardian-platform-app` | `4276780` | Checks: read; Contents: write; Metadata: read; Packages: write; Pull requests: write; Commit statuses: write | None | None | Inactive; no events |
+| App                                |                              App ID | Repository permissions                                                                                                                                                       | Organization permissions   | Account permissions | Webhook                     |
+| ---------------------------------- | ----------------------------------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ------------------- | --------------------------- |
+| `Postflight by Guardian`           |                           `3370540` | Actions: read; Metadata: read; Pull requests: write                                                                                                                          | Self-hosted runners: write | None                | Active; only `Workflow job` |
+| `Postflight by Guardian (Staging)` | Record in the environment inventory | Actions: read; Metadata: read; Pull requests: write                                                                                                                          | Self-hosted runners: write | None                | Active; only `Workflow job` |
+| `Guardian Promotions`              |                           `4206397` | Contents: write; Metadata: read; Pull requests: write                                                                                                                        | None                       | None                | Inactive; no events         |
+| `guardian-renovate`                |                           `4260384` | Administration: read; Checks: write; Contents: write; Dependabot alerts: read; Issues: write; Metadata: read; Pull requests: write; Commit statuses: write; Workflows: write | Members: read              | None                | Inactive; no events         |
+| `guardian-platform-app`            |                           `4276780` | Checks: read; Contents: write; Metadata: read; Packages: write; Pull requests: write; Commit statuses: write                                                                 | None                       | None                | Inactive; no events         |
 
 Additional invariants:
 
@@ -125,11 +125,11 @@ Additional invariants:
 
 Select **Only select repositories** for every first-party installation.
 
-| App | Required repositories in `guardian-intelligence` |
-| - | - |
-| `Guardian Promotions` | `guardian`, `homebrew-tap` |
-| `guardian-renovate` | `guardian` |
-| `guardian-platform-app` | `guardian` |
+| App                      | Required repositories in `guardian-intelligence`                                                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Guardian Promotions`    | `guardian`, `homebrew-tap`                                                                                                                                               |
+| `guardian-renovate`      | `guardian`                                                                                                                                                               |
+| `guardian-platform-app`  | `guardian`                                                                                                                                                               |
 | `Postflight by Guardian` | Only repositories whose default-branch workflow files contain a live Postflight `runs-on` label, plus an explicitly documented Postflight canary or benchmark repository |
 
 `homebrew-tap` is a publication boundary for the Postflight CLI, not an

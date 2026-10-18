@@ -47,8 +47,8 @@ Consequences and checks:
 - WAL segments stay gzip: `barman-cloud-wal-archive` uploads through
   boto3's managed transfer with fixed 8MiB parts.
 - Symptom in the instance log (`kubectl logs <pod> -c postgres | grep
-  barman-cloud-backup`): `Upload error: An error occurred (InvalidPart) when
-  calling the CompleteMultipartUpload operation`. The operator also logs
+barman-cloud-backup`): `Upload error: An error occurred (InvalidPart) when
+calling the CompleteMultipartUpload operation`. The operator also logs
   `Instance manager was restarted, marking backup as failed` on **every**
   backup, successful or not — that is the CNPG 1.27.3 operator vs older CRD
   skew (`status.instanceID.sessionID` pruned) that Cozystack fixes with the
@@ -186,7 +186,7 @@ SELECT pg_create_physical_replication_slot('_cnpg_<cluster>_<n>', true);
 ```
 
 The replica starts streaming within seconds and the queued commits drain. A
-*logical* slot that reports `lost` belongs to its consumer (for example
+_logical_ slot that reports `lost` belongs to its consumer (for example
 `electric_slot_default`): the consumer has to re-create it and resync.
 
 ## Known limits (stated, not hidden)

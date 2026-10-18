@@ -24,14 +24,14 @@ drills, and cleanup are reviewed source changes. Flux is the only writer.
 
 ## Availability and recovery objectives
 
-| Objective | Target |
-| --- | --- |
-| Authorization availability | Three replicas; two available during planned work |
-| Customer-visible rollout failures | Zero; product clients retry transient gRPC failures |
-| PostgreSQL data loss | At most 5 minutes for an idle database; active WAL normally archives sooner |
-| PostgreSQL copy-restore | Ready and verified within 30 minutes |
-| CheckPermission latency | Establish p50/p95/p99 at 50, 100, 250, and 500 QPS; alert initially at 100 ms p99 |
-| Incorrect decisions during planned work | Zero |
+| Objective                               | Target                                                                            |
+| --------------------------------------- | --------------------------------------------------------------------------------- |
+| Authorization availability              | Three replicas; two available during planned work                                 |
+| Customer-visible rollout failures       | Zero; product clients retry transient gRPC failures                               |
+| PostgreSQL data loss                    | At most 5 minutes for an idle database; active WAL normally archives sooner       |
+| PostgreSQL copy-restore                 | Ready and verified within 30 minutes                                              |
+| CheckPermission latency                 | Establish p50/p95/p99 at 50, 100, 250, and 500 QPS; alert initially at 100 ms p99 |
+| Incorrect decisions during planned work | Zero                                                                              |
 
 PostgreSQL uses synchronous quorum `1..2`, encrypted replicated storage,
 `archive_timeout=300s`, continuous R2 WAL archiving, and nightly base backups.
@@ -333,19 +333,19 @@ arrive. Leave no drill rule enabled.
 
 The workstream closes only with links or captured output for every row:
 
-| Gate | Evidence |
-| --- | --- |
-| Flux cold install | exact revision reaches Ready from absent resources |
-| Namespace RBAC | `spicedb-qualify placement` and no operator ClusterRoleBinding |
-| Fault domains | three distinct SpiceDB nodes and three distinct PostgreSQL nodes |
-| TLS and tokens | schema Job plus `spicedb-qualify verify` |
-| Schema | local `zed validate`, schema Job, and positive/negative live checks |
-| SpiceDB restart | Thumper summary spanning the Flux rollout |
-| PostgreSQL failover | Thumper summary, new primary, and recovery interval |
-| Rotations | Secret/certificate revisions and repeated live checks |
-| Upgrade/rollback | three converged revisions ending at the target release |
-| R2 restore | marker, BackupJob/RestoreJob status, measured RPO/RTO, cleanup revision |
-| Capacity | numeric QPS and latency/resource table |
-| Alerts | firing and resolved delivery timestamps |
+| Gate                | Evidence                                                                |
+| ------------------- | ----------------------------------------------------------------------- |
+| Flux cold install   | exact revision reaches Ready from absent resources                      |
+| Namespace RBAC      | `spicedb-qualify placement` and no operator ClusterRoleBinding          |
+| Fault domains       | three distinct SpiceDB nodes and three distinct PostgreSQL nodes        |
+| TLS and tokens      | schema Job plus `spicedb-qualify verify`                                |
+| Schema              | local `zed validate`, schema Job, and positive/negative live checks     |
+| SpiceDB restart     | Thumper summary spanning the Flux rollout                               |
+| PostgreSQL failover | Thumper summary, new primary, and recovery interval                     |
+| Rotations           | Secret/certificate revisions and repeated live checks                   |
+| Upgrade/rollback    | three converged revisions ending at the target release                  |
+| R2 restore          | marker, BackupJob/RestoreJob status, measured RPO/RTO, cleanup revision |
+| Capacity            | numeric QPS and latency/resource table                                  |
+| Alerts              | firing and resolved delivery timestamps                                 |
 
 If any row lacks evidence, the prerequisite remains open.

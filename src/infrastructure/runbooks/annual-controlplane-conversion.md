@@ -6,14 +6,14 @@ The source changes describe a target; they do not prove it has been applied.
 
 ## Scope and identities
 
-| Item | Identity |
-|---|---|
-| First annual | ash-worker0 / sv_EvjLaBxRQNoqy |
-| Public/private | 206.223.228.99 / 10.8.0.14 on VLAN2140 |
-| System SSD that may be reset after approval | 362510FCEFF6 |
-| Preserved WUM data SSD | 362510FCEFD5 |
-| Private NIC permanent MAC | 90:5a:08:33:bb:14 / enp1s0f0 |
-| Public NIC permanent MAC | 90:5a:08:33:bb:15 / enp1s0f1 |
+| Item                                        | Identity                               |
+| ------------------------------------------- | -------------------------------------- |
+| First annual                                | ash-worker0 / sv_EvjLaBxRQNoqy         |
+| Public/private                              | 206.223.228.99 / 10.8.0.14 on VLAN2140 |
+| System SSD that may be reset after approval | 362510FCEFF6                           |
+| Preserved WUM data SSD                      | 362510FCEFD5                           |
+| Private NIC permanent MAC                   | 90:5a:08:33:bb:14 / enp1s0f0           |
+| Public NIC permanent MAC                    | 90:5a:08:33:bb:15 / enp1s0f1           |
 
 NVMe enumeration is not identity. Resolve and assert both serials and NIC MACs
 immediately before any destructive or network action. Keep the current physical

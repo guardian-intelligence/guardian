@@ -62,13 +62,13 @@ territory (see adopt-on-pull).
 
 ### Adversaries in scope
 
-| Adversary | Turbo | Confidential |
-| --- | --- | --- |
-| Malicious tenant job (hostile guest kernel, escape attempts, residue) | ✔ | ✔ |
-| Data-at-rest attacker (disks, zvols, snapshots, decommissioned media, storage plane) | ✔ | ✔ |
-| Network attacker (on-path between guest, host, control plane, GitHub) | ✔ | ✔ |
-| Residual-state attacker (plaintext or credentials surviving VM destruction) | ✔ | ✔ |
-| **Byzantine host** (compromised host kernel/KVM/QEMU/hostd, rogue provider personnel, BMC access) | ✖ trusted | ✔ |
+| Adversary                                                                                         | Turbo     | Confidential |
+| ------------------------------------------------------------------------------------------------- | --------- | ------------ |
+| Malicious tenant job (hostile guest kernel, escape attempts, residue)                             | ✔         | ✔            |
+| Data-at-rest attacker (disks, zvols, snapshots, decommissioned media, storage plane)              | ✔         | ✔            |
+| Network attacker (on-path between guest, host, control plane, GitHub)                             | ✔         | ✔            |
+| Residual-state attacker (plaintext or credentials surviving VM destruction)                       | ✔         | ✔            |
+| **Byzantine host** (compromised host kernel/KVM/QEMU/hostd, rogue provider personnel, BMC access) | ✖ trusted | ✔            |
 
 ### Trusted
 
@@ -211,10 +211,10 @@ is a future custody profile, not the current first-party implementation.
 product, provisioned per the [OpenBao design](openbao-design.md) (self-init
 declares the mount; durable keys are data):
 
-| Key | Purpose | Operations |
-| --- | --- | --- |
-| `tenant-<id>` | Confidential `K_tenant` custody; proposed per-lineage Turbo DEK wrapping | datakey generate, decrypt |
-| `postflight-manifest` | Generation-manifest signing | sign, verify |
+| Key                   | Purpose                                                                  | Operations                |
+| --------------------- | ------------------------------------------------------------------------ | ------------------------- |
+| `tenant-<id>`         | Confidential `K_tenant` custody; proposed per-lineage Turbo DEK wrapping | datakey generate, decrypt |
+| `postflight-manifest` | Generation-manifest signing                                              | sign, verify              |
 
 Rules: keys are non-exportable and deny-by-default; each control-plane module
 gets the minimum verb set (metering can verify, only the session module can
@@ -255,33 +255,33 @@ Every applicable gate runs on the exact hardware, firmware, guest image, and QEM
 admitted to production. No customer job runs on a tuple with a failing gate.
 Each gate needs a positive control proving the detector trips.
 
-| ID | Product | Gate | Pass condition |
-| --- | --- | --- | --- |
-| G1 | C | SNP launch | Guests launch with SNP active, debug/migration prohibited, expected measurement; any mutated boot input changes the measurement. |
-| G2 | C | Attestation-gated release | A guest with a wrong measurement, stale TCB, or bad VCEK chain receives no JIT, no `K_tenant`, no listener. |
-| G3 | C | Conduit host | JIT and tenant-key material never appear as plaintext in host memory dumps, disks, argv, environment, or logs; wire frames are ciphertext; hostd binaries contain no unseal path. |
-| G4 | C | Off-chip decryption fails | A volume copied off the worker cannot be opened with any key derivable off that chip; a different-measurement guest on the same chip fails to open it. |
-| G5 | C | Forged-message rejection | Guest lifecycle messages replayed or forged by the host are rejected by the control plane; assignment bindings require the sealed session. |
-| G6 | C | Rollback refusal | A stale-but-authentic generation presented below the floor is refused in-guest; the job runs cold. |
-| G7 | both | Plaintext marker scan | High-entropy markers written inside a job are absent from raw zvols, snapshots, host logs, and host page cache. |
-| G8 | both | Capsule scan | A CRIU dump on host storage is ciphertext; structural decode fails; no credential or registration material exists in any dump from a compliant guest. |
-| G9 | both | Lifecycle destruction | Success, failure, cancellation, timeout, and crash paths all destroy the VM and slot state; residue scans find no mapper devices, keys, or mounts; no VM accepts a second job. |
-| G10 | both | Isolation battery | The §16 jail conformance suite passes: non-root QEMU, seccomp, per-VM network isolation, cgroup caps, no cross-tenant sibling scheduling. |
-| G11 | both | Image hygiene | Golden images are customer-free and, on Confidential, bake the production encryption mode; insecure modes fail image admission. |
-| G12 | C | Bulletin currency | Admitted TCB versions meet minimums from active AMD bulletins; a newly prohibited TCB removes the tuple from scheduling. |
-| G13 | T | Transit custody | Turbo DEKs exist on no host disk or log; wrapped DEKs are useless without Transit; deleting a tenant key renders its lineages undecryptable (verified). |
-| G14 | T | Transit restore drill | A cold-start OpenBao restore decrypts pre-restore Turbo ciphertext before any at-rest claim ships. |
+| ID  | Product | Gate                      | Pass condition                                                                                                                                                                    |
+| --- | ------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G1  | C       | SNP launch                | Guests launch with SNP active, debug/migration prohibited, expected measurement; any mutated boot input changes the measurement.                                                  |
+| G2  | C       | Attestation-gated release | A guest with a wrong measurement, stale TCB, or bad VCEK chain receives no JIT, no `K_tenant`, no listener.                                                                       |
+| G3  | C       | Conduit host              | JIT and tenant-key material never appear as plaintext in host memory dumps, disks, argv, environment, or logs; wire frames are ciphertext; hostd binaries contain no unseal path. |
+| G4  | C       | Off-chip decryption fails | A volume copied off the worker cannot be opened with any key derivable off that chip; a different-measurement guest on the same chip fails to open it.                            |
+| G5  | C       | Forged-message rejection  | Guest lifecycle messages replayed or forged by the host are rejected by the control plane; assignment bindings require the sealed session.                                        |
+| G6  | C       | Rollback refusal          | A stale-but-authentic generation presented below the floor is refused in-guest; the job runs cold.                                                                                |
+| G7  | both    | Plaintext marker scan     | High-entropy markers written inside a job are absent from raw zvols, snapshots, host logs, and host page cache.                                                                   |
+| G8  | both    | Capsule scan              | A CRIU dump on host storage is ciphertext; structural decode fails; no credential or registration material exists in any dump from a compliant guest.                             |
+| G9  | both    | Lifecycle destruction     | Success, failure, cancellation, timeout, and crash paths all destroy the VM and slot state; residue scans find no mapper devices, keys, or mounts; no VM accepts a second job.    |
+| G10 | both    | Isolation battery         | The §16 jail conformance suite passes: non-root QEMU, seccomp, per-VM network isolation, cgroup caps, no cross-tenant sibling scheduling.                                         |
+| G11 | both    | Image hygiene             | Golden images are customer-free and, on Confidential, bake the production encryption mode; insecure modes fail image admission.                                                   |
+| G12 | C       | Bulletin currency         | Admitted TCB versions meet minimums from active AMD bulletins; a newly prohibited TCB removes the tuple from scheduling.                                                          |
+| G13 | T       | Transit custody           | Turbo DEKs exist on no host disk or log; wrapped DEKs are useless without Transit; deleting a tenant key renders its lineages undecryptable (verified).                           |
+| G14 | T       | Transit restore drill     | A cold-start OpenBao restore decrypts pre-restore Turbo ciphertext before any at-rest claim ships.                                                                                |
 
 ## Adopt on pull
 
 Each row is adopted only on customer or regulatory pull, as a separately
 reviewed change to this model:
 
-| Extension | Adopt when |
-| --- | --- |
+| Extension                                                                                              | Adopt when                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Operator-independent key custody: customer-held or customer-wrapped keys, external RATS-style verifier | An enterprise segment requires it and pays for its latency and ceremony — this is the Black tier's defining feature, not a Confidential upgrade. |
-| Portable warmth: attested guest-to-guest key handoff so capsules survive host loss and image rolls | Fleet scale makes cold-on-miss measurably expensive; requires its own reviewed key-release design. |
-| Side-channel hardening beyond bulletin policy | A customer threat model names a specific vector with evidence. |
+| Portable warmth: attested guest-to-guest key handoff so capsules survive host loss and image rolls     | Fleet scale makes cold-on-miss measurably expensive; requires its own reviewed key-release design.                                               |
+| Side-channel hardening beyond bulletin policy                                                          | A customer threat model names a specific vector with evidence.                                                                                   |
 
 Related: [architecture](postflight-architecture.md) ·
 [fleet](postflight-fleet.md) · [storage](postflight-storage.md) ·

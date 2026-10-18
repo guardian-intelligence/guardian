@@ -1,6 +1,6 @@
 # Mythra sim workspace
 
-Crates are grouped by which side of the WebTransport boundary *executes*
+Crates are grouped by which side of the WebTransport boundary _executes_
 them. Distribution doesn't matter — the park serves `client.wasm` bytes it
 never runs.
 

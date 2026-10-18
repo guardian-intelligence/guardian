@@ -17,11 +17,11 @@
 - The workstation reaches both APIs through the in-cluster Cloudflare Tunnel,
   behind founder-only Cloudflare Access applications (`guardian-mgmt-dns`).
   Run `tools/ops/mgmt-tunnel install` once: launchd then keeps `cloudflared
-  access tcp` listeners on `127.0.0.1:16443` (Kubernetes) and
+access tcp` listeners on `127.0.0.1:16443` (Kubernetes) and
   `127.0.0.1:50000` (Talos). `aspect infra auth` and kubectl use the first
   automatically — guardian_auth probes the loopback port before the direct
   endpoint. Point talosctl/talm at the second with `-e 127.0.0.1 -n
-  <node VLAN IP>`. The first connection, and each one after the Access
+<node VLAN IP>`. The first connection, and each one after the Access
   session expires, opens a browser for Cloudflare's one-time PIN unless the
   Mac transport credential has been installed. `guardian-mgmt-dns` declares
   the dedicated `guardian-operator-shovon-mac-v1` service token and admits it
@@ -51,7 +51,7 @@
   cert lifetime. The ladder lives in
   `src/infrastructure/base/cozystack-identities/platform-admins.yaml`.
 - Workstation hygiene is a launchd agent, not a habit: `tools/ops/workspace-watch
-  install` fast-forwards the primary checkout whenever that is a no-op for local
+install` fast-forwards the primary checkout whenever that is a no-op for local
   work, removes worktrees whose branch is already in `origin/main`, and keeps the
   `read` persona's offline token from idling out of its 30-day window. Locked,
   dirty, in-use, and recently touched worktrees are never removed —
@@ -86,4 +86,4 @@ Every node arms its AMD SP5100 TCO chipset watchdog (`/dev/watchdog0`, 1m timeou
 
 ## Drills
 
-* Drills are not part of normal development — run them when asked on one node at a time by explicit node IP, wait for the node and public edge to recover, document that node's outage window, then move to the next. A node whose loss breaches 60 seconds of public-edge disruption is load-bearing and must be fixed before continuing.
+- Drills are not part of normal development — run them when asked on one node at a time by explicit node IP, wait for the node and public edge to recover, document that node's outage window, then move to the next. A node whose loss breaches 60 seconds of public-edge disruption is load-bearing and must be fixed before continuing.

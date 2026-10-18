@@ -1130,7 +1130,7 @@ export const rampUnits = (
   return last[1];
 };
 
-const zeros = () => new Array<number>(MONTHS + 1).fill(0); // index 1..MONTHS
+const zeros = () => Array.from({ length: MONTHS + 1 }, () => 0); // index 1..MONTHS
 
 export type StreamSeries = {
   units: number[];

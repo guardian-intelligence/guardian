@@ -120,7 +120,7 @@ spec:
             severity: warning
         - alert: CPUThrottlingHigh
           annotations:
-            description: '{{ $value | humanizePercentage }} throttling of CPU in namespace {{ $labels.namespace }} for container {{ $labels.container }} in pod {{ $labels.pod }}.'
+            description: "{{ $value | humanizePercentage }} throttling of CPU in namespace {{ $labels.namespace }} for container {{ $labels.container }} in pod {{ $labels.pod }}."
             runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/cputhrottlinghigh
             summary: Processes experience elevated CPU throttling.
           expr: |-

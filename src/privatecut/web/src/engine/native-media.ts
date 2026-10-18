@@ -61,7 +61,8 @@ export function recorderMimeCandidates(
 export function selectRecorderMimeType(
   profile: OutputProfile,
   includeAudio: boolean,
-  isSupported: (mimeType: string) => boolean = MediaRecorder.isTypeSupported,
+  isSupported: (mimeType: string) => boolean = (mimeType) =>
+    MediaRecorder.isTypeSupported(mimeType),
 ): string | null {
   return recorderMimeCandidates(profile, includeAudio).find(isSupported) ?? null;
 }

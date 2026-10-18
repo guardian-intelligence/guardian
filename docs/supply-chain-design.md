@@ -46,10 +46,10 @@ identity can sign more than one artifact family.
 
 ## What gets signed and where it lives
 
-| Artifact | Producer | Signature/attestation | Location |
-|---|---|---|---|
-| `postflight-cli` binaries + OCI artifact | `postflight-cli-image` workflow on main | per-binary cosign keyless sign-blob bundles (travel inside the artifact layer), cosign keyless signature + SPDX SBOM attestation on the artifact digest | ghcr.io, attached to the digest; bundles republished with each GitHub Release |
-| union images lock (generated) | `images-lock-sign` workflow on main pushes touching any union input (declared lock, manifest trees, the imageset tool) | derives the union with `//src/infrastructure/cmd/imageset`, then `cosign sign-blob --bundle` (embeds Fulcio cert + Rekor proof), pushed with `oras push` so the layer carries a filename title | `ghcr.io/guardian-intelligence/supply-chain:images.lock-<sha256>` (one tag per union hash, no floating tag; package stays private — only authenticated drive builds fetch it, dark bring-up reads it from the drive) |
+| Artifact                                 | Producer                                                                                                               | Signature/attestation                                                                                                                                                                          | Location                                                                                                                                                                                                             |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `postflight-cli` binaries + OCI artifact | `postflight-cli-image` workflow on main                                                                                | per-binary cosign keyless sign-blob bundles (travel inside the artifact layer), cosign keyless signature + SPDX SBOM attestation on the artifact digest                                        | ghcr.io, attached to the digest; bundles republished with each GitHub Release                                                                                                                                        |
+| union images lock (generated)            | `images-lock-sign` workflow on main pushes touching any union input (declared lock, manifest trees, the imageset tool) | derives the union with `//src/infrastructure/cmd/imageset`, then `cosign sign-blob --bundle` (embeds Fulcio cert + Rekor proof), pushed with `oras push` so the layer carries a filename title | `ghcr.io/guardian-intelligence/supply-chain:images.lock-<sha256>` (one tag per union hash, no floating tag; package stays private — only authenticated drive builds fetch it, dark bring-up reads it from the drive) |
 
 The artifact inventory itself is split and mostly generated:
 `src/infrastructure/bootstrap/bundle/images.declared.lock` hand-declares
@@ -62,7 +62,7 @@ offline operators all reproduce identical bytes from the same revision.
 
 The union is revision-exact by design: it contains what the checkout
 declares and renders, nothing more. The retired hand-maintained lock
-instead *accumulated* superseded pins so an in-flight blue/green window or
+instead _accumulated_ superseded pins so an in-flight blue/green window or
 a Git-revert rollback stayed mirror-servable from one haul. That property
 is deliberately traded away: a dark rollback now means building (or
 retaining) a bundle at the revision being rolled back to, and a standing
@@ -71,32 +71,33 @@ across syncs rather than serving a single revision's haul. Bring-up from a
 drive is unaffected — workloads deploy fresh from the manifests, so no
 superseded digest is ever needed.
 
-The dark-uplink haul is *derived* from the union lock and every blob in it
+The dark-uplink haul is _derived_ from the union lock and every blob in it
 is digest-addressed, so a verified union plus hash verification of the haul
 against it covers the entire bundle. Signing the haul itself would add no
 integrity the union signature does not already provide. The chain is
 enforced twice: `aspect infra bundle` derives the union, refuses to build a
 drive whose union CI never signed, verifies the signature (pinned identity
-+ pinned Sigstore trusted root at
-`src/infrastructure/bootstrap/bundle/sigstore-trusted-root.json`),
-and runs `bundle --verify` (union/haul/hauler-manifest hash bindings); the
-operator repeats the checks offline as step 0 of dark bring-up (see the
-cold-boot runbook), re-deriving the union from the checkout and
-byte-comparing it against the drive copy. The offline re-derivation runs
-the drive-carried `imageset-bin`, so its binding of drive bytes to checkout
-bytes holds under the custody model (the drive and its binaries travel
-with the operator, like the seal key) — the cosign check is what defends
-the Git-derivation axis, proving the union was produced from reviewed main
-history. The residual trust in the haul→manifest binding is the
-custody model itself: the drive is custody, assembled and carried by the
-operator who also holds the seal key — signatures defend the Git-derivation
-and upstream-registry axes, not the operator.
+
+- pinned Sigstore trusted root at
+  `src/infrastructure/bootstrap/bundle/sigstore-trusted-root.json`),
+  and runs `bundle --verify` (union/haul/hauler-manifest hash bindings); the
+  operator repeats the checks offline as step 0 of dark bring-up (see the
+  cold-boot runbook), re-deriving the union from the checkout and
+  byte-comparing it against the drive copy. The offline re-derivation runs
+  the drive-carried `imageset-bin`, so its binding of drive bytes to checkout
+  bytes holds under the custody model (the drive and its binaries travel
+  with the operator, like the seal key) — the cosign check is what defends
+  the Git-derivation axis, proving the union was produced from reviewed main
+  history. The residual trust in the haul→manifest binding is the
+  custody model itself: the drive is custody, assembled and carried by the
+  operator who also holds the seal key — signatures defend the Git-derivation
+  and upstream-registry axes, not the operator.
 
 ## Promotion: how digests move
 
 Deployment pins are decoupled from content changes. A content PR never
 moves a pin; when it merges, CI on main builds and pushes the new `edge`
-digest, which makes it *eligible* for promotion — nothing more. Every
+digest, which makes it _eligible_ for promotion — nothing more. Every
 digest behind `edge` came from reviewed main history by construction
 (`images.yml` publishes on main pushes only), so a pin move needs no
 per-digest verification.
@@ -125,7 +126,7 @@ from this same commit" to "pin ∈ digests published from main history".
 What is bought: content merges stop requiring a round-trip repin commit,
 and promotion becomes an automatable, independently-gated step per
 service. What is given up: Git alone no longer proves the pin is the
-*latest* build — freshness is the automation's job — and pinning an older
+_latest_ build — freshness is the automation's job — and pinning an older
 published digest (rollback) remains a legitimate one-line operation rather
 than a violation.
 
@@ -197,7 +198,7 @@ openbao://…` is native). We deliberately keep it out of CI's signing path:
    inside the cluster it bootstraps, one level up.
 2. **Exposure**: it puts a network path from public CI runners to the
    secret store that exists for cluster-internal custody.
-3. **No benefit there**: CI signing wants a verifiable *builder identity*,
+3. **No benefit there**: CI signing wants a verifiable _builder identity_,
    and the builder is CI. Keyless binds exactly that.
 
 ## Exit path (sovereignty upgrade)

@@ -50,10 +50,10 @@ break-glass workstation apply.
 **The mode ladder.** A root runs in one of two postures, set by the `MODE`
 env on its CronJob (default `plan`):
 
-| Posture | On a clean plan | On a plan with changes |
-| --- | --- | --- |
-| `plan` (the soak) | exit 0 | log the plan, exit 0 — hold |
-| `apply` | exit 0 | `tofu apply` the saved plan |
+| Posture           | On a clean plan | On a plan with changes      |
+| ----------------- | --------------- | --------------------------- |
+| `plan` (the soak) | exit 0          | log the plan, exit 0 — hold |
+| `apply`           | exit 0          | `tofu apply` the saved plan |
 
 A root is born in `plan` mode and soaks until its plans are clean and stable;
 the flip to `apply` is its own reviewed PR that adds `MODE: apply`, in the
@@ -153,7 +153,7 @@ runners, the operator vault for cold boot — ciphertext outlives every token,
 so the one value that cannot be re-issued from a console is the one kept in
 two places. The cluster never reads the vault, so dual-homing crosses no
 boundary; it is the same arrangement the custody repository passphrase has.
-(A key provider's *name* is embedded in the ciphertext metadata — see the
+(A key provider's _name_ is embedded in the ciphertext metadata — see the
 [[tofu-state-encryption]] note; renaming one without a same-ceremony
 re-encrypt orphans the state.)
 

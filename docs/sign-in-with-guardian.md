@@ -44,10 +44,10 @@ connections to a Guardian account; they are not the account model.
 
 ## Product application inventory
 
-| Surface | Production | Staging | Boundary |
-| - | - | - | - |
-| Sign in with Guardian GitHub OAuth App | Settings ID `3656712`, client ID `Ov23li9wlYzzt3mcfJ7V` | Settings ID `3708383`, client ID `Ov23liQCzyzCZ0Vr8SCf` | GitHub social login for the Guardian realm |
-| Postflight GitHub App | [Postflight by Guardian](https://github.com/apps/postflight-by-guardian), App ID `3370540` | A dedicated `Postflight by Guardian (Staging)` App installed only in the canary organization | Webhooks, Actions API, and runner JIT configuration |
+| Surface                                | Production                                                                                 | Staging                                                                                      | Boundary                                            |
+| -------------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Sign in with Guardian GitHub OAuth App | Settings ID `3656712`, client ID `Ov23li9wlYzzt3mcfJ7V`                                    | Settings ID `3708383`, client ID `Ov23liQCzyzCZ0Vr8SCf`                                      | GitHub social login for the Guardian realm          |
+| Postflight GitHub App                  | [Postflight by Guardian](https://github.com/apps/postflight-by-guardian), App ID `3370540` | A dedicated `Postflight by Guardian (Staging)` App installed only in the canary organization | Webhooks, Actions API, and runner JIT configuration |
 
 Before production activation:
 

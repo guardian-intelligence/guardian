@@ -196,7 +196,7 @@ function safeReturnTo(value: string | null): string {
   return value;
 }
 
-function securityHeaders(): HeadersInit {
+function securityHeaders(): Record<string, string> {
   return {
     "cache-control": "no-store",
     "content-security-policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",

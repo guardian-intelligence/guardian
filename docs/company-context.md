@@ -1,9 +1,9 @@
 # Company context
 
-* Domain: guardianintelligence.org (abbreviated in conversation with user as "gi.org")
-* Repo ships specific products within the architecture. First major product: Postflight (reference Blacksmith.sh and verself)
-* Stripe is payment rail only -- we don't use Stripe Subscriptions / Usage-Based Billing. We meter on our own (planned)
-* Other useful reference architectures: Zarf/UDS, AWS Landing Zone Accelerator
+- Domain: guardianintelligence.org (abbreviated in conversation with user as "gi.org")
+- Repo ships specific products within the architecture. First major product: Postflight (reference Blacksmith.sh and verself)
+- Stripe is payment rail only -- we don't use Stripe Subscriptions / Usage-Based Billing. We meter on our own (planned)
+- Other useful reference architectures: Zarf/UDS, AWS Landing Zone Accelerator
 
 <overall_strategy>
 We are an open source reference architecture in addition to the Postflight core product. The value proposition for cloners:

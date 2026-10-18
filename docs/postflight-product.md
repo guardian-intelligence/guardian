@@ -25,7 +25,7 @@ Differentiation, two claims only:
 
 Evidence for the proof slides:
 
-- CI volume is growing ~60% *per quarter, per developer* (Blacksmith's measured figure) as agents multiply PR volume ahead of headcount.
+- CI volume is growing ~60% _per quarter, per developer_ (Blacksmith's measured figure) as agents multiply PR volume ahead of headcount.
 - Champions in their own words: "developers became incredibly vocal that the pipeline wasn't great" (Jane, 250 devs); "ran the pipeline 10 times to get one pass" (Clerk); "The amount we pay an engineer per minute is far higher than any CI minute" (Upbound, Director of Eng).
 - Pitch order: morale story → founder credibility → live demo ("your agent installs it before this meeting ends") → the benchmark → the meter and the commitment. Emotion, trust, proof, demo, deal. Infrastructure never leads.
 
@@ -38,12 +38,13 @@ Early customers buy the person operating the runner. The bio maps onto the produ
 - **The FDE commitment, in writing:** Shovon personally forward-deploys into your org. Any bug, outage, latency regression, or janky feature is prioritized immediately — not triaged into a backlog. Headline for the common case: a fix ships within 24 hours.
 
 ⚙ The written form is a standard severity-tiered support agreement (the design-partner one-pager, ~half a page), so the promise survives physics:
-  - **Sev-1 (CI down / security):** acknowledged within 1 hour; continuous mitigation effort until restored; hourly status updates.
-  - **Sev-2 (degraded performance, blocking bug):** acknowledged within 4 hours; workaround or mitigation within 24 hours.
-  - **Sev-3 (minor bug, janky feature):** prioritized ASAP; committed timeline communicated within 24 hours.
+
+- **Sev-1 (CI down / security):** acknowledged within 1 hour; continuous mitigation effort until restored; hourly status updates.
+- **Sev-2 (degraded performance, blocking bug):** acknowledged within 4 hours; workaround or mitigation within 24 hours.
+- **Sev-3 (minor bug, janky feature):** prioritized ASAP; committed timeline communicated within 24 hours.
   Response and mitigation are on the clock; root-cause resolution is continuous effort plus a communicated timeline.
 
-⚙ AWS status — resolved: Shovon is at AWS until outside investment (or revenue) makes Postflight the full-time job, and the material says so. Handle it *proactively* in every deal (§9's talk track) — raised by us before they ask, paired with why the platform doesn't depend on founder-hours: the substrate runs unattended and pages a human only when self-healing fails.
+⚙ AWS status — resolved: Shovon is at AWS until outside investment (or revenue) makes Postflight the full-time job, and the material says so. Handle it _proactively_ in every deal (§9's talk track) — raised by us before they ask, paired with why the platform doesn't depend on founder-hours: the substrate runs unattended and pages a human only when self-healing fails.
 
 ## 4. Who buys (evidence-based ICP)
 
@@ -52,7 +53,7 @@ Research across ~30 competitor case studies gives two profiles and one conquest 
 ### ICP-A — the compile-bound AI-era product team (land)
 
 - **Firmographics:** 15–75 engineers, seed–Series C. Devtools, AI, fintech-infra. Compiled or Docker-heavy stacks over-index hard (Rust appears in ~half the strongest case studies; monorepos and SDK matrices qualify). Private repos, Linux-dominant CI.
-- **Champion:** below ~30 engineers, a founder/CTO; 30–75, a named IC — staff engineer, DevOps/SRE, platform lead — *the person who personally waits on CI*. Measured on ship velocity and their own wait time. Fears owning CI forever and a migration that eats a quarter (every competitor testimonial praises "one line of YAML" for this reason).
+- **Champion:** below ~30 engineers, a founder/CTO; 30–75, a named IC — staff engineer, DevOps/SRE, platform lead — _the person who personally waits on CI_. Measured on ship velocity and their own wait time. Fears owning CI forever and a migration that eats a quarter (every competitor testimonial praises "one line of YAML" for this reason).
 - **Economic buyer:** the same person or one hop up. Card-on-file territory.
 - **Triggers, ranked by evidence:** (1) PR-check time crossing ~10 minutes / queues visible in standup; (2) bill shock or the 10GB cache wall ("Ten gigabytes in today's world is peanuts" — Bastion CTO); (3) agent adoption multiplying CI jobs ahead of headcount.
 - **Disqualifiers:** <5 engineers or hobbyists; Hetzner-DIY cost culture; pure price shoppers (Ubicloud owns them at $0.001/min; GitHub's January cuts compressed that segment — BuildJet died of it).
@@ -67,10 +68,10 @@ Research across ~30 competitor case studies gives two profiles and one conquest 
 
 ### Conquest notes (time-boxed)
 
-- **Cirrus Runners run-off:** contracts expire through 2026 with no first-party migration path. The macOS-primary mobile fleet is *not ours* (we don't do macOS — refer them out). The **Linux-slot** portion bought fixed monthly capacity for budget predictability — exactly our commitment shape.
+- **Cirrus Runners run-off:** contracts expire through 2026 with no first-party migration path. The macOS-primary mobile fleet is _not ours_ (we don't do macOS — refer them out). The **Linux-slot** portion bought fixed monthly capacity for budget predictability — exactly our commitment shape.
 - **Blacksmith billing-surprise refugees** (June 2026 HN scandal): approachable with the spend-cap + commitment story.
 
-⚙ **Design-partner selection rule:** the first 10 come from ICP-A *behavior* (founder-reachable, one-hop approval, 5-minute install) but are selected for ICP-B *trajectory* — 30+ engineers, agent adoption visible, approaching the wall. The research's sharpest insight: **the self-serve champion and the committed buyer are the same person at two moments in company life.** The IC who felt the queue at 40 engineers runs the procurement pass at 150. Design partners are champion-farming; the $40k/mo customer is ICP-B, reached through references, and reference calls are how that segment buys (the biggest enterprise case studies in this market are anonymous).
+⚙ **Design-partner selection rule:** the first 10 come from ICP-A _behavior_ (founder-reachable, one-hop approval, 5-minute install) but are selected for ICP-B _trajectory_ — 30+ engineers, agent adoption visible, approaching the wall. The research's sharpest insight: **the self-serve champion and the committed buyer are the same person at two moments in company life.** The IC who felt the queue at 40 engineers runs the procurement pass at 150. Design partners are champion-farming; the $40k/mo customer is ICP-B, reached through references, and reference calls are how that segment buys (the biggest enterprise case studies in this market are anonymous).
 
 Where these people are: HN incident/pricing threads (the proven channel — every founder in this market sells in comments), RunsOn's public benchmarks used as neutral eval material, the GitHub pricing-revolt threads, OSS maintainer blogs, and in person in SF.
 
@@ -105,7 +106,7 @@ Surfaces, in the order customers meet them:
 - The GitHub App's failure comment carries the same context in agent-readable form — the agent in the customer's PR loop diagnoses without being asked.
 - The skill teaches the agent to pull context and propose the fix. Incumbents built dashboards for humans staring at logs.
 
-**A verifiable install path.** The CLI and skill are cosign-signed with SLSA provenance and inspectable attestations. When an org tells its agent to install a new vendor's tooling, the agent verifies provenance *before executing anything*, and the security reviewer can audit that it happened. No CI incumbent offers an attestable install path today. ⚙ The machinery exists (keyless CI identities, offline-verifiable bundles); the skill's install step runs verification by default — whether agents "appreciate" it is unfalsifiable, but security teams reviewing agent-driven installs measurably do, and it converts the scariest part of our pitch (new vendor + agent + binary) into a differentiator.
+**A verifiable install path.** The CLI and skill are cosign-signed with SLSA provenance and inspectable attestations. When an org tells its agent to install a new vendor's tooling, the agent verifies provenance _before executing anything_, and the security reviewer can audit that it happened. No CI incumbent offers an attestable install path today. ⚙ The machinery exists (keyless CI identities, offline-verifiable bundles); the skill's install step runs verification by default — whether agents "appreciate" it is unfalsifiable, but security teams reviewing agent-driven installs measurably do, and it converts the scariest part of our pitch (new vendor + agent + binary) into a differentiator.
 
 **Closing the console-shaped gaps headlessly** (each a known failure mode of console-less products):
 
@@ -119,14 +120,14 @@ Auth: PKCE loopback is the default `postflight login` (agent does everything; hu
 
 ## 7. Onboarding: the one-prompt integration
 
-The line: *"Take 5 minutes. Install our GitHub App, tell your agent to finish the job, and watch your next PR."*
+The line: _"Take 5 minutes. Install our GitHub App, tell your agent to finish the job, and watch your next PR."_
 
 1. Human installs the GitHub App (or the skill first — either entry works).
 2. Agent invokes `/postflight` → runs `postflight login` — PKCE loopback, one human approve click. The skill's install step verifies cosign/SLSA provenance before anything executes.
 3. Agent runs `postflight init` — detects repos and opens migration PRs **with the customer's own credentials**: swaps `runs-on`, swaps `actions/checkout` → `postflight/checkout`, authors `.postflight/cache.yml` from repo analysis (bazel/pnpm/cargo/gradle paths — judgment work a customer's agent does well).
 4. First merged PR → next job lands warm → the GitHub App comments before/after timing on the PR. The product demos itself in the customer's own repo.
 
-⚙ Step 3 is structural advantage twice: competitors' migration wizards need code/PR write on *their* App (the permission security reviewers reject) — ours needs nothing because the customer's agent does it; and wizards only do mechanical `runs-on` swaps — an agent authors the cache manifest that unlocks the real speedup. Honest demo nuance: a bare `runs-on` swap gets faster CPU but leaves `actions/cache` on GitHub's backend (~20 MB/s from external DCs — worse than GH-hosted). The full win needs all three changes, which is why the agent does them in one PR. Stock actions still work as a compatibility fallback; they're not the product.
+⚙ Step 3 is structural advantage twice: competitors' migration wizards need code/PR write on _their_ App (the permission security reviewers reject) — ours needs nothing because the customer's agent does it; and wizards only do mechanical `runs-on` swaps — an agent authors the cache manifest that unlocks the real speedup. Honest demo nuance: a bare `runs-on` swap gets faster CPU but leaves `actions/cache` on GitHub's backend (~20 MB/s from external DCs — worse than GH-hosted). The full win needs all three changes, which is why the agent does them in one PR. Stock actions still work as a compatibility fallback; they're not the product.
 
 ## 8. Performance claims (sales language guardrails)
 
@@ -140,22 +141,22 @@ The line: *"Take 5 minutes. Install our GitHub App, tell your agent to finish th
 ## 9. Objection playbook
 
 **"We already use Blacksmith."**
-"Blacksmith is good — we benchmarked them. Three structural differences: (1) *Metering* — they bill per-minute; your 10-second agent-triggered jobs bill as full minutes, and their metered free tier accrued a customer a surprise $1,081 invoice in June. We meter by the millisecond, with hard spend caps you set. (2) *Capacity* — they have no dedicated or reserved option at any price; you share their pool and their outages (this month: cache outage plus job-history data loss). We reserve warm concurrency for you contractually. (3) *Support* — you Slack me, I get paged, and if your agents hit a CLI or skill bug I ship the fix within 24 hours. And static IPs are included, not $100 a month."
+"Blacksmith is good — we benchmarked them. Three structural differences: (1) _Metering_ — they bill per-minute; your 10-second agent-triggered jobs bill as full minutes, and their metered free tier accrued a customer a surprise $1,081 invoice in June. We meter by the millisecond, with hard spend caps you set. (2) *Capacity* — they have no dedicated or reserved option at any price; you share their pool and their outages (this month: cache outage plus job-history data loss). We reserve warm concurrency for you contractually. (3) *Support* — you Slack me, I get paged, and if your agents hit a CLI or skill bug I ship the fix within 24 hours. And static IPs are included, not $100 a month."
 
 **"GitHub Actions is fine."**
 "If CI isn't a felt pain, we're not a fit. But check three numbers: you're paying $0.006/min for roughly half the CPU we run; your cache caps at 10GB with 72-second round-trips; and 'stuck in Queued' has its own community megathreads. Ask your engineers — they know."
 
-**"We already use Depot."** *(will come up — the strongest incumbent)*
+**"We already use Depot."** _(will come up — the strongest incumbent)_
 "Depot's real strength is Docker builds — keep them for that if you love it. Where we win: metering (ms vs seconds), dedicated reserved capacity (their dedicated infra is a sales-gated enterprise checkbox), a cache that's a block device mounted before boot rather than a faster download, and an agent-debuggable surface. And you're a name to me, not a tier."
 
 **"You're one person."**
 "One person whose day job is EC2's capacity products — Capacity Reservations, Spot, Capacity Blocks for ML. Reserved compute with a meter is what I build at planetary scale; this is the boutique version with my name on the pager. Your CI runs on capacity I don't oversubscribe, the substrate is open source with drilled disaster recovery — cold-boot from nothing is a rehearsed procedure — and leaving us is a one-line `runs-on` flip back to `ubuntu-latest`; I'll hand you that runbook today. Plus the support commitment in writing: anything broken gets prioritized immediately, most fixes ship within 24 hours." ⚙ Hand the runbook over proactively; after two vendor shutdowns this year, continuity is a stated buying criterion and the runbook converts fear into trust.
 
-**"Isn't this a side project? You work at AWS."** *(raise it ourselves before they do)*
+**"Isn't this a side project? You work at AWS."** _(raise it ourselves before they do)_
 "Yes — I'm at AWS until this business earns my full attention, and I'd rather you hear that from me. In practice: the platform runs unattended — it detects its own degradation, heals what it can, and pages me only when it can't; my support commitment is in writing with severity tiers; and your exit is a one-line runbook I hand you on day one. And candidly: design partners like you are exactly how this becomes my full-time job." ⚙ Proactive honesty here is a trust weapon — a hidden day job discovered later kills the deal; a disclosed one with a written SLA and an exit runbook reads as integrity. Calibrate warmth; never the belligerent version.
 
 **"You want our agents installing a new vendor's binary?"**
-"That's the one install in your org your agent can *cryptographically verify first*. CLI and skill are cosign-signed with SLSA provenance; the skill's install step verifies attestations before executing, and your security team can audit that it happened. Compare that to the marketplace actions your CI already runs unverified."
+"That's the one install in your org your agent can _cryptographically verify first_. CLI and skill are cosign-signed with SLSA provenance; the skill's install step verifies attestations before executing, and your security team can audit that it happened. Compare that to the marketplace actions your CI already runs unverified."
 
 **"Are you SOC 2?"**
 "In flight — Type II window opens [date]. Until then: trust page, isolation architecture doc, pentest letter, and I'll walk your security team through the design live. The architecture answers what SOC 2 can't: one job per VM, VM destroyed after, workloads isolated per customer with per-org encrypted storage, everything we retain expires in 30 days and is rebuildable from your repo, and a GitHub App that cannot request secrets or code access."
@@ -194,7 +195,7 @@ The warmth substrate underneath this section is **Lightning** — doctrine and c
 
 **Cache model — the moat (Postflight-source-verified semantics on the QEMU mechanism):**
 
-- Source and caches are **local NVMe block devices, never a download protocol** — the customer-facing claim and the structural answer to every competitor's cache benchmark. **The core mechanism is hot-plugging zvols into running QEMU VMs** — tracer-proven 2026-07-05: 227ms attach, revoke verified, virtio-scsi controller must be in the VM template. Hot-plug turns a generic warm pooled VM into *your* VM at assignment time (the org isn't known at pool-boot) and is the expected path for non-enterprise customers; staging drives before boot remains available for golden-restore and dedicated-capacity paths. ⚙ "Mount before boot, never hot-plug" is not a constraint — do not carry it as one.
+- Source and caches are **local NVMe block devices, never a download protocol** — the customer-facing claim and the structural answer to every competitor's cache benchmark. **The core mechanism is hot-plugging zvols into running QEMU VMs** — tracer-proven 2026-07-05: 227ms attach, revoke verified, virtio-scsi controller must be in the VM template. Hot-plug turns a generic warm pooled VM into _your_ VM at assignment time (the org isn't known at pool-boot) and is the expected path for non-enterprise customers; staging drives before boot remains available for golden-restore and dedicated-capacity paths. ⚙ "Mount before boot, never hot-plug" is not a constraint — do not carry it as one.
 - `postflight/checkout`: guest fetches a single-commit git pack from the host's bare mirror, advances the durable workspace to the exact SHA, preserves untracked build state. Laptop-style incremental builds across CI runs.
 - `.postflight/cache.yml`: named cache mounts as ZFS zvol generations, CAS pointer promotion, scoped by branch + job-shape + trust class, 7-day TTL + watermark eviction.
 - Green on push-to-main → golden checkpoint: a CRIU process capsule atomically coupled to the zvol generation set (including `_work`), CAS-promoted. PR runs consume goldens; only protected-branch pushes create them.
@@ -230,7 +231,7 @@ The market is converging on this ladder (Depot CI → agent sandboxes; OpenAI ×
 
 ## 14. Open decisions
 
-1. **Hardware + rate card (gates the "faster than everyone else" headline).** f4.metal.small (EPYC 4484PX — desktop-class single-thread, competitive with premium vendors) until $4k MRR; rs4.metal.xlarge (9554P, 64c/1.5TB) adds density but its 3.1GHz base likely *regresses* single-thread — possibly right for sandbox density, wrong for CI slots. Benchmark rs4.metal.xlarge and f4.metal.large (9275F-class, 4.1GHz) one hour each: single-thread + a real CI suite (`bare-metal-ci-bench` is prior art). Publish the winner in RunsOn-comparable format.
+1. **Hardware + rate card (gates the "faster than everyone else" headline).** f4.metal.small (EPYC 4484PX — desktop-class single-thread, competitive with premium vendors) until $4k MRR; rs4.metal.xlarge (9554P, 64c/1.5TB) adds density but its 3.1GHz base likely _regresses_ single-thread — possibly right for sandbox density, wrong for CI slots. Benchmark rs4.metal.xlarge and f4.metal.large (9275F-class, 4.1GHz) one hour each: single-thread + a real CI suite (`bare-metal-ci-bench` is prior art). Publish the winner in RunsOn-comparable format.
 2. **Design-partner terms:** months free (how many?), written feedback/reference ask, card-on-file (recommend: always).
 3. **SOC 2 start:** now vs first paying customer (recommend: first paying customer; trust page now).
 4. **Runner label flavor branding** — the label scheme is `postflight-<x>vcpu-<os>-<flavor>` (first category: `postflight-<x>vcpu-ubuntu24-confidential`); the non-TEE flavor's public name (`turbo`, provisional) lives in customer workflow files forever — ratify before first install.

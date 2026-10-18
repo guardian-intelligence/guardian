@@ -15,6 +15,7 @@ called out explicitly.
 ---
 
 ## Topology & storage
+
 - 3-node raft `StatefulSet` in `tenant-guardian`, one member per node, hard pod + node
   anti-affinity so a single node loss removes exactly one member (quorum 2/3).
 - **Local encrypted storage per member** — node-pinned
@@ -31,6 +32,7 @@ called out explicitly.
   non-converging release; the drills are the compensating convergence check.)
 
 ## Seal — static auto-unseal
+
 - `seal "static"` with `current_key = file:///openbao/secrets/unseal-<id>.key`, a 32-byte
   raw AES-256-GCM key, read-only mounted from node storage.
 - An init container hard-fails the pod unless the key file exists **and its fingerprint
@@ -45,6 +47,7 @@ called out explicitly.
   mixed OpenBao `cluster_id` values across raft members.
 
 ## Static seal security posture
+
 - The static seal key is a node-local bearer secret. It is placed out of band on the three
   dedicated OpenBao nodes and is never stored in Git, Kubernetes, CI, Talos `machine.files`,
   chat, shell history, or OpenBao-backed secret paths.
@@ -56,6 +59,7 @@ called out explicitly.
   backup custody. That is part of the DR posture, not a convergence failure.
 
 ## Listener TLS
+
 - cert-manager issues **one** cert for the **8200 API listener**:
   `Certificate/guardian-openbao-api` writes `Secret/guardian-openbao-api-tls`.
 - The OpenBao listener certificate is transport identity only. It is issued by
@@ -77,9 +81,9 @@ called out explicitly.
   services, the `leader_tls_servername` value, and localhost. Mount **without `subPath`**
   (subPath mounts never receive Secret updates).
 - **Reload:** a **SIGHUP sidecar** watching the mounted cert file (OpenBao reloads cert
-  *content* at the same path on SIGHUP; there is no native file-watcher). Preferred over
+  _content_ at the same path on SIGHUP; there is no native file-watcher). Preferred over
   Stakater Reloader because it avoids restarts and any quorum risk — though restart-based
-  Reloader is now *tolerable* since static-seal makes restarts self-healing. The sidecar
+  Reloader is now _tolerable_ since static-seal makes restarts self-healing. The sidecar
   matches the running `bao` server process before sending SIGHUP.
 - **Rolling order** under `OnDelete`: standbys first, one at a time → `operator step-down` →
   former-active last. Never `kubectl rollout restart`.
@@ -94,6 +98,7 @@ called out explicitly.
   dependency. Deferred; cert-manager + SIGHUP sidecar is the lower-dependency path.
 
 ## Workload PKI
+
 - OpenBao PKI is not used for OpenBao's own listener certificate.
 - No workload PKI consumer exists yet, so the repo does not carry a PKI mount,
   root issuer, role, cert-manager Vault issuer, or cert-manager TokenRequest
@@ -109,6 +114,7 @@ called out explicitly.
   OpenBao unless that is explicitly accepted as the custody boundary.
 
 ## Transit
+
 - Self-init's `enable_transit_mount` request declares the Transit engine so approved
   key-management consumers can be added without reintroducing a bootstrap control plane.
 - Durable Transit keys are not declared generically. A Transit key that protects
@@ -124,6 +130,7 @@ called out explicitly.
   approved consumer arrives.
 
 ## Auth & self-init config
+
 - Kubernetes auth method; ESO and the writer path authenticate via SA tokens validated
   by TokenReview, bound to namespace + SA + audience, least-privilege policies.
 - **Self-init is the sole source of truth for steady-state OpenBao config.** The `initialize`
@@ -157,9 +164,10 @@ called out explicitly.
   kv mount and auth role and ESO can read them.
 
 ## Audit
+
 - A **single local `file` audit device** (the device OpenBao blocks on if audit writes fail).
   Rotate by **rename + SIGHUP** (not copytruncate); alert before disk pressure can block bao.
-- **No network audit "fallback" device.** A second socket/syslog device *enlarges* the
+- **No network audit "fallback" device.** A second socket/syslog device _enlarges_ the
   blocking surface (a network audit device is more block-prone), so it makes availability
   worse, not better.
 - A sidecar tails the file and ships rotated logs to **Cloudflare R2 with a bucket-lock rule
@@ -167,6 +175,7 @@ called out explicitly.
   request path. R2 is not an OpenBao audit device.
 
 ## Disaster recovery
+
 - Primary recovery model: config rebuilds from Git (self-init), data restores
   from the latest raft snapshot. A cluster CronJob runs
   `bao operator raft snapshot` and ships the result to R2 continuously; the
@@ -197,6 +206,7 @@ called out explicitly.
   same static key and pass the same decrypt check after snapshot restore.
 
 ## Seal-key rotation
+
 - `previous_key`/`current_key` under a new key-id; roll one pod at a time; keep the previous
   key until rewrap/seal-migration evidence clears it **and** no retained snapshot still needs
   it. Key contents never change without the key-id changing.
@@ -219,6 +229,7 @@ easy to race, so encode the dependency explicitly.
 ## Operations inventory
 
 Created by the self-init `initialize` block and Ready in the current cluster:
+
 - `kv` mount and tune.
 - `transit` mount and tune.
 - Kubernetes auth backend and tune.
@@ -227,6 +238,7 @@ Created by the self-init `initialize` block and Ready in the current cluster:
   `TestOpenBaoOperationsInventoryConformance`).
 
 Declared alongside self-init:
+
 - `ClusterSecretStore/external-dns-openbao` and `ExternalSecret/cloudflare-external-dns`.
 
 Durable Transit keys are provisioned as data rather than self-init requests.
@@ -238,6 +250,7 @@ signing, envelope encryption, and workload key management use Transit rather
 than Kubernetes Secrets as their key authority.
 
 ## Key references
+
 - Integrated storage = local filesystem + consensus; remove-peer / peers.json recovery:
   https://developer.hashicorp.com/vault/docs/concepts/integrated-storage
 - Raft reference architecture (SSD-optimized, IOPS/latency targets):

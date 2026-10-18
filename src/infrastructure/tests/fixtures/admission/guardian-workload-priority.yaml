@@ -3,35 +3,35 @@
 policy: guardian-workload-priority
 cases:
   - name: deployment without a priority class gets the floor
-    resource: {group: apps, version: v1, resource: deployments}
+    resource: { group: apps, version: v1, resource: deployments }
     object:
       apiVersion: apps/v1
       kind: Deployment
-      metadata: {name: unpinned, namespace: tenant-guardian-previews}
+      metadata: { name: unpinned, namespace: tenant-guardian-previews }
       spec:
         selector:
-          matchLabels: {app: unpinned}
+          matchLabels: { app: unpinned }
         template:
           metadata:
-            labels: {app: unpinned}
+            labels: { app: unpinned }
           spec:
             containers:
               - name: site
                 image: ghcr.io/guardian-intelligence/company-site@sha256:0000000000000000000000000000000000000000000000000000000000000000
     expect: mutate
-    expectField: {path: spec.template.spec.priorityClassName, value: guardian-standard}
+    expectField: { path: spec.template.spec.priorityClassName, value: guardian-standard }
   - name: explicit priority class is untouched
-    resource: {group: apps, version: v1, resource: deployments}
+    resource: { group: apps, version: v1, resource: deployments }
     object:
       apiVersion: apps/v1
       kind: Deployment
-      metadata: {name: pinned, namespace: tenant-guardian-previews}
+      metadata: { name: pinned, namespace: tenant-guardian-previews }
       spec:
         selector:
-          matchLabels: {app: pinned}
+          matchLabels: { app: pinned }
         template:
           metadata:
-            labels: {app: pinned}
+            labels: { app: pinned }
           spec:
             priorityClassName: guardian-critical
             containers:

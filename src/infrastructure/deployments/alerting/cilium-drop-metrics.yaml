@@ -33,7 +33,7 @@ spec:
             severity: warning
             guardian_component: cilium-drops
           annotations:
-            summary: 'Cilium denying {{ $labels.protocol }} traffic at {{ $value | humanize }} notifications/s'
+            summary: "Cilium denying {{ $labels.protocol }} traffic at {{ $value | humanize }} notifications/s"
             description: >-
               POLICY_DENIED drops have been sustained for 15+ minutes.
               Something a network policy does not admit is retrying against
