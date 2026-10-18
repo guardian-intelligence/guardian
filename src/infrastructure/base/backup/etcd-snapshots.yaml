@@ -41,7 +41,7 @@ metadata:
     guardian.dev/component: backup
 spec:
   # :20 offset keeps the run clear of the :00 nightly CNPG backups.
-  schedule: '20 */6 * * *'
+  schedule: "20 */6 * * *"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 600
   successfulJobsHistoryLimit: 3
@@ -94,7 +94,7 @@ spec:
                 # (UsePathStyle = env == "false"); "false" is what yields
                 # path-style requests, which R2 expects.
                 - name: USE_PATH_STYLE
-                  value: 'false'
+                  value: "false"
                 - name: CLUSTER_NAME
                   value: guardian-mgmt
                 - name: S3_PREFIX
@@ -158,20 +158,20 @@ spec:
             k8s:k8s-app: kube-dns
       toPorts:
         - ports:
-            - port: '53'
+            - port: "53"
               protocol: UDP
-            - port: '53'
+            - port: "53"
               protocol: TCP
     - toEntities:
         - host
         - remote-node
       toPorts:
         - ports:
-            - port: '50000'
+            - port: "50000"
               protocol: TCP
     - toEntities:
         - world
       toPorts:
         - ports:
-            - port: '443'
+            - port: "443"
               protocol: TCP

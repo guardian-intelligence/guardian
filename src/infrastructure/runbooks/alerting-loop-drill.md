@@ -82,11 +82,11 @@ expect a duplicate; two pages beat zero.
 
 ## Drill log
 
-| Date | Drill | Result | Evidence |
-|---|---|---|---|
-| 2026-07-06 | Delivery (synthetic critical) | PASS | priority-5 page, tags critical/production; receipt confirmed by operator |
-| 2026-07-06 | Kargo (unhealthy warehouse) | PASS | KargoWarehouseNotHealthy paged priority 5 at ~17 min; warehouse deleted |
-| 2026-07-07 | Delivery (synthetic PGBackupStale) | PASS | priority-5 page, tags critical/production, ~60s after POST; proves postgres-health rules route end to end |
+| Date       | Drill                              | Result | Evidence                                                                                                  |
+| ---------- | ---------------------------------- | ------ | --------------------------------------------------------------------------------------------------------- |
+| 2026-07-06 | Delivery (synthetic critical)      | PASS   | priority-5 page, tags critical/production; receipt confirmed by operator                                  |
+| 2026-07-06 | Kargo (unhealthy warehouse)        | PASS   | KargoWarehouseNotHealthy paged priority 5 at ~17 min; warehouse deleted                                   |
+| 2026-07-07 | Delivery (synthetic PGBackupStale) | PASS   | priority-5 page, tags critical/production, ~60s after POST; proves postgres-health rules route end to end |
 
 ## Known limits (stated, not hidden)
 

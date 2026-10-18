@@ -32,7 +32,7 @@ git (flags.json)
   detail behind the OFREP contract; it can be swapped without touching a
   client.
 - **Change notification**: `feature-flags-notify`
-  (`src/flags/notify`) streams the *flag-set epoch* — a
+  (`src/flags/notify`) streams the _flag-set epoch_ — a
   content hash of flags.json — over SSE at `/features/events`. No flag
   values on the stream, no per-user compute: one identical event fans out
   to every subscriber, and each client re-evaluates through OFREP with its
@@ -111,7 +111,7 @@ down and `write-basic` cannot be minted, the x509 breakglass
 (`--persona=root --reason "<why>"`) applies, pages a human, and is audit
 logged.
 
-Kill-switch tip: design risky client features with the flag as the *only*
+Kill-switch tip: design risky client features with the flag as the _only_
 gate (`enabled === true` renders, anything else — including evaluation
 failure — renders nothing). Then the worst-case rollback is also just the
 flag flip, and a flags-lane outage fails closed to the GA'd experience.

@@ -4,12 +4,8 @@ import { Counter, Rate } from "k6/metrics";
 
 const targets = JSON.parse(__ENV.EDGE_TARGETS_JSON || "[]");
 const iterations = Number(__ENV.EDGE_K6_ITERATIONS || "2");
-const minRequests = Number(
-  __ENV.EDGE_K6_MIN_REQUESTS || String(targets.length * iterations),
-);
-const expectedStatuses = unique(
-  targets.flatMap((target) => target.expected_statuses || [200]),
-);
+const minRequests = Number(__ENV.EDGE_K6_MIN_REQUESTS || String(targets.length * iterations));
+const expectedStatuses = unique(targets.flatMap((target) => target.expected_statuses || [200]));
 const targetRequests = new Counter("guardian_edge_target_requests");
 const expectedStatusRate = new Rate("guardian_edge_expected_status");
 
@@ -28,9 +24,7 @@ export const options = {
   noVUConnectionReuse: true,
   thresholds: {
     guardian_edge_target_requests: [`count>=${minRequests}`],
-    guardian_edge_expected_status: [
-      __ENV.EDGE_K6_EXPECTED_STATUS_THRESHOLD || "rate>0.99",
-    ],
+    guardian_edge_expected_status: [__ENV.EDGE_K6_EXPECTED_STATUS_THRESHOLD || "rate>0.99"],
     http_reqs: ["count>0"],
   },
   summaryTrendStats: ["avg", "min", "med", "p(95)", "p(99)", "max"],

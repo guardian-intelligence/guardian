@@ -9,7 +9,7 @@ produced the state.
 
 ## What it measures
 
-A scheduling request is easy to comply with and hard to *serve*. Given "make
+A scheduling request is easy to comply with and hard to _serve_. Given "make
 sure tonight's dinner goes smoothly," a compliant assistant does nothing wrong;
 a good assistant checks the evening forecast, stages the umbrella, reminds the
 friend who always forgets, and works backwards from the drive time — without

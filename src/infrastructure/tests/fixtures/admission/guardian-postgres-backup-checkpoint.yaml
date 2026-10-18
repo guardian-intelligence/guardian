@@ -4,11 +4,11 @@
 policy: guardian-postgres-backup-checkpoint
 cases:
   - name: object store with a data block gets an immediate checkpoint
-    resource: {group: barmancloud.cnpg.io, version: v1, resource: objectstores}
+    resource: { group: barmancloud.cnpg.io, version: v1, resource: objectstores }
     object:
       apiVersion: barmancloud.cnpg.io/v1
       kind: ObjectStore
-      metadata: {name: postgres-app, namespace: tenant-guardian-prod}
+      metadata: { name: postgres-app, namespace: tenant-guardian-prod }
       spec:
         configuration:
           destinationPath: s3://guardian-backups/tenant-guardian-prod/postgres-app/
@@ -24,13 +24,13 @@ cases:
           wal:
             compression: gzip
     expect: mutate
-    expectField: {path: spec.configuration.data.immediateCheckpoint, value: true}
+    expectField: { path: spec.configuration.data.immediateCheckpoint, value: true }
   - name: object store without a data block gets an immediate checkpoint
-    resource: {group: barmancloud.cnpg.io, version: v1, resource: objectstores}
+    resource: { group: barmancloud.cnpg.io, version: v1, resource: objectstores }
     object:
       apiVersion: barmancloud.cnpg.io/v1
       kind: ObjectStore
-      metadata: {name: postgres-nodata, namespace: tenant-guardian-prod}
+      metadata: { name: postgres-nodata, namespace: tenant-guardian-prod }
       spec:
         configuration:
           destinationPath: s3://guardian-backups/tenant-guardian-prod/postgres-nodata/
@@ -44,13 +44,13 @@ cases:
           wal:
             compression: gzip
     expect: mutate
-    expectField: {path: spec.configuration.data.immediateCheckpoint, value: true}
+    expectField: { path: spec.configuration.data.immediateCheckpoint, value: true }
   - name: explicit immediateCheckpoint is preserved
-    resource: {group: barmancloud.cnpg.io, version: v1, resource: objectstores}
+    resource: { group: barmancloud.cnpg.io, version: v1, resource: objectstores }
     object:
       apiVersion: barmancloud.cnpg.io/v1
       kind: ObjectStore
-      metadata: {name: postgres-explicit, namespace: tenant-guardian-prod}
+      metadata: { name: postgres-explicit, namespace: tenant-guardian-prod }
       spec:
         configuration:
           destinationPath: s3://guardian-backups/tenant-guardian-prod/postgres-explicit/

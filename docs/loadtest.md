@@ -17,8 +17,8 @@ A surface earns "load-tested" by composing these, not by running one of them:
    checkout canary (`src/payments/canary`) is the reference; simpler HTTP
    surfaces use blackbox_exporter probes on a 15s scrape
    (`deployments/alerting/{blackbox-exporter,synthetic-probes}.yaml`).
-2. **Deploy-time stress gate** — a k6 arrival-rate run against the *canary
-   color* before traffic shifts, thresholds-as-code, wired as a Flagger
+2. **Deploy-time stress gate** — a k6 arrival-rate run against the _canary
+   color_ before traffic shifts, thresholds-as-code, wired as a Flagger
    `pre-rollout` webhook. Landing with company-site as first consumer; see
    "Next slice" below.
 
@@ -34,7 +34,7 @@ on each:
   `TestNoInlineK6ScriptsInYAML`.
 - **No network imports.** k6 resolves `k6`, `k6/http`, `k6/metrics`, ... from
   inside the pinned binary — those are not fetches. `import x from
-  'https://...'` downloads and runs third-party code at run time, outside the
+'https://...'` downloads and runs third-party code at run time, outside the
   digest-pinned image and the dark bundle, with the pod's credentials. Vendor
   what you need and import it by relative path. Enforced by
   `TestK6ScriptsHaveNoRemoteImports`.
@@ -57,18 +57,21 @@ Two more rules the platform depends on (keep them or the results are wrong):
    identical script, keep one shared file and render it into each stage.
 
 2. **Tag every metric** so gates and dashboards can find the series:
+
    ```js
    // pin dynamic URLs to a static group, or k6 mints a new VictoriaMetrics
    // series per request value (a per-UUID delete leaked ~1440 series/day/stage
    // until it was fixed — see the loadtest-observability memory).
    http.del(`${base}/users/${id}`, null, { tags: { name: `${base}/users/{id}` } });
    ```
+
    Run k6 with `--tag stage=<stage>` (and `--tag surface=<name>`,
    `--tag scenario=<smoke|stress|headroom>` for load runs). Local runs must add
    `--tag run_source=local` so gate queries never see them.
 
 3. **Render it** with a `configMapGenerator` in the stage kustomization,
    carrying the envsubst opt-out:
+
    ```yaml
    generatorOptions:
      disableNameSuffixHash: true
@@ -83,12 +86,14 @@ Two more rules the platform depends on (keep them or the results are wrong):
    ```
 
 4. **Remote-write k6 results** to VictoriaMetrics from the CronJob/Job:
+
    ```yaml
    args: [run, --tag, stage=<stage>, -o, experimental-prometheus-rw, /scripts/<name>.js]
    env:
      - name: K6_PROMETHEUS_RW_SERVER_URL
        value: http://vminsert-shortterm.tenant-root.svc:8480/insert/0/prometheus/api/v1/write
    ```
+
    Give the pod `automountServiceAccountToken: false`, a non-root
    `securityContext`, and a `CiliumNetworkPolicy` egress allowlist (kube-dns,
    the target Service, vminsert:8480, and `world:443` only if a flow needs the

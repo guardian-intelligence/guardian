@@ -123,9 +123,9 @@ darkBundleMirror:
     - quay.io
     - registry.k8s.io
 podSubnets:
-- 10.244.0.0/16
+  - 10.244.0.0/16
 serviceSubnets:
-- 10.96.0.0/16
+  - 10.96.0.0/16
 
 # Optional override for machine.kubelet.nodeIP.validSubnets and
 # cluster.etcd.advertisedSubnets. When left empty the chart derives
@@ -223,13 +223,13 @@ adminKubeconfigCertLifetime: "8h0m0s"
 # each node's public IP so the API/Talos stays manageable from a runner off the
 # private VLAN.
 certSANs:
-- api.guardianintelligence.org
-- k8s.guardianintelligence.org
-- 10.8.0.250
-- 206.223.228.101  # ash-earth
-- 45.250.254.119   # ash-wind
-- 206.223.228.87   # ash-water
-- 206.223.228.99   # ash-worker0
+  - api.guardianintelligence.org
+  - k8s.guardianintelligence.org
+  - 10.8.0.250
+  - 206.223.228.101 # ash-earth
+  - 45.250.254.119 # ash-wind
+  - 206.223.228.87 # ash-water
+  - 206.223.228.99 # ash-worker0
 nr_hugepages: 0
 allocateNodeCIDRs: true
 

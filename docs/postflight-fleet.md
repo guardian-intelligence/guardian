@@ -9,10 +9,10 @@ claim that all described fleets are currently serving jobs.
 Each SKU category runs on its own fleet in its own provider account; fleets
 carry the SKU flavor names:
 
-| Fleet | Silicon | Provider posture |
-| --- | --- | --- |
-| Turbo | Bare-metal AMD Ryzen, highest available clocks | Host is trusted and hardened; provider diligence matters |
-| Confidential | AMD EPYC with SEV-SNP | Host and provider are untrusted (see [security model](postflight-security-model.md)); provider choice is commercial |
+| Fleet        | Silicon                                        | Provider posture                                                                                                    |
+| ------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Turbo        | Bare-metal AMD Ryzen, highest available clocks | Host is trusted and hardened; provider diligence matters                                                            |
+| Confidential | AMD EPYC with SEV-SNP                          | Host and provider are untrusted (see [security model](postflight-security-model.md)); provider choice is commercial |
 
 Fleets share nothing at the data plane: generations, capsules, and keys
 never cross fleets, and the fleets are different compatibility classes by

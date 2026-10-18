@@ -25,6 +25,11 @@ var meteredEventNames = map[string]struct{}{
 	"privatecut.link_submitted":            {},
 	"privatecut.link_resolved":             {},
 	"privatecut.link_failed":               {},
+	"privatecut.encode_started":            {},
+	"privatecut.encode_completed":          {},
+	"privatecut.encode_failed":             {},
+	"privatecut.encode_abandoned":          {},
+	"privatecut.gpu_context_lost":          {},
 }
 
 var eventsByName = promauto.NewCounterVec(prometheus.CounterOpts{

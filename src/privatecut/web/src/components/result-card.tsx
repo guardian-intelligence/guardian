@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from "react";
 import type { EncodeResult } from "~/engine/client";
 import { OUTPUT_CONTAINER_INFO } from "~/engine/formats";
 import { formatBytes } from "~/lib/format";
+import { useObjectUrl } from "~/lib/object-url";
 
 export interface ResultCardProps {
   readonly result: EncodeResult;
@@ -10,8 +10,7 @@ export interface ResultCardProps {
 }
 
 export function ResultCard({ result, sourceName, onBack }: ResultCardProps) {
-  const url = useMemo(() => URL.createObjectURL(result.blob), [result.blob]);
-  useEffect(() => () => URL.revokeObjectURL(url), [url]);
+  const url = useObjectUrl(result.blob) ?? undefined;
 
   const { outcome } = result;
   const outputInfo = OUTPUT_CONTAINER_INFO[outcome.outputFormat];

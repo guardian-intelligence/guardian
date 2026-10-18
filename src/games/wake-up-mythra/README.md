@@ -24,17 +24,17 @@ aspect mythra dev down                # stop everything
 
 The legs:
 
-| piece | where | notes |
-| --- | --- | --- |
-| journal db | repo-pinned PostgreSQL, 127.0.0.1:55432 | empty is complete: parks genesis themselves on first open |
-| analytics db | repo-pinned ClickHouse, 127.0.0.1:59000 (native), :58123 (HTTP) | local `guardian_analytics` sink with the prod `events` + `otel_traces` schemas, on the exact server version the prod chart hard-pins |
-| otel collector | 127.0.0.1:4317 (gRPC), :4318 (HTTP) | prod-shaped pipeline (redaction included) writing traces to the analytics db |
-| flagd | 127.0.0.1:8016 (OFREP), :8013/:8014 | serves the committed prod flag set; hot-reloads on file edit |
-| analytics ingest | 127.0.0.1:9636 | the real event Publish service, batching into the analytics db |
-| dev OIDC issuer | 127.0.0.1:9635/realms/dev | Keycloak-shaped; signs any subject; the gateway validates it through the production `oidcGate` path |
-| chunkies-chunkie | 127.0.0.1:9632 (sessions), :9631 (HTTP), :9637 (metrics) | one park authority and its journal |
-| chunkies-gateway | 127.0.0.1:9634 (HTTP), :4433 (WebTransport), :9633 (metrics) | admission, public transport, static content, and the authenticated park proxy |
-| web app | http://127.0.0.1:4254 | vite dev server proxying game requests to chunkies-gateway and events to ingest |
+| piece            | where                                                           | notes                                                                                                                                |
+| ---------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| journal db       | repo-pinned PostgreSQL, 127.0.0.1:55432                         | empty is complete: parks genesis themselves on first open                                                                            |
+| analytics db     | repo-pinned ClickHouse, 127.0.0.1:59000 (native), :58123 (HTTP) | local `guardian_analytics` sink with the prod `events` + `otel_traces` schemas, on the exact server version the prod chart hard-pins |
+| otel collector   | 127.0.0.1:4317 (gRPC), :4318 (HTTP)                             | prod-shaped pipeline (redaction included) writing traces to the analytics db                                                         |
+| flagd            | 127.0.0.1:8016 (OFREP), :8013/:8014                             | serves the committed prod flag set; hot-reloads on file edit                                                                         |
+| analytics ingest | 127.0.0.1:9636                                                  | the real event Publish service, batching into the analytics db                                                                       |
+| dev OIDC issuer  | 127.0.0.1:9635/realms/dev                                       | Keycloak-shaped; signs any subject; the gateway validates it through the production `oidcGate` path                                  |
+| chunkies-chunkie | 127.0.0.1:9632 (sessions), :9631 (HTTP), :9637 (metrics)        | one park authority and its journal                                                                                                   |
+| chunkies-gateway | 127.0.0.1:9634 (HTTP), :4433 (WebTransport), :9633 (metrics)    | admission, public transport, static content, and the authenticated park proxy                                                        |
+| web app          | http://127.0.0.1:4254                                           | vite dev server proxying game requests to chunkies-gateway and events to ingest                                                      |
 
 If another local tool owns a default port, override it consistently through
 the launcher, for example `WUM_DEV_PG_PORT=55433

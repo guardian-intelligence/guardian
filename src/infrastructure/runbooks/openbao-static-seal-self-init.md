@@ -346,6 +346,7 @@ each gate:
    the payments checkout canary and the postflight CLI release canaries
    unable to write their events. Per-user sources and the DR-rebuild case are
    in `runbooks/analytics-clickhouse.md`.
+
 6. **Convergence.** Force-syncs every ClusterSecretStore/SecretStore and
    every ExternalSecret cluster-wide, then polls until all report Ready,
    listing the stragglers on timeout. The store nudge is load-bearing: a

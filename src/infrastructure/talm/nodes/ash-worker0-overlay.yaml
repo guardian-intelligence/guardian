@@ -8,7 +8,7 @@ machine:
       serial: 362510FCEFF6
     image: factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.10@sha256:e892079895b227a83fd86c1249efbbc3684c61815e5b5efcffd3cc279e56703b
   nodeLabels:
-    guardian.dev/openbao-static-seal: 'false'
+    guardian.dev/openbao-static-seal: "false"
 ---
 apiVersion: v1alpha1
 kind: HostnameConfig

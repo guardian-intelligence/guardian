@@ -16,11 +16,11 @@ LINSTOR, OpenBao, or public-edge steps below for a worker.
 
 Node map:
 
-| Node | Public IP | Private IP |
-|---|---|---|
+| Node        | Public IP         | Private IP  |
+| ----------- | ----------------- | ----------- |
 | `ash-earth` | `206.223.228.101` | `10.8.0.11` |
-| `ash-wind` | `45.250.254.119` | `10.8.0.12` |
-| `ash-water` | `206.223.228.87` | `10.8.0.13` |
+| `ash-wind`  | `45.250.254.119`  | `10.8.0.12` |
+| `ash-water` | `206.223.228.87`  | `10.8.0.13` |
 
 ## Preconditions
 

@@ -180,7 +180,7 @@ spec:
             severity: warning
             guardian_component: synthetic-probes
           annotations:
-            summary: 'synthetic probe failing: {{ $labels.instance }} ({{ $labels.probe_class }}) in {{ $labels.probe_namespace }}'
+            summary: "synthetic probe failing: {{ $labels.instance }} ({{ $labels.probe_class }}) in {{ $labels.probe_namespace }}"
             description: >-
               {{ $labels.instance }} has failed {{ $labels.probe_class }}
               probes for 5+ minutes. service-class = the cluster path;
@@ -214,9 +214,9 @@ spec:
           labels:
             severity: warning
             guardian_component: synthetic-probes
-            exported_instance: '{{ $labels.probe_namespace }}/edge-ttfb'
+            exported_instance: "{{ $labels.probe_namespace }}/edge-ttfb"
           annotations:
-            summary: 'edge TTFB p95 above 1.5s in {{ $labels.probe_namespace }}'
+            summary: "edge TTFB p95 above 1.5s in {{ $labels.probe_namespace }}"
             description: >-
               At least one route through the public edge has had
               time-to-first-byte above 1.5s (p95, 15m) in

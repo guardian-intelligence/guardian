@@ -89,6 +89,6 @@ a follow-up; no Guardian-declared owner for R2 bucket config exists yet.
 
 ## Drill log
 
-| Date | Result | Notes |
-|------|--------|-------|
-| _none yet_ | | First restore drill pending: take a live snapshot, restore into a scratch single-node target, assert object counts match. |
+| Date       | Result | Notes                                                                                                                     |
+| ---------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| _none yet_ |        | First restore drill pending: take a live snapshot, restore into a scratch single-node target, assert object counts match. |

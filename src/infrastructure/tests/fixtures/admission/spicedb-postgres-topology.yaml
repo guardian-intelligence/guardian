@@ -4,21 +4,21 @@
 policy: spicedb-postgres-topology.guardian.dev
 cases:
   - name: spicedb cluster gets switchover and required anti-affinity
-    resource: {group: postgresql.cnpg.io, version: v1, resource: clusters}
+    resource: { group: postgresql.cnpg.io, version: v1, resource: clusters }
     object:
       apiVersion: postgresql.cnpg.io/v1
       kind: Cluster
-      metadata: {name: postgres-spicedb, namespace: tenant-guardian-prod}
+      metadata: { name: postgres-spicedb, namespace: tenant-guardian-prod }
       spec:
         instances: 3
     expect: mutate
-    expectField: {path: spec.primaryUpdateMethod, value: switchover}
+    expectField: { path: spec.primaryUpdateMethod, value: switchover }
   - name: other clusters are untouched
-    resource: {group: postgresql.cnpg.io, version: v1, resource: clusters}
+    resource: { group: postgresql.cnpg.io, version: v1, resource: clusters }
     object:
       apiVersion: postgresql.cnpg.io/v1
       kind: Cluster
-      metadata: {name: postgres-products, namespace: tenant-guardian-prod}
+      metadata: { name: postgres-products, namespace: tenant-guardian-prod }
       spec:
         instances: 3
     expect: no-match

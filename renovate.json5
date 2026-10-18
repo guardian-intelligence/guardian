@@ -83,9 +83,7 @@
   // it excludes bootstrap/, where the dark-mode OCIRepository points at a
   // registry no datasource lookup can reach.
   flux: {
-    managerFilePatterns: [
-      "/^src\\/infrastructure\\/(base|deployments)\\/.+\\.ya?ml$/",
-    ],
+    managerFilePatterns: ["/^src\\/infrastructure\\/(base|deployments)\\/.+\\.ya?ml$/"],
   },
 
   // Everything not overridden below waits out a 3-day cooldown, mirroring
@@ -135,10 +133,7 @@
     // datasources so every Renovate version bump keeps runtime and gate in
     // lockstep; digest-only image refreshes may still move independently.
     {
-      matchDepNames: [
-        "docker.io/renovate/renovate",
-        "renovatebot/renovate",
-      ],
+      matchDepNames: ["docker.io/renovate/renovate", "renovatebot/renovate"],
       groupName: "Renovate self-update",
     },
 
@@ -372,9 +367,7 @@
     {
       customType: "regex",
       managerFilePatterns: ["/^src/tools/multitool\\.lock\\.json$/"],
-      matchStrings: [
-        '"url": "https://dl\\.k8s\\.io/release/(?<currentValue>v[0-9.]+)/bin/',
-      ],
+      matchStrings: ['"url": "https://dl\\.k8s\\.io/release/(?<currentValue>v[0-9.]+)/bin/'],
       depNameTemplate: "kubernetes/kubernetes",
       datasourceTemplate: "github-releases",
     },
@@ -448,9 +441,7 @@
     // runbook, never by Flux), and no manager reads lock files.
     {
       customType: "regex",
-      managerFilePatterns: [
-        "/^src/infrastructure/bootstrap/bundle/images\\.declared\\.lock$/",
-      ],
+      managerFilePatterns: ["/^src/infrastructure/bootstrap/bundle/images\\.declared\\.lock$/"],
       matchStrings: [
         "(?<packageName>ghcr\\.io/cozystack/cozystack/cozy-installer):(?<currentValue>[0-9.]+)@(?<currentDigest>sha256:[a-f0-9]{64})",
       ],
@@ -463,9 +454,7 @@
     {
       customType: "regex",
       managerFilePatterns: ["/^\\.github/scripts/check-renovate-config\\.sh$/"],
-      matchStrings: [
-        "-p renovate@(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)",
-      ],
+      matchStrings: ["-p renovate@(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"],
       depNameTemplate: "renovatebot/renovate",
       datasourceTemplate: "github-releases",
     },

@@ -57,11 +57,11 @@ Reference:
 
 Talos provisions three LUKS2 volumes on every node:
 
-| Volume | Contents | TPM policy |
-|---|---|---|
-| `STATE` | Machine identity, configuration, and system state | TPM key; PCR 7 plus signed PCR 11 policy |
-| `EPHEMERAL` | `/var`, including Kubernetes and container runtime state | Same policy; locked to `STATE` |
-| `r-guardian-data` | The NVMe substrate for the LINSTOR `data` pool | Same policy; locked to `STATE` |
+| Volume            | Contents                                                 | TPM policy                               |
+| ----------------- | -------------------------------------------------------- | ---------------------------------------- |
+| `STATE`           | Machine identity, configuration, and system state        | TPM key; PCR 7 plus signed PCR 11 policy |
+| `EPHEMERAL`       | `/var`, including Kubernetes and container runtime state | Same policy; locked to `STATE`           |
+| `r-guardian-data` | The NVMe substrate for the LINSTOR `data` pool           | Same policy; locked to `STATE`           |
 
 The raw data volume is selected by immutable disk serial in each Talos node
 overlay. Piraeus consumes only
@@ -76,12 +76,12 @@ The LINSTOR master passphrase is supplied through
 `guardian-linstor-master-passphrase` and `spec.linstorPassphraseSecret`.
 Non-synthetic persistent data uses Cozystack's native encrypted class shape:
 
-| StorageClass | LINSTOR layers | Replication | Reclaim |
-|---|---|---:|---|
-| `local-encrypted` | `luks storage` | 1 | Delete |
-| `local-encrypted-retain` | `luks storage` | 1 | Retain |
-| `replicated-encrypted` | `drbd luks storage` | 3 | Delete |
-| `replicated-encrypted-retain` | `drbd luks storage` | 3 | Retain |
+| StorageClass                  | LINSTOR layers      | Replication | Reclaim |
+| ----------------------------- | ------------------- | ----------: | ------- |
+| `local-encrypted`             | `luks storage`      |           1 | Delete  |
+| `local-encrypted-retain`      | `luks storage`      |           1 | Retain  |
+| `replicated-encrypted`        | `drbd luks storage` |           3 | Delete  |
+| `replicated-encrypted-retain` | `drbd luks storage` |           3 | Retain  |
 
 These classes set `linstor.csi.linbit.com/encryption: "true"` and carry
 `guardian.dev/encryption-at-rest=linstor-luks`. The replicated encrypted

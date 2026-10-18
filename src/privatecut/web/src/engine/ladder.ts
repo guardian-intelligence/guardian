@@ -52,27 +52,40 @@ export interface FramePlanInput {
   readonly codec: VideoCodecChoice;
 }
 
+// The rung's frame for this source: its short side at the rung height,
+// aspect preserved, or the untouched source frame once the rung reaches it.
+function rungSize(
+  rung: Rung,
+  sourceWidth: number,
+  sourceHeight: number,
+): { width: number; height: number; isSource: boolean } {
+  const height =
+    sourceHeight <= sourceWidth ? rung.height : even(rung.height * (sourceHeight / sourceWidth));
+  const width =
+    sourceHeight <= sourceWidth ? even(rung.height * (sourceWidth / sourceHeight)) : rung.height;
+  const isSource = height >= sourceHeight && width >= sourceWidth;
+  return isSource
+    ? { width: sourceWidth, height: sourceHeight, isSource }
+    : { width, height, isSource };
+}
+
 export function planFrame(input: FramePlanInput): FramePlan {
   const { sourceWidth, sourceHeight, sourceFrameRate, videoBitsPerSecond, codec } = input;
   const floor = BPP_FLOOR * CODEC_EFFICIENCY[codec];
-  const aspect = sourceWidth / sourceHeight;
   const shortSide = Math.min(sourceWidth, sourceHeight);
 
   const candidates: Omit<FramePlan, "meetsQualityFloor">[] = [];
   for (const rung of RUNGS) {
     if (rung.height > shortSide) continue;
-    const height =
-      sourceHeight <= sourceWidth ? rung.height : even(rung.height * (sourceHeight / sourceWidth));
-    const width = sourceHeight <= sourceWidth ? even(rung.height * aspect) : rung.height;
-    const isSource = height >= sourceHeight && width >= sourceWidth;
+    const { width, height, isSource } = rungSize(rung, sourceWidth, sourceHeight);
     // Halve high frame rates before dropping below 720p: motion smoothness
     // is worth less than legibility at social-post sizes.
     for (const frameRate of sourceFrameRate > 40
       ? [sourceFrameRate, sourceFrameRate / 2]
       : [sourceFrameRate]) {
       candidates.push({
-        width: isSource ? sourceWidth : width,
-        height: isSource ? sourceHeight : height,
+        width,
+        height,
         frameRate,
         label: rung.label,
         isSource: isSource && frameRate === sourceFrameRate,
@@ -108,4 +121,35 @@ export function planFrame(input: FramePlanInput): FramePlan {
     isSource: true,
   };
   return { ...fallback, meetsQualityFloor: false };
+}
+
+// Frame rates below this read as a slideshow; stepping stops halving here.
+const MIN_STEP_FRAME_RATE = 12;
+
+// One notch cheaper than `plan`, for when the encoder will not get under the
+// cap at the planned frame however few bits are requested (its rate floor
+// scales with pixel rate; see convergence.ts). Frame rate goes first — at a
+// starved budget halving it beats every resolution step — then the next
+// smaller rung at the reduced rate. Null when nothing cheaper exists.
+export function stepDownFrame(plan: FramePlan, input: FramePlanInput): FramePlan | null {
+  const { sourceWidth, sourceHeight, videoBitsPerSecond, codec } = input;
+  const floor = BPP_FLOOR * CODEC_EFFICIENCY[codec];
+  const withFloor = (next: Omit<FramePlan, "meetsQualityFloor">): FramePlan => ({
+    ...next,
+    meetsQualityFloor: videoBitsPerSecond / (next.width * next.height * next.frameRate) >= floor,
+  });
+  if (plan.frameRate / 2 >= MIN_STEP_FRAME_RATE) {
+    return withFloor({ ...plan, frameRate: plan.frameRate / 2, isSource: false });
+  }
+  const shortSide = Math.min(plan.width, plan.height);
+  const rung = RUNGS.find((candidate) => candidate.height < shortSide);
+  if (rung === undefined) return null;
+  const { width, height } = rungSize(rung, sourceWidth, sourceHeight);
+  return withFloor({
+    width,
+    height,
+    frameRate: plan.frameRate,
+    label: rung.label,
+    isSource: false,
+  });
 }

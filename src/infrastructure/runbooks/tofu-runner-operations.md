@@ -49,7 +49,7 @@ If a manual Job fails, `TofuManualJobFailed` pages and latches: a later
 scheduled success does not clear it, because on a plan-mode root the next
 scheduled plan exits 0 over the very drift a failed apply leaves behind.
 Read the pod log, remediate, then delete the failed Job object — the
-deletion is the acknowledgement that closes the alert. (A failed *scheduled*
+deletion is the acknowledgement that closes the alert. (A failed _scheduled_
 Job pages `TofuRootJobFailed` instead, which resolves on the root's next
 scheduled success on its own.)
 
@@ -99,9 +99,9 @@ Roots start in plan mode (the runner defaults to plan; the CronJob sets no
 its own reviewed PR that adds one env var to the root's CronJob:
 
 ```yaml
-              env:
-                - name: MODE
-                  value: apply
+env:
+  - name: MODE
+    value: apply
 ```
 
 Follow the ruled order in docs/tofu-gitops-design.md (sandbox first, the

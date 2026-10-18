@@ -4,16 +4,16 @@
 policy: guardian-cozystack-app-tenant-namespace
 cases:
   - name: app CR in a tenant namespace
-    resource: {group: apps.cozystack.io, version: v1, resource: postgreses}
+    resource: { group: apps.cozystack.io, version: v1, resource: postgreses }
     object:
       apiVersion: apps.cozystack.io/v1
       kind: Postgres
-      metadata: {name: some-db, namespace: tenant-guardian}
+      metadata: { name: some-db, namespace: tenant-guardian }
     expect: allow
   - name: app CR outside tenant namespaces
-    resource: {group: apps.cozystack.io, version: v1, resource: postgreses}
+    resource: { group: apps.cozystack.io, version: v1, resource: postgreses }
     object:
       apiVersion: apps.cozystack.io/v1
       kind: Postgres
-      metadata: {name: orphan-db, namespace: guardian-analytics}
+      metadata: { name: orphan-db, namespace: guardian-analytics }
     expect: deny

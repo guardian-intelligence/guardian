@@ -48,14 +48,13 @@ class FakeWebTransport {
       this.#resolveClosed = resolve;
       this.#rejectClosed = reject;
     });
-    const self = this;
     this.datagrams = {
       readable: new ReadableStream<Uint8Array>({ start() {} }),
       writable: new WritableStream<Uint8Array>({
-        write(chunk) {
-          if (self.datagramWriteMode === "reject")
+        write: (chunk) => {
+          if (this.datagramWriteMode === "reject")
             return Promise.reject(new Error("datagram lane broke"));
-          self.datagramsSent.push(chunk.slice());
+          this.datagramsSent.push(chunk.slice());
           return Promise.resolve();
         },
       }),
@@ -65,14 +64,13 @@ class FakeWebTransport {
 
   async createBidirectionalStream() {
     if (FakeWebTransport.failOpen) throw new Error("no streams on this session");
-    const self = this;
     return {
       readable: new ReadableStream<Uint8Array>({ start() {} }),
       writable: new WritableStream<Uint8Array>({
-        write(chunk) {
-          if (self.writeMode === "reject") return Promise.reject(new Error("path broke"));
-          if (self.writeMode === "hang") return new Promise<void>(() => {});
-          self.written.push(chunk.slice());
+        write: (chunk) => {
+          if (this.writeMode === "reject") return Promise.reject(new Error("path broke"));
+          if (this.writeMode === "hang") return new Promise<void>(() => {});
+          this.written.push(chunk.slice());
           return Promise.resolve();
         },
       }),

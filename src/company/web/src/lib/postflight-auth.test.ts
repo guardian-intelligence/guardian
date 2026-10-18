@@ -138,10 +138,12 @@ describe("Postflight OIDC BFF", () => {
     const idToken = `${signingInput}.${Buffer.from(signature).toString("base64url")}`;
 
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : input.toString();
       if (url.endsWith("/protocol/openid-connect/token")) {
         expect(init?.method).toBe("POST");
-        expect(String(init?.body)).toContain("code_verifier=");
+        const body = init?.body;
+        expect(body).toBeInstanceOf(URLSearchParams);
+        expect(body instanceof URLSearchParams && body.has("code_verifier")).toBe(true);
         expect(new Headers(init?.headers).get("authorization")).toMatch(/^Basic /);
         return Response.json({ id_token: idToken });
       }
@@ -405,7 +407,8 @@ describe("session seal keyring", () => {
   it("re-reads a *_FILE secret on every use", async () => {
     const { mkdtempSync, writeFileSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
+    const path = await import("node:path");
+    const join = path.join.bind(path);
     const dir = mkdtempSync(join(tmpdir(), "seal-"));
     const sealPath = join(dir, "session-seal");
     writeFileSync(sealPath, `${"a".repeat(64)}\n`);

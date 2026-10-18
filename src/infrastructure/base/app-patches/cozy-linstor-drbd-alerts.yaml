@@ -85,7 +85,7 @@ spec:
           expr: sum by (cluster, tenant, tier, prometheus, job, node, conn_name) (drbd_connection_state{drbd_connection_state!="Connected"} > 0) > 0
           for: 2m
           labels:
-            exported_instance: '{{ $labels.node }}->{{ $labels.conn_name }}'
+            exported_instance: "{{ $labels.node }}->{{ $labels.conn_name }}"
             severity: warning
         - alert: drbdDeviceNotUpToDate
           annotations:
@@ -94,7 +94,7 @@ spec:
           expr: sum by (cluster, tenant, tier, prometheus, job, node) (drbd_device_state{drbd_device_state!~"UpToDate|Diskless"} > 0) > 0
           for: 2m
           labels:
-            exported_instance: '{{ $labels.node }}/drbd-devices'
+            exported_instance: "{{ $labels.node }}/drbd-devices"
             severity: warning
         - alert: drbdDeviceUnintentionalDiskless
           annotations:

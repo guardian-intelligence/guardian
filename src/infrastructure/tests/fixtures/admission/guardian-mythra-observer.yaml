@@ -5,13 +5,13 @@ policy: guardian-mythra-observer
 cases:
   - name: query the Mythra journal
     operation: CONNECT
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     subResource: exec
     objectName: mythra-journal-console-0
     object:
       apiVersion: v1
       kind: PodExecOptions
-      metadata: {namespace: tenant-guardian-prod}
+      metadata: { namespace: tenant-guardian-prod }
       container: console
       command: [psql, -X, -c, "SELECT count(*) FROM park_events"]
       stdout: true
@@ -21,13 +21,13 @@ cases:
     expect: allow
   - name: dump the Mythra journal
     operation: CONNECT
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     subResource: exec
     objectName: mythra-journal-console-0
     object:
       apiVersion: v1
       kind: PodExecOptions
-      metadata: {namespace: tenant-guardian-prod}
+      metadata: { namespace: tenant-guardian-prod }
       container: console
       command: [pg_dump, --no-owner, --no-privileges]
       stdout: true
@@ -37,13 +37,13 @@ cases:
     expect: allow
   - name: open an arbitrary console shell
     operation: CONNECT
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     subResource: exec
     objectName: mythra-journal-console-0
     object:
       apiVersion: v1
       kind: PodExecOptions
-      metadata: {namespace: tenant-guardian-prod}
+      metadata: { namespace: tenant-guardian-prod }
       container: console
       command: [/bin/sh]
       stdin: true
@@ -54,13 +54,13 @@ cases:
     expect: deny
   - name: exec into the game server
     operation: CONNECT
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     subResource: exec
     objectName: mythrad-59b449c48f-h84js
     object:
       apiVersion: v1
       kind: PodExecOptions
-      metadata: {namespace: tenant-guardian-prod}
+      metadata: { namespace: tenant-guardian-prod }
       container: mythrad
       command: [psql]
       stdout: true
@@ -70,13 +70,13 @@ cases:
     expect: deny
   - name: run psql in another console container
     operation: CONNECT
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     subResource: exec
     objectName: mythra-journal-console-0
     object:
       apiVersion: v1
       kind: PodExecOptions
-      metadata: {namespace: tenant-guardian-prod}
+      metadata: { namespace: tenant-guardian-prod }
       container: sidecar
       command: [psql]
       stdout: true
@@ -86,7 +86,7 @@ cases:
     expect: deny
   - name: delete the game server
     operation: DELETE
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     objectName: mythrad-59b449c48f-h84js
     object:
       apiVersion: v1
@@ -103,13 +103,13 @@ cases:
     expect: deny
   - name: platform-agent is not matched directly
     operation: CONNECT
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     subResource: exec
     objectName: mythra-journal-console-0
     object:
       apiVersion: v1
       kind: PodExecOptions
-      metadata: {namespace: tenant-guardian-prod}
+      metadata: { namespace: tenant-guardian-prod }
       container: console
       command: [psql]
       stdout: true

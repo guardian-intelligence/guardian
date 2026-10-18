@@ -6,15 +6,10 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = "Apache-2.0"
 keywords = ["personal-assistant", "anticipation", "eval", "benchmark", "verifiers"]
-dependencies = [
-    "verifiers==0.2.1",
-]
+dependencies = ["verifiers==0.2.1"]
 
 [dependency-groups]
-dev = [
-    "prime==0.6.21",
-    "pytest==9.0.3",
-]
+dev = ["prime==0.6.21", "pytest==9.0.3"]
 
 [build-system]
 requires = ["hatchling"]

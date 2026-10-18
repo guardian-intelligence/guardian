@@ -13,15 +13,15 @@ Audit baseline: 2026-09-06, repository revision
 `2b9c745c405ea9de6386db448099c6dd9c79b0f4`. Live settings below are a
 snapshot, not a completion claim.
 
-| Workflow | Jobs | Trigger and constraint |
-| --- | --- | --- |
-| `build-and-test.yml` | `build-and-test` | PR, main push, dispatch; the only required merge check; builds/tests `//...` and verifies changed tool pins |
-| `images.yml` | `classify`, `publish` matrix | Main build-input changes; up to 15 image publications; Docker registry login and Bazel |
-| `images-lock-sign.yml` | `sign` | Main manifest changes; GHCR, cosign, ORAS, GitHub OIDC |
-| `postflight-cli-image.yml` | `edge` | Main CLI changes; Rust/zig cross-build, native smoke test, GHCR, cosign and SBOM |
-| `postflight-cli-release.yml` | `release` | Main channel-pin changes; verifies signed OCI, cuts releases and updates Homebrew with scoped App tokens |
-| `postflight-cli-publish-npm.yml` | `publish` | Stable release; five packages, tokenless npm trusted publishing |
-| `postflight-cli-publish-crates.yml` | `publish` | Stable release; exact release-tag sources, Rust, crates.io trusted publishing |
+| Workflow                            | Jobs                         | Trigger and constraint                                                                                      |
+| ----------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `build-and-test.yml`                | `build-and-test`             | PR, main push, dispatch; the only required merge check; builds/tests `//...` and verifies changed tool pins |
+| `images.yml`                        | `classify`, `publish` matrix | Main build-input changes; up to 15 image publications; Docker registry login and Bazel                      |
+| `images-lock-sign.yml`              | `sign`                       | Main manifest changes; GHCR, cosign, ORAS, GitHub OIDC                                                      |
+| `postflight-cli-image.yml`          | `edge`                       | Main CLI changes; Rust/zig cross-build, native smoke test, GHCR, cosign and SBOM                            |
+| `postflight-cli-release.yml`        | `release`                    | Main channel-pin changes; verifies signed OCI, cuts releases and updates Homebrew with scoped App tokens    |
+| `postflight-cli-publish-npm.yml`    | `publish`                    | Stable release; five packages, tokenless npm trusted publishing                                             |
+| `postflight-cli-publish-crates.yml` | `publish`                    | Stable release; exact release-tag sources, Rust, crates.io trusted publishing                               |
 
 All eight declared job templates used `ubuntu-latest` at the audit
 baseline. PR run [34032744882](https://github.com/guardian-intelligence/guardian/actions/runs/34032744882)
