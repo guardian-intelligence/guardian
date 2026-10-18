@@ -335,6 +335,16 @@ for (const name of selected) {
       failures.push(`${event.name} props are ${event.length} chars; the beacon drops them`);
     }
   }
+  // Close like a person closing the tab: unload runs, so the beacon's
+  // pagehide flush ships whatever its 15 s interval had not yet sent —
+  // against a real deployment those are the events under test.
+  for (const open of context.pages()) {
+    await Promise.race([
+      open.close({ runBeforeUnload: true }).catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, 5_000)),
+    ]);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
   await context.close().catch(() => {});
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
   if (failures.length > 0) failed += 1;
