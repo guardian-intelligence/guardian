@@ -2,10 +2,12 @@ import { planBudget } from "./budget";
 import { calibratedMargin, recordCalibration } from "./calibration";
 import { converge, firstPassBitrate } from "./convergence";
 import { OUTPUT_CONTAINER_INFO } from "./formats";
-import { planFrame } from "./ladder";
+import { planFrame, stepDownFrame, type FramePlan, type FramePlanInput } from "./ladder";
 import { MAX_SELECTION_SECONDS } from "./limits";
 import type {
   EncodeOutcome,
+  EncodePass,
+  FrameSize,
   OutputContainer,
   OutputProfile,
   ProbeSummary,
@@ -106,9 +108,10 @@ export async function nativeTranscode(input: {
   readonly selection: SelectionRange;
   readonly limitBytes: number;
   readonly outputFormat: OutputContainer;
-  readonly onProgress: (pass: number, fraction: number) => void;
+  readonly onProgress: (pass: number, fraction: number, frame: FrameSize) => void;
+  readonly onPass: (report: EncodePass) => void;
 }): Promise<NativeEncodeResult> {
-  const { file, summary, limitBytes, outputFormat, onProgress } = input;
+  const { file, summary, limitBytes, outputFormat, onProgress, onPass } = input;
   const selection = {
     startS: Math.max(input.selection.startS, 0),
     endS: Math.min(input.selection.endS, summary.durationS),
@@ -127,35 +130,52 @@ export async function nativeTranscode(input: {
     durationS,
     frameRate: summary.video.frameRate,
     sourceHasAudio: summary.hasAudio,
+    audioCodec: profile.audioCodec,
     sourceVideoBitsPerSecond: summary.video.bitsPerSecond,
     limitBytes,
   });
-  const frame = planFrame({
+  const frameInput: FramePlanInput = {
     sourceWidth: summary.video.width,
     sourceHeight: summary.video.height,
     sourceFrameRate: summary.video.frameRate,
     videoBitsPerSecond: budget.videoBitsPerSecond,
     codec: profile.videoCodec,
-  });
+  };
+  const frame = planFrame(frameInput);
   const margin = calibratedMargin(profile.videoCodec, frame.height);
   const startedAt = performance.now();
-  const result = await converge<Blob>({
+  const passes: EncodePass[] = [];
+  const result = await converge<Blob, FramePlan>({
     limitBytes,
     reservedBytes: budget.containerBytes + budget.audioBytes,
     initialVideoBitsPerSecond: budget.videoBitsPerSecond,
     maxVideoBitsPerSecond: summary.video.bitsPerSecond,
     safetyMargin: margin,
-    encode: async (videoBitsPerSecond, pass) => {
+    frame,
+    stepDown: (current) => stepDownFrame(current, frameInput),
+    encode: async (videoBitsPerSecond, pass, passFrame) => {
       const blob = await recordNativePass({
         file,
         selection,
-        frame,
+        frame: passFrame,
         profile,
         audioBitsPerSecond: budget.audio?.bitrate ?? null,
         videoBitsPerSecond,
-        onProgress: (fraction) => onProgress(pass, fraction),
+        onProgress: (fraction) => onProgress(pass, fraction, passFrame),
       });
       return { artifact: blob, bytes: blob.size };
+    },
+    onPass: (report) => {
+      const encodePass: EncodePass = {
+        ...report,
+        frame: {
+          width: report.frame.width,
+          height: report.frame.height,
+          frameRate: report.frame.frameRate,
+        },
+      };
+      passes.push(encodePass);
+      onPass(encodePass);
     },
   });
 
@@ -191,11 +211,12 @@ export async function nativeTranscode(input: {
       limitBytes,
       utilization: result.utilization,
       durationS,
-      width: frame.width,
-      height: frame.height,
-      frameRate: frame.frameRate,
+      width: result.frame.width,
+      height: result.frame.height,
+      frameRate: result.frame.frameRate,
       codec: profile.videoCodec,
-      passes: result.passes,
+      audio: budget.audio,
+      passes,
       wallMs: performance.now() - startedAt,
     },
   };

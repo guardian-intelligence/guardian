@@ -9,7 +9,8 @@ import { LandingGuide, landingJsonLd } from "~/components/landing-guide";
 import { LinkInput } from "~/components/link-input";
 import type { PrivateCutEngine } from "~/engine/client";
 import type { MediaSource, ProbeSummary } from "~/engine/types";
-import { emitSpan } from "@guardian/telemetry";
+import { emitSpan, reportError } from "@guardian/telemetry";
+import { installEncodeJournal } from "~/lib/encode-journal";
 
 type DeviceKind = "phone" | "computer";
 
@@ -63,13 +64,13 @@ function Home() {
     }, 75);
   }, [loadEngine]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    installEncodeJournal();
+    return () => {
       if (warmTimerRef.current !== null) window.clearTimeout(warmTimerRef.current);
       engineRef.current?.dispose();
-    },
-    [],
-  );
+    };
+  }, []);
 
   const onSource = useCallback(
     (source: MediaSource) => {
@@ -87,7 +88,12 @@ function Home() {
       void loadEngine()
         .then(async (m) => {
           engineRef.current?.dispose();
-          const engine = new m.PrivateCutEngine();
+          const engine = new m.PrivateCutEngine({
+            onFault: (fault) =>
+              reportError(Object.assign(new Error(fault.message), fault), {
+                "error.origin": "privatecut.worker",
+              }),
+          });
           engineRef.current = engine;
           const summary = await engine.probe(source);
           emitSpan("privatecut.probed", {

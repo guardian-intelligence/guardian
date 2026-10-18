@@ -51,6 +51,9 @@ export async function transcodePass(input: TranscodePassInput): Promise<Transcod
             codec: profile.audioCodec ?? "aac",
             bitrate: budget.audio.bitrate,
             numberOfChannels: budget.audio.numberOfChannels,
+            ...(budget.audio.sampleRate === undefined
+              ? {}
+              : { sampleRate: budget.audio.sampleRate }),
             forceTranscode: true,
           },
     showWarnings: false,

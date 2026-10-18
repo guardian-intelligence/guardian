@@ -3,7 +3,7 @@
 // round-trip. The numbers steer expectations only; the encode itself is
 // governed by the measured acceptance gate.
 
-import { planBudget } from "./budget";
+import { planBudget, type AudioPlan } from "./budget";
 import { canRemuxCodecs } from "./formats";
 import { planFrame } from "./ladder";
 import type { OutputProfile, ProbeSummary, SelectionRange } from "./types";
@@ -12,7 +12,9 @@ export interface SelectionEstimate {
   readonly durationS: number;
   readonly videoBitsPerSecond: number;
   readonly label: string;
+  readonly shortSide: number;
   readonly frameRate: number;
+  readonly audio: AudioPlan | null;
   readonly likelyRemux: boolean;
   readonly lowQuality: boolean;
 }
@@ -28,6 +30,7 @@ export function estimateSelection(
     durationS,
     frameRate: summary.video.frameRate,
     sourceHasAudio: summary.hasAudio,
+    audioCodec: profile.audioCodec,
     sourceVideoBitsPerSecond: summary.video.bitsPerSecond,
     limitBytes,
   });
@@ -54,7 +57,9 @@ export function estimateSelection(
     durationS,
     videoBitsPerSecond: budget.videoBitsPerSecond,
     label: frame.isSource ? "original size" : frame.label,
+    shortSide: Math.min(frame.width, frame.height),
     frameRate: frame.frameRate,
+    audio: budget.audio,
     likelyRemux,
     lowQuality,
   };

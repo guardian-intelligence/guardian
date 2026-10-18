@@ -1,4 +1,5 @@
-import type { PassRecord } from "./convergence";
+import type { AudioPlan } from "./budget";
+import type { PassReport } from "./convergence";
 import type { VideoCodecChoice } from "./ladder";
 
 export type OutputContainer = "mp4" | "webm";
@@ -53,6 +54,14 @@ export interface SelectionRange {
 
 export type EncodeMode = "remux" | "transcode";
 
+export interface FrameSize {
+  readonly width: number;
+  readonly height: number;
+  readonly frameRate: number;
+}
+
+export type EncodePass = PassReport<FrameSize>;
+
 export interface EncodeOutcome {
   readonly mode: EncodeMode;
   readonly outputFormat: OutputContainer;
@@ -64,8 +73,23 @@ export interface EncodeOutcome {
   readonly height: number;
   readonly frameRate: number;
   readonly codec: VideoCodecChoice | "source";
-  readonly passes: readonly PassRecord[];
+  readonly audio: AudioPlan | null;
+  readonly passes: readonly EncodePass[];
   readonly wallMs: number;
+}
+
+// Where an encode was when it failed: choosing the plan, the stream-copy
+// fast path, a WebCodecs transcode pass, or the native media-element path.
+export type EncodeStage = "plan" | "remux" | "transcode" | "native";
+
+// A failure as it crosses the worker boundary: Error's fields flattened
+// (structured clone drops class identity) plus the encode's position.
+export interface EncodeFailure {
+  readonly name: string;
+  readonly message: string;
+  readonly stack: string;
+  readonly stage: EncodeStage;
+  readonly passes: readonly EncodePass[];
 }
 
 export type WorkerRequest =
@@ -99,11 +123,27 @@ export type WorkerResponse =
       readonly id: number;
       readonly pass: number;
       readonly fraction: number;
+      readonly frame: FrameSize;
     }
+  | { readonly kind: "pass"; readonly id: number; readonly report: EncodePass }
   | {
       readonly kind: "encoded";
       readonly id: number;
       readonly blob: Blob;
       readonly outcome: EncodeOutcome;
     }
-  | { readonly kind: "error"; readonly id: number; readonly message: string };
+  | {
+      readonly kind: "error";
+      readonly id: number;
+      readonly message: string;
+      readonly failure?: EncodeFailure;
+    }
+  // An error the worker raised outside any request's control flow — a codec
+  // callback throwing after its pipeline moved on, a stray rejection. Not
+  // tied to a request id; reported, never fatal by itself.
+  | {
+      readonly kind: "fault";
+      readonly name: string;
+      readonly message: string;
+      readonly stack: string;
+    };

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { supportsHtmlInCanvas } from "~/canvas/html-in-canvas";
 import { createCanvasRenderer, type CanvasRenderer } from "~/canvas/renderer";
+import { noteGpuContextLost } from "~/lib/encode-journal";
 
 export interface CanvasDocumentProps {
   readonly children: ReactNode;
@@ -58,6 +59,7 @@ export function CanvasDocument({ children }: CanvasDocumentProps) {
 
     const onContextLost = (event: Event) => {
       event.preventDefault();
+      noteGpuContextLost();
       generation += 1;
       renderer?.dispose();
       renderer = null;

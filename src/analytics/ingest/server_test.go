@@ -284,7 +284,7 @@ func TestMeteredEventNamesCounter(t *testing.T) {
 	failedBefore := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.link_failed"))
 	submittedBefore := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.link_submitted"))
 	visualFailureBefore := testutil.ToFloat64(eventsByName.WithLabelValues("local", "company.hero_visual_integrity_failed"))
-	unmeteredBefore := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.encode_completed"))
+	unmeteredBefore := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.encode_pass"))
 
 	req := connect.NewRequest(&analyticsv1.PublishRequest{
 		SentAtUnixMs: 1_800_000_000_000,
@@ -294,7 +294,7 @@ func TestMeteredEventNamesCounter(t *testing.T) {
 			{Name: "privatecut.link_submitted", Path: "/"},
 			// Registered via the privatecut. prefix but not allowlisted for the
 			// metric: accepted as a row, never a label value.
-			{Name: "privatecut.encode_completed", Path: "/"},
+			{Name: "privatecut.encode_pass", Path: "/"},
 		},
 	})
 	res, err := client.Publish(context.Background(), req)
@@ -316,7 +316,7 @@ func TestMeteredEventNamesCounter(t *testing.T) {
 	if d := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.link_submitted")) - submittedBefore; d != 1 {
 		t.Errorf("link_submitted delta = %v, want 1", d)
 	}
-	if d := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.encode_completed")) - unmeteredBefore; d != 0 {
+	if d := testutil.ToFloat64(eventsByName.WithLabelValues("local", "privatecut.encode_pass")) - unmeteredBefore; d != 0 {
 		t.Errorf("unmetered name delta = %v, want 0", d)
 	}
 }
