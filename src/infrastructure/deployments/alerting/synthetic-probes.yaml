@@ -153,6 +153,38 @@ spec:
         probe_namespace: postflight-runner
         guardian_surface: postflight
 ---
+# anveio.com through the full public path: the company home page, the privacy
+# policy Google's OAuth consent screen links, Shovon's contact card and its
+# Google sign-in landing page (the registered redirect URI). No service-class
+# twin: the anveio CNPs admit only node-identity ingress, so an in-cluster
+# prober pod is deliberately not admitted.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMProbe
+metadata:
+  name: anveio-prod-edge
+  namespace: tenant-root
+  labels:
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/component: alerting
+spec:
+  jobName: probe/anveio/prod/edge
+  interval: 15s
+  module: http_2xx
+  vmProberSpec:
+    url: blackbox-exporter.tenant-root.svc:9115
+    path: /probe
+  targets:
+    staticConfig:
+      targets:
+        - https://anveio.com/
+        - https://anveio.com/privacy
+        - https://anveio.com/shovon
+        - https://anveio.com/oauth/google.html
+      labels:
+        probe_class: edge
+        probe_namespace: tenant-guardian-prod
+        guardian_surface: anveio
+---
 # Detection over the probe series, independent of any pending promotion.
 # Routes through the proven VMRule -> vmalert -> Alertmanager -> Alerta ->
 # relay -> ntfy pipeline.
@@ -188,8 +220,8 @@ spec:
               service passes, the problem is between the user and the
               ingress (DNS, Cloudflare, LB, origin ingress).
         - alert: ProbeAbsent
-          # 11 targets x 15s: total silence means the exporter, vmagent, or
-          # the scrape path broke — not that traffic is slow.
+          # Every target every 15s: total silence means the exporter,
+          # vmagent, or the scrape path broke — not that traffic is slow.
           expr: absent(probe_success)
           for: 10m
           labels:

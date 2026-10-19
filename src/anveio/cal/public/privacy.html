@@ -1,12 +1,23 @@
 <!doctype html>
+<!--
+  TRANSITIONAL: a static copy of anveio.com/privacy (src/anveio/web/src/routes/privacy.tsx),
+  served by server/index.mjs while the old ingress still sends /privacy to anveio-cal. The
+  follow-up PR that points the ingress's / at anveio-web deletes this file and the server code
+  that serves it. Keep the text identical to privacy.tsx until then.
+-->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#000000" />
-    <title>Privacy Policy · Shovon Hasan</title>
-    <link rel="icon" type="image/png" href="favicon.png" />
+    <meta
+      name="description"
+      content="What anveio.com collects, where it goes and how long it is kept."
+    />
+    <link rel="canonical" href="https://anveio.com/privacy" />
+    <title>Privacy Policy · Anveio</title>
+    <link rel="icon" type="image/png" href="/shovon/favicon.png" />
     <style>
       :root {
         --label: rgba(235, 235, 245, 0.86);
@@ -28,8 +39,8 @@
       }
       body {
         margin: 0 auto;
-        max-width: 640px;
-        padding: max(48px, env(safe-area-inset-top)) 20px 64px;
+        max-width: 720px;
+        padding: max(48px, env(safe-area-inset-top)) 16px 64px;
       }
       h1 {
         font-size: 28px;
@@ -44,12 +55,7 @@
         margin: 32px 0 8px;
         color: #fff;
       }
-      p,
-      li {
-        margin: 0 0 12px;
-      }
-      ul {
-        padding-left: 20px;
+      p {
         margin: 0 0 12px;
       }
       .meta {
@@ -63,91 +69,152 @@
         color: var(--tint);
         text-decoration: none;
       }
+      .table-wrap {
+        overflow-x: auto;
+        margin: 0 0 12px;
+      }
+      table {
+        border-collapse: collapse;
+        font-size: 15px;
+        min-width: 560px;
+      }
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 8px 12px 8px 0;
+        border-bottom: 0.5px solid var(--sep);
+      }
+      th {
+        color: #fff;
+        font-weight: 600;
+      }
     </style>
   </head>
   <body>
     <h1>Privacy Policy</h1>
-    <p class="meta">Effective October 8, 2026</p>
+    <p class="meta">Effective October 12, 2026</p>
 
     <p>
-      This policy covers anveio.com, the personal site of Shovon Hasan (“I”, “me”), including Rumi,
-      the assistant that takes messages and schedules time with me. It explains what I collect, why,
-      and what you can do about it.
+      This policy covers anveio.com, run by Anveio Foundation (“Anveio”, “we”), a Delaware
+      corporation. That includes this website, the Anveio deck at anveio.com/deck, and
+      anveio.com/shovon, our founder Shovon Hasan’s contact card. The card is an experimental
+      prototype: Rumi, the assistant on it, follows a script, and nothing you leave there is sent to
+      anyone.
     </p>
 
-    <h2>What I collect</h2>
-    <ul>
-      <li>
-        <strong>Your Google account basics.</strong> When you sign in with Google, Google shares
-        your name, email address and profile picture with me. I don’t receive your password or
-        access to anything else in your Google account.
-      </li>
-      <li>
-        <strong>Your messages.</strong> Voice and text messages you leave with Rumi, and the details
-        of any meeting you schedule through it, such as the time and topic.
-      </li>
-      <li>
-        <strong>Basic technical data.</strong> Like most websites, the servers that host this site
-        record technical information such as your IP address, browser type and the time of your
-        visit, to keep the site running and secure.
-      </li>
-    </ul>
-
-    <h2>How I use it</h2>
-    <ul>
-      <li>To know who is leaving a message, so I can reply to the right person.</li>
-      <li>To deliver your messages to me and to schedule and send meeting invitations.</li>
-      <li>To keep the site working, secure and free of abuse.</li>
-    </ul>
+    <h2>What we collect</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">What</th>
+            <th scope="col">When</th>
+            <th scope="col">Where it goes</th>
+            <th scope="col">How long</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              Request details: IP address, browser user agent, the page asked for, the referring
+              page and the time
+            </td>
+            <td>Every visit to any page</td>
+            <td>
+              Cloudflare, which carries all traffic to the site, and the access logs of our own
+              servers
+            </td>
+            <td>
+              Our logs: up to three months, then deleted automatically. Cloudflare: under its own
+              policy
+            </td>
+          </tr>
+          <tr>
+            <td>
+              Network error reports: the address your browser failed to load, the kind of error,
+              your IP address and the time
+            </td>
+            <td>
+              Only if your browser supports Network Error Logging and a request to the site fails
+            </td>
+            <td>
+              Cloudflare, which asks browsers to send them so it can spot problems on its network
+            </td>
+            <td>Under Cloudflare’s own policy; we don’t receive them</td>
+          </tr>
+          <tr>
+            <td>Your Google account ID, name, email address and profile picture link</td>
+            <td>Only if you choose Sign in with Google on anveio.com/shovon</td>
+            <td>
+              Nowhere: Google hands them to your browser, which checks them and keeps them in the
+              open page
+            </td>
+            <td>Until you close or reload the page</td>
+          </tr>
+          <tr>
+            <td>Emails you send us, with your address and anything you include</td>
+            <td>Only if you write to an anveio.com address</td>
+            <td>Forwarded by Cloudflare Email Routing to the founder’s Gmail inbox</td>
+            <td>As long as needed to answer you, or until you ask us to delete them</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     <p>
-      Rumi uses AI services to understand your messages and find a time that works. Your messages
-      are processed by those services only to provide this feature.
+      That is everything. The site sets no cookies, stores nothing in your browser and runs no
+      analytics or advertising. Apart from Cloudflare, which carries the site, the only outside
+      service a page talks to is Google, and only when you sign in with Google. Cloudflare asks your
+      browser to remember, for up to a week, where to send the network error reports above; the
+      browser keeps that instruction itself, and you can clear it with your browsing data.
     </p>
 
-    <h2>What I don’t do</h2>
-    <ul>
-      <li>I don’t sell your information or use it for advertising.</li>
-      <li>
-        I don’t use information received from Google APIs for anything other than signing you in. My
-        use of it adheres to the
-        <a href="https://developers.google.com/terms/api-services-user-data-policy"
-          >Google API Services User Data Policy</a
-        >, including the Limited Use requirements.
-      </li>
-    </ul>
-
-    <h2>Who I share it with</h2>
+    <h2>Sign in with Google</h2>
     <p>
-      Only the service providers needed to run this site: hosting, email and calendar delivery, and
-      the AI services behind Rumi. Each may process your information only on my behalf. I may also
-      disclose information if the law requires it.
+      On anveio.com/shovon you can sign in with Google so Rumi knows who is leaving a message. We
+      ask Google only for your basic profile: your Google account ID, name, email address and
+      profile picture. Google sends these to your browser, never to our servers. The page checks
+      them against Google’s published keys, holds them while it is open and forgets them when you
+      close or reload it. We don’t receive your password or access to anything else in your Google
+      account.
+    </p>
+    <p>
+      We use information received from Google APIs only to sign you in. Our use adheres to the
+      <a href="https://developers.google.com/terms/api-services-user-data-policy"
+        >Google API Services User Data Policy</a
+      >, including the Limited Use requirements. You can remove anveio.com from your Google account
+      at any time in your
+      <a href="https://myaccount.google.com/connections">Google Account settings</a>.
     </p>
 
-    <h2>How long I keep it</h2>
+    <h2>Messages to Rumi</h2>
     <p>
-      I keep your messages and meeting details for as long as we’re in touch, and delete them on
-      request. Technical logs are kept for a short time and then deleted.
+      Rumi is a prototype. Today she doesn’t use your microphone, and nothing you say or type on
+      anveio.com/shovon is recorded, sent or stored. Before she starts taking real voice or text
+      messages, we will update this policy to say what is kept, where and for how long.
+    </p>
+
+    <h2>What we don’t do</h2>
+    <p>
+      We don’t sell your information or use it for advertising. We may disclose information if the
+      law requires it.
     </p>
 
     <h2>Your choices</h2>
     <p>
-      You can ask me to see, correct or delete the information I hold about you at any time. You can
-      also remove this site’s access to your Google account from your
-      <a href="https://myaccount.google.com/connections">Google Account settings</a>.
+      You can ask to see, correct or delete anything we hold about you by writing to
+      <a href="mailto:shovon@anveio.com">shovon@anveio.com</a>.
     </p>
 
     <h2>Children</h2>
     <p>
-      This site isn’t meant for children under 13, and I don’t knowingly collect their information.
+      This site isn’t meant for children under 13, and we don’t knowingly collect their information.
     </p>
 
     <h2>Changes</h2>
-    <p>If this policy changes, I’ll update it here and change the date at the top.</p>
+    <p>If this policy changes, we’ll update it here and change the date at the top.</p>
 
     <h2>Contact</h2>
-    <p>
-      Questions or requests:
-      <a href="mailto:contact@guardianintelligence.org">contact@guardianintelligence.org</a>.
-    </p>
+    <p>Anveio Foundation, <a href="mailto:shovon@anveio.com">shovon@anveio.com</a>.</p>
   </body>
 </html>
