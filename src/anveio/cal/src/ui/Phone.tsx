@@ -378,7 +378,13 @@ export function Phone({ forced }: Props) {
       <div className="scroll">
         {!flow.host && (
           <header className="hero">
-            <img src="/shovon.jpg" alt="Shovon Hasan" width={120} height={120} draggable={false} />
+            <img
+              src={`${import.meta.env.BASE_URL}shovon.jpg`}
+              alt="Shovon Hasan"
+              width={120}
+              height={120}
+              draggable={false}
+            />
             <h1 className="t-title1">Shovon Hasan</h1>
             <p className="t-sub secondary">Founder, Guardian</p>
           </header>

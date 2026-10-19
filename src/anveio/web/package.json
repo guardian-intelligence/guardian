@@ -10,7 +10,8 @@
     "preview": "vp preview",
     "start": "node ./.output/server/index.mjs",
     "typecheck": "vp exec tsc -p tsconfig.json",
-    "social-preview": "node scripts/social-preview.mjs"
+    "social-preview": "node scripts/social-preview.mjs",
+    "google-fonts-catalog": "node scripts/google-fonts-catalog.mjs"
   },
   "dependencies": {
     "@guardian/brand": "workspace:*",

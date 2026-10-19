@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DeckRouteImport } from './routes/deck'
+import { Route as DesignRouteImport } from './routes/design'
 import { Route as HealthzRouteImport } from './routes/healthz'
 import { Route as LivezRouteImport } from './routes/livez'
 
@@ -22,6 +23,11 @@ const IndexRoute = IndexRouteImport.update({
 const DeckRoute = DeckRouteImport.update({
   id: '/deck',
   path: '/deck',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DesignRoute = DesignRouteImport.update({
+  id: '/design',
+  path: '/design',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HealthzRoute = HealthzRouteImport.update({
@@ -38,12 +44,14 @@ const LivezRoute = LivezRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/deck': typeof DeckRoute
+  '/design': typeof DesignRoute
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/deck': typeof DeckRoute
+  '/design': typeof DesignRoute
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
 }
@@ -51,20 +59,22 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/deck': typeof DeckRoute
+  '/design': typeof DesignRoute
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/deck' | '/healthz' | '/livez'
+  fullPaths: '/' | '/deck' | '/design' | '/healthz' | '/livez'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/deck' | '/healthz' | '/livez'
-  id: '__root__' | '/' | '/deck' | '/healthz' | '/livez'
+  to: '/' | '/deck' | '/design' | '/healthz' | '/livez'
+  id: '__root__' | '/' | '/deck' | '/design' | '/healthz' | '/livez'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DeckRoute: typeof DeckRoute
+  DesignRoute: typeof DesignRoute
   HealthzRoute: typeof HealthzRoute
   LivezRoute: typeof LivezRoute
 }
@@ -83,6 +93,13 @@ declare module '@tanstack/react-router' {
       path: '/deck'
       fullPath: '/deck'
       preLoaderRoute: typeof DeckRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/design': {
+      id: '/design'
+      path: '/design'
+      fullPath: '/design'
+      preLoaderRoute: typeof DesignRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/healthz': {
@@ -105,6 +122,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DeckRoute: DeckRoute,
+  DesignRoute: DesignRoute,
   HealthzRoute: HealthzRoute,
   LivezRoute: LivezRoute,
 }
