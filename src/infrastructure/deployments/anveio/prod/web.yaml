@@ -167,20 +167,45 @@ spec:
     - host: anveio.com
       http:
         paths:
-          # The investor deck (deck.yaml) serves everything under /deck; www
-          # stays on anveio-cal, which redirects it here.
-          - path: /deck
-            pathType: Prefix
-            backend:
-              service:
-                name: anveio-web
-                port:
-                  number: 80
-          - path: /
+          # The contact card lives at /agent. Google's sign-in hands back to
+          # /oauth/google.html at the root (the registered redirect URI),
+          # /privacy is the OAuth client's policy page and /cal redirects
+          # old links; www stays on anveio-cal, which redirects it here.
+          - path: /agent
             pathType: Prefix
             backend:
               service:
                 name: anveio-cal
+                port:
+                  number: 80
+          - path: /oauth
+            pathType: Prefix
+            backend:
+              service:
+                name: anveio-cal
+                port:
+                  number: 80
+          - path: /privacy
+            pathType: Exact
+            backend:
+              service:
+                name: anveio-cal
+                port:
+                  number: 80
+          - path: /cal
+            pathType: Prefix
+            backend:
+              service:
+                name: anveio-cal
+                port:
+                  number: 80
+          # Everything else, the home page and the investor deck among it,
+          # is anveio-web's (deck.yaml).
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: anveio-web
                 port:
                   number: 80
     - host: www.anveio.com

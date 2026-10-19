@@ -1,4 +1,4 @@
-# anveio.com/cal: the contact-card prototype
+# anveio.com/agent: the contact-card prototype
 
 The highest-fidelity version of the "Leave a message for Rumi" page: Shovon's iOS
 dark-mode contact card on jet-black ink water, with Liquid Glass controls and
