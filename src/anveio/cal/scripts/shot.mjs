@@ -20,7 +20,7 @@ page.on("console", (m) => {
 });
 page.on("pageerror", (e) => console.log(`[pageerror] ${e.message}`));
 for (const frame of frames.length ? frames : ["live"]) {
-  await page.goto(`http://127.0.0.1:4255/?frame=${frame}`, { waitUntil: "networkidle" });
+  await page.goto(`http://127.0.0.1:4255/agent/?frame=${frame}`, { waitUntil: "networkidle" });
   await page.waitForTimeout(4000);
   const gpu = await page.evaluate(() => document.querySelector(".phone")?.className);
   console.log(frame, gpu);

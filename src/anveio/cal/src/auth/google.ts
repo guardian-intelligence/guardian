@@ -15,6 +15,8 @@ import * as v from "valibot";
 const CLIENT_ID: string =
   import.meta.env.VITE_GOOGLE_CLIENT_ID ??
   "494052463155-g1fnlk7ep4pipg66fnn7i3pgudp2rec4.apps.googleusercontent.com";
+// At the site root, outside the app's /agent base: this is the registered
+// redirect URI.
 const REDIRECT = "/oauth/google.html";
 export const CHANNEL = "rumi-google-oauth";
 const ISSUERS = ["https://accounts.google.com", "accounts.google.com"];

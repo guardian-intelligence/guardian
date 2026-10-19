@@ -148,27 +148,6 @@ a {
 }
 
 /* Home */
-.home {
-  min-height: 100svh;
-  display: grid;
-  place-content: center;
-  gap: 4px;
-  padding-inline: 16px;
-  background: var(--paper);
-  text-align: center;
-}
-.home-mark {
-  margin: 0;
-  font-family: var(--font-sans);
-  font-size: 32px;
-  font-weight: 600;
-  color: var(--brand);
-}
-.home-line {
-  margin: 0;
-  color: var(--ink-2);
-}
-
 /* Slides */
 /* Each slide is a fixed 1280x720 canvas scaled so one whole slide fits the
    window, less a 16px gutter each side; the frame reserves the scaled box.

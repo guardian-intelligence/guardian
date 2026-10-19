@@ -54,7 +54,7 @@ await ctx.route("https://accounts.google.com/**", (r) => {
 
 const page = await ctx.newPage();
 page.on("pageerror", (e) => console.log(`[pageerror] ${e.message}`));
-await page.goto("http://127.0.0.1:4255/", { waitUntil: "networkidle" });
+await page.goto("http://127.0.0.1:4255/agent/", { waitUntil: "networkidle" });
 await page.waitForTimeout(2500);
 const box = await page.locator(".phone").boundingBox();
 const bottom = (name) =>

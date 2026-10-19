@@ -89,6 +89,15 @@ export default {
           "no-restricted-imports": "off",
         },
       },
+      {
+        // The /design type editor renders in the browser only (ssr: false),
+        // so it may hold state and touch the page frames it edits.
+        files: ["src/anveio/web/src/design/**"],
+        rules: {
+          "no-restricted-globals": "off",
+          "no-restricted-imports": "off",
+        },
+      },
     ],
   },
   test: {
