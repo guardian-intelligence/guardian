@@ -24,7 +24,7 @@
   overflow-x: clip;
   background: var(--hp-bg);
   color: var(--hp-fg);
-  font-family: var(--font-sans);
+  font-family: "Roboto", var(--font-sans);
   font-size: 16px;
   line-height: 24px;
   font-feature-settings: normal;
@@ -279,12 +279,12 @@ html:has(.hp) {
   padding: 30px var(--hp-gutter) 0;
   text-align: center;
 }
-/* The company's line, as on the deck's title slide: always three lines,
-   set as one justified block as wide as "Bangladesh", whose word gaps take
-   up whatever Bangladesh leaves. A face where another line runs wider
-   (with at least a quarter-em word space) widens the block instead, and
-   Bangladesh, set letter by letter, tracks out to match rather than let
-   words collide. */
+/* The company's line: always three lines, set as one block exactly as wide
+   as "Bangladesh". The lines above it size to nothing (contain), so only
+   Bangladesh sets the width, and their word gaps take up whatever it
+   leaves, however little (Roboto's "Company of" gets about a tenth of an
+   em). Letters are never spaced apart: the face's kerning and the style's
+   tracking hold on every line. */
 .hp-title {
   margin: 0;
   display: grid;
@@ -294,12 +294,10 @@ html:has(.hp) {
 .hp-title > span {
   display: flex;
   justify-content: space-between;
-  gap: 0.25em;
   white-space: nowrap;
 }
-/* Lines spread letter by letter take their spacing from the block alone. */
-.hp-title > .hp-spread {
-  gap: 0;
+.hp-title > span:not(:last-child) {
+  contain: inline-size;
 }
 
 /* No tracking after a line's last letter, so it ends flush. */

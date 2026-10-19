@@ -70,15 +70,10 @@ function tie(text: string) {
   );
 }
 
-// The company's line, justified to one width in three lines, as on the
-// deck's title slide (home.css). "The Data" is spread letter by letter,
-// its word space one more even slot; Bangladesh is set letter by letter
-// too, so it can track out when another line is wider.
-const TITLE = [
-  { line: "The Data", parts: "The\u00a0Data".split(""), spread: true },
-  { line: "Company of", parts: ["Company", "of"], spread: false },
-  { line: "Bangladesh", parts: "Bangladesh".split(""), spread: true },
-] as const;
+// The company's line in three lines, each as wide as "Bangladesh"
+// (home.css): the other lines' word gaps take up the difference, and the
+// letters keep the face's own spacing and kerning.
+const TITLE = [["The", "Data"], ["Company", "of"], ["Bangladesh"]] as const;
 
 // The deck's title-slide lockup, small: the wings beside ANVEIO in Archivo
 // Semi Expanded caps.
@@ -230,15 +225,10 @@ function Home() {
         <Guides />
         <div className="hp-hero-copy">
           <h1 className="hp-title" aria-label="The Data Company of Bangladesh">
-            {TITLE.map(({ line, parts, spread }, n) => (
-              <span
-                key={line}
-                className={`rise rise-${n + 1} ${spread ? "hp-spread" : ""}`}
-                aria-hidden="true"
-              >
-                {parts.map((part, i) => (
-                  // Letters repeat, so position is the key.
-                  <span key={i}>{part}</span>
+            {TITLE.map((words, n) => (
+              <span key={words.join(" ")} className={`rise rise-${n + 1}`} aria-hidden="true">
+                {words.map((word) => (
+                  <span key={word}>{word}</span>
                 ))}
               </span>
             ))}

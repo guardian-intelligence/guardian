@@ -118,6 +118,19 @@ export const LOCAL_FONTS: readonly LocalFont[] = [
     inApp: true,
   },
   {
+    family: "Roboto",
+    category: "sans",
+    fallback: "ui-sans-serif, system-ui, sans-serif",
+    roman: stops(100, 900),
+    italic: stops(100, 900),
+    axes: { wdth: [75, 100], wght: [100, 900] },
+    faces: [
+      { file: "Roboto-Variable.woff2", weight: [100, 900], italic: false },
+      { file: "Roboto-Italic-Variable.woff2", weight: [100, 900], italic: true },
+    ],
+    inApp: false,
+  },
+  {
     family: "Libre Franklin",
     category: "sans",
     fallback: "ui-sans-serif, system-ui, sans-serif",
