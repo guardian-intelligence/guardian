@@ -107,9 +107,6 @@ const BASE = "/agent";
 // Maps a request path to a dist file. Only /agent/**, /oauth/** and /privacy
 // are this server's; anything else is a miss.
 function resolve(path) {
-  // Until the ingress sends / to anveio-web, the card answers there too. Its
-  // page references /agent/** only, so it works from either URL.
-  if (path === "/") return index;
   if (path.startsWith("/oauth/")) return files.get(path);
   if (path === "/privacy") return files.get("/privacy.html");
   if (path !== BASE && !path.startsWith(`${BASE}/`)) return undefined;
