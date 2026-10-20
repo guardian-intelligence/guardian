@@ -88,8 +88,8 @@ catalogs:
       specifier: 3.2.0
       version: 3.2.0
     effect:
-      specifier: 3.22.1
-      version: 3.22.1
+      specifier: 3.22.3
+      version: 3.22.3
     fflate:
       specifier: 0.8.3
       version: 0.8.3
@@ -537,7 +537,7 @@ importers:
         version: 3.0.1
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 3.22.3
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -2500,8 +2500,8 @@ packages:
     resolution: {integrity: sha512-k8DaKGP6r1G30Lx8V4+pCsLzKr8vLmV2paqEj1Y55GdAgJuIqpRp5FfajGF8KtwMxCz9qJc6wUIJnm053d/WCw==}
     engines: {node: '>=12'}
 
-  effect@3.22.1:
-    resolution: {integrity: sha512-TNoXushmPOBAjJlthF5d2QwnX2xBPEtcNJr5XKNKbRLbDvBcOYkXlYDfvGfSA0zriwLFuCll5MDtNMAdZL17PQ==}
+  effect@3.22.3:
+    resolution: {integrity: sha512-pQU7KTFcqHCjCbhMsiv2vFLPtCfKMspA3ChglcRfAMt/h7KlGoEtRL4eaM5Bq5chTgIysITM+fUAW87HQFKl3A==}
 
   electron-to-chromium@1.5.332:
     resolution: {integrity: sha512-7OOtytmh/rINMLwaFTbcMVvYXO3AUm029X0LcyfYk0B557RlPkdpTpnH9+htMlfu5dKwOmT0+Zs2Aw+lnn6TeQ==}
@@ -5329,7 +5329,7 @@ snapshots:
   dotenv@17.4.1:
     optional: true
 
-  effect@3.22.1:
+  effect@3.22.3:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 3.23.2
