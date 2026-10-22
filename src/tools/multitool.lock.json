@@ -329,16 +329,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.30.0/kubectl-cnpg_1.30.0_linux_x86_64.tar.gz",
-        "sha256": "33784dc3b61edb0ddb1a68db6ef045bd32daace5db2ec1f0a02e0e8185eef7eb",
+        "url": "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.30.1/kubectl-cnpg_1.30.1_linux_x86_64.tar.gz",
+        "sha256": "784bc46f176b24a150d5de84d0691f10ff613b59456af86b1a4868e1bacb9953",
         "os": "linux",
         "cpu": "x86_64",
         "file": "kubectl-cnpg"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.30.0/kubectl-cnpg_1.30.0_darwin_arm64.tar.gz",
-        "sha256": "88bb6da8ca5b63b5a4e60dae88b320bdcba3a8843536ad86e0fe077765ff2bbc",
+        "url": "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.30.1/kubectl-cnpg_1.30.1_darwin_arm64.tar.gz",
+        "sha256": "74836f530b54f060126fc8cf5fd5c27e77801a6d36f61b66f4457218aa11383f",
         "os": "macos",
         "cpu": "arm64",
         "file": "kubectl-cnpg"
