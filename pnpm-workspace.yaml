@@ -81,7 +81,7 @@ catalog:
   # Pinned to specific versions so the on-host Verdaccio mirror does not
   # have to keep up with @latest publish drift on every install.
   vite: npm:@voidzero-dev/vite-plus-core@0.2.6
-  vite-plus: 0.2.6
+  vite-plus: 1.1.0
   vitest: 4.1.11
   wawoff2: 2.0.1
   web-vitals: 4.2.4
@@ -137,3 +137,5 @@ minimumReleaseAgeExclude:
   - vitest@4.1.11
   # Renovate security update: @tanstack/react-start@1.168.60
   - "@tanstack/react-start@1.168.60"
+  # Renovate security update: vite-plus@1.1.0
+  - vite-plus@1.1.0
