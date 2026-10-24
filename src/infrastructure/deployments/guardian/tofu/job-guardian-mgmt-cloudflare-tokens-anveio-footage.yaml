@@ -1,11 +1,11 @@
 # One-time, Flux-managed apply of anveio.com/upload's storage: the
-# anveio-footage R2 bucket, its CORS rule, and the bucket-scoped token
-# anveio-web presigns with. The token is new, so its S3 pair must be relayed
+# anveio-footage R2 bucket, its CORS and lifecycle rules, and the
+# bucket-scoped token anveio-web signs with. The token is new, so its S3 pair must be relayed
 # to OpenBao (kv/guardian/guardian-mgmt/tenant-guardian-prod/anveio/footage-r2)
 # before anything consumes it. The scheduled root stays plan-only and is
 # suspended while this runs, so its PAGE_ON_DRIFT plan cannot page on the
 # change it is about to see. The runner applies only its saved plan, targeted
-# at those three resources. No TTL: remove this completed Job and resume the
+# at those four resources. No TTL: remove this completed Job and resume the
 # CronJob through Git after the resumed plan reads back clean.
 apiVersion: batch/v1
 kind: Job
@@ -47,7 +47,7 @@ spec:
             - name: MODE
               value: apply
             - name: TF_CLI_ARGS_plan
-              value: -target=cloudflare_r2_bucket.anveio_footage -target=cloudflare_r2_bucket_cors.anveio_footage -target=cloudflare_account_token.anveio_footage
+              value: -target=cloudflare_r2_bucket.anveio_footage -target=cloudflare_r2_bucket_cors.anveio_footage -target=cloudflare_r2_bucket_lifecycle.anveio_footage -target=cloudflare_account_token.anveio_footage
             - name: ROOT_NAME
               value: guardian-mgmt-cloudflare-tokens
             - name: ROOT_PATH

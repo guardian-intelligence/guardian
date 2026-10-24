@@ -274,6 +274,26 @@ resource "cloudflare_r2_bucket_cors" "anveio_footage" {
   ]
 }
 
+# Phones that vanish mid-upload leave multipart uploads behind; R2 drops any
+# still unfinished after a week (a resume after that starts the video over).
+resource "cloudflare_r2_bucket_lifecycle" "anveio_footage" {
+  provider = cloudflare.r2
+
+  account_id  = var.cloudflare_account_id
+  bucket_name = cloudflare_r2_bucket.anveio_footage.name
+
+  rules = [
+    {
+      id         = "abort-stale-multipart-uploads"
+      enabled    = true
+      conditions = { prefix = "" }
+      abort_multipart_uploads_transition = {
+        condition = { type = "Age", max_age = 604800 }
+      }
+    },
+  ]
+}
+
 # anveio-web's footage credential: presigns the uploaders' part PUTs and does
 # the multipart bookkeeping, receipt probes and manifests itself. Relayed into
 # OpenBao at kv/guardian/guardian-mgmt/tenant-guardian-prod/anveio/footage-r2.

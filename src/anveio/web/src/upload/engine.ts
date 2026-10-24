@@ -65,7 +65,9 @@ export function api(token: string) {
       body: JSON.stringify(body),
     });
     if (response.status === 401) throw new LinkError();
-    if ([400, 404, 413].includes(response.status)) throw new Refused(`HTTP ${response.status}`);
+    if ([400, 404, 413, 422].includes(response.status)) {
+      throw new Refused(`HTTP ${response.status}`);
+    }
     if (response.status === 409) throw new Unassembled();
     if (!response.ok) throw new HttpError(response.status);
     return v.parse(schema, await response.json());
@@ -96,7 +98,7 @@ export async function upload(
       emit();
     });
 
-  const id = `${file.name}:${file.size}:${file.lastModified}`;
+  const id = await fingerprint(file);
   const meta = {
     ...who,
     filename: file.name,
@@ -151,7 +153,21 @@ export async function upload(
       emit();
     }
   };
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
+  // Once, if R2 drops the upload or won't assemble it, the video starts over.
+  const restart = (error: unknown) => {
+    if (error instanceof Unassembled && !fresh) return undefined;
+    throw error;
+  };
+  const sent = await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker),
+  ).then(
+    () => true,
+    (error: unknown) => {
+      queue.length = 0;
+      return restart(error);
+    },
+  );
+  if (!sent) return upload(file, who, call, report, true);
 
   phase = "finishing";
   emit();
@@ -162,10 +178,7 @@ export async function upload(
       { key, uploadId, parts, ...meta },
       v.object({ seconds: v.nullable(v.number()) }),
     ),
-  ).catch((error) => {
-    if (error instanceof Unassembled && !fresh) return undefined;
-    throw error;
-  });
+  ).catch(restart);
   if (!completed) return upload(file, who, call, report, true);
   const { seconds } = completed;
   forget(id);
@@ -221,6 +234,8 @@ function put(url: string, blob: Blob, progress: (loaded: number) => void): Promi
       settle();
       const etag = xhr.getResponseHeader("etag");
       if (xhr.status >= 200 && xhr.status < 300 && etag) resolve(etag);
+      // R2 no longer knows the upload (aborted as stale): start the video over.
+      else if (xhr.status === 404) reject(new Unassembled());
       else reject(new HttpError(xhr.status));
     };
     xhr.onerror = xhr.onabort = () => {
@@ -230,6 +245,17 @@ function put(url: string, blob: Blob, progress: (loaded: number) => void): Promi
     xhr.open("PUT", url);
     xhr.send(blob);
   });
+}
+
+// Which saved session a picked file resumes. Android's photo picker can stamp
+// lastModified with the moment of picking, so the file is recognised by its
+// name, size and a digest of its first and last 64 KiB instead.
+async function fingerprint(file: File): Promise<string> {
+  const edge = 64 * 1024;
+  const sample = new Blob([file.slice(0, edge), file.slice(Math.max(edge, file.size - edge))]);
+  const digest = await crypto.subtle.digest("SHA-256", await sample.arrayBuffer());
+  const hex = Array.from(new Uint8Array(digest), (x) => x.toString(16).padStart(2, "0")).join("");
+  return `${file.name}:${file.size}:${hex}`;
 }
 
 const sessions = () => read(SESSIONS, Sessions, {});

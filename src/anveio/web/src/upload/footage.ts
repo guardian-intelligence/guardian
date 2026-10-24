@@ -51,6 +51,8 @@ const Complete = v.object({
   ),
 });
 
+const Receipt = v.object({ seconds: v.nullable(v.number()), size: v.number() });
+
 type Link = v.InferOutput<typeof Registry>["links"][number];
 type Context = { readonly b: Bucket; readonly link: Link; readonly request: Request };
 
@@ -106,25 +108,34 @@ async function authorize(request: Request): Promise<Link | undefined> {
   return registry.links.find((link) => timingSafeEqual(Buffer.from(link.sha256, "hex"), digest));
 }
 
+// A request that can never succeed as sent; the phone gives that video up.
+class Unacceptable extends Error {}
+
 export async function handle(name: string, request: Request): Promise<Response> {
   const run = Object.hasOwn(OPS, name) ? OPS[name] : undefined;
   if (!run) return json(404, { error: "unknown" });
   const b = bucket();
   if (!b) return json(503, { error: "unconfigured" });
-  const link = await authorize(request);
+  const link = await authorize(request).catch((error: unknown) => {
+    console.error("anveio-footage-links unreadable", error);
+    return null;
+  });
+  if (link === null) return json(503, { error: "registry" });
   if (!link) return json(401, { error: "link" });
   try {
     return await run({ b, link, request }, await request.json().catch(() => undefined));
   } catch (error) {
     if (error instanceof S3Error && error.code === "NoSuchUpload")
       return json(410, { error: "gone" });
-    // The parts don't assemble: the phone starts that video over.
+    // The parts don't assemble, or the upload vanished under them: the
+    // phone starts that video over.
     if (
       error instanceof S3Error &&
-      /^(InvalidPart|InvalidPartOrder|EntityTooSmall)$/.test(error.code)
+      /^(InvalidPart|InvalidPartOrder|EntityTooSmall|NoSuchKey)$/.test(error.code)
     ) {
       return json(409, { error: "parts" });
     }
+    if (error instanceof Unacceptable) return json(422, { error: error.message });
     throw error;
   }
 }
@@ -166,16 +177,26 @@ async function complete({ b, link, request }: Context, upload: v.InferOutput<typ
   const xml = `<CompleteMultipartUpload>${parts
     .map((p) => `<Part><PartNumber>${p.n}</PartNumber><ETag>${escape(p.etag)}</ETag></Part>`)
     .join("")}</CompleteMultipartUpload>`;
+  const manifestKey = upload.key
+    .replace(/^footage\//, "manifests/")
+    .replace(/(\.[a-z0-9]+)?$/, ".json");
   try {
     await call(b, "POST", upload.key, { uploadId: upload.uploadId }, { body: xml });
   } catch (error) {
-    // A retried complete whose first answer was lost: the object is already whole.
     if (!(error instanceof S3Error && error.code === "NoSuchUpload")) throw error;
+    // A retried complete whose first answer was lost: the object is already
+    // whole, and its manifest, once written, is never rewritten.
+    const written = await call(b, "GET", manifestKey).then(
+      async (r) => v.safeParse(Receipt, await r.json()),
+      () => undefined,
+    );
+    if (written?.success) return written.output;
   }
-  const head = await call(b, "HEAD", upload.key);
+  const head = await call(b, "HEAD", upload.key).catch((error: unknown) => {
+    throw error instanceof S3Error && error.status === 404 ? new S3Error(404, "NoSuchKey") : error;
+  });
   const size = Number(head.headers.get("content-length"));
-  if (size !== upload.size)
-    throw new Error(`${upload.key} is ${size} bytes, expected ${upload.size}`);
+  if (size !== upload.size) throw new Unacceptable(`size ${size} != ${upload.size}`);
   const seconds = await mp4Seconds(async (start, length) => {
     const range = { range: `bytes=${start}-${start + length - 1}` };
     const response = await call(b, "GET", upload.key, {}, { headers: range });
@@ -185,7 +206,8 @@ async function complete({ b, link, request }: Context, upload: v.InferOutput<typ
     key: upload.key,
     link: link.id,
     name: upload.name,
-    stream: upload.stream,
+    // The key's folder, which a resumed upload keeps even if the kind changed.
+    stream: upload.key.split("/")[2],
     filename: upload.filename,
     type: upload.type,
     size,
@@ -195,9 +217,6 @@ async function complete({ b, link, request }: Context, upload: v.InferOutput<typ
     country: request.headers.get("cf-ipcountry"),
     userAgent: request.headers.get("user-agent"),
   };
-  const manifestKey = upload.key
-    .replace(/^footage\//, "manifests/")
-    .replace(/(\.[a-z0-9]+)?$/, ".json");
   await call(
     b,
     "PUT",
