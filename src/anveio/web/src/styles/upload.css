@@ -1,0 +1,230 @@
+/* anveio.com/upload: one phone-width column with big tap targets. Bengali
+   leads each line in the system's Bengali face; English sits under it. */
+.upload {
+  --upload-font: "Noto Sans Bengali", "Hind Siliguri", system-ui, sans-serif;
+  box-sizing: border-box;
+  max-width: 34rem;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: max(24px, env(safe-area-inset-top)) 16px max(32px, env(safe-area-inset-bottom));
+  background: var(--paper);
+  font-family: var(--upload-font);
+  font-size: 17px;
+  line-height: 1.45;
+}
+
+.upload *,
+.upload *::before,
+.upload *::after {
+  box-sizing: inherit;
+}
+
+.upload .en {
+  display: block;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 0.8em;
+  color: var(--ink-3);
+}
+
+.upload h1 {
+  margin: 0 0 8px;
+  color: var(--brand);
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.upload h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+.upload .intro {
+  margin: 0 0 24px;
+  color: var(--ink-2);
+}
+
+.upload .field {
+  display: block;
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+}
+
+.upload .label {
+  display: block;
+  margin-bottom: 6px;
+  padding: 0;
+  font-weight: 600;
+}
+
+.upload input[type="text"] {
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 2px solid var(--rule);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 18px;
+}
+
+.upload input[type="text"]:focus {
+  border-color: var(--brand);
+  outline: none;
+}
+
+.upload input[aria-invalid="true"] {
+  border-color: var(--bad);
+}
+
+.upload .error {
+  display: block;
+  margin-top: 6px;
+  color: var(--bad);
+}
+
+.upload .streams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.upload .stream input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.upload .stream > span {
+  display: block;
+  min-height: 56px;
+  padding: 8px 12px;
+  border: 2px solid var(--rule);
+  border-radius: 10px;
+  text-align: center;
+}
+
+.upload .stream > input:checked + span {
+  border-color: var(--brand);
+  background: var(--brand-tint);
+  font-weight: 600;
+}
+
+.upload .stream > input:focus-visible + span {
+  outline: 3px solid var(--input);
+  outline-offset: 2px;
+}
+
+.upload .choose {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  margin: 8px 0 24px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--brand);
+  color: #ffffff;
+  font: inherit;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.upload .choose .en {
+  color: #cfe3d9;
+}
+
+.upload .choose:disabled {
+  opacity: 0.6;
+}
+
+.upload .notice {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--warn-tint);
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.upload .notice.bad {
+  background: var(--bad-tint);
+  color: var(--bad);
+}
+
+.upload ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.upload .item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.upload .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.upload .file {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload .size {
+  flex: none;
+  color: var(--ink-2);
+}
+
+.upload progress {
+  width: 100%;
+  height: 14px;
+  margin: 8px 0 4px;
+  accent-color: var(--brand);
+}
+
+.upload .status {
+  font-size: 15px;
+  color: var(--ink-2);
+}
+
+.upload .status .en {
+  display: inline;
+  margin-left: 6px;
+}
+
+.upload .item.done .status {
+  color: var(--good);
+  font-weight: 600;
+}
+
+.upload .item.offline .status {
+  color: var(--warn);
+}
+
+.upload .item.failed .status {
+  color: var(--bad);
+}
+
+.upload .hint {
+  margin: 12px 0 0;
+  font-size: 15px;
+  color: var(--ink-2);
+}
+
+.upload .receipts {
+  margin-top: 32px;
+}
+
+.upload .receipts li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.upload .total {
+  margin: 0 0 8px;
+  font-weight: 600;
+}

@@ -14,6 +14,8 @@ import { Route as DeckRouteImport } from './routes/deck'
 import { Route as DesignRouteImport } from './routes/design'
 import { Route as HealthzRouteImport } from './routes/healthz'
 import { Route as LivezRouteImport } from './routes/livez'
+import { Route as UploadIndexRouteImport } from './routes/upload/index'
+import { Route as UploadApiOpRouteImport } from './routes/upload/api.$op'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,6 +42,16 @@ const LivezRoute = LivezRouteImport.update({
   path: '/livez',
   getParentRoute: () => rootRouteImport,
 } as any)
+const UploadIndexRoute = UploadIndexRouteImport.update({
+  id: '/upload/',
+  path: '/upload/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UploadApiOpRoute = UploadApiOpRouteImport.update({
+  id: '/upload/api/$op',
+  path: '/upload/api/$op',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +59,8 @@ export interface FileRoutesByFullPath {
   '/design': typeof DesignRoute
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
+  '/upload/': typeof UploadIndexRoute
+  '/upload/api/$op': typeof UploadApiOpRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +68,8 @@ export interface FileRoutesByTo {
   '/design': typeof DesignRoute
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
+  '/upload': typeof UploadIndexRoute
+  '/upload/api/$op': typeof UploadApiOpRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +78,37 @@ export interface FileRoutesById {
   '/design': typeof DesignRoute
   '/healthz': typeof HealthzRoute
   '/livez': typeof LivezRoute
+  '/upload/': typeof UploadIndexRoute
+  '/upload/api/$op': typeof UploadApiOpRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/deck' | '/design' | '/healthz' | '/livez'
+  fullPaths:
+    | '/'
+    | '/deck'
+    | '/design'
+    | '/healthz'
+    | '/livez'
+    | '/upload/'
+    | '/upload/api/$op'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/deck' | '/design' | '/healthz' | '/livez'
-  id: '__root__' | '/' | '/deck' | '/design' | '/healthz' | '/livez'
+  to:
+    | '/'
+    | '/deck'
+    | '/design'
+    | '/healthz'
+    | '/livez'
+    | '/upload'
+    | '/upload/api/$op'
+  id:
+    | '__root__'
+    | '/'
+    | '/deck'
+    | '/design'
+    | '/healthz'
+    | '/livez'
+    | '/upload/'
+    | '/upload/api/$op'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -77,6 +117,8 @@ export interface RootRouteChildren {
   DesignRoute: typeof DesignRoute
   HealthzRoute: typeof HealthzRoute
   LivezRoute: typeof LivezRoute
+  UploadIndexRoute: typeof UploadIndexRoute
+  UploadApiOpRoute: typeof UploadApiOpRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -116,6 +158,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LivezRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/upload/': {
+      id: '/upload/'
+      path: '/upload'
+      fullPath: '/upload/'
+      preLoaderRoute: typeof UploadIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/upload/api/$op': {
+      id: '/upload/api/$op'
+      path: '/upload/api/$op'
+      fullPath: '/upload/api/$op'
+      preLoaderRoute: typeof UploadApiOpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -125,6 +181,8 @@ const rootRouteChildren: RootRouteChildren = {
   DesignRoute: DesignRoute,
   HealthzRoute: HealthzRoute,
   LivezRoute: LivezRoute,
+  UploadIndexRoute: UploadIndexRoute,
+  UploadApiOpRoute: UploadApiOpRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
