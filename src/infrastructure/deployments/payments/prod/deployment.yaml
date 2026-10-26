@@ -51,7 +51,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
       containers:
         - name: payments
-          image: ghcr.io/guardian-intelligence/payments:edge@sha256:c4fe4741aab9099d35597669e67a71d35b20a5038b5b6b86e3e4574eb22850ac # {"$imagepolicy": "guardian-imageops:payments"}
+          image: ghcr.io/guardian-intelligence/payments:edge@sha256:51b118a547a09c2c06b8f62a965239b424680423dc6463801674106cf9def8e1 # {"$imagepolicy": "guardian-imageops:payments"}
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
