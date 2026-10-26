@@ -80,9 +80,9 @@ catalog:
   valibot: 1.4.2
   # Pinned to specific versions so the on-host Verdaccio mirror does not
   # have to keep up with @latest publish drift on every install.
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.6
+  vite: npm:@voidzero-dev/vite-plus-core@1.1.0
   vite-plus: 1.1.0
-  vitest: 4.1.11
+  vitest: 4.1.12
   wawoff2: 2.0.1
   web-vitals: 4.2.4
   playwright: 1.62.1
@@ -105,6 +105,14 @@ overrides:
   vite: "catalog:"
   "vite@>=8.0.0 <=8.0.15": 8.1.5
   vitest: "catalog:"
+  # Patched transitive dependencies; keep fixes within their current major.
+  "@vitest/mocker@<4.1.12": 4.1.12
+  "tinypool@>=2.0.0 <2.1.2": 2.1.2
+  "undici@>=6.0.0 <6.29.1": 6.29.1
+  "postcss@<8.5.23": 8.5.23
+  "browserslist@<4.28.7": 4.28.7
+  "source-map-js@<1.2.2": 1.2.2
+  "baseline-browser-mapping@<2.11.0": 2.11.0
 
 packageExtensions:
   "@voidzero-dev/vite-plus-core@*":
@@ -139,3 +147,14 @@ minimumReleaseAgeExclude:
   - "@tanstack/react-start@1.168.60"
   # Renovate security update: vite-plus@1.1.0
   - vite-plus@1.1.0
+
+  # Security fixes in the build and test dependency graph.
+  - "@voidzero-dev/vite-plus-core@1.1.0"
+  - vitest@4.1.12
+  - "@vitest/mocker@4.1.12"
+  - tinypool@2.1.2
+  - undici@6.29.1
+  - postcss@8.5.23
+  - browserslist@4.28.7
+  - source-map-js@1.2.2
+  - baseline-browser-mapping@2.11.0
