@@ -19,11 +19,7 @@ metadata:
   annotations:
     guardian.dev/parked-until: "2026-10-31"
     guardian.dev/parked-reason: >-
-      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn
-      down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot
-      host whose real-VM canaries gate the default-CI cutover, and five
-      continuous PR lanes would contend with that. Un-suspend once the
-      cutover lands, or retire the lane.
+      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot host whose real-VM canaries gate the default-CI cutover, and five continuous PR lanes would contend with that. Un-suspend once the cutover lands, or retire the lane.
   labels:
     app.kubernetes.io/name: postflight-canary-loop
     app.kubernetes.io/part-of: guardian
@@ -57,7 +53,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: canary-loop
-              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:fb8553fc904597350fb32f0c4f089a4112a947cf86128e4da0219205700d4812 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
+              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:b2da5d101f5ba6af43fc5f709fac317abea2aae88f735724fb138b616be858e1 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
               command:
                 - /app/canary-loop
               securityContext:
@@ -114,11 +110,7 @@ metadata:
   annotations:
     guardian.dev/parked-until: "2026-10-31"
     guardian.dev/parked-reason: >-
-      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn
-      down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot
-      host whose real-VM canaries gate the default-CI cutover, and five
-      continuous PR lanes would contend with that. Un-suspend once the
-      cutover lands, or retire the lane.
+      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot host whose real-VM canaries gate the default-CI cutover, and five continuous PR lanes would contend with that. Un-suspend once the cutover lands, or retire the lane.
   labels:
     app.kubernetes.io/name: postflight-canary-loop
     app.kubernetes.io/part-of: guardian
@@ -152,7 +144,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: canary-loop
-              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:fb8553fc904597350fb32f0c4f089a4112a947cf86128e4da0219205700d4812 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
+              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:b2da5d101f5ba6af43fc5f709fac317abea2aae88f735724fb138b616be858e1 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
               command:
                 - /app/canary-loop
               securityContext:
@@ -209,11 +201,7 @@ metadata:
   annotations:
     guardian.dev/parked-until: "2026-10-31"
     guardian.dev/parked-reason: >-
-      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn
-      down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot
-      host whose real-VM canaries gate the default-CI cutover, and five
-      continuous PR lanes would contend with that. Un-suspend once the
-      cutover lands, or retire the lane.
+      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot host whose real-VM canaries gate the default-CI cutover, and five continuous PR lanes would contend with that. Un-suspend once the cutover lands, or retire the lane.
   labels:
     app.kubernetes.io/name: postflight-canary-loop
     app.kubernetes.io/part-of: guardian
@@ -247,7 +235,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: canary-loop
-              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:fb8553fc904597350fb32f0c4f089a4112a947cf86128e4da0219205700d4812 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
+              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:b2da5d101f5ba6af43fc5f709fac317abea2aae88f735724fb138b616be858e1 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
               command:
                 - /app/canary-loop
               securityContext:
@@ -304,11 +292,7 @@ metadata:
   annotations:
     guardian.dev/parked-until: "2026-10-31"
     guardian.dev/parked-reason: >-
-      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn
-      down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot
-      host whose real-VM canaries gate the default-CI cutover, and five
-      continuous PR lanes would contend with that. Un-suspend once the
-      cutover lands, or retire the lane.
+      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot host whose real-VM canaries gate the default-CI cutover, and five continuous PR lanes would contend with that. Un-suspend once the cutover lands, or retire the lane.
   labels:
     app.kubernetes.io/name: postflight-canary-loop
     app.kubernetes.io/part-of: guardian
@@ -342,7 +326,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: canary-loop
-              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:fb8553fc904597350fb32f0c4f089a4112a947cf86128e4da0219205700d4812 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
+              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:b2da5d101f5ba6af43fc5f709fac317abea2aae88f735724fb138b616be858e1 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
               command:
                 - /app/canary-loop
               securityContext:
@@ -399,11 +383,7 @@ metadata:
   annotations:
     guardian.dev/parked-until: "2026-10-31"
     guardian.dev/parked-reason: >-
-      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn
-      down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot
-      host whose real-VM canaries gate the default-CI cutover, and five
-      continuous PR lanes would contend with that. Un-suspend once the
-      cutover lands, or retire the lane.
+      Suspended 2026-07-26 (#1178) when the SNP worker fleet was torn down. Turbo capacity returned 2026-09-07 (#1520) as one two-slot host whose real-VM canaries gate the default-CI cutover, and five continuous PR lanes would contend with that. Un-suspend once the cutover lands, or retire the lane.
   labels:
     app.kubernetes.io/name: postflight-canary-loop
     app.kubernetes.io/part-of: guardian
@@ -437,7 +417,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: canary-loop
-              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:fb8553fc904597350fb32f0c4f089a4112a947cf86128e4da0219205700d4812 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
+              image: ghcr.io/guardian-intelligence/postflight-controlplane:edge@sha256:b2da5d101f5ba6af43fc5f709fac317abea2aae88f735724fb138b616be858e1 # {"$imagepolicy": "guardian-imageops:postflight-controlplane"}
               command:
                 - /app/canary-loop
               securityContext:
