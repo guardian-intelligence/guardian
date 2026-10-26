@@ -233,7 +233,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: notify
-          image: ghcr.io/guardian-intelligence/feature-flags-notify:edge@sha256:111e28e95e30c0e606e6f9dca11089f767ceb291001405ed95a70c698edc5bf6 # {"$imagepolicy": "guardian-imageops:feature-flags-notify"}
+          image: ghcr.io/guardian-intelligence/feature-flags-notify:edge@sha256:b8459e860375e21b634196c40a6791b581d19dd5336963803cf7884958610ca3 # {"$imagepolicy": "guardian-imageops:feature-flags-notify"}
           imagePullPolicy: IfNotPresent
           env:
             - name: NOTIFY_FLAGS_PATH
