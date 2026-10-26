@@ -1,4 +1,4 @@
-# anveio.com/cal: the contact-card prototype
+# anveio.com/agent: the contact-card prototype
 
 The highest-fidelity version of the "Leave a message for Rumi" page: Shovon's iOS
 dark-mode contact card on jet-black ink water, with Liquid Glass controls and
@@ -9,7 +9,7 @@ Rumi's orb. It's a plain Vite + React SPA with no backend; the flow is scripted.
 ```sh
 vp install                # once, from the repo root
 vp run dev:cal            # from the repo root, or `vp dev` in this folder
-open http://127.0.0.1:4255
+open http://127.0.0.1:4255/agent/
 ```
 
 You need a WebGPU browser (Chrome, Edge, Safari 26+). Without WebGPU, the glass

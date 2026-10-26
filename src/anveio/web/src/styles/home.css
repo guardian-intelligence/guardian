@@ -1,0 +1,867 @@
+/* anveio.com's home page, after hud.ai's layout: a light hero over the farm
+   creative, a dark band where the creative's reflection fades into the data
+   cards, then light sections and a dark footer. The lockup is the deck's
+   title-slide wings and ANVEIO. Layout is CSS only (no JS-measured layout
+   under SSR).
+
+   Type lives in src/home/type-scale.json, edited at /design and rendered
+   with the page (src/home/typeScale.ts); this file sets no font, size or
+   tracking on text. The scale follows hud.ai's, measured at 1440 and 390,
+   with Source Serif 4 Display (OFL) standing in for its Farnham Headline:
+   the same Fournier model, a weight heavier and ~6% larger to match
+   Farnham's colour and width. */
+
+.hp {
+  --hp-bg: #fafafa;
+  --hp-fg: #0a0a0a;
+  --hp-muted: #6f6575;
+  --hp-hair: rgba(229, 229, 229, 0.2);
+  --hp-line: #e6e3e6;
+  --hp-ink: #0a0a0a;
+  --hp-on-ink-muted: #a59fa8;
+  --hp-gutter: 32px;
+  --hp-nav-h: 72px;
+  overflow-x: clip;
+  background: var(--hp-bg);
+  color: var(--hp-fg);
+  font-family: "Roboto", var(--font-sans);
+  font-size: 16px;
+  line-height: 24px;
+  font-feature-settings: normal;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+/* Anchored sections clear the pinned nav (72px; 64px on phones). */
+html:has(.hp) {
+  scroll-padding-top: 72px;
+}
+@media (max-width: 860px) {
+  html:has(.hp) {
+    scroll-padding-top: 64px;
+  }
+}
+html:has(.hp) body {
+  background: var(--hp-bg);
+}
+/* Safari 26 tints its status bar from the root background (theme-color is
+   ignored there), so give the root the hero's top edge: the white veil over
+   the creative's sky. The status bar then reads as part of the scene. */
+html:has(.hp) {
+  background: #f2f5f7;
+}
+.hp a {
+  text-decoration: none;
+}
+/* No widows or orphans: headings balance, running text wraps "pretty". */
+.hp :is(h1, h2, h3) {
+  text-wrap: balance;
+}
+.hp :is(p, dt, dd, summary) {
+  text-wrap: pretty;
+}
+.hp-tie {
+  white-space: nowrap;
+}
+
+/* Lockup */
+.hp-lockup {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 7px;
+  color: var(--hp-fg);
+}
+.hp-lockup svg {
+  height: 16px;
+  fill: currentColor;
+}
+.hp-lockup span {
+  margin-right: calc(-1 * var(--hp-track));
+  text-box: trim-both cap alphabetic;
+}
+.hp-lockup.on-ink {
+  color: #fafafa;
+}
+
+/* Buttons: 40px tall, 12px radius. */
+.hp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 14px 0 16px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 150ms,
+    transform 150ms;
+}
+.hp-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.hp-btn-sm {
+  height: 36px;
+}
+.hp-btn-dark {
+  background: linear-gradient(180deg, #1c1619, #000);
+  color: #f7f7f7;
+}
+.hp-btn-light {
+  background: #fafafa;
+  color: #140f14;
+}
+.hp-btn-plum {
+  background: #241c26;
+  color: #fafafa;
+}
+.hp-btn:disabled {
+  cursor: not-allowed;
+}
+.hp-soon {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.72);
+}
+.hp-btn-light .hp-soon {
+  background: rgba(20, 15, 20, 0.08);
+  color: rgba(20, 15, 20, 0.6);
+}
+.hp-arrow {
+  width: 12px;
+  height: 12px;
+  opacity: 0.6;
+}
+
+/* Nav: part of the scene. At rest it has no fill and no rule, so the
+   creative's sky runs to the top edge. Where scroll-driven animations exist
+   it stays pinned and fills in over the first scroll, before any content can
+   slide under it unfilled; elsewhere it scrolls away with the hero. */
+.hp-nav {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 50;
+  border-bottom: 1px solid transparent;
+}
+@supports (animation-timeline: scroll()) {
+  .hp-nav {
+    position: sticky;
+    margin-bottom: calc(-1 * var(--hp-nav-h));
+    animation: hp-nav-fill linear both;
+    animation-timeline: scroll(root);
+    animation-range: 0 48px;
+  }
+}
+/* Scrolled, the nav turns solid in the status bar's tint (the root
+   background), so the two read as one surface over light and dark
+   sections alike. */
+@keyframes hp-nav-fill {
+  from {
+    background-color: rgba(242, 245, 247, 0);
+    border-bottom-color: rgba(230, 227, 230, 0);
+  }
+  to {
+    background-color: rgb(242, 245, 247);
+    border-bottom-color: var(--hp-line);
+  }
+}
+.hp-nav-inner {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: var(--hp-nav-h);
+  padding: 0 48px;
+}
+.hp-nav-links {
+  display: flex;
+  gap: 4px;
+}
+.hp-nav-links a,
+.hp-nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 12px;
+  color: rgba(23, 20, 23, 0.75);
+  transition: color 150ms;
+}
+.hp-nav-links a:hover,
+.hp-nav-link:hover {
+  color: var(--hp-fg);
+}
+.hp-nav-end {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Hero */
+.hp-hero {
+  position: relative;
+  height: 102vh;
+  min-height: 680px;
+  padding-top: 96px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.hp-hero-media {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: #0a0a0a;
+}
+.hp-hero-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: bottom;
+  filter: contrast(1.15) saturate(1.1);
+}
+.hp-hero-veil-top,
+.hp-hero-veil-bottom {
+  position: absolute;
+  inset-inline: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+.hp-hero-veil-top {
+  top: 0;
+  height: 60%;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.9),
+    rgba(255, 255, 255, 0.5),
+    transparent
+  );
+}
+.hp-hero-veil-bottom {
+  bottom: 0;
+  height: 65%;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.2), transparent);
+}
+.hp-guides {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+.hp-guides span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-inline: 1px solid var(--hp-hair);
+}
+.hp-guides span:nth-child(1) {
+  inset-inline: 0;
+  mask-image: linear-gradient(to bottom, #000 30%, transparent);
+}
+.hp-guides span:nth-child(2) {
+  inset-inline: 80px;
+  mask-image: linear-gradient(to bottom, #000 22%, transparent 68%);
+}
+.hp-guides span:nth-child(3) {
+  inset-inline: 160px;
+  mask-image: linear-gradient(to bottom, #000 15%, transparent 52%);
+}
+.hp-hero-copy {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 30px var(--hp-gutter) 0;
+  text-align: center;
+}
+/* The company's line: always three lines, set as one block exactly as wide
+   as "Bangladesh". The lines above it size to nothing (contain), so only
+   Bangladesh sets the width, and their word gaps take up whatever it
+   leaves, however little (Roboto's "Company of" gets about a tenth of an
+   em). Letters are never spaced apart: the face's kerning and the style's
+   tracking hold on every line. */
+.hp-title {
+  margin: 0;
+  display: grid;
+  justify-content: center;
+  color: var(--hp-fg);
+}
+.hp-title > span {
+  display: flex;
+  justify-content: space-between;
+  white-space: nowrap;
+}
+.hp-title > span:not(:last-child) {
+  contain: inline-size;
+}
+
+/* No tracking after a line's last letter, so it ends flush. */
+.hp-title > span > span:last-child {
+  margin-right: calc(-1 * var(--hp-track));
+}
+.hp-sub {
+  max-width: 576px;
+  margin: 24px 0 0;
+  color: var(--hp-muted);
+}
+.hp-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 48px;
+}
+.hp-seam {
+  position: relative;
+  z-index: 50;
+  margin-top: -1px;
+  border-bottom: 1px solid var(--hp-hair);
+}
+
+/* The dark band: the creative again, upside down, as the island's
+   reflection, dimmed and fading out under the data cards. */
+.hp-infra {
+  --fade: 28rem;
+  --hold: 10rem;
+  position: relative;
+  z-index: 0;
+  padding: 112px var(--hp-gutter) 0;
+  background: #0a0a0a;
+  text-align: center;
+}
+.hp-infra-media {
+  position: absolute;
+  inset: 0 0 auto;
+  height: calc(100% + var(--hold) + var(--fade));
+  overflow: hidden;
+  background: #0a0a0a;
+  pointer-events: none;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
+}
+.hp-infra-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: bottom;
+  transform: scaleY(-1);
+  filter: blur(3px) saturate(0.9);
+}
+.hp-infra-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 10, 0.65);
+}
+.hp-infra-copy {
+  position: relative;
+  z-index: 20;
+  max-width: 768px;
+  margin: 0 auto;
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+}
+.hp-infra h2 {
+  margin: 0;
+  color: #fafafa;
+}
+.hp-infra p {
+  margin: 0;
+  display: grid;
+  color: rgba(255, 255, 255, 0.7);
+}
+.hp-infra p span + span {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* Data cards */
+.hp-bento {
+  position: relative;
+  z-index: 20;
+  margin-top: 112px;
+  padding: 0 var(--hp-gutter) 64px;
+}
+.hp-bento-grid {
+  position: relative;
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+}
+.hp-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+  padding: 44px 44px 0;
+  overflow: hidden;
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+.hp-cell-drone {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  gap: 48px;
+  min-height: 290px;
+}
+.hp-cell-drone .hp-cell-text {
+  flex: 0 0 320px;
+}
+/* Side by side, the panel takes the row's remaining width, not its photos'. */
+.hp-cell-drone .hp-cell-media {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-top: 0;
+}
+.hp-cell h3 {
+  margin: 0;
+}
+.hp-cell p {
+  margin: 8px 0 0;
+  color: var(--hp-muted);
+}
+/* The white panel grows to the card's bottom edge but never shrinks below
+   its photos, so no photo is cropped by the card. */
+.hp-cell-media {
+  margin-top: 32px;
+  flex: 1 0 auto;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  align-content: start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+.hp-cell-media img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.tone-green {
+  background:
+    radial-gradient(60% 80% at 60% 0%, #c6ead6, transparent 70%),
+    linear-gradient(180deg, #ddf2e6, #eef6f1);
+}
+.tone-pink {
+  background:
+    radial-gradient(60% 80% at 40% 0%, #f6c3cb, transparent 70%),
+    linear-gradient(180deg, #f9d9dd, #fbeef0);
+}
+.tone-peach {
+  background:
+    radial-gradient(60% 80% at 50% 0%, #fbd9c3, transparent 70%),
+    linear-gradient(180deg, #fde6d8, #fdf2ea);
+}
+.hp-cross {
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  margin: -7px 0 0 -7px;
+  pointer-events: none;
+}
+.hp-cross::before,
+.hp-cross::after {
+  content: "";
+  position: absolute;
+  background: rgba(10, 10, 10, 0.5);
+}
+.hp-cross::before {
+  left: 7px;
+  top: 0;
+  width: 1px;
+  height: 15px;
+}
+.hp-cross::after {
+  top: 7px;
+  left: 0;
+  width: 15px;
+  height: 1px;
+}
+
+/* Light sections */
+.hp-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 48px;
+  padding: 80px var(--hp-gutter);
+}
+.hp-faq-section {
+  padding-bottom: 160px;
+}
+.hp-section-head {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  text-align: center;
+}
+.hp-section-head p {
+  margin: 0;
+  color: var(--hp-muted);
+}
+.hp-serif {
+  margin: 0;
+}
+.hp-why {
+  position: relative;
+  width: 100%;
+  max-width: 1168px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-block: 1px solid var(--hp-line);
+}
+.hp-why-cell {
+  padding: 44px 32px 48px;
+}
+.hp-why-cell + .hp-why-cell {
+  border-left: 1px solid var(--hp-line);
+}
+.hp-badge {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 40px;
+  border-radius: 50%;
+  background: var(--hp-ink);
+  color: #fff;
+  box-shadow:
+    0 0 0 4px var(--hp-bg),
+    0 0 0 5px var(--hp-line);
+}
+.hp-why-cell h3 {
+  margin: 0;
+}
+.hp-why-cell p {
+  margin: 4px 0 0;
+  color: var(--hp-muted);
+}
+/* FAQ */
+.hp-faq {
+  width: 100%;
+  max-width: 768px;
+}
+.hp-faq details:not(:last-child) {
+  border-bottom: 1px solid var(--hp-line);
+}
+.hp-faq summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 21px 0;
+  cursor: pointer;
+  list-style: none;
+}
+.hp-faq summary::-webkit-details-marker {
+  display: none;
+}
+.hp-plus {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--hp-muted);
+  transition: transform 200ms;
+}
+.hp-faq details[open] .hp-plus {
+  transform: rotate(45deg);
+}
+.hp-faq details p {
+  margin: -8px 0 0;
+  padding-bottom: 22px;
+  max-width: 640px;
+  color: var(--hp-muted);
+}
+
+/* Footer */
+.hp-foot {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: #0a0a0a;
+  color: #fafafa;
+}
+.hp-foot-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  padding: 96px 152px;
+}
+.hp-foot-cta h2 {
+  margin: 0;
+}
+.hp-foot-cta p {
+  margin: 12px 0 0;
+  color: var(--hp-on-ink-muted);
+}
+.hp-foot-btns {
+  display: flex;
+  gap: 10px;
+}
+.hp-foot-grid {
+  display: grid;
+  grid-template-columns: 5fr 2fr 2fr 3fr;
+  border-block: 1px solid rgba(255, 255, 255, 0.1);
+}
+.hp-foot-grid > * {
+  padding: 48px 32px 64px;
+}
+.hp-foot-grid > * + * {
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+.hp-foot-brand {
+  padding-left: 152px !important;
+}
+.hp-foot-brand p {
+  margin: 24px 0 0;
+  max-width: 340px;
+  color: var(--hp-on-ink-muted);
+}
+.hp-foot-col {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+.hp-foot-col h4 {
+  margin: 0 0 8px;
+}
+.hp-foot-col a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(250, 250, 250, 0.8);
+}
+.hp-foot-col a:hover {
+  color: #fff;
+}
+.hp-foot-copy {
+  color: var(--hp-on-ink-muted);
+}
+.hp-foot-media {
+  position: relative;
+  height: 440px;
+  overflow: hidden;
+}
+.hp-foot-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: bottom;
+  filter: brightness(0.5) saturate(0.85) blur(1px);
+  mask-image: linear-gradient(to bottom, transparent, #000 40%);
+}
+.hp-foot-lines {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 5fr 2fr 2fr 3fr;
+  pointer-events: none;
+}
+.hp-foot-lines span {
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Entrance: a short staggered rise. In the hero the nav fades in, the
+   headline rises line by line, then the subtitle and the button. Every
+   .rise holds its first frame (invisible) until the fonts have loaded
+   (src/home/fontGate.ts), so nothing paints in a fallback face. */
+.rise {
+  animation: hp-rise 700ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.rise-fade {
+  animation-name: hp-fade;
+}
+.rise-2 {
+  animation-delay: 90ms;
+}
+.rise-3 {
+  animation-delay: 180ms;
+}
+.rise-4 {
+  animation-delay: 300ms;
+}
+.rise-5 {
+  animation-delay: 420ms;
+}
+@keyframes hp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes hp-fade {
+  from {
+    opacity: 0;
+  }
+}
+/* Reduced motion keeps the fade, which still covers the font load. */
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation-name: hp-fade;
+  }
+}
+
+@media (max-width: 1100px) {
+  .hp-foot-cta {
+    padding-inline: 48px;
+  }
+  .hp-foot-brand {
+    padding-left: 48px !important;
+  }
+  .hp-why {
+    grid-template-columns: 1fr 1fr;
+  }
+  .hp-why-cell:nth-child(3) {
+    border-left: 0;
+  }
+  .hp-why-cell:nth-child(n + 3) {
+    border-top: 1px solid var(--hp-line);
+  }
+}
+
+/* Phones and small tablets (type-scale.json's phone breakpoint), after
+   hud.ai at 390: 24px gutters. */
+@media (max-width: 860px) {
+  .hp {
+    --hp-gutter: 24px;
+    --hp-nav-h: 64px;
+  }
+  .hp-hero {
+    height: 100svh;
+    min-height: 640px;
+    padding-top: 88px;
+  }
+  .hp-nav-inner {
+    grid-template-columns: 1fr auto;
+    padding: 0 var(--hp-gutter);
+  }
+  .hp-nav-links,
+  .hp-nav-link,
+  .hp-guides {
+    display: none;
+  }
+  .hp-hero-copy {
+    padding-top: 30px;
+  }
+  .hp-sub {
+    margin-top: 16px;
+  }
+  .hp-ctas {
+    margin-top: 32px;
+  }
+  /* A portrait screen would zoom the 16:9 creative to its height and crop
+     the island; show it at 2.5 times the screen's width, anchored to the
+     bottom, with the sky above continued in the creative's own top colour. */
+  .hp-hero-media {
+    background: #88a2af;
+  }
+  .hp-hero-video {
+    inset: auto auto 0 50%;
+    width: 250%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    transform: translateX(-50%);
+    mask-image: linear-gradient(to bottom, transparent, #000 12%);
+  }
+  .hp-infra {
+    padding-top: 80px;
+  }
+  .hp-bento {
+    margin-top: 80px;
+  }
+  .hp-bento-grid {
+    grid-template-columns: 1fr;
+  }
+  .hp-cell,
+  .hp-cell-drone {
+    flex-direction: column;
+    gap: 0;
+    min-height: 0;
+    padding: 28px 24px 0;
+    border-right: 0;
+  }
+  .hp-cell-drone .hp-cell-text {
+    flex: none;
+  }
+  .hp-cell-media,
+  .hp-cell-drone .hp-cell-media {
+    margin-top: 24px;
+    padding: 10px 10px 16px;
+    gap: 8px;
+  }
+  .hp-bento .hp-cross {
+    display: none;
+  }
+  .hp-section {
+    padding-block: 64px;
+    gap: 40px;
+  }
+  .hp-faq-section {
+    padding-bottom: 120px;
+  }
+  .hp-why-cell {
+    padding: 28px 20px 32px;
+  }
+  .hp-badge {
+    margin-bottom: 24px;
+  }
+  .hp-foot-cta {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 64px var(--hp-gutter);
+  }
+  .hp-foot-btns {
+    flex-wrap: wrap;
+  }
+  .hp-foot-grid,
+  .hp-foot-lines {
+    grid-template-columns: 1fr 1fr;
+  }
+  .hp-foot-brand {
+    grid-column: 1 / -1;
+    padding-left: var(--hp-gutter) !important;
+  }
+  .hp-foot-grid > * {
+    padding: 32px var(--hp-gutter) 40px;
+  }
+  .hp-foot-grid > :nth-child(2) {
+    border-left: 0;
+  }
+  .hp-foot-grid > :nth-child(n + 2) {
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .hp-foot-col:last-child {
+    grid-column: 1 / -1;
+    border-left: 0;
+  }
+  .hp-foot-media {
+    height: 260px;
+  }
+}
+
+/* Narrow phones (SE, mini): the why grid goes to one column. */
+@media (max-width: 480px) {
+  .hp-why {
+    grid-template-columns: 1fr;
+  }
+  .hp-why-cell + .hp-why-cell {
+    border-left: 0;
+    border-top: 1px solid var(--hp-line);
+  }
+}

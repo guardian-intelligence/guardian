@@ -15,11 +15,11 @@ synthetic-only qualification cluster.
 
 The cluster contract is:
 
-| Replica | Node | Private address | Data class |
-| ---: | --- | --- | --- |
-| 0 | `ash-earth` | `10.8.0.11:3000` | `local-encrypted-retain` |
-| 1 | `ash-wind` | `10.8.0.12:3000` | `local-encrypted-retain` |
-| 2 | `ash-water` | `10.8.0.13:3000` | `local-encrypted-retain` |
+| Replica | Node        | Private address  | Data class               |
+| ------: | ----------- | ---------------- | ------------------------ |
+|       0 | `ash-earth` | `10.8.0.11:3000` | `local-encrypted-retain` |
+|       1 | `ash-wind`  | `10.8.0.12:3000` | `local-encrypted-retain` |
+|       2 | `ash-water` | `10.8.0.13:3000` | `local-encrypted-retain` |
 
 The data files use cluster ID
 `49532141921164377784457307205600684260`, replica count `3`, and replica
@@ -197,16 +197,16 @@ order:
    it, and verify zero loss of acknowledged transactions before proceeding to
    the next node.
 6. **Disk-loss proof:** destroy one non-primary test data file, recover it
-    with `tigerbeetle recover`, complete state sync, and reconcile every
-    balance.
+   with `tigerbeetle recover`, complete state sync, and reconcile every
+   balance.
 7. **Full-DR proof:** rebuild all three replicas in isolation from off-site
-    evidence and meet the declared RPO/RTO.
+   evidence and meet the declared RPO/RTO.
 8. **Performance proof:** run expected load, burst load, one-replica-down
-    load, and a sustained soak without violating latency, capacity, or
-    reconciliation thresholds.
+   load, and a sustained soak without violating latency, capacity, or
+   reconciliation thresholds.
 9. **Release:** enable customer writes behind the fail-closed feature flag,
-    watch canary and reconciliation signals, and retain an immediate ability
-    to stop new writes without modifying historical transactions.
+   watch canary and reconciliation signals, and retain an immediate ability
+   to stop new writes without modifying historical transactions.
 
 References:
 

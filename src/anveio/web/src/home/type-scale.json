@@ -1,0 +1,304 @@
+{
+  "styles": {
+    "lockup": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 500,
+        "italic": false,
+        "size": 21,
+        "lineHeight": 21,
+        "tracking": 0.03,
+        "case": "uppercase",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "navLink": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 500,
+        "italic": false,
+        "size": 15,
+        "lineHeight": 22.5,
+        "tracking": -0.01,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "button": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 500,
+        "italic": false,
+        "size": 14,
+        "lineHeight": 20,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "soon": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 500,
+        "italic": false,
+        "size": 11,
+        "lineHeight": 16,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "title": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 700,
+        "italic": false,
+        "size": 68,
+        "lineHeight": 68,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": { "size": 34, "lineHeight": 40 }
+    },
+    "sub": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 400,
+        "italic": false,
+        "size": 16,
+        "lineHeight": 24,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": { "size": 14, "lineHeight": 20 }
+    },
+    "bandTitle": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 500,
+        "italic": false,
+        "size": 56,
+        "lineHeight": 62.72,
+        "tracking": -0.04,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": { "size": 32, "lineHeight": 35.84 }
+    },
+    "bandBody": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 400,
+        "italic": false,
+        "size": 16,
+        "lineHeight": 28,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "cellTitle": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 500,
+        "italic": false,
+        "size": 22,
+        "lineHeight": 28,
+        "tracking": -0.02,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "cellBody": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 400,
+        "italic": false,
+        "size": 14,
+        "lineHeight": 20,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "sectionTitle": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 600,
+        "italic": false,
+        "size": 38,
+        "lineHeight": 38,
+        "tracking": -0.01,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "sectionLede": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 400,
+        "italic": false,
+        "size": 16,
+        "lineHeight": 24,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "badge": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 600,
+        "italic": false,
+        "size": 13,
+        "lineHeight": 13,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "whyTitle": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 500,
+        "italic": false,
+        "size": 14,
+        "lineHeight": 20,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "whyBody": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 400,
+        "italic": false,
+        "size": 14,
+        "lineHeight": 20,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "faqQ": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 500,
+        "italic": false,
+        "size": 16,
+        "lineHeight": 24,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "faqA": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 400,
+        "italic": false,
+        "size": 14,
+        "lineHeight": 20,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "footTitle": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 600,
+        "italic": false,
+        "size": 40,
+        "lineHeight": 42,
+        "tracking": -0.035,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": { "size": 30, "lineHeight": 31.5 }
+    },
+    "footLede": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 400,
+        "italic": false,
+        "size": 15,
+        "lineHeight": 22.5,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "footBrand": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 400,
+        "italic": false,
+        "size": 14,
+        "lineHeight": 22.75,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "footHead": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 500,
+        "italic": false,
+        "size": 13,
+        "lineHeight": 19.5,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "footLink": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 400,
+        "italic": false,
+        "size": 14,
+        "lineHeight": 20,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    },
+    "footSmall": {
+      "desktop": {
+        "family": "Roboto",
+        "weight": 400,
+        "italic": false,
+        "size": 13,
+        "lineHeight": 19.5,
+        "tracking": 0,
+        "case": "none",
+        "axes": {}
+      },
+      "phone": {}
+    }
+  },
+  "google": {}
+}

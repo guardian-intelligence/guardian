@@ -10,7 +10,7 @@ const page = await browser.newPage({
 });
 page.on("pageerror", (e) => console.log(`[pageerror] ${e.message}`));
 page.on("console", (m) => m.type() === "error" && console.log(`[error] ${m.text()}`));
-await page.goto("http://127.0.0.1:4255/", { waitUntil: "networkidle" });
+await page.goto("http://127.0.0.1:4255/agent/", { waitUntil: "networkidle" });
 await page.waitForTimeout(3000);
 const phone = page.locator(".phone");
 const box = await phone.boundingBox();

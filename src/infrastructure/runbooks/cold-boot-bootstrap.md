@@ -22,6 +22,7 @@ from-nothing bring-up may require.
    `src/infrastructure/deployments/guardian/system/openbao-helmrelease.yaml`
    (init-container key path + sha check, `current_key_id`, `current_key`).
    Never print or commit the key bytes.
+
 2. **`custody.env`** — the operator keys (Cloudflare tokens, R2 credentials,
    account id, the rest of the `openbao_secret_import` schema) plus
    `tofu_state_encryption_passphrase`, the OpenTofu state-encryption
@@ -29,7 +30,7 @@ from-nothing bring-up may require.
    roots needs it — see "OpenTofu state encryption" below). Store the
    passphrase in the operator vault first, then mirror it into the bundle
    with `aspect infra custody --action env-set
-   --env-key tofu_state_encryption_passphrase` (value on stdin). Keep
+--env-key tofu_state_encryption_passphrase` (value on stdin). Keep
    `custody.env` OUTSIDE the repo: `aspect infra validate` (run inside
    `bootstrap`) refuses an in-repo env file, and the importer deletes the
    file on success — keep a custody backup.
@@ -171,13 +172,14 @@ $TODO -- move image signing to a dual-signing model, move images-lock-sign.yaml 
    backend wipe. The generated OCIRepository is bound to the manifest digest
    returned by that push before any Kustomization can consume it; the mirror
    remains plain HTTP because the digest supplies content addressing.
+
 3. **Dark GitOps entrypoint**: `kubectl apply -k
-   src/infrastructure/bootstrap/sync-dark` — sync.yaml with every
+src/infrastructure/bootstrap/sync-dark` — sync.yaml with every
    Kustomization's source resolved to the digest-bound `guardian-oci`
    OCIRepository, plus
    the `guardian-source` ConfigMap that keeps Flux's own re-application of
    sync.yaml resolving the same way. `aspect infra converged
-   --expected-revision <sha>` gates as in steady state — pass the same git
+--expected-revision <sha>` gates as in steady state — pass the same git
    sha you gave `flux push artifact --revision`; the proof matches it against
    the Kustomization's origin revision (an OCIRepository's applied revision
    is `<tag>@<manifest-digest>`, which does not contain the git sha).
@@ -293,6 +295,7 @@ ash-water `206.223.228.87`, ash-worker0 `206.223.228.99`.
   The SSH session hangs when kexec fires — run under a timeout and verify with
   `talosctl get disks --insecure -n <ip> -e <ip>` instead. Boot mode writes
   nothing to disk; the node keeps its static public IP.
+
 - **Talos maintenance mode already** (`talosctl get disks --insecure`
   answers, port 22 closed): Latitude wiped the disks and left the node
   netbooted in a recent Talos. Verify `get discoveredvolumes` shows no
@@ -315,6 +318,7 @@ All from `src/infrastructure/talm/` with the pinned binaries.
    `talosconfig.encrypted` into `src/infrastructure/talm/` (all gitignored;
    the aspect tasks refuse to run without them). Point the client at the
    public IPs: `talosctl config endpoint <ip1> <ip2> <ip3>`.
+
 2. **Apply per node, overlay stacked, validation skipped** (pre-flight rejects
    the Layer2VIPConfig link `enp1s0f0.2140`, which only exists after this same
    apply's VLANConfig lands):
@@ -326,6 +330,7 @@ All from `src/infrastructure/talm/` with the pinned binaries.
    Maintenance apply reports "Applied configuration without a reboot" — the
    install+reboot follows automatically; wait for the authenticated API
    (`talm`/`talosctl version` with the talosconfig).
+
 3. **Bootstrap etcd exactly once, on whichever node is up first**:
    `talm bootstrap -f nodes/<node>.yaml`. The VIP activates on
    `enp1s0f0.2140`; peers join as learners and promote.
@@ -357,7 +362,7 @@ No repo tool exists; the working pattern is two-phase (a one-shot
 `kubectl debug node/… -i` dies at stdin EOF mid-script):
 
 1. `kubectl -n kube-system debug node/<node> --profile=sysadmin
-   --image=quay.io/openbao/openbao@sha256:436eaf…7c115 -- sleep 900`
+--image=quay.io/openbao/openbao@sha256:436eaf…7c115 -- sleep 900`
 2. Stream the key into a synchronous exec (key bytes travel only over the
    API-server exec channel; only the fingerprint is ever printed), then delete
    the pod:

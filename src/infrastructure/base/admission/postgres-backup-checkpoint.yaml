@@ -8,8 +8,12 @@
 #
 # The backupstrategy-controller's CNPG strategy template cannot express this
 # (its data schema carries only compression/encryption/jobs), so the default
-# is applied at admission on the driver's nightly barmanObjectStore apply.
-# A manifest that sets the field explicitly keeps its choice.
+# is applied at admission. Since the barman-cloud plugin migration the driver
+# no longer writes Cluster.spec.backup.barmanObjectStore: it projects the
+# object-store settings into a barmancloud.cnpg.io ObjectStore that the
+# Cluster references through the plugin, and server-side applies it with
+# every nightly backup, so the default lands on that object. An ObjectStore
+# that sets the field explicitly keeps its choice.
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingAdmissionPolicy
 metadata:
@@ -20,32 +24,28 @@ spec:
   matchConstraints:
     resourceRules:
       - apiGroups:
-          - postgresql.cnpg.io
+          - barmancloud.cnpg.io
         apiVersions:
           - v1
         operations:
           - CREATE
           - UPDATE
         resources:
-          - clusters
+          - objectstores
   matchConditions:
-    - name: barman-configured-without-explicit-choice
+    - name: no-explicit-checkpoint-choice
       expression: >-
-        has(object.spec.backup) &&
-        has(object.spec.backup.barmanObjectStore) &&
-        (!has(object.spec.backup.barmanObjectStore.data) ||
-        !has(object.spec.backup.barmanObjectStore.data.immediateCheckpoint))
+        !has(object.spec.configuration.data) ||
+        !has(object.spec.configuration.data.immediateCheckpoint)
   mutations:
     - patchType: ApplyConfiguration
       applyConfiguration:
         expression: >-
           Object{
             spec: Object.spec{
-              backup: Object.spec.backup{
-                barmanObjectStore: Object.spec.backup.barmanObjectStore{
-                  data: Object.spec.backup.barmanObjectStore.data{
-                    immediateCheckpoint: true
-                  }
+              configuration: Object.spec.configuration{
+                data: Object.spec.configuration.data{
+                  immediateCheckpoint: true
                 }
               }
             }

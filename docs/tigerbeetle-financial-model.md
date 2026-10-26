@@ -79,10 +79,10 @@ rounding residual.
 
 Ledger IDs are immutable after the first production account is created:
 
-| Ledger ID | Name | Asset | Scale | Use |
-| ---: | --- | --- | ---: | --- |
-| `1` | `guardian_usd_v1` | USD-denominated Guardian credit | `12` | Production customer and provider movements |
-| `2` | `guardian_usd_synthetic_v1` | Synthetic USD-denominated Guardian credit | `12` | Production canary and destructive lifecycle tests |
+| Ledger ID | Name                        | Asset                                     | Scale | Use                                               |
+| --------: | --------------------------- | ----------------------------------------- | ----: | ------------------------------------------------- |
+|       `1` | `guardian_usd_v1`           | USD-denominated Guardian credit           |  `12` | Production customer and provider movements        |
+|       `2` | `guardian_usd_synthetic_v1` | Synthetic USD-denominated Guardian credit |  `12` | Production canary and destructive lifecycle tests |
 
 The synthetic ledger uses the same account and transfer codes so it exercises
 the production model, but it never contains a live-mode provider object.
@@ -106,14 +106,14 @@ code, leg number, organization, or timestamp.
 
 No personal data enters TigerBeetle. The indexed fields have one convention:
 
-| Object | `user_data_128` | `user_data_64` | `user_data_32` |
-| --- | --- | --- | --- |
-| Customer account | Persisted correlation ID for its PostgreSQL grant or receivable | Organization ledger-party ID | Product registry ID, or `0` for account-wide |
-| Operator account | Persisted operator-account registry ID | Provider or campaign registry ID, when applicable | Product registry ID, or `0` |
-| Usage transfer | Billing-window correlation ID | Organization ledger-party ID | Metered SKU registry ID |
-| Grant transfer | Grant correlation ID | Organization ledger-party ID | Product registry ID, or `0` |
-| Provider transfer | Provider balance-transaction correlation ID | Provider merchant-account registry ID | Provider registry ID |
-| Document/correction transfer | Document or correction correlation ID | Organization ledger-party ID | Product registry ID, or `0` |
+| Object                       | `user_data_128`                                                 | `user_data_64`                                    | `user_data_32`                               |
+| ---------------------------- | --------------------------------------------------------------- | ------------------------------------------------- | -------------------------------------------- |
+| Customer account             | Persisted correlation ID for its PostgreSQL grant or receivable | Organization ledger-party ID                      | Product registry ID, or `0` for account-wide |
+| Operator account             | Persisted operator-account registry ID                          | Provider or campaign registry ID, when applicable | Product registry ID, or `0`                  |
+| Usage transfer               | Billing-window correlation ID                                   | Organization ledger-party ID                      | Metered SKU registry ID                      |
+| Grant transfer               | Grant correlation ID                                            | Organization ledger-party ID                      | Product registry ID, or `0`                  |
+| Provider transfer            | Provider balance-transaction correlation ID                     | Provider merchant-account registry ID             | Provider registry ID                         |
+| Document/correction transfer | Document or correction correlation ID                           | Organization ledger-party ID                      | Product registry ID, or `0`                  |
 
 PostgreSQL is the index from these numeric values to business objects and text
 identifiers.
@@ -125,25 +125,25 @@ also carry the listed balance constraint. `closed` is never set at account
 creation; lifecycle closure uses a reviewed closing transfer after all
 ordinary pending transfers have resolved.
 
-| Code | Name | Cardinality | Normal balance | Additional flags | Purpose |
-| ---: | --- | --- | --- | --- | --- |
-| `1001` | `external_bank` | Per bank destination and currency | Either | none | Counterparty for payouts and opening balances; not a bank-account subledger |
-| `1002` | `processor_settlement` | Per provider merchant account and currency | Either | none | Mirrors the signed Stripe/provider settlement balance, including negative balances |
-| `1003` | `processor_payment_clearing` | Per provider merchant account and currency | Credit | `debits_must_not_exceed_credits` | Gross customer cash received but not yet allocated to a grant or receivable |
-| `1004` | `processor_fee_expense` | Per provider and currency | Either | none | Provider fees and fee reversals |
-| `1005` | `processor_dispute_expense` | Per provider and currency | Either | none | Refund, dispute, and chargeback loss plus recoveries from unused customer credit |
-| `1101` | `free_allowance_source` | Per product | Debit | `credits_must_not_exceed_debits` | Funds free-tier grants |
-| `1102` | `contract_allowance_source` | Per product | Debit | `credits_must_not_exceed_debits` | Funds subscription and committed-contract grants |
-| `1103` | `promotion_source` | Per campaign or product | Debit | `credits_must_not_exceed_debits` | Funds promotional grants |
-| `1104` | `goodwill_source` | Per product | Debit | `credits_must_not_exceed_debits` | Funds support, refund-credit, and goodwill grants |
-| `1105` | `writeoff_source` | Per product | Debit | `credits_must_not_exceed_debits` | Funds service delivered without a collectible customer charge |
-| `1106` | `rounding_gain_loss` | Per currency | Either | none | Holds explicit document/provider rounding residuals |
-| `1201` | `usage_sink` | Per product | Credit | `debits_must_not_exceed_credits` | Receives pending and posted metered usage value |
-| `1202` | `expired_credit_sink` | Per product | Credit | `debits_must_not_exceed_credits` | Receives unused expired credit |
-| `1203` | `revoked_credit_sink` | Per product | Credit | `debits_must_not_exceed_credits` | Receives unused credit revoked by contract or fraud policy |
-| `1204` | `receivable_control` | Per product | Credit | `debits_must_not_exceed_credits` | Counterparty for customer receivable accrual and writeoff |
-| `2001` | `customer_credit` | One per grant | Credit | `debits_must_not_exceed_credits` | Spendable free, contract, promotional, goodwill, or purchased credit |
-| `2002` | `customer_receivable` | Per document or contract cycle | Debit | `credits_must_not_exceed_debits` | Explicitly consented amount billed but not yet cleared |
+|   Code | Name                         | Cardinality                                | Normal balance | Additional flags                 | Purpose                                                                            |
+| -----: | ---------------------------- | ------------------------------------------ | -------------- | -------------------------------- | ---------------------------------------------------------------------------------- |
+| `1001` | `external_bank`              | Per bank destination and currency          | Either         | none                             | Counterparty for payouts and opening balances; not a bank-account subledger        |
+| `1002` | `processor_settlement`       | Per provider merchant account and currency | Either         | none                             | Mirrors the signed Stripe/provider settlement balance, including negative balances |
+| `1003` | `processor_payment_clearing` | Per provider merchant account and currency | Credit         | `debits_must_not_exceed_credits` | Gross customer cash received but not yet allocated to a grant or receivable        |
+| `1004` | `processor_fee_expense`      | Per provider and currency                  | Either         | none                             | Provider fees and fee reversals                                                    |
+| `1005` | `processor_dispute_expense`  | Per provider and currency                  | Either         | none                             | Refund, dispute, and chargeback loss plus recoveries from unused customer credit   |
+| `1101` | `free_allowance_source`      | Per product                                | Debit          | `credits_must_not_exceed_debits` | Funds free-tier grants                                                             |
+| `1102` | `contract_allowance_source`  | Per product                                | Debit          | `credits_must_not_exceed_debits` | Funds subscription and committed-contract grants                                   |
+| `1103` | `promotion_source`           | Per campaign or product                    | Debit          | `credits_must_not_exceed_debits` | Funds promotional grants                                                           |
+| `1104` | `goodwill_source`            | Per product                                | Debit          | `credits_must_not_exceed_debits` | Funds support, refund-credit, and goodwill grants                                  |
+| `1105` | `writeoff_source`            | Per product                                | Debit          | `credits_must_not_exceed_debits` | Funds service delivered without a collectible customer charge                      |
+| `1106` | `rounding_gain_loss`         | Per currency                               | Either         | none                             | Holds explicit document/provider rounding residuals                                |
+| `1201` | `usage_sink`                 | Per product                                | Credit         | `debits_must_not_exceed_credits` | Receives pending and posted metered usage value                                    |
+| `1202` | `expired_credit_sink`        | Per product                                | Credit         | `debits_must_not_exceed_credits` | Receives unused expired credit                                                     |
+| `1203` | `revoked_credit_sink`        | Per product                                | Credit         | `debits_must_not_exceed_credits` | Receives unused credit revoked by contract or fraud policy                         |
+| `1204` | `receivable_control`         | Per product                                | Credit         | `debits_must_not_exceed_credits` | Counterparty for customer receivable accrual and writeoff                          |
+| `2001` | `customer_credit`            | One per grant                              | Credit         | `debits_must_not_exceed_credits` | Spendable free, contract, promotional, goodwill, or purchased credit               |
+| `2002` | `customer_receivable`        | Per document or contract cycle             | Debit          | `credits_must_not_exceed_debits` | Explicitly consented amount billed but not yet cleared                             |
 
 The absence of constraints on `processor_settlement`,
 `processor_fee_expense`, and `processor_dispute_expense` is intentional.
@@ -158,36 +158,36 @@ pending transfer and its resolution both use the same code, as TigerBeetle
 requires. Every resolution sends the expected code explicitly rather than
 relying on zero-field inheritance.
 
-| Code | Name | Usual debit → credit | May be pending? |
-| ---: | --- | --- | ---: |
-| `1001` | `provider_opening_balance` | `processor_settlement` → `external_bank` (positive opening balance; reverse for negative) | no |
-| `1002` | `provider_payment_capture` | `processor_settlement` → `processor_payment_clearing` | no |
-| `1003` | `provider_fee_assess` | `processor_fee_expense` → `processor_settlement` | no |
-| `1004` | `provider_fee_refund` | `processor_settlement` → `processor_fee_expense` | no |
-| `1005` | `provider_payout` | `external_bank` → `processor_settlement` | no |
-| `1006` | `provider_refund` | `processor_payment_clearing` → `processor_settlement` | no |
-| `1007` | `provider_dispute_debit` | `processor_dispute_expense` → `processor_settlement` | no |
-| `1008` | `provider_dispute_reversal` | `processor_settlement` → `processor_dispute_expense` | no |
-| `1009` | `provider_adjustment` | Direction follows the signed provider balance transaction | no |
-| `1010` | `provider_payout_reversal` | `processor_settlement` → `external_bank` | no |
-| `2001` | `grant_issue_free` | `free_allowance_source` → `customer_credit` | no |
-| `2002` | `grant_issue_contract` | `contract_allowance_source` → `customer_credit` | no |
-| `2003` | `grant_issue_purchase` | `processor_payment_clearing` → `customer_credit` | no |
-| `2004` | `grant_issue_promotion` | `promotion_source` → `customer_credit` | no |
-| `2005` | `grant_issue_goodwill` | `goodwill_source` → `customer_credit` | no |
-| `3001` | `usage_charge` | `customer_credit` → `usage_sink` | yes |
-| `3002` | `usage_writeoff` | `writeoff_source` → `usage_sink` | no |
-| `4001` | `grant_expire` | `customer_credit` → `expired_credit_sink` | no |
-| `4002` | `grant_revoke` | `customer_credit` → `revoked_credit_sink` | no |
-| `4003` | `grant_refund_remove` | `customer_credit` → `processor_payment_clearing` | yes |
-| `4004` | `grant_close` | `customer_credit` → lifecycle sink | yes |
-| `4005` | `grant_dispute_recovery` | `customer_credit` → `processor_dispute_expense` | no |
-| `5001` | `receivable_accrue` | `customer_receivable` → `receivable_control` | yes |
-| `5002` | `receivable_clear` | `processor_payment_clearing` → `customer_receivable` | no |
-| `5003` | `receivable_writeoff` | `receivable_control` → `customer_receivable` | no |
-| `5004` | `receivable_rounding` | Direction follows the signed rounding residual | no |
-| `9001` | `correction_reverse` | Reverse of the erroneous posted movement | no |
-| `9002` | `correction_apply` | Correct account pair and amount | no |
+|   Code | Name                        | Usual debit → credit                                                                      | May be pending? |
+| -----: | --------------------------- | ----------------------------------------------------------------------------------------- | --------------: |
+| `1001` | `provider_opening_balance`  | `processor_settlement` → `external_bank` (positive opening balance; reverse for negative) |              no |
+| `1002` | `provider_payment_capture`  | `processor_settlement` → `processor_payment_clearing`                                     |              no |
+| `1003` | `provider_fee_assess`       | `processor_fee_expense` → `processor_settlement`                                          |              no |
+| `1004` | `provider_fee_refund`       | `processor_settlement` → `processor_fee_expense`                                          |              no |
+| `1005` | `provider_payout`           | `external_bank` → `processor_settlement`                                                  |              no |
+| `1006` | `provider_refund`           | `processor_payment_clearing` → `processor_settlement`                                     |              no |
+| `1007` | `provider_dispute_debit`    | `processor_dispute_expense` → `processor_settlement`                                      |              no |
+| `1008` | `provider_dispute_reversal` | `processor_settlement` → `processor_dispute_expense`                                      |              no |
+| `1009` | `provider_adjustment`       | Direction follows the signed provider balance transaction                                 |              no |
+| `1010` | `provider_payout_reversal`  | `processor_settlement` → `external_bank`                                                  |              no |
+| `2001` | `grant_issue_free`          | `free_allowance_source` → `customer_credit`                                               |              no |
+| `2002` | `grant_issue_contract`      | `contract_allowance_source` → `customer_credit`                                           |              no |
+| `2003` | `grant_issue_purchase`      | `processor_payment_clearing` → `customer_credit`                                          |              no |
+| `2004` | `grant_issue_promotion`     | `promotion_source` → `customer_credit`                                                    |              no |
+| `2005` | `grant_issue_goodwill`      | `goodwill_source` → `customer_credit`                                                     |              no |
+| `3001` | `usage_charge`              | `customer_credit` → `usage_sink`                                                          |             yes |
+| `3002` | `usage_writeoff`            | `writeoff_source` → `usage_sink`                                                          |              no |
+| `4001` | `grant_expire`              | `customer_credit` → `expired_credit_sink`                                                 |              no |
+| `4002` | `grant_revoke`              | `customer_credit` → `revoked_credit_sink`                                                 |              no |
+| `4003` | `grant_refund_remove`       | `customer_credit` → `processor_payment_clearing`                                          |             yes |
+| `4004` | `grant_close`               | `customer_credit` → lifecycle sink                                                        |             yes |
+| `4005` | `grant_dispute_recovery`    | `customer_credit` → `processor_dispute_expense`                                           |              no |
+| `5001` | `receivable_accrue`         | `customer_receivable` → `receivable_control`                                              |             yes |
+| `5002` | `receivable_clear`          | `processor_payment_clearing` → `customer_receivable`                                      |              no |
+| `5003` | `receivable_writeoff`       | `receivable_control` → `customer_receivable`                                              |              no |
+| `5004` | `receivable_rounding`       | Direction follows the signed rounding residual                                            |              no |
+| `9001` | `correction_reverse`        | Reverse of the erroneous posted movement                                                  |              no |
+| `9002` | `correction_apply`          | Correct account pair and amount                                                           |              no |
 
 Codes and meanings are append-only. A new business meaning gets a new code.
 Renaming a code in source must not change its meaning, and a retired code is

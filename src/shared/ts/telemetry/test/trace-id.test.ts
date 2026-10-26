@@ -15,7 +15,9 @@ describe("traceIdToBase64", () => {
   it("round-trips a realistic id", () => {
     const hex = "4bf92f3577b34da6a3ce929d0e0e4736";
     const decoded = atob(traceIdToBase64(hex));
-    const back = [...decoded].map((c) => c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+    const back = Array.from({ length: decoded.length }, (_, i) =>
+      decoded.charCodeAt(i).toString(16).padStart(2, "0"),
+    ).join("");
     expect(back).toBe(hex);
   });
 

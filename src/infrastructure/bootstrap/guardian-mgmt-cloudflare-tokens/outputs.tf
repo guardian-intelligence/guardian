@@ -57,6 +57,17 @@ output "payments_journal_isolated_secret_access_key" {
   sensitive   = true
 }
 
+output "anveio_footage_access_key_id" {
+  description = "S3 access key id for the anveio-footage bucket."
+  value       = cloudflare_account_token.anveio_footage.id
+}
+
+output "anveio_footage_secret_access_key" {
+  description = "S3 secret access key for the anveio-footage bucket."
+  value       = sha256(cloudflare_account_token.anveio_footage.value)
+  sensitive   = true
+}
+
 output "r2_state_access_key_id" {
   description = "S3 access key id for the guardian-vault state bucket (custody-mirrored: cloudflare_r2_access_key_id)."
   value       = cloudflare_account_token.r2_state.id

@@ -1,21 +1,21 @@
-# One-time, Flux-managed apply of guardian-mgmt-dns's operator route: the
-# Tunnel's Kubernetes and Talos operator ingress rules, their proxied DNS
-# records, and the founder-only Access policy and applications. It replaces
-# the sunset operations VPS as the workstation path to the cluster APIs
-# (tools/ops/mgmt-tunnel). The root stays plan-only; the runner applies only
-# its saved plan, targeted at those resources. The DNS lane token already
-# holds Tunnel Write and Access Apps and Policies Write.
-# No TTL: remove this completed Job through Git after the root's scheduled
-# plan reads back clean.
+# One-time, Flux-managed apply of anveio.com/upload's storage: the
+# anveio-footage R2 bucket, its CORS and lifecycle rules, and the
+# bucket-scoped token anveio-web signs with. The token is new, so its S3 pair must be relayed
+# to OpenBao (kv/guardian/guardian-mgmt/tenant-guardian-prod/anveio/footage-r2)
+# before anything consumes it. The scheduled root stays plan-only and is
+# suspended while this runs, so its PAGE_ON_DRIFT plan cannot page on the
+# change it is about to see. The runner applies only its saved plan, targeted
+# at those four resources. No TTL: remove this completed Job and resume the
+# CronJob through Git after the resumed plan reads back clean.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: tofu-guardian-mgmt-dns-operator-access
+  name: tofu-guardian-mgmt-cloudflare-tokens-anveio-footage
   namespace: tofu-system
   labels:
     app.kubernetes.io/name: tofu-runner
     app.kubernetes.io/part-of: guardian
-    guardian.dev/tofu-root: guardian-mgmt-dns
+    guardian.dev/tofu-root: guardian-mgmt-cloudflare-tokens
 spec:
   backoffLimit: 1
   activeDeadlineSeconds: 3000
@@ -23,7 +23,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: tofu-runner
-        guardian.dev/tofu-root: guardian-mgmt-dns
+        guardian.dev/tofu-root: guardian-mgmt-cloudflare-tokens
     spec:
       serviceAccountName: tofu-runner
       restartPolicy: Never
@@ -47,11 +47,11 @@ spec:
             - name: MODE
               value: apply
             - name: TF_CLI_ARGS_plan
-              value: -target=cloudflare_zero_trust_tunnel_cloudflared_config.guardian_codex_cloud -target=cloudflare_dns_record.guardian_operator_tunnel -target=cloudflare_zero_trust_access_policy.guardian_operator -target=cloudflare_zero_trust_access_application.guardian_operator
+              value: -target=cloudflare_r2_bucket.anveio_footage -target=cloudflare_r2_bucket_cors.anveio_footage -target=cloudflare_r2_bucket_lifecycle.anveio_footage -target=cloudflare_account_token.anveio_footage
             - name: ROOT_NAME
-              value: guardian-mgmt-dns
+              value: guardian-mgmt-cloudflare-tokens
             - name: ROOT_PATH
-              value: ./src/infrastructure/bootstrap/guardian-mgmt-dns
+              value: ./src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens
             - name: SOURCE_KIND
               value: ${GUARDIAN_SOURCE_KIND:=GitRepository}
             - name: SOURCE_NAME
@@ -67,7 +67,7 @@ spec:
             - secretRef:
                 name: tofu-state-encryption
             - secretRef:
-                name: tofu-cloudflare-dns
+                name: tofu-cloudflare-minter
           volumeMounts:
             - name: workspace
               mountPath: /workspace

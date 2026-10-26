@@ -9,12 +9,21 @@ resources:
   - behavior-configmap.yaml
   - certificate.yaml
   - chunkies-wal-pvc.yaml
-  - ingress.yaml
+  # Temporarily paused for the three-node Guardian consolidation. Keep the
+  # manifests and durability claims so restarting the product is deliberate.
   - internal-keys.yaml
   - networkpolicy.yaml
-  - observability.yaml
   - services.yaml
   - web.yaml
+replicas:
+  - name: chunkies-gateway
+    count: 0
+  - name: chunkies-chunkie
+    count: 0
+  - name: wake-up-mythra-web
+    count: 0
+  - name: mythra-journal-console
+    count: 0
 patches:
   - path: gateway-wum.patch.yaml
     target:

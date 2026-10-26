@@ -10,13 +10,7 @@ homepage = "https://guardianintelligence.org/postflight"
 readme = "README.md"
 keywords = ["ci", "github", "postflight", "devops", "cli"]
 categories = ["command-line-utilities", "development-tools::build-utils"]
-include = [
-    "src/**",
-    "Cargo.toml",
-    "README.md",
-    "Makefile",
-    "LICENSE",
-]
+include = ["src/**", "Cargo.toml", "README.md", "Makefile", "LICENSE"]
 
 [[bin]]
 name = "postflight"

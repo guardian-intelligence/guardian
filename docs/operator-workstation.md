@@ -2,9 +2,11 @@
 
 ## Talos access from the operator workstation
 
-- The live talosconfig is `src/infrastructure/talm/talosconfig` (gitignored;
-  its encrypted twin `talosconfig.encrypted` is committed — decryption is
-  covered by the cold-boot runbook). **Do not trust `~/.talos/config`**: it
+- Talos administrative credentials stay sealed between recovery ceremonies.
+  For an authorized node replacement, follow the
+  [encrypted node replacement runbook](../src/infrastructure/runbooks/wiped-node-drill.md).
+  Do not keep a plaintext administrative config in the checkout.
+  **Do not trust `~/.talos/config`**: it
   holds endpoints of a previous cluster generation and every one of them
   times out. If `talosctl` hangs on port 50000, you are almost certainly
   using the stale global config.
@@ -15,12 +17,25 @@
 - The workstation reaches both APIs through the in-cluster Cloudflare Tunnel,
   behind founder-only Cloudflare Access applications (`guardian-mgmt-dns`).
   Run `tools/ops/mgmt-tunnel install` once: launchd then keeps `cloudflared
-  access tcp` listeners on `127.0.0.1:16443` (Kubernetes) and
+access tcp` listeners on `127.0.0.1:16443` (Kubernetes) and
   `127.0.0.1:50000` (Talos). `aspect infra auth` and kubectl use the first
   automatically — guardian_auth probes the loopback port before the direct
   endpoint. Point talosctl/talm at the second with `-e 127.0.0.1 -n
-  <node VLAN IP>`. The first connection, and each one after the Access
-  session expires, opens a browser for Cloudflare's one-time PIN.
+<node VLAN IP>`. The first connection, and each one after the Access
+  session expires, opens a browser for Cloudflare's one-time PIN unless the
+  Mac transport credential has been installed. `guardian-mgmt-dns` declares
+  the dedicated `guardian-operator-shovon-mac-v1` service token and admits it
+  only to the two operator applications. Relay its sensitive
+  `operator_mac_access_credential` output directly through stdin into
+  `/usr/bin/python3 tools/ops/mgmt_tunnel_credential.py store`, then reinstall
+  the tunnel agents. The credential lives in login Keychain and reaches
+  `cloudflared` through process environment, never argv, the repo, or a plist.
+  It removes Access PIN prompts across networks; Kubernetes personas and
+  Talos mTLS remain required. It is valid for one year, with a blocking
+  plan failure 30 days before expiry; increment the declared
+  `guardian_operator_mac_rotation.input` revision and
+  re-seed Keychain to rotate it. `tools/ops/mgmt-tunnel status` checks the
+  listeners; the credential helper's `status` reports expiry without secrets.
 - The kube API is reachable via the default `~/.kube/config`, whose only
   standing identity is the `read` persona (the `platform-agent` OIDC context,
   set up with `aspect infra auth`): cluster-wide read plus port-forward, and the
@@ -36,7 +51,7 @@
   cert lifetime. The ladder lives in
   `src/infrastructure/base/cozystack-identities/platform-admins.yaml`.
 - Workstation hygiene is a launchd agent, not a habit: `tools/ops/workspace-watch
-  install` fast-forwards the primary checkout whenever that is a no-op for local
+install` fast-forwards the primary checkout whenever that is a no-op for local
   work, removes worktrees whose branch is already in `origin/main`, and keeps the
   `read` persona's offline token from idling out of its 30-day window. Locked,
   dirty, in-use, and recently touched worktrees are never removed —
@@ -71,4 +86,4 @@ Every node arms its AMD SP5100 TCO chipset watchdog (`/dev/watchdog0`, 1m timeou
 
 ## Drills
 
-* Drills are not part of normal development — run them when asked on one node at a time by explicit node IP, wait for the node and public edge to recover, document that node's outage window, then move to the next. A node whose loss breaches 60 seconds of public-edge disruption is load-bearing and must be fixed before continuing.
+- Drills are not part of normal development — run them when asked on one node at a time by explicit node IP, wait for the node and public edge to recover, document that node's outage window, then move to the next. A node whose loss breaches 60 seconds of public-edge disruption is load-bearing and must be fixed before continuing.

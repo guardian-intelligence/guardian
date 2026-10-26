@@ -25,4 +25,4 @@ export const DEFAULT_SAFETY_MARGIN = 0.93;
 // we owe the user quality we withheld; another pass converts the headroom.
 export const MIN_UTILIZATION = 0.88;
 
-export const MAX_PASSES = 4;
+export const MAX_PASSES = 5;

@@ -8,196 +8,211 @@ policy: guardian-persona-read
 cases:
   - name: pod port-forward
     operation: CONNECT
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     subResource: portforward
     objectName: some-pod
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: allow
   - name: read persona matched by group not username
     operation: CONNECT
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     subResource: portforward
     objectName: some-pod
-    user: {username: "keycloak:cozy#other", groups: ["guardian-persona-read", "system:authenticated"]}
+    user:
+      { username: "keycloak:cozy#other", groups: ["guardian-persona-read", "system:authenticated"] }
     expect: allow
   - name: mint one-hour Devin delivery-read token
     operation: CREATE
-    resource: {group: "", version: v1, resource: serviceaccounts}
+    resource: { group: "", version: v1, resource: serviceaccounts }
     subResource: token
     objectName: guardian-cloud-agent-devin
     object:
       apiVersion: authentication.k8s.io/v1
       kind: TokenRequest
-      metadata: {name: guardian-cloud-agent-devin, namespace: tenant-root}
+      metadata: { name: guardian-cloud-agent-devin, namespace: tenant-root }
       spec:
         audiences: [https://10.8.0.250:6443]
         expirationSeconds: 3600
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: allow
   - name: mint Cursor delivery-read token matched by group
     operation: CREATE
-    resource: {group: "", version: v1, resource: serviceaccounts}
+    resource: { group: "", version: v1, resource: serviceaccounts }
     subResource: token
     objectName: guardian-cloud-agent-cursor
     object:
       apiVersion: authentication.k8s.io/v1
       kind: TokenRequest
-      metadata: {name: guardian-cloud-agent-cursor, namespace: tenant-root}
+      metadata: { name: guardian-cloud-agent-cursor, namespace: tenant-root }
       spec:
         audiences: [https://10.8.0.250:6443]
         expirationSeconds: 1800
-    user: {username: "keycloak:cozy#other", groups: ["guardian-persona-read", "system:authenticated"]}
+    user:
+      { username: "keycloak:cozy#other", groups: ["guardian-persona-read", "system:authenticated"] }
     expect: allow
   - name: mint fifteen-minute Mythra operator token
     operation: CREATE
-    resource: {group: "", version: v1, resource: serviceaccounts}
+    resource: { group: "", version: v1, resource: serviceaccounts }
     subResource: token
     objectName: guardian-mythra-operator
     object:
       apiVersion: authentication.k8s.io/v1
       kind: TokenRequest
-      metadata: {name: guardian-mythra-operator, namespace: tenant-guardian-prod}
+      metadata: { name: guardian-mythra-operator, namespace: tenant-guardian-prod }
       spec:
         audiences: [https://10.8.0.250:6443]
         expirationSeconds: 900
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: allow
   - name: mint fifteen-minute Mythra observer token matched by group
     operation: CREATE
-    resource: {group: "", version: v1, resource: serviceaccounts}
+    resource: { group: "", version: v1, resource: serviceaccounts }
     subResource: token
     objectName: guardian-mythra-observer
     object:
       apiVersion: authentication.k8s.io/v1
       kind: TokenRequest
-      metadata: {name: guardian-mythra-observer, namespace: tenant-guardian-prod}
+      metadata: { name: guardian-mythra-observer, namespace: tenant-guardian-prod }
       spec:
         audiences: [https://10.8.0.250:6443]
         expirationSeconds: 900
-    user: {username: "keycloak:cozy#other", groups: ["guardian-persona-read", "system:authenticated"]}
+    user:
+      { username: "keycloak:cozy#other", groups: ["guardian-persona-read", "system:authenticated"] }
     expect: allow
   - name: mint Mythra operator token longer than fifteen minutes
     operation: CREATE
-    resource: {group: "", version: v1, resource: serviceaccounts}
+    resource: { group: "", version: v1, resource: serviceaccounts }
     subResource: token
     objectName: guardian-mythra-operator
     object:
       apiVersion: authentication.k8s.io/v1
       kind: TokenRequest
-      metadata: {name: guardian-mythra-operator, namespace: tenant-guardian-prod}
+      metadata: { name: guardian-mythra-operator, namespace: tenant-guardian-prod }
       spec:
         audiences: [https://10.8.0.250:6443]
         expirationSeconds: 901
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: deny
   - name: mint Mythra operator token outside prod
     operation: CREATE
-    resource: {group: "", version: v1, resource: serviceaccounts}
+    resource: { group: "", version: v1, resource: serviceaccounts }
     subResource: token
     objectName: guardian-mythra-operator
     object:
       apiVersion: authentication.k8s.io/v1
       kind: TokenRequest
-      metadata: {name: guardian-mythra-operator, namespace: tenant-root}
+      metadata: { name: guardian-mythra-operator, namespace: tenant-root }
       spec:
         audiences: [https://10.8.0.250:6443]
         expirationSeconds: 900
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: deny
   - name: mint cloud agent token longer than one hour
     operation: CREATE
-    resource: {group: "", version: v1, resource: serviceaccounts}
+    resource: { group: "", version: v1, resource: serviceaccounts }
     subResource: token
     objectName: guardian-cloud-agent-devin
     object:
       apiVersion: authentication.k8s.io/v1
       kind: TokenRequest
-      metadata: {name: guardian-cloud-agent-devin, namespace: tenant-root}
+      metadata: { name: guardian-cloud-agent-devin, namespace: tenant-root }
       spec:
         audiences: [https://10.8.0.250:6443]
         expirationSeconds: 3601
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: deny
   - name: mint cloud agent token for another audience
     operation: CREATE
-    resource: {group: "", version: v1, resource: serviceaccounts}
+    resource: { group: "", version: v1, resource: serviceaccounts }
     subResource: token
     objectName: guardian-cloud-agent-devin
     object:
       apiVersion: authentication.k8s.io/v1
       kind: TokenRequest
-      metadata: {name: guardian-cloud-agent-devin, namespace: tenant-root}
+      metadata: { name: guardian-cloud-agent-devin, namespace: tenant-root }
       spec:
         audiences: [https://example.invalid]
         expirationSeconds: 3600
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: deny
   - name: delete pod
     operation: DELETE
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     objectName: some-pod
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: deny
   - name: delete job
     operation: DELETE
-    resource: {group: batch, version: v1, resource: jobs}
+    resource: { group: batch, version: v1, resource: jobs }
     objectName: some-job
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: deny
   - name: scale deployment
     operation: UPDATE
-    resource: {group: apps, version: v1, resource: deployments}
+    resource: { group: apps, version: v1, resource: deployments }
     subResource: scale
     objectName: some-deployment
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: deny
   - name: mint secrets-writer token
     operation: CREATE
-    resource: {group: "", version: v1, resource: serviceaccounts}
+    resource: { group: "", version: v1, resource: serviceaccounts }
     subResource: token
     objectName: secrets-writer
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: deny
   - name: create secret
     operation: CREATE
-    resource: {group: "", version: v1, resource: secrets}
+    resource: { group: "", version: v1, resource: secrets }
     objectName: stolen
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: deny
   - name: pod exec
     operation: CONNECT
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     subResource: exec
     objectName: some-pod
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: deny
   - name: update pod
     operation: UPDATE
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     objectName: some-pod
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: deny
   - name: delete deployment
     operation: DELETE
-    resource: {group: apps, version: v1, resource: deployments}
+    resource: { group: apps, version: v1, resource: deployments }
     objectName: some-deployment
-    user: {username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"]}
+    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: deny
   - name: write-basic persona is not matched by the read policy
     operation: DELETE
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     objectName: some-pod
-    user: {username: "keycloak:cozy#platform-write-basic", groups: ["guardian-persona-write-basic", "system:authenticated"]}
+    user:
+      {
+        username: "keycloak:cozy#platform-write-basic",
+        groups: ["guardian-persona-write-basic", "system:authenticated"],
+      }
     expect: no-match
   - name: human admin is not matched
     operation: DELETE
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     objectName: some-pod
-    user: {username: "keycloak:cozy#platform-admin", groups: ["cozystack-cluster-admin", "system:authenticated"]}
+    user:
+      {
+        username: "keycloak:cozy#platform-admin",
+        groups: ["cozystack-cluster-admin", "system:authenticated"],
+      }
     expect: no-match
   - name: controller service account is not matched
     operation: DELETE
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     objectName: some-pod
-    user: {username: "system:serviceaccount:tenant-root:flux", groups: ["system:serviceaccounts", "system:authenticated"]}
+    user:
+      {
+        username: "system:serviceaccount:tenant-root:flux",
+        groups: ["system:serviceaccounts", "system:authenticated"],
+      }
     expect: no-match

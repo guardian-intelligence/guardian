@@ -1,0 +1,700 @@
+/* /design's chrome: dark panels around a dotted canvas, after Figma. */
+.dz {
+  --dz-ui: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --dz-bg: #1e1e1e;
+  --dz-panel: #2c2c2c;
+  --dz-line: #3d3d3d;
+  --dz-hover: #383838;
+  --dz-fg: #f0f0f0;
+  --dz-fg-2: #b3b3b3;
+  --dz-fg-3: #8a8a8a;
+  --dz-accent: #0d99ff;
+  --dz-accent-dim: rgba(13, 153, 255, 0.18);
+  --dz-bad: #f24822;
+  --dz-good: #14ae5c;
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template: 44px 1fr / 248px 1fr 288px;
+  background: var(--dz-bg);
+  color: var(--dz-fg);
+  font: 400 12px/16px var(--dz-ui);
+  font-feature-settings: normal;
+  color-scheme: dark;
+  user-select: none;
+}
+.dz button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.dz button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.dz code {
+  font:
+    11px/16px ui-monospace,
+    monospace;
+  color: var(--dz-fg-3);
+}
+.dz h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dz-fg);
+}
+
+/* Top bar */
+.dz-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 8px 0 16px;
+  background: var(--dz-panel);
+  border-bottom: 1px solid var(--dz-line);
+  min-width: 0;
+}
+.dz-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  color: var(--dz-fg-2);
+}
+.dz-title strong {
+  color: var(--dz-fg);
+  font-weight: 600;
+}
+.dz-dirty {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dz-accent);
+}
+.dz-frames {
+  display: flex;
+  gap: 2px;
+  margin: 0 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.dz-frames button,
+.dz-chips button {
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 5px;
+  color: var(--dz-fg-3);
+  white-space: nowrap;
+}
+.dz-frames button:hover,
+.dz-chips button:hover {
+  background: var(--dz-hover);
+  color: var(--dz-fg);
+}
+.dz-frames button[aria-pressed="true"],
+.dz-chips button[aria-pressed="true"] {
+  background: var(--dz-accent-dim);
+  color: var(--dz-fg);
+}
+.dz-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dz-orphan-total {
+  margin-right: 6px;
+  color: var(--dz-good);
+  white-space: nowrap;
+}
+.dz-orphan-total.bad,
+.dz-frame-orphans.bad {
+  color: var(--dz-bad);
+}
+.dz-zoom {
+  display: flex;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.dz-zoom button,
+.dz-icon {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 6px;
+  border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.dz-zoom button:hover,
+.dz-icon:hover:not(:disabled) {
+  background: var(--dz-hover);
+}
+.dz-icon {
+  display: grid;
+  place-items: center;
+}
+.dz .dz-btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 5px;
+  border: 1px solid var(--dz-line);
+  white-space: nowrap;
+}
+.dz .dz-btn:hover:not(:disabled) {
+  background: var(--dz-hover);
+}
+.dz .dz-primary {
+  border-color: transparent;
+  background: var(--dz-accent);
+  color: #fff;
+  font-weight: 500;
+}
+.dz .dz-primary:hover:not(:disabled) {
+  background: #0b8ae6;
+}
+.dz .dz-link {
+  color: var(--dz-accent);
+}
+.dz .dz-link:hover {
+  text-decoration: underline;
+}
+
+/* Layers */
+.dz-layers,
+.dz-inspector {
+  background: var(--dz-panel);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #555 transparent;
+}
+.dz-layers {
+  border-right: 1px solid var(--dz-line);
+  padding: 12px 8px 24px;
+}
+.dz-layers > h2 {
+  padding: 4px 8px 8px;
+}
+.dz-layers > h2:not(:first-child) {
+  margin-top: 16px;
+  border-top: 1px solid var(--dz-line);
+  padding-top: 16px;
+}
+.dz-layers h3 {
+  margin: 8px 8px 2px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dz-fg-3);
+}
+.dz-layer {
+  display: grid;
+  width: 100%;
+  gap: 1px;
+  padding: 5px 8px 6px;
+  border-radius: 5px;
+  text-align: left;
+}
+.dz-layer.hovered {
+  box-shadow: inset 0 0 0 1px var(--dz-accent);
+}
+.dz-layer.selected {
+  background: var(--dz-accent-dim);
+}
+.dz-layer-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dz-fg);
+}
+.dz-layer-name svg {
+  flex: none;
+  color: var(--dz-fg-3);
+}
+.dz-layer-meta {
+  padding-left: 18px;
+  color: var(--dz-fg-3);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dz-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dz-accent);
+}
+.dz-phone-mark {
+  margin-left: auto;
+  color: var(--dz-fg-3);
+}
+.dz-fonts {
+  display: grid;
+  gap: 2px;
+  padding: 0 8px;
+}
+.dz-font-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: 13px;
+}
+.dz-font-row .dz-layer-meta {
+  padding: 0;
+}
+.dz-font-row .dz-picker {
+  top: 100%;
+}
+
+/* Canvas */
+.dz-canvas {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle, #2e2e2e 1px, transparent 1px) 0 0 / 16px 16px,
+    var(--dz-bg);
+  cursor: default;
+  touch-action: none;
+}
+.dz-space .dz-canvas {
+  cursor: grab;
+}
+.dz-panning .dz-canvas {
+  cursor: grabbing;
+}
+.dz-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+.dz-frame {
+  position: absolute;
+  top: 0;
+}
+.dz-frame iframe {
+  display: block;
+  border: 0;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 8px 40px rgba(0, 0, 0, 0.45);
+}
+.dz-frame-label {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding-bottom: 6px;
+  transform-origin: 0 100%;
+}
+.dz-frame-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  color: var(--dz-fg-2);
+  text-align: left;
+}
+.dz-frame-name > span,
+.dz-frame-orphans {
+  white-space: nowrap;
+}
+.dz-frame-name span {
+  color: var(--dz-fg-3);
+}
+.dz-frame-name.on {
+  color: var(--dz-accent);
+}
+.dz-frame-name .dz-frame-bp {
+  opacity: 0.8;
+}
+.dz-frame-orphans {
+  color: var(--dz-good);
+}
+.dz-frame-orphans:disabled {
+  opacity: 1 !important;
+}
+.dz-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+}
+.dz-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 44px;
+  z-index: 10;
+  display: flex;
+  gap: 12px;
+  max-width: 560px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  background: #383838;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  transform: translateX(-50%);
+  user-select: text;
+}
+.dz-toast.bad {
+  background: #4a2219;
+}
+.dz-hints {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  text-align: center;
+  color: var(--dz-fg-3);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+/* Inspector */
+.dz-inspector {
+  border-left: 1px solid var(--dz-line);
+}
+.dz-inspector-empty {
+  padding: 16px;
+  color: var(--dz-fg-2);
+  line-height: 18px;
+}
+.dz-inspector-empty p {
+  margin: 12px 0 0;
+}
+.dz-warn {
+  color: var(--dz-bad);
+}
+.dz-ins-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 14px 16px 12px;
+}
+.dz-ins-head h2 {
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+.dz-count {
+  color: var(--dz-fg-3);
+  white-space: nowrap;
+}
+.dz-seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: #1f1f1f;
+}
+.dz-seg button {
+  flex: 1;
+  height: 24px;
+  border-radius: 4px;
+  color: var(--dz-fg-3);
+}
+.dz-seg button[aria-selected="true"],
+.dz-seg button[aria-pressed="true"] {
+  background: var(--dz-hover);
+  color: var(--dz-fg);
+}
+.dz-bp {
+  margin: 0 16px;
+}
+.dz-bp button {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+}
+.dz-bp small {
+  color: var(--dz-fg-3);
+  font-size: 10px;
+}
+.dz-pill {
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--dz-accent-dim);
+  color: var(--dz-accent);
+  font-size: 10px;
+  line-height: 15px;
+}
+.dz-note {
+  margin: 8px 16px 0;
+  color: var(--dz-fg-3);
+  font-size: 11px;
+}
+.dz-section {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px 16px;
+  border-bottom: 1px solid var(--dz-line);
+}
+.dz-section h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+.dz-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.dz-grow {
+  flex: 1;
+  min-width: 0;
+}
+.dz-field {
+  position: relative;
+  display: grid;
+  gap: 4px;
+}
+.dz-label {
+  color: var(--dz-fg-3);
+  font-size: 11px;
+}
+.dz-field.inherited :is(.dz-font-name, select, input, .dz-slider-value, .dz-case button) {
+  color: var(--dz-fg-3) !important;
+}
+.dz-family {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px !important;
+  border-radius: 5px !important;
+  background: #1f1f1f !important;
+  text-align: left;
+}
+.dz-family:hover {
+  box-shadow: inset 0 0 0 1px var(--dz-line);
+}
+.dz-font-name {
+  font-size: 15px;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dz-family-src {
+  color: var(--dz-fg-3);
+  font-size: 11px;
+}
+.dz select,
+.dz-num-box {
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: #1f1f1f;
+  color: var(--dz-fg);
+  font: inherit;
+}
+.dz select {
+  width: 100%;
+  padding: 0 6px;
+}
+.dz select:hover,
+.dz-num-box:hover {
+  border-color: var(--dz-line);
+}
+.dz-num {
+  flex: 1;
+  min-width: 0;
+}
+.dz-num-box {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+}
+.dz-num-box:focus-within {
+  border-color: var(--dz-accent);
+}
+.dz-num-box input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--dz-fg);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  user-select: text;
+}
+.dz-unit,
+.dz-hint {
+  color: var(--dz-fg-3);
+  font-size: 11px;
+}
+.dz-num-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 16px;
+}
+.dz-num-head .dz-scrub {
+  flex: 1;
+}
+.dz-num-head .dz-reset {
+  position: static;
+}
+.dz-scrub {
+  cursor: ew-resize !important;
+}
+.dz-toggle {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 5px !important;
+  background: #1f1f1f !important;
+  color: var(--dz-fg-3) !important;
+  font-size: 14px !important;
+}
+.dz-toggle.on {
+  background: var(--dz-accent-dim) !important;
+  color: var(--dz-accent) !important;
+}
+.dz-toggle i {
+  font-family: Georgia, serif;
+}
+.dz-case button {
+  font-size: 11px;
+}
+.dz-reset {
+  position: absolute;
+  top: -2px;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--dz-accent) !important;
+  font-size: 12px !important;
+  line-height: 18px;
+}
+.dz-reset:hover {
+  background: var(--dz-hover) !important;
+}
+.dz-family + .dz-reset {
+  top: 9px;
+  right: 46px;
+}
+.dz-slider {
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  column-gap: 8px;
+}
+.dz-slider .dz-label {
+  grid-column: 1 / -1;
+}
+.dz-slider input {
+  width: 100%;
+  accent-color: var(--dz-accent);
+}
+.dz-slider.unset input {
+  opacity: 0.45;
+}
+.dz-slider-value {
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--dz-fg-2);
+}
+.dz-slider .dz-reset {
+  position: static;
+}
+.dz-ins-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px;
+}
+
+/* Font picker */
+.dz-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+.dz-picker {
+  position: absolute;
+  top: 40px;
+  left: -8px;
+  right: -8px;
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  max-height: min(560px, 70vh);
+  border: 1px solid var(--dz-line);
+  border-radius: 8px;
+  background: #2c2c2c;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+.dz-search {
+  margin: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--dz-accent);
+  border-radius: 5px;
+  background: #1f1f1f;
+  color: var(--dz-fg);
+  font: inherit;
+  outline: none;
+  user-select: text;
+}
+.dz-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 0 8px 6px;
+  border-bottom: 1px solid var(--dz-line);
+}
+.dz-chips button {
+  height: 22px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+.dz-picker-list {
+  overflow-y: auto;
+  padding: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #555 transparent;
+}
+.dz-picker-row {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 34px;
+  padding: 0 8px !important;
+  border-radius: 5px !important;
+  text-align: left;
+}
+.dz-picker-row.active {
+  background: var(--dz-hover) !important;
+}
+.dz-picker-row.current .dz-font-name {
+  color: var(--dz-accent);
+}
+.dz-picker-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  color: var(--dz-fg-3);
+  font-size: 10px;
+}
+.dz-empty {
+  margin: 8px;
+  color: var(--dz-fg-3);
+}

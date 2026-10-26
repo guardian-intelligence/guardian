@@ -4,7 +4,9 @@ resources:
   - namespace.yaml
   - secrets.yaml
   - controlplane.yaml
-  - canary-loop.yaml
-  - ingress.yaml
+  # Product execution, public routes, and product-only probes are temporarily
+  # paused for Guardian consolidation. Retain secrets and the backed-up ledger.
   - networkpolicy.yaml
-  - observability.yaml
+replicas:
+  - name: postflight-controlplane
+    count: 0

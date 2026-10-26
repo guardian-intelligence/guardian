@@ -1,18 +1,21 @@
 # Management cluster trusted boot and data at rest
 
-This document is the current control description for the three-node
-`guardian-mgmt` cluster. It covers the boot trust chain, local NVMe
+This document describes the required controls for the `guardian-mgmt`
+control-plane and storage nodes. It covers the boot trust chain, local NVMe
 encryption, LINSTOR volume encryption, synthetic-data exceptions, and the
 evidence an operator or auditor can collect.
 
-The dedicated `ash-worker0` WUM node is outside this storage-control boundary:
-it uses the same Sidero Secure Boot chain but has no etcd, OpenBao, LINSTOR data
-pool, or TPM-sealed system volumes. Its procedure and evidence are in
-`src/infrastructure/runbooks/wum-worker-reinstall.md`.
+The annual `ash-worker0` conversion is staged in
+`src/infrastructure/runbooks/annual-controlplane-conversion.md`. Its target uses
+TPM-encrypted system volumes and the separately pinned v1.13.10 assets in
+`src/infrastructure/talm/annual-controlplane-assets.yaml`. The initial join keeps
+its WUM data SSD intact, declares no LINSTOR pool, and excludes OpenBao until the
+static seal is independently installed and verified. Source declarations do not
+prove that the conversion or these runtime controls have been applied.
 
 ## Boot trust
 
-All three nodes run Talos from a Secure Boot UKI produced by the Sidero Labs
+Control-plane nodes must run Talos from a Secure Boot UKI produced by the Sidero Labs
 Image Factory. UEFI Secure Boot is enabled in User mode. The factory
 Secure Boot ISO enrolled the Sidero Labs PK, KEK, and `db` authorization
 files while each board was in Setup mode.
@@ -54,11 +57,11 @@ Reference:
 
 Talos provisions three LUKS2 volumes on every node:
 
-| Volume | Contents | TPM policy |
-|---|---|---|
-| `STATE` | Machine identity, configuration, and system state | TPM key; PCR 7 plus signed PCR 11 policy |
-| `EPHEMERAL` | `/var`, including Kubernetes and container runtime state | Same policy; locked to `STATE` |
-| `r-guardian-data` | The NVMe substrate for the LINSTOR `data` pool | Same policy; locked to `STATE` |
+| Volume            | Contents                                                 | TPM policy                               |
+| ----------------- | -------------------------------------------------------- | ---------------------------------------- |
+| `STATE`           | Machine identity, configuration, and system state        | TPM key; PCR 7 plus signed PCR 11 policy |
+| `EPHEMERAL`       | `/var`, including Kubernetes and container runtime state | Same policy; locked to `STATE`           |
+| `r-guardian-data` | The NVMe substrate for the LINSTOR `data` pool           | Same policy; locked to `STATE`           |
 
 The raw data volume is selected by immutable disk serial in each Talos node
 overlay. Piraeus consumes only
@@ -73,12 +76,12 @@ The LINSTOR master passphrase is supplied through
 `guardian-linstor-master-passphrase` and `spec.linstorPassphraseSecret`.
 Non-synthetic persistent data uses Cozystack's native encrypted class shape:
 
-| StorageClass | LINSTOR layers | Replication | Reclaim |
-|---|---|---:|---|
-| `local-encrypted` | `luks storage` | 1 | Delete |
-| `local-encrypted-retain` | `luks storage` | 1 | Retain |
-| `replicated-encrypted` | `drbd luks storage` | 3 | Delete |
-| `replicated-encrypted-retain` | `drbd luks storage` | 3 | Retain |
+| StorageClass                  | LINSTOR layers      | Replication | Reclaim |
+| ----------------------------- | ------------------- | ----------: | ------- |
+| `local-encrypted`             | `luks storage`      |           1 | Delete  |
+| `local-encrypted-retain`      | `luks storage`      |           1 | Retain  |
+| `replicated-encrypted`        | `drbd luks storage` |           3 | Delete  |
+| `replicated-encrypted-retain` | `drbd luks storage` |           3 | Retain  |
 
 These classes set `linstor.csi.linbit.com/encryption: "true"` and carry
 `guardian.dev/encryption-at-rest=linstor-luks`. The replicated encrypted

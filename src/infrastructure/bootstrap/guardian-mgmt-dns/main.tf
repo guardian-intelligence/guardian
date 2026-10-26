@@ -337,6 +337,16 @@ resource "cloudflare_dns_record" "guardian_operator_tunnel" {
   }
 }
 
+# How the founder proves the operator policy's address: Cloudflare mails a
+# one-time PIN to it. The account's other login, Cloudflare account sign-in,
+# admits account members only, and the founder address is not one.
+resource "cloudflare_zero_trust_access_identity_provider" "one_time_pin" {
+  account_id = var.cloudflare_account_id
+  name       = "One-time PIN"
+  type       = "onetimepin"
+  config     = {}
+}
+
 resource "cloudflare_zero_trust_access_policy" "guardian_operator" {
   account_id = var.cloudflare_account_id
   name       = "Guardian operator identity"
@@ -350,6 +360,43 @@ resource "cloudflare_zero_trust_access_policy" "guardian_operator" {
   ]
 }
 
+# Standing transport access for the founder's Mac across networks. This
+# credential reaches only the two operator applications; it confers no
+# Kubernetes or Talos API authority. Relay its sensitive output into the
+# workstation's login Keychain, never a launchd plist or shell argument.
+resource "terraform_data" "guardian_operator_mac_rotation" {
+  # Increment this revision to replace the token and renew its annual term.
+  input = 1
+}
+
+resource "cloudflare_zero_trust_access_service_token" "guardian_operator_mac" {
+  account_id = var.cloudflare_account_id
+  name       = "guardian-operator-shovon-mac-v${terraform_data.guardian_operator_mac_rotation.input}"
+  duration   = "8760h"
+
+  lifecycle {
+    create_before_destroy = true
+    replace_triggered_by  = [terraform_data.guardian_operator_mac_rotation]
+    postcondition {
+      condition     = timecmp(timeadd(plantimestamp(), "720h"), self.expires_at) < 0
+      error_message = "The operator Mac Access token expires within 30 days. Increment guardian_operator_mac_rotation.input and re-seed this Mac's Keychain before expiry."
+    }
+  }
+}
+
+resource "cloudflare_zero_trust_access_policy" "guardian_operator_mac" {
+  account_id = var.cloudflare_account_id
+  name       = "Guardian operator Mac transport credential"
+  decision   = "non_identity"
+  include = [
+    {
+      service_token = {
+        token_id = cloudflare_zero_trust_access_service_token.guardian_operator_mac.id
+      }
+    },
+  ]
+}
+
 resource "cloudflare_zero_trust_access_application" "guardian_operator" {
   for_each = local.operator_tunnel_routes
 
@@ -359,8 +406,12 @@ resource "cloudflare_zero_trust_access_application" "guardian_operator" {
   domain     = each.value.hostname
   policies = [
     {
-      id         = cloudflare_zero_trust_access_policy.guardian_operator.id
+      id         = cloudflare_zero_trust_access_policy.guardian_operator_mac.id
       precedence = 1
+    },
+    {
+      id         = cloudflare_zero_trust_access_policy.guardian_operator.id
+      precedence = 2
     },
   ]
 }
@@ -540,4 +591,140 @@ resource "cloudflare_dns_record" "wakeupmythra_com_caa" {
   lifecycle {
     prevent_destroy = true
   }
+}
+
+# anveio.com — Shovon's contact card (src/anveio/cal). Proxied A records to
+# the three ASH origins for the apex and www (the origin redirects www to the
+# apex), with the same no-Load-Balancer trade-off as rumi.engineering. The
+# zone's pre-Guardian records were retired; only its Resend/SES mail-sending
+# records (send.anveio.com, notify.anveio.com, DKIM, DMARC) remain outside
+# this root.
+data "cloudflare_zone" "anveio_com" {
+  filter = {
+    name = "anveio.com"
+    account = {
+      id = var.cloudflare_account_id
+    }
+  }
+}
+
+resource "cloudflare_dns_record" "anveio_com_web" {
+  for_each = {
+    for pair in setproduct(["anveio.com", "www.anveio.com"], keys(local.public_ingress_origins)) :
+    "${pair[0]}/${pair[1]}" => { name = pair[0], origin = pair[1] }
+  }
+
+  zone_id = data.cloudflare_zone.anveio_com.id
+  name    = each.value.name
+  type    = "A"
+  content = local.public_ingress_origins[each.value.origin].public_ipv4
+  ttl     = 1
+  proxied = true
+  comment = "anveio ${each.value.origin} product edge"
+}
+
+# CAA policy, as for rumi.engineering: Cloudflare edge certificates issue via
+# Google Trust Services or Let's Encrypt; nothing else may issue for the zone.
+resource "cloudflare_dns_record" "anveio_com_caa" {
+  for_each = {
+    letsencrypt = "letsencrypt.org"
+    google      = "pki.goog"
+  }
+
+  zone_id = data.cloudflare_zone.anveio_com.id
+  name    = "anveio.com"
+  type    = "CAA"
+  ttl     = 1
+  data = {
+    flags = 0
+    tag   = "issue"
+    value = each.value
+  }
+  comment = "anveio edge certificate issuance policy"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Inbound mail for anveio.com: careers@, the address on the job descriptions,
+# and shovon@, the founder's company address (vendor accounts that require a
+# company domain, such as the Claude Console), both forwarded to the founder
+# inbox; everything else is dropped, as for
+# guardianintelligence.org. Email Routing itself is enabled on the zone by the
+# edge-policy root (it needs Zone Settings Write); it adds and locks the MX
+# records. The apex SPF record, adopted from the pre-Guardian zone, is owned
+# here and carries the Email Routing include so forwarded mail passes SPF on
+# its rewritten envelope. Resend sends
+# from send.anveio.com, which has its own SPF, so the apex carries no SES
+# include.
+resource "cloudflare_email_routing_rule" "anveio_careers" {
+  zone_id  = data.cloudflare_zone.anveio_com.id
+  name     = "careers@ to the founder inbox"
+  enabled  = true
+  priority = 0
+
+  matchers = [
+    {
+      type  = "literal"
+      field = "to"
+      value = "careers@anveio.com"
+    },
+  ]
+
+  actions = [
+    {
+      type  = "forward"
+      value = [cloudflare_email_routing_address.founder_inbox.email]
+    },
+  ]
+}
+
+resource "cloudflare_email_routing_rule" "anveio_founder" {
+  zone_id  = data.cloudflare_zone.anveio_com.id
+  name     = "shovon@ to the founder inbox"
+  enabled  = true
+  priority = 0
+
+  matchers = [
+    {
+      type  = "literal"
+      field = "to"
+      value = "shovon@anveio.com"
+    },
+  ]
+
+  actions = [
+    {
+      type  = "forward"
+      value = [cloudflare_email_routing_address.founder_inbox.email]
+    },
+  ]
+}
+
+resource "cloudflare_email_routing_catch_all" "anveio_com" {
+  zone_id = data.cloudflare_zone.anveio_com.id
+  name    = "drop everything but careers@ and shovon@"
+  enabled = true
+
+  matchers = [
+    {
+      type = "all"
+    },
+  ]
+
+  actions = [
+    {
+      type = "drop"
+    },
+  ]
+}
+
+resource "cloudflare_dns_record" "anveio_com_spf" {
+  zone_id = data.cloudflare_zone.anveio_com.id
+  name    = "anveio.com"
+  type    = "TXT"
+  content = "\"v=spf1 include:_spf.mx.cloudflare.net ~all\""
+  ttl     = 1
+  comment = "anveio Email Routing SPF"
 }

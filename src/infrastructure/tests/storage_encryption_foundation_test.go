@@ -164,7 +164,7 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 
 func TestTalosBootAndVolumeEncryptionConformance(t *testing.T) {
 	const controlplaneInstaller = "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:f6245aaf9c630fc40479e5798b616468c144c1601c29fc6e19de8d32cc7277e2"
-	const workerInstaller = "factory.talos.dev/metal-installer/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:89997784056d862a59c2a2d0f2fa78714a6c3ef76f34ef4f8d835dee829719d3"
+	const annualInstaller = "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.10@sha256:e892079895b227a83fd86c1249efbbc3684c61815e5b5efcffd3cc279e56703b"
 
 	assetsPath := runfilePath("src/infrastructure/talm/secureboot-assets.yaml")
 	assets := singleYAMLDoc(t, assetsPath)
@@ -248,40 +248,55 @@ func TestTalosBootAndVolumeEncryptionConformance(t *testing.T) {
 	workerPath := "src/infrastructure/talm/nodes/ash-worker0.yaml"
 	worker := readText(t, runfilePath(workerPath))
 	for _, want := range []string{
-		"type: worker",
+		"type: controlplane",
 		"206.223.228.99",
 		"serial: 362510FCEFF6",
-		"node-labels: guardian.dev/dedicated=wum",
-		"register-with-taints: guardian.dev/dedicated=wum:NoSchedule",
-		"image: " + workerInstaller,
-	} {
-		assertTextContains(t, worker, want, workerPath)
-	}
-	for _, forbidden := range []string{
 		"name: STATE",
 		"name: EPHEMERAL",
-		"guardian.dev/openbao-static-seal",
-		"kind: Layer2VIPConfig",
-		"\n  nodeLabels:\n    guardian.dev/dedicated:",
-		"\n  nodeTaints:\n    guardian.dev/dedicated:",
+		"image: " + annualInstaller,
 	} {
-		assertTextNotContains(t, worker, forbidden, workerPath)
+		assertTextContains(t, worker, want, workerPath)
 	}
 
 	workerOverlayPath := "src/infrastructure/talm/nodes/ash-worker0-overlay.yaml"
 	workerOverlay := readText(t, runfilePath(workerOverlayPath))
 	for _, want := range []string{
-		`serial: "362510FCEFF6"`,
+		"serial: 362510FCEFF6",
 		"hostname: ash-worker0",
 		"address: 10.8.0.14/24",
-		"node: ash-worker0",
-		"node-labels: guardian.dev/dedicated=wum",
-		"register-with-taints: guardian.dev/dedicated=wum:NoSchedule",
-		"image: " + workerInstaller,
+		"kind: Layer2VIPConfig",
+		"link: enp1s0f0.2140",
+		"image: " + annualInstaller,
 	} {
 		assertTextContains(t, workerOverlay, want, workerOverlayPath)
 	}
-	for _, forbidden := range []string{"kind: RawVolumeConfig", "r-guardian-data", "provider: luks2"} {
-		assertTextNotContains(t, workerOverlay, forbidden, workerOverlayPath)
+	// Stage one must not allocate or reformat the preserved WUM data SSD,
+	// and must not attract OpenBao before its static seal is restored.
+	for _, path := range []string{workerPath, workerOverlayPath} {
+		raw := readText(t, runfilePath(path))
+		for _, forbidden := range []string{"kind: RawVolumeConfig", "kind: UserVolumeConfig", "register-with-taints:", "node-labels: guardian.dev/dedicated=wum"} {
+			assertTextNotContains(t, raw, forbidden, path)
+		}
+		first := yamlDocs(t, runfilePath(path))[0]
+		assertNestedString(t, first, "false", "machine", "nodeLabels", "guardian.dev/openbao-static-seal")
 	}
+	for _, doc := range yamlDocs(t, runfilePath(workerPath)) {
+		if stringValue(doc["kind"]) != "VolumeConfig" {
+			continue
+		}
+		assertNestedString(t, doc, "luks2", "encryption", "provider")
+		keys := sliceValue(mapValue(doc["encryption"])["keys"])
+		if len(keys) != 1 {
+			t.Fatalf("%s must have exactly one TPM encryption key", doc["name"])
+		}
+		assertNestedBool(t, mapValue(keys[0]), true, "tpm", "checkSecurebootStatusOnEnroll")
+		if stringValue(doc["name"]) == "EPHEMERAL" {
+			assertNestedBool(t, mapValue(keys[0]), true, "lockToState")
+		}
+	}
+	annualAssets := singleYAMLDoc(t, runfilePath("src/infrastructure/talm/annual-controlplane-assets.yaml"))
+	assertNestedString(t, annualAssets, "v1.13.10", "spec", "talosVersion")
+	assertNestedString(t, annualAssets, "sha256:e892079895b227a83fd86c1249efbbc3684c61815e5b5efcffd3cc279e56703b", "spec", "installer", "digest")
+	assertNestedString(t, annualAssets, "13644483d10040dbb30571ff2c4f0504a6a5b2073510db36095cafc5250e2d91", "spec", "iso", "sha256")
+	assertNestedBool(t, annualAssets, false, "spec", "enrollment", "includeWellKnownUefiCertificates")
 }

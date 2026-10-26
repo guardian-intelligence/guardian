@@ -12,15 +12,15 @@ Companions: [fleet](postflight-fleet.md), [Lightning](postflight-lightning.md),
 
 ## Runner profiles
 
-| | First-party Turbo | Confidential |
-| --- | --- | --- |
-| Runner class | `postflight-4vcpu-ubuntu24-turbo` | Separate confidential classes, unchanged by Turbo rollout |
-| Guest | Ubuntu 24.04, 4 vCPU, 16 GiB, QEMU/KVM | SEV-SNP guest; attestation and confidential-image requirements |
-| TEE requirement | None | SEV-SNP |
-| Boot reuse | Generic pre-registration QEMU RAM + root template | Turbo RAM template path is rejected |
-| Cross-job cache | Scoped workspace and tool ZFS generations | Separate confidential encryption profile |
-| At-rest keys | Native encrypted host ZFS; raw key seeded from OpenBao outside Git | In-guest SNP-derived volume keys |
-| Host trust | Trusted Guardian host, including kernel, QEMU, hostd, and storage key | Untrusted host is the confidential security-policy target |
+|                 | First-party Turbo                                                     | Confidential                                                   |
+| --------------- | --------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Runner class    | `postflight-4vcpu-ubuntu24-turbo`                                     | Separate confidential classes, unchanged by Turbo rollout      |
+| Guest           | Ubuntu 24.04, 4 vCPU, 16 GiB, QEMU/KVM                                | SEV-SNP guest; attestation and confidential-image requirements |
+| TEE requirement | None                                                                  | SEV-SNP                                                        |
+| Boot reuse      | Generic pre-registration QEMU RAM + root template                     | Turbo RAM template path is rejected                            |
+| Cross-job cache | Scoped workspace and tool ZFS generations                             | Separate confidential encryption profile                       |
+| At-rest keys    | Native encrypted host ZFS; raw key seeded from OpenBao outside Git    | In-guest SNP-derived volume keys                               |
+| Host trust      | Trusted Guardian host, including kernel, QEMU, hostd, and storage key | Untrusted host is the confidential security-policy target      |
 
 The concrete Turbo class is seeded by
 [migration 012](../src/postflight/controlplane/migrations/012_turbo_runner_class.sql).

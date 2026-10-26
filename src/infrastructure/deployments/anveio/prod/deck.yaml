@@ -1,0 +1,137 @@
+# anveio.com's home page and investor deck (src/anveio/web), served at / and
+# /deck through the anveio-cal Ingress in web.yaml. Three replicas preserve two ready servers
+# during a one-node management-cluster replacement. Verify placement across
+# all three control planes before draining; spread stays soft so a replacement
+# can schedule while one node is unavailable. Image automation owns the pin.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anveio-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: anveio-web
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: web
+    guardian.dev/product: anveio
+    guardian.dev/stage: prod
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anveio-web
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: anveio-web
+        app.kubernetes.io/part-of: guardian
+        app.kubernetes.io/component: web
+        guardian.dev/product: anveio
+        guardian.dev/stage: prod
+    spec:
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: anveio-web
+              app.kubernetes.io/part-of: guardian
+              guardian.dev/stage: prod
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: ghcr.io/guardian-intelligence/anveio-web:edge@sha256:1d2caaf6d2cca68fea70ffb212b959aed194421694d86a43178170d5c036afd9 # {"$imagepolicy": "guardian-imageops:anveio-web"}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            # Server-rendered (Nitro on node), so sized like privatecut-web
+            # rather than anveio-cal's static server.
+            requests:
+              cpu: 20m
+              memory: 128Mi
+              ephemeral-storage: 16Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+              ephemeral-storage: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anveio-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: anveio-web
+    app.kubernetes.io/part-of: guardian
+    app.kubernetes.io/component: web
+    guardian.dev/product: anveio
+    guardian.dev/stage: prod
+spec:
+  type: ClusterIP
+  internalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: anveio-web
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/stage: prod
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: anveio-web
+  namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: anveio-web
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/product: anveio
+    guardian.dev/stage: prod
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: anveio-web
+      app.kubernetes.io/part-of: guardian
+      guardian.dev/stage: prod

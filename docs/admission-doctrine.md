@@ -9,7 +9,7 @@ where admission structurally cannot see the invariant.
 ## The three lanes
 
 **1. Admission doctrine — `ValidatingAdmissionPolicy` / `MutatingAdmissionPolicy`.**
-Any rule about a *single object* belongs here: safety floors, network
+Any rule about a _single object_ belongs here: safety floors, network
 boundaries, alerting hygiene, scheduling defaults, secret hygiene. VAP states
 what must be true; MAP makes it true when a manifest doesn't say otherwise.
 Policies live in `src/infrastructure/base/admission/` (or next to the
@@ -28,7 +28,7 @@ doc comment. If the rationale names only one object, it is in the wrong lane.
 
 **3. Artifact conformance — targeted tests for non-Kubernetes artifacts.**
 SQL DDL drift, image-lock derivations, load-test script hygiene, Bazel module
-pins. Same bar as lane 2: consistency *between* artifacts, not mirrors of one.
+pins. Same bar as lane 2: consistency _between_ artifacts, not mirrors of one.
 
 ## What is banned
 
@@ -39,7 +39,7 @@ pins. Same bar as lane 2: consistency *between* artifacts, not mirrors of one.
   if a generalizable rule is buried inside, promote the rule to a policy.
 - **Policy-text tests.** Never assert the YAML of a VAP/MAP or re-implement
   its expression in Go. The harness compiles and evaluates the real thing.
-- **Migration freezes.** Tests that assert files or objects *no longer exist*
+- **Migration freezes.** Tests that assert files or objects _no longer exist_
   outlive their purpose the moment they first pass on main. Git history is
   the record of what was removed.
 - **Merge gates encoded as failing tests.** A red test on main is never a

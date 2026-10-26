@@ -28,6 +28,11 @@ output "rumi_engineering_zone_id" {
   value       = data.cloudflare_zone.rumi_engineering.id
 }
 
+output "anveio_com_zone_id" {
+  description = "Cloudflare zone id for the anveio.com contact card."
+  value       = data.cloudflare_zone.anveio_com.id
+}
+
 output "codex_cloud_tunnel_token" {
   description = "Connector token relayed to OpenBao for the in-cluster cloudflared Deployment."
   value       = data.cloudflare_zero_trust_tunnel_cloudflared_token.guardian_codex_cloud.token
@@ -58,6 +63,16 @@ output "cloud_agent_access_client_secrets" {
   value = {
     for provider, token in cloudflare_zero_trust_access_service_token.guardian_cloud_agent :
     provider => token.client_secret
+  }
+  sensitive = true
+}
+
+output "operator_mac_access_credential" {
+  description = "Transport-only credential relayed through stdin into this Mac's login Keychain."
+  value = {
+    client_id     = cloudflare_zero_trust_access_service_token.guardian_operator_mac.client_id
+    client_secret = cloudflare_zero_trust_access_service_token.guardian_operator_mac.client_secret
+    expires_at    = cloudflare_zero_trust_access_service_token.guardian_operator_mac.expires_at
   }
   sensitive = true
 }

@@ -4,22 +4,22 @@
 policy: guardian-tigerbeetle-runtime
 cases:
   - name: ordinary pod without host networking
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     object:
       apiVersion: v1
       kind: Pod
-      metadata: {name: worker, namespace: tenant-guardian}
+      metadata: { name: worker, namespace: tenant-guardian }
       spec:
         containers:
           - name: main
             image: busybox
     expect: allow
   - name: host networking without the tigerbeetle identity
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     object:
       apiVersion: v1
       kind: Pod
-      metadata: {name: snooper, namespace: tenant-guardian}
+      metadata: { name: snooper, namespace: tenant-guardian }
       spec:
         hostNetwork: true
         serviceAccountName: default
@@ -28,7 +28,7 @@ cases:
             image: busybox
     expect: deny
   - name: tigerbeetle-labeled pod that formats the ledger
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     object:
       apiVersion: v1
       kind: Pod

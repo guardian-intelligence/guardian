@@ -15,8 +15,8 @@ metadata:
     app.kubernetes.io/part-of: guardian
     guardian.dev/tofu-root: guardian-mgmt-cloudflare-tokens
 spec:
-  # Suspended for the one-shot Access identity-provider permission grant in
-  # job-guardian-mgmt-cloudflare-tokens-access-idps.yaml; resume in the PR
+  # Suspended for the one-shot anveio-footage bucket apply in
+  # job-guardian-mgmt-cloudflare-tokens-anveio-footage.yaml; resume in the PR
   # that removes that Job.
   suspend: true
   schedule: "*/15 * * * *"

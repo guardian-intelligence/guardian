@@ -27,12 +27,12 @@ spec:
       - apiGroups:
           - apps.cozystack.io
         apiVersions:
-          - '*'
+          - "*"
         operations:
           - CREATE
           - UPDATE
         resources:
-          - '*'
+          - "*"
   validations:
     - expression: >-
         object.metadata.namespace.startsWith("tenant-")

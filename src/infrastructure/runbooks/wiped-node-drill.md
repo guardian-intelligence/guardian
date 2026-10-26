@@ -16,16 +16,21 @@ LINSTOR, OpenBao, or public-edge steps below for a worker.
 
 Node map:
 
-| Node | Public IP | Private IP |
-|---|---|---|
+| Node        | Public IP         | Private IP  |
+| ----------- | ----------------- | ----------- |
 | `ash-earth` | `206.223.228.101` | `10.8.0.11` |
-| `ash-wind` | `45.250.254.119` | `10.8.0.12` |
-| `ash-water` | `206.223.228.87` | `10.8.0.13` |
+| `ash-wind`  | `45.250.254.119`  | `10.8.0.12` |
+| `ash-water` | `206.223.228.87`  | `10.8.0.13` |
 
 ## Preconditions
 
 1. Restore custody to tmpfs and assemble the Talm mint root described in
    `cert-rotation.md`.
+   On macOS, use a Linux container's actual `/dev/shm` tmpfs for the ceremony.
+   A workstation Talos client can consume the restored config through an
+   anonymous descriptor without writing a plaintext credential file. Keep
+   the encrypted repository separate from restore data, then wipe the
+   custody bundle and remove the temporary container when the ceremony ends.
 2. Confirm all nodes and Flux resources are Ready:
 
    ```sh

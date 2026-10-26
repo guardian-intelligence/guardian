@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import opentype from "opentype.js";
 import { decompress } from "wawoff2";
 

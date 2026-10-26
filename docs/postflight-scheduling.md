@@ -42,19 +42,19 @@ Three layers, strongest last:
 
 ## Modules
 
-| Module | Responsibility |
-| --- | --- |
-| GitHub ingress | Webhook inbox, signature verification, delivery records, API truth repair, cancellation and completion tracking |
-| Admission | Label → runner class → fleet + hardware class routing; tenant concurrency; trust class; spend policy against the always-on meter |
-| Capacity | Hosts, slots, pool-member incarnations, cordon/drain/offline; per-site inventories |
-| Planning | Select the scope and a compatible generation for a job intent — never a VM; push small plans to every eligible host |
-| Assignment | Persist the exact, immutable binding after the guest reports it; unique-match join or recycle |
-| Generation catalog | Signed manifests, lineage, generation numbers, current-pointer CAS, rollback floors, retention |
-| Attested sessions | Verify SNP evidence, establish sealed channels, release JIT and tenant keys (Confidential); authenticated control channel and DEK release (Turbo) |
-| Transit custody | The `transit-postflight` client: tenant keys, manifest signing, crypto-erase |
-| Metering | Append-only intervals: customer-billable and infrastructure-reserved |
-| Reconcilers | Missed webhooks, stale hosts, deadlines, promotion, retention sweeps, image freshness |
-| Canary controller | Dispatch real workflows as an ordinary showback tenant |
+| Module             | Responsibility                                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub ingress     | Webhook inbox, signature verification, delivery records, API truth repair, cancellation and completion tracking                                   |
+| Admission          | Label → runner class → fleet + hardware class routing; tenant concurrency; trust class; spend policy against the always-on meter                  |
+| Capacity           | Hosts, slots, pool-member incarnations, cordon/drain/offline; per-site inventories                                                                |
+| Planning           | Select the scope and a compatible generation for a job intent — never a VM; push small plans to every eligible host                               |
+| Assignment         | Persist the exact, immutable binding after the guest reports it; unique-match join or recycle                                                     |
+| Generation catalog | Signed manifests, lineage, generation numbers, current-pointer CAS, rollback floors, retention                                                    |
+| Attested sessions  | Verify SNP evidence, establish sealed channels, release JIT and tenant keys (Confidential); authenticated control channel and DEK release (Turbo) |
+| Transit custody    | The `transit-postflight` client: tenant keys, manifest signing, crypto-erase                                                                      |
+| Metering           | Append-only intervals: customer-billable and infrastructure-reserved                                                                              |
+| Reconcilers        | Missed webhooks, stale hosts, deadlines, promotion, retention sweeps, image freshness                                                             |
+| Canary controller  | Dispatch real workflows as an ordinary showback tenant                                                                                            |
 
 ## Admission and routing
 
@@ -140,11 +140,11 @@ provide production coverage.
 
 Three moments partition every job's timeline:
 
-| Moment | Meaning | Meter |
-| --- | --- | --- |
-| `customer_complete` | The attempt concluded on GitHub | Customer-billable time ends here |
-| `slot_reusable` | Donor destroyed, slot released for refill | Reserved-infrastructure time |
-| `generation_published` | Candidate promoted after attempt success | Reserved-infrastructure time |
+| Moment                 | Meaning                                   | Meter                            |
+| ---------------------- | ----------------------------------------- | -------------------------------- |
+| `customer_complete`    | The attempt concluded on GitHub           | Customer-billable time ends here |
+| `slot_reusable`        | Donor destroyed, slot released for refill | Reserved-infrastructure time     |
+| `generation_published` | Candidate promoted after attempt success  | Reserved-infrastructure time     |
 
 Sealing and publication run on Guardian's clock, never the customer's.
 Intervals are append-only; corrections are compensating rows.

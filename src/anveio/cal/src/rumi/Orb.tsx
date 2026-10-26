@@ -225,7 +225,7 @@ export function Orb({ mode, muted, size }: Props) {
         style={{
           opacity: gpu ? 0 : 1,
           // a still frame of her (public/rumi.png) until her shader is drawing, or without WebGPU
-          background: "center / cover url(/rumi.png)",
+          background: `center / cover url(${import.meta.env.BASE_URL}rumi.png)`,
           filter: muted ? "saturate(.92) brightness(.82)" : "none",
         }}
       />

@@ -1,5 +1,8 @@
-// anveio.com's origin: serves the `vp build` output in ../dist with no
-// dependencies beyond node: builtins. Every file is read into memory at
+// anveio.com/agent's origin: serves the `vp build` output in ../dist with no
+// dependencies beyond node: builtins. The ingress sends it /agent/**, the
+// Google sign-in landing page under /oauth/ (its registered redirect URI stays
+// at the site root), /privacy, /cal and the whole www host; the home page is
+// anveio-web's. Every file is read into memory at
 // startup and requests are answered from that table only, so no request path
 // ever reaches the filesystem and traversal has nothing to escape into.
 import { createHash } from "node:crypto";
@@ -43,6 +46,7 @@ const types = {
 
 // Vite content-hashes everything under /assets/, so a name never changes
 // meaning. HTML must revalidate so a deploy is picked up on the next load.
+// Paths here are dist paths, before the /agent prefix.
 function cacheControl(path) {
   if (path.startsWith("/assets/")) return "public, max-age=31536000, immutable";
   if (path.endsWith(".html")) return "no-cache";
@@ -96,13 +100,24 @@ function redirect(req, res, location) {
   send(req, res, 301, { location, "cache-control": "public, max-age=3600" }, Buffer.alloc(0));
 }
 
+// The app's public URL prefix: Vite builds with base /agent/, so dist/x is
+// served at /agent/x.
+const BASE = "/agent";
+
+// Maps a request path to a dist file. Only /agent/**, /oauth/** and /privacy
+// are this server's; anything else is a miss.
 function resolve(path) {
-  if (path === "/") return index;
+  if (path.startsWith("/oauth/")) return files.get(path);
   if (path === "/privacy") return files.get("/privacy.html");
-  const file = files.get(path);
+  if (path !== BASE && !path.startsWith(`${BASE}/`)) return undefined;
+  const rest = path.slice(BASE.length) || "/";
+  if (rest === "/") return index;
+  // The sign-in landing page has one URL, the registered one.
+  if (rest.startsWith("/oauth/")) return undefined;
+  const file = files.get(rest);
   if (file) return file;
   // Client-side routes have no extension; anything with one is a real miss.
-  const last = path.slice(path.lastIndexOf("/") + 1);
+  const last = rest.slice(rest.lastIndexOf("/") + 1);
   return last.includes(".") ? undefined : index;
 }
 
@@ -129,8 +144,9 @@ const server = createServer((req, res) => {
   if (reqHost === `www.${canonicalHost}`) {
     return redirect(req, res, `https://${canonicalHost}${path}${url.search}`);
   }
-  // The prototype lived at /cal before it became the whole site.
-  if (path === "/cal" || path.startsWith("/cal/")) return redirect(req, res, `/${url.search}`);
+  // The prototype lived at /cal, then at the site root, before /agent.
+  if (path === "/cal" || path.startsWith("/cal/"))
+    return redirect(req, res, `${BASE}${url.search}`);
 
   const file = resolve(path);
   if (!file) return text(req, res, 404, "Not found");

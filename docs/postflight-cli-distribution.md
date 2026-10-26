@@ -17,16 +17,16 @@ minted once, at build time, and never re-minted anywhere downstream.**
 Four targets are built and released every time: `x86_64-unknown-linux-musl`,
 `aarch64-unknown-linux-musl`, `x86_64-apple-darwin`, `aarch64-apple-darwin`.
 
-| Method | Command | Channels | Status |
-|---|---|---|---|
-| curl installer | `curl -fsSL https://guardianintelligence.org/postflight/install.sh \| sh -s -- --channel nightly` | stable (default), `--channel rc\|nightly` | live |
-| release asset | download `postflight-<target>` from the release, `cosign verify-blob`, `chmod +x` | all | live |
-| make | `make && sudo make install` in `src/postflight/cli` of a clone, or in an unpacked release source tarball | all | live |
-| cargo | `cargo install postflight` | stable | live |
-| cargo-binstall | `cargo binstall postflight` | stable | live |
-| npm/bun | `npm i -g @guardian-intelligence/postflight` | stable | live |
-| brew | `brew install guardian-intelligence/tap/postflight` | stable | live |
-| mise | tool `ubi:guardian-intelligence/guardian` with `exe=postflight` and `tag_regex=^postflight-cli/v` | stable | untested |
+| Method         | Command                                                                                                  | Channels                                  | Status   |
+| -------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------- | -------- |
+| curl installer | `curl -fsSL https://guardianintelligence.org/postflight/install.sh \| sh -s -- --channel nightly`        | stable (default), `--channel rc\|nightly` | live     |
+| release asset  | download `postflight-<target>` from the release, `cosign verify-blob`, `chmod +x`                        | all                                       | live     |
+| make           | `make && sudo make install` in `src/postflight/cli` of a clone, or in an unpacked release source tarball | all                                       | live     |
+| cargo          | `cargo install postflight`                                                                               | stable                                    | live     |
+| cargo-binstall | `cargo binstall postflight`                                                                              | stable                                    | live     |
+| npm/bun        | `npm i -g @guardian-intelligence/postflight`                                                             | stable                                    | live     |
+| brew           | `brew install guardian-intelligence/tap/postflight`                                                      | stable                                    | live     |
+| mise           | tool `ubi:guardian-intelligence/guardian` with `exe=postflight` and `tag_regex=^postflight-cli/v`        | stable                                    | untested |
 
 All three ecosystem mirrors hold 0.2.0, published from the
 `postflight-cli/v0.2.0` release. crates.io additionally carries 0.1.0, hand
@@ -111,12 +111,12 @@ would run cargo as root against root's `CARGO_HOME`.
 edge (OCI, never user-facing) -> nightly -> rc -> stable
 ```
 
-| Channel | Tag | Prerelease | Pin advanced by |
-|---|---|---|---|
-| edge | none (OCI tags `:edge` and `:sha-<commit>`) | n/a | the `postflight-cli-image` workflow, on every main push touching the crate |
-| nightly | `postflight-cli/nightly-YYYYMMDD` | yes | Kargo promotion PR, fired by `cli-nightly-promoter` at its next departure (see Cadence) |
-| rc | `postflight-cli/rc-YYYYMMDD` | yes | a human PR |
-| stable | `postflight-cli/v<version>` | no (`--latest`) | a human PR |
+| Channel | Tag                                         | Prerelease      | Pin advanced by                                                                         |
+| ------- | ------------------------------------------- | --------------- | --------------------------------------------------------------------------------------- |
+| edge    | none (OCI tags `:edge` and `:sha-<commit>`) | n/a             | the `postflight-cli-image` workflow, on every main push touching the crate              |
+| nightly | `postflight-cli/nightly-YYYYMMDD`           | yes             | Kargo promotion PR, fired by `cli-nightly-promoter` at its next departure (see Cadence) |
+| rc      | `postflight-cli/rc-YYYYMMDD`                | yes             | a human PR                                                                              |
+| stable  | `postflight-cli/v<version>`                 | no (`--latest`) | a human PR                                                                              |
 
 Nightly and rc tags take a `-HHMM` suffix if the day's tag already exists at
 a different commit; for stable a tag that already points elsewhere fails the
@@ -142,7 +142,7 @@ success against a release the others would not have picked.
 pointer move: the artifact that soaked is the artifact that promotes, and
 nothing about it changes on the way up. Only the stable cut builds something
 new, because dropping the prerelease suffix from the crate version changes
-`CARGO_PKG_VERSION` and therefore the bytes. main names the *next* stable
+`CARGO_PKG_VERSION` and therefore the bytes. main names the _next_ stable
 with a `-pre` suffix, so a nightly or a candidate reports `0.3.0-pre` — the
 version 0.3.0 would be cut from — and a bare `0.3.0` exists only on the one
 commit a stable is built from. Which channel a binary came down, and which
@@ -283,7 +283,7 @@ would no longer be the artifact that was tested.
 So provenance is recorded beside the binary rather than inside it.
 `install.sh` writes `install-receipt.json` into the CLI's config directory
 (`$XDG_CONFIG_HOME/postflight`, else `~/.config/postflight`) — and under sudo,
-into the *invoking* user's config rather than root's, handed back to them with
+into the _invoking_ user's config rather than root's, handed back to them with
 `chown`. A receipt in root's home describes an install nobody can see: the
 user's own CLI reads its config from their home, so `postflight version` would
 report no provenance and `self uninstall` would refuse to remove a binary this
@@ -339,7 +339,7 @@ install and the same inode gets offered for removal twice.
 
 Searching `$PATH` alone fails in both directions. A copy in a directory the
 user has since dropped from `PATH` is invisible to `which` and still installed;
-and a Homebrew copy *shadowed* by a newer one in `~/.local/bin` is exactly the
+and a Homebrew copy _shadowed_ by a newer one in `~/.local/bin` is exactly the
 situation worth reporting, because after a successful uninstall it is what
 `postflight` still resolves to — which is how someone concludes the uninstall
 silently failed.
@@ -376,7 +376,7 @@ its owner and its removal command, on the success path as well as the refusal
 path.
 
 **One receipt, one owned installation.** The receipt is a single file per
-machine, so at most one copy can be *proved* ours; anything else the sweep
+machine, so at most one copy can be _proved_ ours; anything else the sweep
 finds is reported rather than removed. The exit status is non-zero when a
 binary would not go, or when nothing here was ours to remove: the thing that
 was asked for did not fully happen.
@@ -384,12 +384,12 @@ was asked for did not fully happen.
 Detection is in `src/postflight/cli/src/scope.rs`, shared with every
 other verb that changes an installation, and it works on the **resolved** path:
 
-| Manager | Marker | Why that marker |
-| --- | --- | --- |
-| Homebrew | a `Cellar` path component | The prefix is unusable as a signal — on an Intel Mac it is `/usr/local`, which is also where `make install` lands. Every keg is `<prefix>/Cellar/<formula>/<version>` and every linked binary resolves through one, so the keg identifies Homebrew on a relocated prefix, a Linuxbrew prefix and a keg-only formula alike. |
-| npm, pnpm, bun, Yarn | a `node_modules` component, then the manager's own home (`.bun`, `pnpm`, `.yarn`) | They all produce `node_modules` and take different removal commands. Naming npm for all four sends three of them a command that does nothing. |
-| npx | an `_npx` component | Not an installation at all. There is nothing to remove and nothing to upgrade, and npm expires the cache itself — so no command is offered. |
-| cargo | under `$CARGO_HOME/bin` | — |
+| Manager              | Marker                                                                            | Why that marker                                                                                                                                                                                                                                                                                                            |
+| -------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Homebrew             | a `Cellar` path component                                                         | The prefix is unusable as a signal — on an Intel Mac it is `/usr/local`, which is also where `make install` lands. Every keg is `<prefix>/Cellar/<formula>/<version>` and every linked binary resolves through one, so the keg identifies Homebrew on a relocated prefix, a Linuxbrew prefix and a keg-only formula alike. |
+| npm, pnpm, bun, Yarn | a `node_modules` component, then the manager's own home (`.bun`, `pnpm`, `.yarn`) | They all produce `node_modules` and take different removal commands. Naming npm for all four sends three of them a command that does nothing.                                                                                                                                                                              |
+| npx                  | an `_npx` component                                                               | Not an installation at all. There is nothing to remove and nothing to upgrade, and npm expires the cache itself — so no command is offered.                                                                                                                                                                                |
+| cargo                | under `$CARGO_HOME/bin`                                                           | —                                                                                                                                                                                                                                                                                                                          |
 
 Resolution matters as much as the markers. `current_exe()` lies in two ways
 that both land here: macOS returns `_NSGetExecutablePath`, which `dyld(3)` says
@@ -443,11 +443,11 @@ they were built from. npm and crates.io hold no token secrets at all —
 trusted publishing mints their credential over OIDC — and the tap write uses
 a short-lived App token.
 
-| Lane | Where it lives | Trigger | Auth |
-|---|---|---|---|
-| npm | `.github/workflows/postflight-cli-publish-npm.yml` | `release: published` | npm trusted publishing (OIDC) |
-| crates.io | `.github/workflows/postflight-cli-publish-crates.yml` | `release: published` | crates.io trusted publishing (OIDC), via `rust-lang/crates-io-auth-action` |
-| Homebrew | a step in the stable path of `postflight-cli-release.yml` | inline, `contains(cuts, 'stable')` | a second short-lived `guardian-promotions` App token |
+| Lane      | Where it lives                                            | Trigger                            | Auth                                                                       |
+| --------- | --------------------------------------------------------- | ---------------------------------- | -------------------------------------------------------------------------- |
+| npm       | `.github/workflows/postflight-cli-publish-npm.yml`        | `release: published`               | npm trusted publishing (OIDC)                                              |
+| crates.io | `.github/workflows/postflight-cli-publish-crates.yml`     | `release: published`               | crates.io trusted publishing (OIDC), via `rust-lang/crates-io-auth-action` |
+| Homebrew  | a step in the stable path of `postflight-cli-release.yml` | inline, `contains(cuts, 'stable')` | a second short-lived `guardian-promotions` App token                       |
 
 `release: published` only fires because the cutter authenticates as an App
 rather than as `GITHUB_TOKEN` — releases authored by `GITHUB_TOKEN` do not
@@ -486,8 +486,8 @@ every `optionalDependencies` pin to the release version. Platform packages
 publish before the meta package, because an install that won the race
 between the two would resolve nothing to run; a re-run after a partial
 publish converges past `EPUBLISHCONFLICT` and still fails on anything else,
-since npm versions are immutable. Trusted publishing is registered *per
-package*, so all five carry their own registration against
+since npm versions are immutable. Trusted publishing is registered _per
+package_, so all five carry their own registration against
 `postflight-cli-publish-npm.yml`, and the lane asserts npm ≥ 11.5.1 before
 it tries: older npm cannot publish without a token, and the point of this
 lane is that it holds none.
@@ -539,7 +539,7 @@ so it never carries a second copy of the target set, and it fails if any
 The tap write mints its **own** App token. `create-github-app-token` scopes
 an installation token to the current repository by default, so the token
 that cuts the Release 404s against the tap; the tap token names
-`repositories: homebrew-tap` explicitly. It is minted *before* the cut, so a
+`repositories: homebrew-tap` explicitly. It is minted _before_ the cut, so a
 tap that is unreachable fails the release rather than stranding it
 half-published. The tap repository and the `guardian-promotions`
 App-installation grant on it are declared in the `guardian-github` tofu root
@@ -601,19 +601,19 @@ promotion so the gate reads a verdict rather than racing one. It resolves
 `:edge` anonymously, computes the digest from the manifest bytes in hand
 rather than trusting a header, and records these checks:
 
-| check | assertion |
-|---|---|
-| `edge_resolved` | `:edge` resolves and its manifest is readable |
-| `layers` | every layer blob matches its digest and all four targets are present with a bundle each |
-| `binaries_digest` | the four binaries re-hash to the manifest's `org.guardian.binaries-digest` |
-| `image_signature` | `cosign verify` against the canonical identity |
-| `blob_signatures` | `cosign verify-blob` on all four bundles |
-| `structure` | object magic plus the machine/cputype word matches the target the directory name claims |
-| `version` | the native binary prints `postflight version <semver>` |
-| `device_flow` | a real device-code request against the live issuer prints its one-time code |
-| `auth_status_live` | `auth status` on a credential the issuer never minted reports the session ended and removes it |
-| `auth_status_offline` | `auth status` against an unreachable issuer errors and leaves the credential in place |
-| `auth_logout` | `auth logout` ends the session and removes the credential |
+| check                 | assertion                                                                                      |
+| --------------------- | ---------------------------------------------------------------------------------------------- |
+| `edge_resolved`       | `:edge` resolves and its manifest is readable                                                  |
+| `layers`              | every layer blob matches its digest and all four targets are present with a bundle each        |
+| `binaries_digest`     | the four binaries re-hash to the manifest's `org.guardian.binaries-digest`                     |
+| `image_signature`     | `cosign verify` against the canonical identity                                                 |
+| `blob_signatures`     | `cosign verify-blob` on all four bundles                                                       |
+| `structure`           | object magic plus the machine/cputype word matches the target the directory name claims        |
+| `version`             | the native binary prints `postflight version <semver>`                                         |
+| `device_flow`         | a real device-code request against the live issuer prints its one-time code                    |
+| `auth_status_live`    | `auth status` on a credential the issuer never minted reports the session ended and removes it |
+| `auth_status_offline` | `auth status` against an unreachable issuer errors and leaves the credential in place          |
+| `auth_logout`         | `auth logout` ends the session and removes the credential                                      |
 
 The three session checks run against credentials the job forges, because a real
 one needs a browser approval this job cannot give. `auth_status_offline` is what
@@ -624,7 +624,7 @@ drift from the binary's compiled-in default —
 `TestDeeptestAuthIssuerMatchesTheCliDefault` holds them together, and
 `TestDeeptestRecordsTheAuthSessionChecks` keeps the checks from being dropped
 without their alerting. What they cannot prove is that signing out ends the
-session *at the issuer*: that needs a real approval to create a session to
+session _at the issuer_: that needs a real approval to create a session to
 end, and nothing automated performs one today.
 
 `structure` is read-only inspection and runs unconditionally. Execution does
@@ -686,7 +686,7 @@ would page on the first transient public-internet hiccup.
 The channel advances by departures, not by a wall clock. The promoter ticks
 every 15 minutes and departs when three things line up: the newest Freight
 that has **soaked** (existed for `SOAK_SECONDS`, 1h) is not the one the last
-*successful* promotion shipped, no attempt at it happened inside
+_successful_ promotion shipped, no attempt at it happened inside
 `RETRY_SECONDS`, and the last departure is at least `DEPARTURE_SECONDS`
 (6h) behind. A departure takes the newest soaked Freight, so commits landing
 between departures batch into one hop — and a new commit never delays a
@@ -723,14 +723,14 @@ verbatim, so a step added to the template is a step the next promotion runs.
 
 ### Alerts
 
-| Alert | Severity | Fires when |
-|---|---|---|
-| `GuardianCliInstallCanaryFailing` | critical | the same channel × method cell fails twice consecutively (13h window, ≥2 samples) |
-| `GuardianCliInstallCanarySilent` | warning | no install-matrix heartbeat for 13h |
-| `GuardianCliDeeptestFailing` | warning | `guardian_cli_deeptest_pass` is 0 for the digest `:edge` currently points at |
-| `GuardianCliDeeptestSilent` | warning | no deep-test heartbeat for 3h |
-| `GuardianCliDeeptestEventWriteFailing` | warning | the runner's ClickHouse INSERT is being rejected |
-| `GuardianCliNightlyPromoterSilent` | warning | no promoter heartbeat for 2h |
+| Alert                                  | Severity | Fires when                                                                        |
+| -------------------------------------- | -------- | --------------------------------------------------------------------------------- |
+| `GuardianCliInstallCanaryFailing`      | critical | the same channel × method cell fails twice consecutively (13h window, ≥2 samples) |
+| `GuardianCliInstallCanarySilent`       | warning  | no install-matrix heartbeat for 13h                                               |
+| `GuardianCliDeeptestFailing`           | warning  | `guardian_cli_deeptest_pass` is 0 for the digest `:edge` currently points at      |
+| `GuardianCliDeeptestSilent`            | warning  | no deep-test heartbeat for 3h                                                     |
+| `GuardianCliDeeptestEventWriteFailing` | warning  | the runner's ClickHouse INSERT is being rejected                                  |
+| `GuardianCliNightlyPromoterSilent`     | warning  | no promoter heartbeat for 2h                                                      |
 
 Only the install canary pages critical, and deliberately: it is the only
 loop watching what a user actually hits.
@@ -866,7 +866,7 @@ newly-pinned channel, in order:
   version the bytes do not carry cannot mint a misnamed release.
 
 It then stages assets, mints a short-lived `guardian-promotions` App token,
-creates the tag ref, and cuts the release. The App token is minted *after*
+creates the tag ref, and cuts the release. The App token is minted _after_
 the dedup check and is not `GITHUB_TOKEN` on purpose: App-authored releases
 fire `release:` workflows, which is what the npm and crates.io lanes ride.
 The tag ref is created before the release because the releases API 403s
@@ -885,7 +885,7 @@ grep — one that a same-bytes ladder makes load-bearing rather than
 ceremonial.
 
 Stable cannot work that way, and no amount of care makes it able to. The cut
-*is* a version change; a version change changes `CARGO_PKG_VERSION`, hence
+_is_ a version change; a version change changes `CARGO_PKG_VERSION`, hence
 the bytes, hence the binaries digest, hence the OCI digest. **Stable can
 never share a digest with the candidate it promotes.** Any rule that asks for
 digest equality across the cut — a symmetric lineage grep, an assert that the
@@ -902,9 +902,9 @@ So stable asserts the two things that stay checkable across a byte change:
   was published within the last seven days.
 
 What that buys, exactly, is worth stating flatly, because it is less than the
-word "soak" suggests. The ancestry check proves the candidate is *behind* the
+word "soak" suggests. The ancestry check proves the candidate is _behind_ the
 stable build rather than beside it — not a fork, not a revert. The window
-proves the candidate was *published* recently. It does not bound how much
+proves the candidate was _published_ recently. It does not bound how much
 main history separates the two: publication recency is a property of the
 release, not of the commit it was built from, so a candidate published
 yesterday from a commit three weeks old satisfies the window exactly as well

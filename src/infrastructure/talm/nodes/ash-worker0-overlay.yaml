@@ -1,42 +1,14 @@
+# Stage one: reset only system SSD 362510FCEFF6 after exact approval.
+# Data SSD 362510FCEFD5 remains intact and is deliberately not declared as a pool.
+# Keep OpenBao ineligible until its existing static-seal key has been installed
+# and independently verified on this encrypted destination.
 machine:
-  kubelet:
-    # Registration-time identity is required for the dedicated taint. Talos'
-    # dynamic NodeApply controller is not authorized to mutate its own taints.
-    extraArgs:
-      node-labels: guardian.dev/dedicated=wum
-      register-with-taints: guardian.dev/dedicated=wum:NoSchedule
   install:
     diskSelector:
-      serial: "362510FCEFF6"
-    # This disposable worker deliberately uses ordinary Talos. Management
-    # control planes retain the shared Secure Boot installer default.
-    image: factory.talos.dev/metal-installer/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:89997784056d862a59c2a2d0f2fa78714a6c3ef76f34ef4f8d835dee829719d3
-  logging:
-    destinations:
-      - endpoint: tcp://10.8.0.200:5170
-        format: json_lines
-        extraTags:
-          node: ash-worker0
----
-# The chunkies durability volume: WAL segments + checkpoints for the
-# worlds this node serves (design of record: netcode spec, slices B-D).
-# Node-local by ruling — deliberately NOT in the LINSTOR mesh; contents
-# are expendable on reinstall (recovery re-seeds from the control
-# plane). Unencrypted by ruling: workers are fungible cattle holding
-# non-sensitive world state; only control-plane volumes carry customer
-# data and LUKS2. During a node rebuild FD5 is also the staging disk:
-# the volume stays pending until the staging wipe, then provisions on
-# reconcile.
-apiVersion: v1alpha1
-kind: UserVolumeConfig
-name: chunkies
-provisioning:
-  diskSelector:
-    match: disk.serial == "362510FCEFD5"
-  minSize: 800GiB
-  grow: true
-filesystem:
-  type: xfs
+      serial: 362510FCEFF6
+    image: factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.10@sha256:e892079895b227a83fd86c1249efbbc3684c61815e5b5efcffd3cc279e56703b
+  nodeLabels:
+    guardian.dev/openbao-static-seal: "false"
 ---
 apiVersion: v1alpha1
 kind: HostnameConfig
@@ -56,3 +28,8 @@ vlanID: 2140
 mtu: 1420
 addresses:
   - address: 10.8.0.14/24
+---
+apiVersion: v1alpha1
+kind: Layer2VIPConfig
+name: 10.8.0.250
+link: enp1s0f0.2140

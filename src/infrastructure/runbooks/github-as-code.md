@@ -57,7 +57,7 @@ break-glass only:
 ## First run is an import, not an apply
 
 The ruleset and the fleet repositories predate this root. A plan that
-proposes to *create* any of them means the import did not happen — stop and
+proposes to _create_ any of them means the import did not happen — stop and
 fix that, never let it create a second `main-protection`. The Homebrew tap
 is the one object born here: a create for `github_repository.homebrew_tap`
 is the expected plan until the first apply, and drift afterwards.

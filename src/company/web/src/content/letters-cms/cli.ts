@@ -38,14 +38,14 @@ async function login(): Promise<void> {
 }
 
 async function api(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      "content-type": "application/json",
-      ...init?.headers,
-    },
+  // Caller headers win; merged through Headers so every HeadersInit shape
+  // (record, tuple list, Headers instance) is honored.
+  const headers = new Headers({
+    authorization: `Bearer ${accessToken}`,
+    "content-type": "application/json",
   });
+  new Headers(init?.headers).forEach((value, name) => headers.set(name, value));
+  return fetch(`${BASE_URL}${path}`, { ...init, headers });
 }
 
 async function find(path: string): Promise<{ id: string } | undefined> {

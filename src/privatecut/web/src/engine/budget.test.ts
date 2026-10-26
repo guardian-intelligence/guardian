@@ -7,11 +7,12 @@ describe("planAudio", () => {
     expect(planAudio(5, DEFAULT_SIZE_LIMIT_BYTES, true)).toEqual({
       bitrate: 128_000,
       numberOfChannels: 2,
+      sampleRate: 48_000,
     });
   });
 
   it("steps down the ladder as duration grows", () => {
-    expect(planAudio(60, DEFAULT_SIZE_LIMIT_BYTES, true)).toEqual({
+    expect(planAudio(60, DEFAULT_SIZE_LIMIT_BYTES, true, "opus")).toEqual({
       bitrate: 64_000,
       numberOfChannels: 2,
     });
@@ -19,7 +20,7 @@ describe("planAudio", () => {
 
   it("drops to mono only when the budget is tight", () => {
     const plan = planAudio(120, DEFAULT_SIZE_LIMIT_BYTES, true);
-    expect(plan).toEqual({ bitrate: 48_000, numberOfChannels: 1 });
+    expect(plan).toEqual({ bitrate: 48_000, numberOfChannels: 1, sampleRate: 48_000 });
   });
 
   it("returns null without a source audio track", () => {

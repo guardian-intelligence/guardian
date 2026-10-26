@@ -1,5 +1,9 @@
 # WUM worker reinstall
 
+This is the historical disposable-worker procedure. The annual control-plane
+conversion uses `annual-controlplane-conversion.md`; do not apply this older
+worker profile to an annual control-plane node or wipe its preserved data SSD.
+
 This procedure wipes and rebuilds a disposable regional WUM worker in the
 `guardian-mgmt` Kubernetes cluster. Unlike the management control planes, this
 worker uses ordinary Talos with firmware Secure Boot disabled. It has no etcd
@@ -9,9 +13,9 @@ system-volume encryption is required.
 
 Current node:
 
-| Node | Latitude server | Public IP | Private IP | Talos disk serial | Staging disk serial |
-|---|---|---|---|---|---|
-| `ash-worker0` | `sv_EvjLaBxRQNoqy` | `206.223.228.99` | `10.8.0.14` | `362510FCEFF6` | `362510FCEFD5` |
+| Node          | Latitude server    | Public IP        | Private IP  | Talos disk serial | Staging disk serial |
+| ------------- | ------------------ | ---------------- | ----------- | ----------------- | ------------------- |
+| `ash-worker0` | `sv_EvjLaBxRQNoqy` | `206.223.228.99` | `10.8.0.14` | `362510FCEFF6`    | `362510FCEFD5`      |
 
 NVMe names are observations, never identities: this host has exchanged
 `nvme0n1` and `nvme1n1` assignments across reboots. Every destructive command
@@ -144,7 +148,7 @@ The rebuild is complete only when all of these pass after the full power cycle:
   reports module-signature enforcement.
 - The Talos system disk has serial `362510FCEFF6`; serial `362510FCEFD5`
   carries the provisioned `chunkies` user volume (`talosctl get volumestatus
-  u-chunkies` reports ready; the disk shows the Talos-provisioned XFS user
+u-chunkies` reports ready; the disk shows the Talos-provisioned XFS user
   volume — unencrypted by ruling, workers hold no sensitive data — never a
   foreign filesystem).
 - Kubernetes reports `ash-worker0` Ready with label

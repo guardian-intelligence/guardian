@@ -5,7 +5,7 @@
 policy: guardian-openbao-static-seal-hostpath
 cases:
   - name: openbao server pod mounts the static seal
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     object:
       apiVersion: v1
       kind: Pod
@@ -22,59 +22,59 @@ cases:
             image: ghcr.io/guardian-intelligence/openbao@sha256:0000000000000000000000000000000000000000000000000000000000000000
         volumes:
           - name: static-seal
-            hostPath: {path: /var/lib/guardian/openbao/static-seal, type: Directory}
+            hostPath: { path: /var/lib/guardian/openbao/static-seal, type: Directory }
     expect: allow
   - name: foreign pod mounts the static seal path
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     object:
       apiVersion: v1
       kind: Pod
-      metadata: {name: intruder, namespace: guardian-analytics}
+      metadata: { name: intruder, namespace: guardian-analytics }
       spec:
         containers:
           - name: main
             image: busybox
         volumes:
           - name: steal
-            hostPath: {path: /var/lib/guardian/openbao/static-seal}
+            hostPath: { path: /var/lib/guardian/openbao/static-seal }
     expect: deny
   - name: parent-directory mount reaches the seal
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     object:
       apiVersion: v1
       kind: Pod
-      metadata: {name: traversal, namespace: guardian-analytics}
+      metadata: { name: traversal, namespace: guardian-analytics }
       spec:
         containers:
           - name: main
             image: busybox
         volumes:
           - name: parent
-            hostPath: {path: /var/lib/guardian/openbao}
+            hostPath: { path: /var/lib/guardian/openbao }
     expect: deny
   - name: unrelated hostPath in tenant-guardian
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     object:
       apiVersion: v1
       kind: Pod
-      metadata: {name: sidecar, namespace: tenant-guardian}
+      metadata: { name: sidecar, namespace: tenant-guardian }
       spec:
         containers:
           - name: main
             image: busybox
         volumes:
           - name: host-logs
-            hostPath: {path: /var/log}
+            hostPath: { path: /var/log }
     expect: deny
   - name: privileged container in tenant-guardian
-    resource: {group: "", version: v1, resource: pods}
+    resource: { group: "", version: v1, resource: pods }
     object:
       apiVersion: v1
       kind: Pod
-      metadata: {name: privileged, namespace: tenant-guardian}
+      metadata: { name: privileged, namespace: tenant-guardian }
       spec:
         containers:
           - name: main
             image: busybox
-            securityContext: {privileged: true}
+            securityContext: { privileged: true }
     expect: deny

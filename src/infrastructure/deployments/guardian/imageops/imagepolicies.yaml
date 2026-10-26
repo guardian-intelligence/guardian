@@ -26,7 +26,7 @@ spec:
   imageRepositoryRef:
     name: company-site
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc
@@ -55,7 +55,7 @@ spec:
   imageRepositoryRef:
     name: payments
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc
@@ -84,7 +84,7 @@ spec:
   imageRepositoryRef:
     name: payments-canary
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc
@@ -113,7 +113,7 @@ spec:
   imageRepositoryRef:
     name: postflight-controlplane
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc
@@ -142,7 +142,7 @@ spec:
   imageRepositoryRef:
     name: privatecut-web
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc
@@ -171,7 +171,36 @@ spec:
   imageRepositoryRef:
     name: anveio-cal
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
+  policy:
+    alphabetical:
+      order: asc
+  digestReflectionPolicy: Always
+  interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: anveio-web
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  image: ghcr.io/guardian-intelligence/anveio-web
+  interval: 1m0s
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: anveio-web
+  namespace: guardian-imageops
+  labels:
+    app.kubernetes.io/part-of: guardian
+spec:
+  imageRepositoryRef:
+    name: anveio-web
+  filterTags:
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc
@@ -200,7 +229,7 @@ spec:
   imageRepositoryRef:
     name: alert-relay
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc
@@ -229,7 +258,7 @@ spec:
   imageRepositoryRef:
     name: analytics-ingest
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc
@@ -258,7 +287,7 @@ spec:
   imageRepositoryRef:
     name: authorization
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc
@@ -287,7 +316,7 @@ spec:
   imageRepositoryRef:
     name: wake-up-mythra-web
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc
@@ -316,7 +345,7 @@ spec:
   imageRepositoryRef:
     name: chunkies-gateway
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc
@@ -345,7 +374,7 @@ spec:
   imageRepositoryRef:
     name: chunkies-chunkie
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc
@@ -374,7 +403,7 @@ spec:
   imageRepositoryRef:
     name: feature-flags-notify
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc
@@ -403,7 +432,7 @@ spec:
   imageRepositoryRef:
     name: tofu-runner
   filterTags:
-    pattern: '^edge$'
+    pattern: "^edge$"
   policy:
     alphabetical:
       order: asc

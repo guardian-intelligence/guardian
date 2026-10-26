@@ -78,7 +78,7 @@ spec:
             exported_instance: prod/sign-in
           annotations:
             summary: "Most sign-in attempts are failing in prod"
-            description: "More than half of the login attempts through the Guardian realm in the last 10 minutes failed (minimum 4 attempts). Split keycloak_user_events_total{event=\"login\",error!=\"\"} by idp and error to localize: idp=\"github\" points at the broker or GitHub, no idp points at the realm or its database."
+            description: 'More than half of the login attempts through the Guardian realm in the last 10 minutes failed (minimum 4 attempts). Split keycloak_user_events_total{event="login",error!=""} by idp and error to localize: idp="github" points at the broker or GitHub, no idp points at the realm or its database.'
         - alert: KeycloakScrapeDown
           expr: up{namespace="tenant-guardian-prod",job="keycloak-metrics"} == 0
           for: 5m

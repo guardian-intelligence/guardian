@@ -36,3 +36,28 @@ spec:
               trace_id to guardian_analytics.otel_traces (ServiceName
               privatecut-web) for the resolve → syndication spans and the serving
               image in ResourceAttributes.
+        # Encodes run entirely in the visitor's browser, so their failures
+        # exist only as beacon events: encode_failed when the engine reports
+        # one (failed, stalled, worker-lost), encode_abandoned when a page
+        # died or was left mid-encode and the next load reported it. Traffic
+        # is low enough that two in an hour is a pattern, not noise.
+        - alert: PrivateCutEncodeFailures
+          expr: >-
+            sum(increase(analytics_ingest_events_by_name_total{site="rumi.engineering",event_name=~"privatecut.encode_failed|privatecut.encode_abandoned"}[1h]))
+            >= 2
+          labels:
+            severity: warning
+            guardian_stage: prod
+          annotations:
+            summary: "Clip encodes failing on rumi.engineering"
+            description: >-
+              Encodes failing in visitors' browsers since @pt:{{ $activeAt.Unix }}@
+              — {{ printf "%.0f" $value }} failed or abandoned encodes in the
+              last hour on rumi.engineering. In guardian_analytics.events,
+              privatecut.encode_failed carries props.kind (failed, stalled,
+              worker-lost), props.stage, props["error.type"] and
+              props.pass_trail; privatecut.encode_abandoned carries
+              props.reason (page_lost = the tab crashed, page_left = the
+              person left mid-encode) and props.context_lost. Group by
+              trace_id to read one encode's started → pass → outcome story,
+              and check privatecut.gpu_context_lost for GPU-process crashes.

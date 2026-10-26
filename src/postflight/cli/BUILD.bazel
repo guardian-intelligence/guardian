@@ -92,10 +92,16 @@ sh_test(
     ],
 )
 
+# Hangs on macOS at the temp-home cleanup until the 60s timeout; it runs on
+# Linux (CI) only.
 sh_test(
     name = "installer_test",
     size = "small",
     srcs = ["installer_test.sh"],
+    target_compatible_with = select({
+        "@platforms//os:macos": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     args = [
         "$(rootpath dist/install.sh)",
         "$(rootpath testdata/releases-mixed/page-1.json)",

@@ -105,7 +105,9 @@ async function assertExport(
     return {
       mimeType: response.headers.get("content-type"),
       size: bytes.byteLength,
-      head: [...bytes.slice(0, 16)].map((byte) => byte.toString(16).padStart(2, "0")).join(""),
+      head: Array.from(bytes.subarray(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join(
+        "",
+      ),
     };
   });
   expect(artifact.mimeType).toBe(mimeType);

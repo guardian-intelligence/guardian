@@ -1,7 +1,7 @@
 # Custody bundle lifecycle
 
 The custody bundle is the irreducible root of trust: the members whose
-*changes* require reading them, which is exactly why no write-only path can
+_changes_ require reading them, which is exactly why no write-only path can
 replace it. It holds nothing routine — every other secret class lives in a
 tier with an open write path (`docs/secrets.md`). The encrypted restic
 repository is the only at-rest form; plaintext exists in exactly one place —
@@ -16,19 +16,19 @@ The manifest lives in `src/infrastructure/cmd/custody/main.go` and `create`
 fails closed: a bundle missing any required member is refused, because a
 bundle that would be trusted and useless is worse than none.
 
-| bundle path | what it is |
-| --- | --- |
-| `talm/secrets.yaml` | Talos genesis secrets (machine/k8s/etcd CAs, service-account keys) |
-| `talm/talm.key` | age key decrypting the `.encrypted` Talm variants |
-| `talm/talosconfig` | Talos API client credentials |
-| `linstor/master-passphrase` | LINSTOR master passphrase; losing it makes every native LUKS volume unrecoverable |
-| `openbao/unseal-<sha256>.key` | OpenBao static-seal key; content hash must match the filename fingerprint |
-| `openbao/metadata.json` | seal-key metadata |
+| bundle path                   | what it is                                                                        |
+| ----------------------------- | --------------------------------------------------------------------------------- |
+| `talm/secrets.yaml`           | Talos genesis secrets (machine/k8s/etcd CAs, service-account keys)                |
+| `talm/talm.key`               | age key decrypting the `.encrypted` Talm variants                                 |
+| `talm/talosconfig`            | Talos API client credentials                                                      |
+| `linstor/master-passphrase`   | LINSTOR master passphrase; losing it makes every native LUKS volume unrecoverable |
+| `openbao/unseal-<sha256>.key` | OpenBao static-seal key; content hash must match the filename fingerprint         |
+| `openbao/metadata.json`       | seal-key metadata                                                                 |
 
 Deliberately excluded: minted kubeconfigs (re-derivable from `talosconfig`,
 and including them would replicate live credentials), the `.encrypted` Talm
 variants (ciphertext derivable from the plaintext + `talm.key`), drill logs,
-and the custody README (it is the *locations* log and must stay readable
+and the custody README (it is the _locations_ log and must stay readable
 without the bundle password). Operational values — provider keys, R2
 credentials, integration secrets — live in the bootstrap set and OpenBao
 (`docs/secrets.md`), never here.
@@ -138,10 +138,11 @@ leaked:
   `aspect infra auth --persona=root --reason "post-rotation verification"`,
   then `create` a new snapshot. Rehearse this before it is needed — it is a
   drill like any other.
+
 - **the unseal key** — rotate the static seal per
   `openbao-static-seal-self-init.md`, then re-bundle.
 - **the restic repository password** — `restic key add` a new key, `restic
-  key remove` the exposed one, re-push to R2, and refresh the local pulls
+key remove` the exposed one, re-push to R2, and refresh the local pulls
   (old media still honor the removed key's ciphertext).
 
 In every case, finish by writing down what leaked, when, and what was

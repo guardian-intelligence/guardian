@@ -278,7 +278,7 @@ spec:
             severity: warning
             guardian_component: remediator
           annotations:
-            summary: 'Self-healing is looping: {{ $labels.action }} ran {{ $value }} times in 6h'
+            summary: "Self-healing is looping: {{ $labels.action }} ran {{ $value }} times in 6h"
             description: >-
               The remediator keeps restarting the Kargo controller and the
               wedge keeps returning. Automatic recovery is masking a live
@@ -292,7 +292,7 @@ spec:
             severity: warning
             guardian_component: remediator
           annotations:
-            summary: 'guardian-remediator has pushed no check samples for 30m'
+            summary: "guardian-remediator has pushed no check samples for 30m"
             description: >-
               The remediator CronJob is not running or cannot reach
               vminsert; wedge auto-recovery is offline.
