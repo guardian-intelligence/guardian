@@ -38,6 +38,8 @@ on:
       - "vite.config.ts"
       - "tsconfig.json"
       - ".npmrc"
+      - ".changeset/**"
+      - "scripts/**"
       - ".github/scripts/classify_images.py"
       - "src/proto/**"
       - "go.mod"

@@ -37,8 +37,12 @@ images. Keep the PR in draft until the operator approves those effects.
   is already merged at `7066dd5ea3eb1eab18d46015d8d572a3d98163b6`.
   Its root pnpm changes triggered the image workflow but selected no images.
   This change makes those inputs select all five web images, with regression
-  tests in the universal Bazel gate. Source convergence alone does not prove
-  that the running web images contain the fix.
+  tests in the universal Bazel gate. The October 24 image run at
+  `a6cc13104cfdcf090fb13b16c43d9a090b3acb68` subsequently rebuilt only
+  `anveio-web`. Its published digest
+  `sha256:1d2caaf6d2cca68fea70ffb212b959aed194421694d86a43178170d5c036afd9`
+  matches all three running Anveio web pods. That source includes #1611. The
+  other web images still need publication and deployed-digest verification.
 
 ## Approval and execution
 

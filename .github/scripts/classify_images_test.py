@@ -16,7 +16,8 @@ class ClassifyImagesTest(unittest.TestCase):
     def test_root_web_inputs_rebuild_all_web_images(self):
         for path in ["pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json",
                      "patches/dependency.patch", "tsconfig.base.json", "tsconfig.json",
-                     "vite.config.ts", ".npmrc"]:
+                     "vite.config.ts", ".npmrc", ".changeset/config.json",
+                     ".changeset/security.md", "scripts/check-release-hygiene.ts"]:
             with self.subTest(path=path):
                 self.assertEqual(self.names([path]), WEB_IMAGES)
 
@@ -57,7 +58,8 @@ class ClassifyImagesTest(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/images.yml").read_text()
         self.assertIn("run: python3 .github/scripts/classify_images.py", workflow)
         for path in ["pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json", "patches/**",
-                     "tsconfig.base.json", "tsconfig.json", "vite.config.ts", ".npmrc"]:
+                     "tsconfig.base.json", "tsconfig.json", "vite.config.ts", ".npmrc",
+                     ".changeset/**", "scripts/**"]:
             with self.subTest(path=path):
                 self.assertIn(f'      - "{path}"', workflow)
 

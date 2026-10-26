@@ -44,7 +44,7 @@ TARGETS = {
 
 WEB_IMAGES = {"company-site", "privatecut-web", "wake-up-mythra-web", "anveio-cal", "anveio-web"}
 COMMON = re.compile(r"^(MODULE\.bazel(\.lock)?|\.bazelrc|\.bazelversion|\.github/workflows/images\.yml|\.github/scripts/classify_images\.py)$")
-WEB_COMMON = re.compile(r"^(pnpm-(lock|workspace)\.yaml|package\.json|tsconfig(\.base)?\.json|vite\.config\.ts|\.npmrc)$|^patches/")
+WEB_COMMON = re.compile(r"^(pnpm-(lock|workspace)\.yaml|package\.json|tsconfig(\.base)?\.json|vite\.config\.ts|\.npmrc)$|^(patches|scripts|\.changeset)/")
 
 
 def classify(paths, all_images=False):
