@@ -149,7 +149,7 @@ overrides:
   js-yaml@>=4.0.0 <4.2.0: 4.3.2
   read-yaml-file@<2.1.0: 2.1.0
   vite: npm:@voidzero-dev/vite-plus-core@1.1.0
-  vite@>=8.0.0 <=8.0.15: 8.1.5
+  vite@>=8.0.0 <=8.0.15: 8.1.6
   vitest: 4.1.12
   '@vitest/mocker@<4.1.12': 4.1.12
   tinypool@>=2.0.0 <2.1.2: 2.1.2
@@ -1786,7 +1786,7 @@ packages:
   '@tailwindcss/vite@4.2.2':
     resolution: {integrity: sha512-mEiF5HO1QqCLXoNEfXVA1Tzo+cYsrqV7w9Juj2wdUFyW07JRenqMG225MvPwr3ZD9N1bFQj46X7r33iHxLUW0w==}
     peerDependencies:
-      vite: 8.1.5
+      vite: 8.1.6
 
   '@tanstack/history@1.162.4':
     resolution: {integrity: sha512-utTS5L2OkeYUzXGohL1Z8sefu1GLNOJcxe8Hd6iIdc/Xo1K1nDB2JEp4iSFhvYh33xKC9V91TxrS8qfrpoKobQ==}
@@ -1838,7 +1838,7 @@ packages:
       '@vitejs/plugin-rsc': '*'
       react: '>=18.0.0 || >=19.0.0'
       react-dom: '>=18.0.0 || >=19.0.0'
-      vite: 8.1.5
+      vite: 8.1.6
     peerDependenciesMeta:
       '@rsbuild/core':
         optional: true
@@ -1867,7 +1867,7 @@ packages:
     peerDependencies:
       '@rsbuild/core': '>=1.0.2 || ^2.0.0'
       '@tanstack/react-router': ^1.170.41
-      vite: 8.1.5
+      vite: 8.1.6
       vite-plugin-solid: ^2.11.10 || ^3.0.0-0
       webpack: '>=5.92.0'
     peerDependenciesMeta:
@@ -1899,7 +1899,7 @@ packages:
     engines: {node: '>=22.12.0'}
     peerDependencies:
       '@rsbuild/core': ^2.0.0
-      vite: 8.1.5
+      vite: 8.1.6
     peerDependenciesMeta:
       '@rsbuild/core':
         optional: true
@@ -1989,7 +1989,7 @@ packages:
     peerDependencies:
       '@rolldown/plugin-babel': ^0.1.7 || ^0.2.0
       babel-plugin-react-compiler: ^1.0.0
-      vite: 8.1.5
+      vite: 8.1.6
     peerDependenciesMeta:
       '@rolldown/plugin-babel':
         optional: true
@@ -2013,7 +2013,7 @@ packages:
     resolution: {integrity: sha512-fKShNpKZzupWZuY0z7egydvL0sqW4INEZBEExMBMAa6izlENEVHwoXgdaTCaBZ5fwlr4xf2o1wXC83n9RpO+NA==}
     peerDependencies:
       msw: ^2.4.9
-      vite: 8.1.5
+      vite: 8.1.6
     peerDependenciesMeta:
       msw:
         optional: true
@@ -2024,7 +2024,7 @@ packages:
     resolution: {integrity: sha512-T8sWAIbkSyAjkwTcaEc3Iu0o9A27X1/kdXrizhZkGuSKScRQtRzclfAMpOTcGdXCsqxeWlpGy3XjqaW8CpLORg==}
     peerDependencies:
       msw: ^2.4.9
-      vite: 8.1.5
+      vite: 8.1.6
     peerDependenciesMeta:
       msw:
         optional: true
@@ -2990,7 +2990,7 @@ packages:
       giget: '*'
       jiti: ^2.7.0
       rollup: ^4.61.1
-      vite: 8.1.5
+      vite: 8.1.6
       xml2js: ^0.6.2
       zephyr-agent: ^0.2.0
     peerDependenciesMeta:
@@ -3390,7 +3390,7 @@ packages:
       rolldown: '*'
       rollup: '*'
       unloader: '*'
-      vite: 8.1.5
+      vite: 8.1.6
       webpack: '*'
     peerDependenciesMeta:
       '@farmfe/core':
@@ -3524,7 +3524,7 @@ packages:
   vitefu@1.1.3:
     resolution: {integrity: sha512-ub4okH7Z5KLjb6hDyjqrGXqWtWvoYdU3IGm/NorpgHncKoLTCfRIbvlhBm7r0YstIaQRYlp4yEbFqDcKSzXSSg==}
     peerDependencies:
-      vite: 8.1.5
+      vite: 8.1.6
     peerDependenciesMeta:
       vite:
         optional: true
@@ -3545,7 +3545,7 @@ packages:
       '@vitest/ui': 4.1.12
       happy-dom: '*'
       jsdom: '*'
-      vite: 8.1.5
+      vite: 8.1.6
     peerDependenciesMeta:
       '@edge-runtime/vm':
         optional: true
