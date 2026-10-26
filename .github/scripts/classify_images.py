@@ -48,6 +48,10 @@ WEB_COMMON = re.compile(r"^(pnpm-(lock|workspace)\.yaml|package\.json|tsconfig(\
 
 
 def classify(paths, all_images=False):
+    # Game deployment manifests live beside their sources. Image automation
+    # edits them after publication; rebuilding on those edits feeds promotion
+    # back into publication, which can loop for non-reproducible web outputs.
+    paths = [path for path in paths if not re.match(r"^src/games/[^/]+/deploy/", path)]
     selected = []
     for name, pattern in WATCH.items():
         def matches(path):
