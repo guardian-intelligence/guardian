@@ -94,6 +94,19 @@ sh_test(
 )
 
 py_test(
+    name = "classify_images_test",
+    srcs = [
+        ".github/scripts/classify_images.py",
+        ".github/scripts/classify_images_test.py",
+    ],
+    imports = [".github/scripts"],
+    main = ".github/scripts/classify_images_test.py",
+    data = [".github/workflows/images.yml"],
+    size = "small",
+    python_version = "3.12",
+)
+
+py_test(
     name = "dependency_snapshot_test",
     srcs = [
         ".github/scripts/dependency_snapshot.py",

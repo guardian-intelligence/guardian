@@ -21,6 +21,7 @@ on:
       - "src/payments/**"
       - "src/flags/notify/**"
       - "src/chunkies/**"
+      - "src/games/**"
       - "src/infrastructure/cmd/tofu_runner/**"
       - "src/analytics/**"
       - "src/company/**"
@@ -35,6 +36,9 @@ on:
       - "patches/**"
       - "tsconfig.base.json"
       - "vite.config.ts"
+      - "tsconfig.json"
+      - ".npmrc"
+      - ".github/scripts/classify_images.py"
       - "src/proto/**"
       - "go.mod"
       - "go.sum"
@@ -69,79 +73,7 @@ jobs:
 
       - name: Classify the diff
         id: classify
-        run: |
-          names=(alert-relay analytics-ingest authorization
-            chunkies-gateway chunkies-chunkie feature-flags-notify payments payments-canary
-            postflight-controlplane tofu-runner company-site privatecut-web
-            wake-up-mythra-web anveio-cal anveio-web)
-          declare -A watch=(
-            [alert-relay]='^src/alerting/'
-            [analytics-ingest]='^src/analytics/|^src/proto/'
-            [authorization]='^src/authorization/|^src/proto/guardian/authorization/|^src/proto/gen/go/guardian/authorization/'
-            [chunkies-gateway]='^src/chunkies/|^src/games/'
-            [chunkies-chunkie]='^src/chunkies/|^src/games/'
-            [payments]='^src/payments/'
-            [payments-canary]='^src/payments/'
-            [postflight-controlplane]='^src/postflight/(controlplane|canaryloop|hostd/syncproto)/'
-            [feature-flags-notify]='^src/flags/notify/'
-            [tofu-runner]='^src/infrastructure/cmd/tofu_runner/'
-            [company-site]='^src/company/web/|^src/shared/ts/(brand|telemetry)/'
-            [privatecut-web]='^src/privatecut/web/|^src/shared/ts/(brand|telemetry)/'
-            [wake-up-mythra-web]='^src/games/wake-up-mythra/|^src/chunkies/|^src/shared/ts/telemetry/'
-            [anveio-cal]='^src/anveio/cal/'
-            [anveio-web]='^src/anveio/web/|^src/shared/ts/brand/'
-          )
-          declare -A push_target=(
-            [alert-relay]='//src/alerting/relay:push'
-            [analytics-ingest]='//src/analytics/ingest:push'
-            [authorization]='//src/authorization:push'
-            [chunkies-gateway]='//src/chunkies:chunkies_gateway_push'
-            [chunkies-chunkie]='//src/chunkies:chunkies_chunkie_push'
-            [payments]='//src/payments:push'
-            [payments-canary]='//src/payments/canary:push'
-            [postflight-controlplane]='//src/postflight/controlplane:push'
-            [feature-flags-notify]='//src/flags/notify:push'
-            [tofu-runner]='//src/infrastructure/cmd/tofu_runner:push'
-            [company-site]='//src/company/web/site:push'
-            [privatecut-web]='//src/privatecut/web/site:push'
-            [wake-up-mythra-web]='//src/games/wake-up-mythra/web/site:push'
-            [anveio-cal]='//src/anveio/cal/site:push'
-            [anveio-web]='//src/anveio/web/site:push'
-          )
-          go_images=' alert-relay analytics-ingest authorization chunkies-gateway chunkies-chunkie feature-flags-notify payments payments-canary postflight-controlplane tofu-runner '
-          common='^MODULE\.bazel$|^MODULE\.bazel\.lock$|^\.bazelrc$|^\.bazelversion$|^\.github/workflows/images\.yml$'
-
-          all=false changed=""
-          if [[ "${{ github.event_name }}" == "push" ]]; then
-            base="${{ github.event.before }}"
-            if [[ "$base" =~ ^0+$ ]] || ! git cat-file -e "$base" 2>/dev/null; then
-              all=true
-            else
-              changed="$(git diff --name-only "$base" HEAD)"
-            fi
-          else
-            all=true
-          fi
-
-          hits() { printf '%s\n' "$changed" | grep -qE "$1"; }
-          selected=()
-          for name in "${names[@]}"; do
-            re="${watch[$name]}|$common"
-            case "$go_images" in *" $name "*) re="$re|^go\.(mod|sum)$" ;; esac
-            if [[ "$all" == true ]] || hits "$re"; then
-              selected+=("$name")
-            fi
-          done
-
-          images='[]'
-          if [[ ${#selected[@]} -gt 0 ]]; then
-            images="$(for name in "${selected[@]}"; do
-              jq -n --arg name "$name" --arg target "${push_target[$name]}" \
-                '{name: $name, target: $target}'
-            done | jq -sc .)"
-          fi
-          echo "images=$images" >> "$GITHUB_OUTPUT"
-          echo "classified: images=$images"
+        run: python3 .github/scripts/classify_images.py
 
   # Push only for the canonical main history — not for workflow_dispatch on
   # arbitrary branches (a dispatch push would retag `edge` with bytes that
