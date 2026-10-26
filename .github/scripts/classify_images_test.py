@@ -13,6 +13,15 @@ class ClassifyImagesTest(unittest.TestCase):
     def names(self, paths, **kwargs):
         return {image["name"] for image in classify(paths, **kwargs)}
 
+    def workflow_triggers(self, path):
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/images.yml").read_text()
+        patterns = [line.split('"')[1] for line in workflow.splitlines() if line.startswith('      - "')]
+        selected = False
+        for pattern in patterns:
+            if fnmatch.fnmatchcase(path, pattern.removeprefix("!")):
+                selected = not pattern.startswith("!")
+        return selected
+
     def test_root_web_inputs_rebuild_all_web_images(self):
         for path in ["pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json",
                      "patches/dependency.patch", "tsconfig.base.json", "tsconfig.json",
@@ -45,6 +54,19 @@ class ClassifyImagesTest(unittest.TestCase):
         self.assertEqual(classify(["src/infrastructure/deployments/anveio/prod/web.yaml",
                                    "docs/dependency-management.md"]), [])
 
+    def test_game_deployment_promotions_do_not_trigger_or_publish(self):
+        for path in ["src/games/wake-up-mythra/deploy/prod/web.yaml",
+                     "src/games/wake-up-mythra/deploy/prod/kustomization.yaml"]:
+            with self.subTest(path=path):
+                self.assertFalse(self.workflow_triggers(path))
+                self.assertEqual(classify([path]), [])
+
+    def test_game_source_and_promotion_still_publish_source_changes(self):
+        paths = ["src/games/wake-up-mythra/deploy/prod/web.yaml",
+                 "src/games/wake-up-mythra/client/game.ts"]
+        self.assertTrue(self.workflow_triggers(paths[1]))
+        self.assertEqual(self.names(paths), {"chunkies-gateway", "chunkies-chunkie", "wake-up-mythra-web"})
+
     def test_dispatch_and_new_branch_select_all(self):
         self.assertIsNone(changed_paths("workflow_dispatch", {}))
         self.assertIsNone(changed_paths("push", {"before": "0" * 40}))
@@ -64,8 +86,6 @@ class ClassifyImagesTest(unittest.TestCase):
                 self.assertIn(f'      - "{path}"', workflow)
 
     def test_service_inputs_also_trigger_the_workflow(self):
-        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/images.yml").read_text()
-        triggers = [line.split('"')[1] for line in workflow.splitlines() if line.startswith('      - "')]
         for path in ["src/alerting/relay/main.go", "src/analytics/ingest/main.go",
                      "src/authorization/main.go", "src/chunkies/gateway/gateway.go",
                      "src/games/wake-up-mythra/client/game.ts", "src/payments/main.go",
@@ -76,7 +96,7 @@ class ClassifyImagesTest(unittest.TestCase):
                      "src/proto/guardian/authorization/v1/auth.proto"]:
             with self.subTest(path=path):
                 self.assertTrue(self.names([path]))
-                self.assertTrue(any(fnmatch.fnmatchcase(path, pattern) for pattern in triggers))
+                self.assertTrue(self.workflow_triggers(path))
 
     @patch("classify_images.subprocess.run")
     @patch("classify_images.subprocess.check_output")
