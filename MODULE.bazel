@@ -81,8 +81,8 @@ http_file(
 http_file(
     name = "cacert_pem",
     downloaded_file_path = "cacert.pem",
-    sha256 = "86a1f3366afac7c6f8ae9f3c779ac221129328c43f0ab2b8817eb2f362a5025c",
-    url = "https://curl.se/ca/cacert-2026-05-14.pem",
+    sha256 = "796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe",
+    url = "https://curl.se/ca/cacert-2026-10-20.pem",
 )
 
 # The OpenTofu binary the in-cluster tofu-runner image ships. It is pinned to
@@ -317,7 +317,7 @@ hauler_go_deps.module_override(
 use_repo(hauler_go_deps, "dev_hauler_go_hauler_v2")
 
 node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
-node.toolchain(node_version = "24.18.0")
+node.toolchain(node_version = "24.22.1")
 use_repo(node, "nodejs", "nodejs_toolchains")
 
 npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")

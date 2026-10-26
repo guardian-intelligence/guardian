@@ -3,6 +3,7 @@ load("@rules_go//go:def.bzl", "go_test")
 go_test(
     name = "tests",
     srcs = [
+        "ca_bundle_test.go",
         "admission_policy_harness_test.go",
         "alert_severity_contract_test.go",
         "alertmanager_auth_test.go",
@@ -47,7 +48,9 @@ go_test(
         "vm_rollup_wiring_test.go",
         "zot_sync_test.go",
     ],
+    args = ["-guardian-ca-bundle=$(rootpath @cacert_pem//file)"],
     data = glob(["fixtures/**"]) + [
+        "@cacert_pem//file",
         "//:.aspect/config.axl",
         "//:.aspect/lib/helpers.axl",
         "//:.aspect/tasks/infra.axl",

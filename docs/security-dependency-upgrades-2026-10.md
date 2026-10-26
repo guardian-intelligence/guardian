@@ -7,6 +7,8 @@ constraints are included; unrelated latest-version upgrades are excluded.
 | Area | Prepared fix | Reason |
 | --- | --- | --- |
 | Bazel Go compiler | 1.26.5 to 1.26.10 | [October Go security releases](https://go.dev/doc/devel/release) fix HTTP/2 and crypto/x509 issues. The patched Hauler containerd also requires Go 1.26.8 or later. |
+| Bazel and web runtime Node.js | 24.18.0 to 24.22.1 | [October Node.js security release](https://nodejs.org/en/blog/release/v24.22.1) fixes the eMudhra trust issue, TLS hostname validation and Brotli memory safety. Web image node layers consume this toolchain. |
+| Shared image CA bundle | Dated curl/Mozilla snapshot 2026-10-20 | Replace the May snapshot shipped in all five web images and tofu-runner; upstream removes the affected emSign roots. Verify actual certificate fingerprints in the Bazel gate. |
 | Hauler isolated module | containerd 2.3.6, chi 5.4.0, compress 1.18.7, gRPC 1.83.2 | Open advisories affect its old resolved dependencies. Preserve the Hauler 2.0.2 source pin, distribution replacement and isolation from the root module. Minimum-version selection also moves required patch dependencies. |
 | Postflight CLI | Rustls 0.23.45 and rustls-webpki 0.103.16 | [GHSA-2mjx-qc3c-rqvc](https://github.com/rustls/rustls/security/advisories/GHSA-2mjx-qc3c-rqvc): TLS handshake encryption-level validation. |
 | Benchmark Python environment | aiohttp 3.14.4, filelock 4.2.1, PyJWT 2.15.0, opentelemetry-api 1.45.1, mcp 1.30.0, multidict 6.9.1, urllib3 2.8.0 | Patch the current lockfile's reported affected ranges. Keep direct application dependency versions unchanged; include resolution-required companion updates. |
