@@ -98,6 +98,15 @@ export default {
           "no-restricted-imports": "off",
         },
       },
+      {
+        // anveio.com/upload renders in the browser only (ssr: false): its
+        // link, queue and receipts all live on the uploader's phone.
+        files: ["src/anveio/web/src/upload/**"],
+        rules: {
+          "no-restricted-globals": "off",
+          "no-restricted-imports": "off",
+        },
+      },
     ],
   },
   test: {

@@ -19,7 +19,8 @@
     "@tanstack/react-start": "catalog:",
     "nitro": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "valibot": "catalog:"
   },
   "devDependencies": {
     "@playwright/test": "catalog:",

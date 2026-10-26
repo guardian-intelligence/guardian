@@ -48,6 +48,7 @@ locals {
   backups_bucket_resource          = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-backups"
   payments_journal_bucket_resource = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-payments-journal"
   vault_bucket_resource            = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_guardian-vault"
+  anveio_footage_bucket_resource   = "com.cloudflare.edge.r2.bucket.${var.cloudflare_account_id}_default_anveio-footage"
 
   expires = {
     dns_lb_provisioner    = "2027-01-04T00:00:00Z"
@@ -58,6 +59,7 @@ locals {
     r2_bucket_provision   = "2027-01-04T00:00:00Z"
     r2_state              = "2027-01-04T00:00:00Z"
     mythra_acme_dns       = "2027-01-04T00:00:00Z"
+    anveio_footage        = "2027-01-04T00:00:00Z"
   }
 }
 
@@ -233,6 +235,85 @@ resource "cloudflare_account_token" "payments_journal_isolated" {
   ]
 
   depends_on = [cloudflare_r2_bucket.payments_journal]
+}
+
+# Anveio's raw field footage: supplier phones upload originals straight into
+# this bucket through presigned multipart URLs that anveio.com/upload mints,
+# so the video bytes never cross the Cloudflare proxy or the cluster. APAC
+# placement keeps the bucket near the uploaders in Bangladesh. The CORS rule
+# is what lets that page's PUTs land and read back each part's ETag.
+resource "cloudflare_r2_bucket" "anveio_footage" {
+  provider = cloudflare.r2
+
+  account_id    = var.cloudflare_account_id
+  name          = "anveio-footage"
+  location      = "apac"
+  storage_class = "Standard"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "cloudflare_r2_bucket_cors" "anveio_footage" {
+  provider = cloudflare.r2
+
+  account_id  = var.cloudflare_account_id
+  bucket_name = cloudflare_r2_bucket.anveio_footage.name
+
+  rules = [
+    {
+      allowed = {
+        methods = ["PUT"]
+        origins = ["https://anveio.com"]
+        headers = ["content-type"]
+      }
+      expose_headers  = ["ETag"]
+      max_age_seconds = 86400
+    },
+  ]
+}
+
+# Phones that vanish mid-upload leave multipart uploads behind; R2 drops any
+# still unfinished after a week (a resume after that starts the video over).
+resource "cloudflare_r2_bucket_lifecycle" "anveio_footage" {
+  provider = cloudflare.r2
+
+  account_id  = var.cloudflare_account_id
+  bucket_name = cloudflare_r2_bucket.anveio_footage.name
+
+  rules = [
+    {
+      id         = "abort-stale-multipart-uploads"
+      enabled    = true
+      conditions = { prefix = "" }
+      abort_multipart_uploads_transition = {
+        condition = { type = "Age", max_age = 604800 }
+      }
+    },
+  ]
+}
+
+# anveio-web's footage credential: presigns the uploaders' part PUTs and does
+# the multipart bookkeeping, receipt probes and manifests itself. Relayed into
+# OpenBao at kv/guardian/guardian-mgmt/tenant-guardian-prod/anveio/footage-r2.
+resource "cloudflare_account_token" "anveio_footage" {
+  account_id = var.cloudflare_account_id
+  name       = "anveio-footage-upload"
+  expires_on = local.expires.anveio_footage
+
+  policies = [
+    {
+      effect = "allow"
+      permission_groups = [
+        { id = local.permission_groups.r2_bucket_item_read },
+        { id = local.permission_groups.r2_bucket_item_write },
+      ]
+      resources = jsonencode({ (local.anveio_footage_bucket_resource) = "*" })
+    },
+  ]
+
+  depends_on = [cloudflare_r2_bucket.anveio_footage]
 }
 
 # Tofu state-backend credential (guardian-vault bucket only — tighter than
