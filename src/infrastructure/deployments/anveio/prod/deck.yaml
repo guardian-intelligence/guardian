@@ -55,7 +55,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web
-          image: ghcr.io/guardian-intelligence/anveio-web:edge@sha256:dba5951fcfaca81a394bc35c8925e5ee14ac72bdadf279fc56c024345cb06a9a # {"$imagepolicy": "guardian-imageops:anveio-web"}
+          image: ghcr.io/guardian-intelligence/anveio-web:edge@sha256:f422dbba3a4435fa8ebe808cf5464f5ab9b73fc8e61ce0b5099b0c397aac63c9 # {"$imagepolicy": "guardian-imageops:anveio-web"}
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
