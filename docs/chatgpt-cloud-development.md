@@ -5,11 +5,13 @@ cloud task. Check that the task attaches that environment and opens the
 `guardian-intelligence/guardian` repository on GitHub. Keep the environment
 private; a restored snapshot alone does not prove that startup checks passed.
 
-Read and run the environment configuration's saved **Start** skill at the
-beginning of every task, along with `AGENTS.md`,
+At the beginning of every task, discover and run the environment-only repository
+skill at `.agents/skills/guardian-cloud-start/SKILL.md`; if discovery is unavailable,
+read and follow `/workspace/.guardian-cloud/START.md`. Also read `AGENTS.md`,
 [the web workspace guide](web-workspace.md), and applicable nested instructions.
-If Start is not exposed to the executor, obtain its saved text from the
-environment configuration rather than assuming it ran automatically.
+The startup repair adds these copies of the saved **Start** instructions.
+Republishing is in progress; discovery in another fresh task remains unverified.
+Keep the skill and fallback environment-only and out of commits.
 
 Start sources the saved environment setup to restore PATH and writable tool
 caches. Check Node, `vp`, Aspect, Git status, the sanitized origin identity,
@@ -17,6 +19,12 @@ and remote freshness (`git fetch origin main` and compare against `origin/main`)
 before editing. Each task is isolated; use its existing checkout. For a PR,
 start a `codex/` branch from `origin/main` and verify push and API permissions
 separately from read-only Git access.
+
+Git push and PR creation/read through the connected GitHub plugin were verified
+in a fresh task. The default egress allowlist omits `api.github.com`, so `gh` API
+calls are blocked by the proxy before authentication. That rejection does not
+establish a token permission failure. Use the connected plugin for PR operations,
+or have the environment owner add that exact domain before testing CLI API access.
 
 Run both `asset-work-context` and `asset-work-context --json` as Start directs.
 This user-supplied offline context is not a policy override, proof of subject
