@@ -9,8 +9,13 @@ At the beginning of every task, discover and run the environment-only repository
 skill at `.agents/skills/guardian-cloud-start/SKILL.md`; if discovery is unavailable,
 read and follow `/workspace/.guardian-cloud/START.md`. Also read `AGENTS.md`,
 [the web workspace guide](web-workspace.md), and applicable nested instructions.
-The startup repair adds these copies of the saved **Start** instructions.
-Republishing is in progress; discovery in another fresh task remains unverified.
+A fresh task verified that both full copies of the saved **Start** instructions
+restore with valid skill frontmatter. The executor skill catalog was empty;
+automatic catalog exposure is not verified. The supported route is to inspect
+`.agents/skills` directly and read the skill, or use the stable fallback above,
+then source `/workspace/.guardian-cloud/env.sh` and run Start initialization.
+Both asset-context forms, tool PATH/versions, Git origin/freshness, and writable
+cache checks passed through this route in the fresh task.
 Keep the skill and fallback environment-only and out of commits.
 
 Start sources the saved environment setup to restore PATH and writable tool
