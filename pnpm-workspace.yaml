@@ -80,9 +80,9 @@ catalog:
   valibot: 1.4.2
   # Pinned to specific versions so the on-host Verdaccio mirror does not
   # have to keep up with @latest publish drift on every install.
-  vite: npm:@voidzero-dev/vite-plus-core@1.1.0
-  vite-plus: 1.1.0
-  vitest: 4.1.12
+  vite: npm:@voidzero-dev/vite-plus-core@1.3.0
+  vite-plus: 1.3.0
+  vitest: 5.0.5
   wawoff2: 2.0.1
   web-vitals: 4.2.4
   playwright: 1.62.1
@@ -145,12 +145,12 @@ minimumReleaseAgeExclude:
   - vitest@4.1.11
   # Renovate security update: @tanstack/react-start@1.168.60
   - "@tanstack/react-start@1.168.60"
-  # Renovate security update: vite-plus@1.1.0
-  - vite-plus@1.1.0
+  # Renovate security update: vite-plus@1.1.0 || 1.3.0
+  - vite-plus@1.1.0 || 1.3.0
 
   # Security fixes in the build and test dependency graph.
-  - "@voidzero-dev/vite-plus-core@1.1.0"
-  - vitest@4.1.12
+  - "@voidzero-dev/vite-plus-core@1.3.0"
+  - vitest@5.0.5
   - "@vitest/mocker@4.1.12"
   - tinypool@2.1.2
   - undici@6.29.1
