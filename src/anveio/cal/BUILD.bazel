@@ -30,7 +30,7 @@ genrule(
         ":node_modules",
         ":node_modules/vite-plus",
         ":sources",
-        "//:.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@1.1.0/dir",
+        "//:.aspect_rules_js/node_modules/@voidzero-dev+vite-plus-linux-x64-gnu@1.3.0/dir",
         "//:vp_node",
         "//:workspace_sources",
         ":node_modules/typescript",
