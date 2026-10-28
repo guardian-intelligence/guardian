@@ -19,8 +19,9 @@ read `docs/engineering-rules.md`, then only what your task routes to below.
 - **Postflight** — `docs/postflight-architecture.md` is the entry point and
   names its companions
   (`postflight-{product,fleet,host,scheduling,storage,security-model,runner-lifecycle,lightning,cli-distribution}.md`).
-- **Company site, letters, PrivateCut** — `docs/letters-cms.md` (letters live
-  in Directus, not Git), `docs/trace-correlation.md`, `docs/canaries.md`.
+- **Company site, letters, PrivateCut** — `docs/letters.md` (letters live
+  in the site's Postgres store, not Git, and are edited in place on the
+  site), `docs/trace-correlation.md`, `docs/canaries.md`.
 - **Identity and sign-in** — `docs/sign-in-with-guardian.md`;
   `docs/github-apps.md` for the first-party App inventory.
 - **Payments and billing** — `docs/payments.md`, `docs/tigerbeetle.md`,

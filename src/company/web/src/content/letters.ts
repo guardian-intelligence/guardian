@@ -1,9 +1,9 @@
 import type * as v from "valibot";
 import type { LetterFrontmatterSchema } from "./letter-schema";
 
-// Letters — Guardian's long-form. Authored in Directus (the Studio at
-// cms.guardianintelligence.org) and served from it at request time by
-// ./letters.server.ts. This module is the client-safe surface: the Letter
+// Letters — Guardian's long-form. Edited in place on the site
+// (/letters/$slug/edit), stored in the site's Postgres, and served at request
+// time by ./letters.server.ts. This module is the client-safe surface: the Letter
 // shape and the section metadata. Letter data only ever reaches the client
 // through route loaders.
 

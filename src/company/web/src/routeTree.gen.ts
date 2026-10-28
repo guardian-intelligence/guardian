@@ -38,6 +38,7 @@ import { Route as WorkshopDesignLettersRouteImport } from './routes/_workshop/de
 import { Route as WorkshopDesignNewsroomRouteImport } from './routes/_workshop/design/newsroom'
 import { Route as WorkshopDesignWorkshopRouteImport } from './routes/_workshop/design/workshop'
 import { Route as WorkshopPostflightDocsRouteImport } from './routes/_workshop/postflight/docs'
+import { Route as LettersSlugEditRouteImport } from './routes/letters/$slug_.edit'
 import { Route as OgLetterSlugRouteImport } from './routes/og/letter/$slug'
 import { Route as PostflightAuthCallbackRouteImport } from './routes/postflight.auth.callback'
 import { Route as PostflightAuthLoginRouteImport } from './routes/postflight.auth.login'
@@ -190,6 +191,11 @@ const WorkshopPostflightDocsRoute = WorkshopPostflightDocsRouteImport.update({
   path: '/postflight/docs',
   getParentRoute: () => WorkshopRouteRoute,
 } as any)
+const LettersSlugEditRoute = LettersSlugEditRouteImport.update({
+  id: '/$slug_/edit',
+  path: '/$slug/edit',
+  getParentRoute: () => LettersRouteRoute,
+} as any)
 const OgLetterSlugRoute = OgLetterSlugRouteImport.update({
   id: '/og/letter/$slug',
   path: '/og/letter/$slug',
@@ -255,6 +261,7 @@ export interface FileRoutesByFullPath {
   '/design/newsroom': typeof WorkshopDesignNewsroomRoute
   '/design/workshop': typeof WorkshopDesignWorkshopRoute
   '/postflight/docs': typeof WorkshopPostflightDocsRoute
+  '/letters/$slug/edit': typeof LettersSlugEditRoute
   '/og/letter/$slug': typeof OgLetterSlugRoute
   '/postflight/auth/callback': typeof PostflightAuthCallbackRoute
   '/postflight/auth/login': typeof PostflightAuthLoginRoute
@@ -289,6 +296,7 @@ export interface FileRoutesByTo {
   '/design/newsroom': typeof WorkshopDesignNewsroomRoute
   '/design/workshop': typeof WorkshopDesignWorkshopRoute
   '/postflight/docs': typeof WorkshopPostflightDocsRoute
+  '/letters/$slug/edit': typeof LettersSlugEditRoute
   '/og/letter/$slug': typeof OgLetterSlugRoute
   '/postflight/auth/callback': typeof PostflightAuthCallbackRoute
   '/postflight/auth/login': typeof PostflightAuthLoginRoute
@@ -328,6 +336,7 @@ export interface FileRoutesById {
   '/_workshop/design/newsroom': typeof WorkshopDesignNewsroomRoute
   '/_workshop/design/workshop': typeof WorkshopDesignWorkshopRoute
   '/_workshop/postflight/docs': typeof WorkshopPostflightDocsRoute
+  '/letters/$slug_/edit': typeof LettersSlugEditRoute
   '/og/letter/$slug': typeof OgLetterSlugRoute
   '/postflight/auth/callback': typeof PostflightAuthCallbackRoute
   '/postflight/auth/login': typeof PostflightAuthLoginRoute
@@ -367,6 +376,7 @@ export interface FileRouteTypes {
     | '/design/newsroom'
     | '/design/workshop'
     | '/postflight/docs'
+    | '/letters/$slug/edit'
     | '/og/letter/$slug'
     | '/postflight/auth/callback'
     | '/postflight/auth/login'
@@ -401,6 +411,7 @@ export interface FileRouteTypes {
     | '/design/newsroom'
     | '/design/workshop'
     | '/postflight/docs'
+    | '/letters/$slug/edit'
     | '/og/letter/$slug'
     | '/postflight/auth/callback'
     | '/postflight/auth/login'
@@ -439,6 +450,7 @@ export interface FileRouteTypes {
     | '/_workshop/design/newsroom'
     | '/_workshop/design/workshop'
     | '/_workshop/postflight/docs'
+    | '/letters/$slug_/edit'
     | '/og/letter/$slug'
     | '/postflight/auth/callback'
     | '/postflight/auth/login'
@@ -671,6 +683,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkshopPostflightDocsRouteImport
       parentRoute: typeof WorkshopRouteRoute
     }
+    '/letters/$slug_/edit': {
+      id: '/letters/$slug_/edit'
+      path: '/$slug/edit'
+      fullPath: '/letters/$slug/edit'
+      preLoaderRoute: typeof LettersSlugEditRouteImport
+      parentRoute: typeof LettersRouteRoute
+    }
     '/og/letter/$slug': {
       id: '/og/letter/$slug'
       path: '/og/letter/$slug'
@@ -773,11 +792,13 @@ const WorkshopRouteRouteWithChildren = WorkshopRouteRoute._addFileChildren(
 interface LettersRouteRouteChildren {
   LettersSlugRoute: typeof LettersSlugRoute
   LettersIndexRoute: typeof LettersIndexRoute
+  LettersSlugEditRoute: typeof LettersSlugEditRoute
 }
 
 const LettersRouteRouteChildren: LettersRouteRouteChildren = {
   LettersSlugRoute: LettersSlugRoute,
   LettersIndexRoute: LettersIndexRoute,
+  LettersSlugEditRoute: LettersSlugEditRoute,
 }
 
 const LettersRouteRouteWithChildren = LettersRouteRoute._addFileChildren(

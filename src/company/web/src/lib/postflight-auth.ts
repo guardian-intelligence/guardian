@@ -188,7 +188,9 @@ function safeReturnTo(value: string | null): string {
     !(
       value === "/postflight" ||
       value.startsWith("/postflight/") ||
-      value.startsWith("/postflight?")
+      value.startsWith("/postflight?") ||
+      // The letters editor signs in through the same session.
+      /^\/letters\/[a-z0-9-]+\/edit$/.test(value)
     )
   ) {
     return "/postflight/console";
