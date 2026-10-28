@@ -62,6 +62,9 @@ function sql(): postgres.Sql {
     max: 2,
     idle_timeout: 60,
     connect_timeout: 10,
+    // Server NOTICEs ("relation already exists, skipping" from the
+    // idempotent schema setup) are not events worth a log line.
+    onnotice: () => {},
   });
   return client;
 }
