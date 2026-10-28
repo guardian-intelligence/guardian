@@ -369,16 +369,16 @@
     "binaries": [
       {
         "kind": "archive",
-        "url": "https://github.com/oras-project/oras/releases/download/v1.3.3/oras_1.3.3_linux_amd64.tar.gz",
-        "sha256": "9ce999f8d2de03fc03968b29d743077a58783e545e5eaa53917ca177352d0e59",
+        "url": "https://github.com/oras-project/oras/releases/download/v1.3.6/oras_1.3.6_linux_amd64.tar.gz",
+        "sha256": "66fb0ad7206f3f6fa77ed5b552049d364ccf4b50b1684554f731f76302b52ca0",
         "os": "linux",
         "cpu": "x86_64",
         "file": "oras"
       },
       {
         "kind": "archive",
-        "url": "https://github.com/oras-project/oras/releases/download/v1.3.3/oras_1.3.3_darwin_arm64.tar.gz",
-        "sha256": "f33fc12753c54172b0d0d19eaa0318d3f90fe9b094d96e8b259c881713c92e1c",
+        "url": "https://github.com/oras-project/oras/releases/download/v1.3.6/oras_1.3.6_darwin_arm64.tar.gz",
+        "sha256": "e2b25a53234e2471c5fc81936f957fa612065ab559c21834c02d8bfbc2f62b30",
         "os": "macos",
         "cpu": "arm64",
         "file": "oras"
