@@ -1,14 +1,13 @@
 import * as v from "valibot";
 
-// status is the publish gate, Directus's standard draft/published field: a
-// draft stays in Directus, invisible to the anonymous role and to /letters,
-// until it is flipped to published in the Studio.
+// status is the publish gate: a draft renders only in the editor
+// (/letters/$slug/edit), never on /letters, until it is saved as published.
 export const LetterFrontmatterSchema = v.pipe(
   v.object({
     slug: v.pipe(v.string(), v.minLength(1)),
     title: v.pipe(v.string(), v.minLength(1)),
-    // YYYY-MM-DD only. Directus date fields serialize to this shape over the
-    // REST API, so anything else here is an authoring mistake worth surfacing.
+    // YYYY-MM-DD only: the store's date column reads back in this shape, so
+    // anything else here is an authoring mistake worth surfacing.
     publishedAt: v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/)),
     flare: v.pipe(v.string(), v.minLength(1)),
     // dispatch: a letter from the author to a younger self — a titled

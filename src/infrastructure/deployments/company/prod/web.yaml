@@ -63,10 +63,22 @@ spec:
           env:
             - name: GUARDIAN_SITE
               value: prod
-            # Runtime letters source: the SSR server fetches published
-            # letters from Directus (anonymous, permission-filtered) and
-            # serves last-good through CMS outages; /letters* is additionally
-            # edge-cached (guardian-mgmt-edge-policy cache rule).
+            # Runtime letters source: the site's own store in the products
+            # Postgres (database `letters`, schema owned by the site). The SSR
+            # server serves last-good through database outages; /letters* is
+            # additionally edge-cached (guardian-mgmt-edge-policy cache rule).
+            - name: LETTERS_DATABASE_HOST
+              value: postgres-products-rw.tenant-guardian-prod.svc
+            - name: LETTERS_DATABASE_SSL
+              value: require
+            - name: LETTERS_DATABASE_PASSWORD_FILE
+              value: /letters-db/password
+            # Keycloak account ids allowed to edit at /letters/$slug/edit.
+            # A signed-in non-editor is shown their id there to add here.
+            - name: LETTERS_EDITOR_SUBJECTS
+              value: ""
+            # One-time seed: an empty letters table imports the published
+            # letters Directus serves anonymously. Goes with Directus.
             - name: DIRECTUS_URL
               value: http://directus.tenant-guardian-prod.svc
             - name: POSTFLIGHT_PUBLIC_URL
@@ -128,7 +140,16 @@ spec:
             - name: auth-secrets
               mountPath: /auth-secrets
               readOnly: true
+            - name: letters-db
+              mountPath: /letters-db
+              readOnly: true
       volumes:
+        - name: letters-db
+          secret:
+            secretName: postgres-products-credentials
+            items:
+              - key: letters
+                path: password
         - name: auth-secrets
           projected:
             sources:

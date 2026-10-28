@@ -4,65 +4,37 @@ import { setResponseHeader } from "@tanstack/react-start/server";
 import { inkWrapHtml } from "~/features/letters/ink";
 import { LetterFrontmatterSchema } from "./letter-schema";
 import type { Letter } from "./letters";
+import { allLetterRecords, type LetterDraft } from "./letters-store.server";
 
-// Runtime letters source. The site reads published letters from Directus and
-// renders them at request time; there is no baked copy. Availability is
-// layered instead of duplicated: this module serves its last-good fetch
-// through any Directus failure, and the edge caches /letters* pages
-// (stale-if-error) so readers keep being served even when the origin is down.
+// Runtime letters source. The site reads letters from its own store
+// (letters-store.server.ts) and renders them at request time; there is no
+// baked copy. Availability is layered instead of duplicated: this module
+// serves its last-good read through any database failure, and the edge caches
+// /letters* pages (stale-if-error) so readers keep being served even when the
+// origin is down.
 //
-// DIRECTUS_URL          in-cluster service URL (web.yaml); localhost default
-//                       matches a `kubectl port-forward svc/directus 8055:80`
-// DIRECTUS_EMAIL, DIRECTUS_PASSWORD
-//                       local preview only (scripts/preview.sh): sign in on
-//                       every fetch so drafts are readable; the anonymous
-//                       role can only ever see published letters
-// DIRECTUS_INCLUDE_DRAFTS=true
+// LETTERS_INCLUDE_DRAFTS=true
 //                       local preview only: also render draft letters
 
-const FIELDS = [
-  "slug",
-  "title",
-  "publishedAt",
-  "flare",
-  "kind",
-  "status",
-  "author",
-  "authorTitle",
-  "description",
-  "note",
-  "body",
-] as const;
-
-// Directus returns null for unset fields; the schema wants them absent.
-const ItemSchema = v.record(v.string(), v.nullable(v.string()));
-
-function renderLetter(raw: unknown): Letter | null {
-  const item = v.safeParse(ItemSchema, raw);
-  if (!item.success) {
-    console.error(JSON.stringify({ msg: "letters: non-object item from Directus, skipped" }));
-    return null;
-  }
+export function renderLetter(record: LetterDraft): Letter | null {
   const frontmatter: Record<string, string> = {};
-  for (const key of FIELDS) {
-    if (key === "body") continue;
-    const value = item.output[key];
-    if (typeof value === "string" && value !== "") frontmatter[key] = value;
+  for (const [key, value] of Object.entries(record)) {
+    if (key !== "body" && typeof value === "string" && value !== "") frontmatter[key] = value;
   }
   const parsed = v.safeParse(LetterFrontmatterSchema, frontmatter);
   if (!parsed.success) {
-    // A bad Studio edit unpublishes that letter (its page 404s, which the
+    // An invalid row unpublishes that letter (its page 404s, which the
     // synthetic probes catch) instead of taking the whole shelf down.
     console.error(
       JSON.stringify({
         msg: "letters: invalid letter skipped",
-        slug: item.output["slug"] ?? "",
+        slug: record.slug,
         issues: parsed.issues.map((issue) => issue.message),
       }),
     );
     return null;
   }
-  const tokens = marked.lexer(item.output["body"] ?? "");
+  const tokens = marked.lexer(record.body);
   const flowTokens = tokens.filter((token) => token.type !== "space");
   const [leadToken, ...continuationTokens] = flowTokens;
   // Every rendered word of the letter wears its own ink (see
@@ -81,50 +53,12 @@ function renderLetter(raw: unknown): Letter | null {
   };
 }
 
-// Directus access tokens expire in minutes, so a long-running preview server
-// signs in per fetch (at most once per cache TTL) instead of holding one.
-async function previewToken(base: string): Promise<string | undefined> {
-  const email = process.env["DIRECTUS_EMAIL"]?.trim();
-  const password = process.env["DIRECTUS_PASSWORD"];
-  if (!email || !password) return undefined;
-  const response = await fetch(`${base}/auth/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, password }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) throw new Error(`letters: Directus login responded ${response.status}`);
-  const json = v.parse(
-    v.object({ data: v.object({ access_token: v.string() }) }),
-    await response.json(),
-  );
-  return json.data.access_token;
-}
-
 async function fetchLetters(): Promise<readonly Letter[]> {
-  const base = process.env["DIRECTUS_URL"]?.trim() || "http://127.0.0.1:8055";
-  const includeDrafts = process.env["DIRECTUS_INCLUDE_DRAFTS"] === "true";
-  const token = await previewToken(base);
-  const url = new URL(`${base}/items/letters`);
-  url.searchParams.set("limit", "-1");
-  url.searchParams.set("fields", FIELDS.join(","));
-  const response = await fetch(url, {
-    headers: {
-      accept: "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) {
-    throw new Error(`letters: Directus responded ${response.status}`);
-  }
-  const json = (await response.json()) as { data?: unknown[] };
-  const letters = (json.data ?? [])
+  const includeDrafts = process.env["LETTERS_INCLUDE_DRAFTS"] === "true";
+  const letters = (await allLetterRecords())
+    .filter((record) => includeDrafts || record.status === "published")
     .map(renderLetter)
-    .filter((letter): letter is Letter => letter !== null)
-    // The anonymous role is permission-filtered to published letters
-    // already; this keeps the gate true regardless of the credential in play.
-    .filter((letter) => includeDrafts || letter.status === "published");
+    .filter((letter): letter is Letter => letter !== null);
   return [...letters].sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1));
 }
 
@@ -135,7 +69,8 @@ let inflight: Promise<readonly Letter[]> | null = null;
 
 // Stale-while-revalidate, in process. Fresh cache is served as-is; a stale
 // cache is served immediately while one refresh runs behind the request; only
-// a cold start with Directus down has nothing to serve and fails the request.
+// a cold start with the database down has nothing to serve and fails the
+// request.
 export async function publishedLetters(): Promise<readonly Letter[]> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.letters;
   inflight ??= fetchLetters()
@@ -155,6 +90,19 @@ export async function publishedLetters(): Promise<readonly Letter[]> {
     return cache.letters;
   }
   return inflight;
+}
+
+// After a save: this replica re-reads at once so the editor's next view is
+// the saved letter; the other replicas pick it up within the TTL, the edge
+// within its s-maxage. A failed re-read keeps the last-good shelf.
+export async function refreshLetters(): Promise<void> {
+  try {
+    cache = { letters: await fetchLetters(), at: Date.now() };
+  } catch (error) {
+    console.error(
+      JSON.stringify({ msg: "letters: refresh after save failed", error: String(error) }),
+    );
+  }
 }
 
 export async function publishedLetterBySlug(slug: string): Promise<Letter | undefined> {
