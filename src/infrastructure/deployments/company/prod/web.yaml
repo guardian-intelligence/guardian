@@ -76,7 +76,7 @@ spec:
             # Keycloak account ids allowed to edit at /letters/$slug/edit.
             # A signed-in non-editor is shown their id there to add here.
             - name: LETTERS_EDITOR_SUBJECTS
-              value: ""
+              value: a4df8b81-41a0-4b43-b311-49e36127e6bc
             # One-time seed: an empty letters table imports the published
             # letters Directus serves anonymously. Goes with Directus.
             - name: DIRECTUS_URL
