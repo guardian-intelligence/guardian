@@ -292,7 +292,7 @@ func TestPersonaLadderShape(t *testing.T) {
 				case "secrets":
 					t.Fatalf("ClusterRole %s grants secrets; no persona may read a secret value", name)
 				case "serviceaccounts/token":
-					if name != "guardian-persona-secrets-writer-token" && name != "guardian-persona-cloud-agent-token" {
+					if name != "guardian-persona-secrets-writer-token" {
 						t.Fatalf("ClusterRole %s grants serviceaccounts/token outside the pinned token-mint lane", name)
 					}
 				}

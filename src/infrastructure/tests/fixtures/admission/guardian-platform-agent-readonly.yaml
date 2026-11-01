@@ -7,32 +7,18 @@ cases:
     objectName: some-pod
     user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: allow
-  - name: mint one-hour Devin delivery-read token
+  - name: mint Mythra observer token matched by group
     operation: CREATE
     resource: { group: "", version: v1, resource: serviceaccounts }
     subResource: token
-    objectName: guardian-cloud-agent-devin
+    objectName: guardian-mythra-observer
     object:
       apiVersion: authentication.k8s.io/v1
       kind: TokenRequest
-      metadata: { name: guardian-cloud-agent-devin, namespace: tenant-root }
+      metadata: { name: guardian-mythra-observer, namespace: tenant-guardian-prod }
       spec:
         audiences: [https://10.8.0.250:6443]
-        expirationSeconds: 3600
-    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
-    expect: allow
-  - name: mint Cursor delivery-read token matched by group
-    operation: CREATE
-    resource: { group: "", version: v1, resource: serviceaccounts }
-    subResource: token
-    objectName: guardian-cloud-agent-cursor
-    object:
-      apiVersion: authentication.k8s.io/v1
-      kind: TokenRequest
-      metadata: { name: guardian-cloud-agent-cursor, namespace: tenant-root }
-      spec:
-        audiences: [https://10.8.0.250:6443]
-        expirationSeconds: 1800
+        expirationSeconds: 900
     user:
       {
         username: "keycloak:cozy#other",
@@ -79,34 +65,6 @@ cases:
       spec:
         audiences: [https://10.8.0.250:6443]
         expirationSeconds: 901
-    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
-    expect: deny
-  - name: mint cloud-agent token longer than one hour
-    operation: CREATE
-    resource: { group: "", version: v1, resource: serviceaccounts }
-    subResource: token
-    objectName: guardian-cloud-agent-devin
-    object:
-      apiVersion: authentication.k8s.io/v1
-      kind: TokenRequest
-      metadata: { name: guardian-cloud-agent-devin, namespace: tenant-root }
-      spec:
-        audiences: [https://10.8.0.250:6443]
-        expirationSeconds: 3601
-    user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
-    expect: deny
-  - name: mint cloud-agent token for another audience
-    operation: CREATE
-    resource: { group: "", version: v1, resource: serviceaccounts }
-    subResource: token
-    objectName: guardian-cloud-agent-devin
-    object:
-      apiVersion: authentication.k8s.io/v1
-      kind: TokenRequest
-      metadata: { name: guardian-cloud-agent-devin, namespace: tenant-root }
-      spec:
-        audiences: [https://example.invalid]
-        expirationSeconds: 3600
     user: { username: "keycloak:cozy#platform-agent", groups: ["system:authenticated"] }
     expect: deny
   - name: mint secrets-writer token
