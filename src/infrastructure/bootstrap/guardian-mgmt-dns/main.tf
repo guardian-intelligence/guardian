@@ -37,9 +37,7 @@ locals {
   # in guardian-mgmt/main.tf.
   game_plane_origin_ipv4 = "206.223.228.99"
 
-  k8s_api_hostname             = "k8s.${local.cloudflare_zone_name}"
-  codex_cloud_k8s_api_hostname = "k8s-codex.${local.cloudflare_zone_name}"
-  cloud_agent_providers        = toset(["cursor", "devin"])
+  k8s_api_hostname = "k8s.${local.cloudflare_zone_name}"
 
   # The operator route: the founder's workstation reaches the Kubernetes and
   # Talos APIs through the same Tunnel, each behind its own identity-gated
@@ -175,11 +173,13 @@ resource "cloudflare_dns_record" "guardian_mgmt_k8s_api" {
   }
 }
 
-# Codex cloud reaches the private Kubernetes Service through a remotely
-# managed Cloudflare Tunnel. The public hostname accepts no origin traffic:
-# Access requires the one service token below, cloudflared carries the TCP
-# stream over Cloudflare's edge, and Kubernetes OIDC/RBAC remains the final
-# authority boundary.
+# The cluster Tunnel: a remotely managed Cloudflare Tunnel whose in-cluster
+# connector (base/dns/codex-cloud-tunnel.yaml) carries the operator routes
+# below to the private Kubernetes and Talos Services. Its hostnames accept no
+# origin traffic: Access gates each one, cloudflared carries the TCP stream
+# over Cloudflare's edge, and Kubernetes OIDC/RBAC and Talos mTLS remain the
+# final authority boundaries. The resource keeps its original Codex-era name
+# because renaming would replace the Tunnel and its connector token.
 resource "cloudflare_zero_trust_tunnel_cloudflared" "guardian_codex_cloud" {
   account_id = var.cloudflare_account_id
   name       = "guardian-codex-cloud-kubernetes"
@@ -191,10 +191,6 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "guardian_codex_cloud
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.guardian_codex_cloud.id
   config = {
     ingress = [
-      {
-        hostname = local.codex_cloud_k8s_api_hostname
-        service  = "tcp://kubernetes.default.svc:443"
-      },
       {
         hostname = local.operator_tunnel_routes.kubernetes.hostname
         service  = local.operator_tunnel_routes.kubernetes.service
@@ -213,108 +209,6 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "guardian_codex_cloud
 data "cloudflare_zero_trust_tunnel_cloudflared_token" "guardian_codex_cloud" {
   account_id = var.cloudflare_account_id
   tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.guardian_codex_cloud.id
-}
-
-resource "cloudflare_dns_record" "guardian_codex_cloud_k8s_api" {
-  zone_id = data.cloudflare_zone.guardianintelligence_org.id
-  name    = local.codex_cloud_k8s_api_hostname
-  type    = "CNAME"
-  content = "${cloudflare_zero_trust_tunnel_cloudflared.guardian_codex_cloud.id}.cfargotunnel.com"
-  ttl     = 1
-  proxied = true
-  comment = "Guardian Kubernetes API through the Codex cloud Tunnel"
-
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
-resource "cloudflare_zero_trust_access_service_token" "guardian_codex_cloud" {
-  account_id = var.cloudflare_account_id
-  name       = "guardian-codex-cloud-kubernetes"
-  duration   = "2160h"
-
-  # The expiry horizon blocks the plan instead of warning (checks block
-  # nothing in OpenTofu): under auto-apply, a reconcile that starts failing
-  # 21 days out is the rotation reminder, surfaced through the CR going
-  # red and the alert that follows.
-  lifecycle {
-    create_before_destroy = true
-
-    postcondition {
-      condition     = timecmp(timeadd(plantimestamp(), "504h"), self.expires_at) < 0
-      error_message = "The Codex cloud Access service token expires within 21 days. Rotate it by incrementing client_secret_version, update the Codex environment secrets, and prove the cloud canary."
-    }
-  }
-}
-
-# Cursor and Devin share the proven tunnel hostname but not credentials. The
-# Access token authenticates transport only; Kubernetes still requires each
-# provider's independently minted, short-lived delivery-read token.
-resource "cloudflare_zero_trust_access_service_token" "guardian_cloud_agent" {
-  for_each = local.cloud_agent_providers
-
-  account_id = var.cloudflare_account_id
-  name       = "guardian-${each.key}-cloud-kubernetes"
-  duration   = "2160h"
-
-  lifecycle {
-    create_before_destroy = true
-
-    postcondition {
-      condition     = timecmp(timeadd(plantimestamp(), "504h"), self.expires_at) < 0
-      error_message = "A cloud-agent Access service token expires within 21 days. Rotate the affected provider token, update only that provider environment, and prove its cloud canary."
-    }
-  }
-}
-
-resource "cloudflare_zero_trust_access_policy" "guardian_codex_cloud" {
-  account_id = var.cloudflare_account_id
-  name       = "Guardian Codex cloud Kubernetes service token"
-  decision   = "non_identity"
-  include = [
-    {
-      service_token = {
-        token_id = cloudflare_zero_trust_access_service_token.guardian_codex_cloud.id
-      }
-    },
-  ]
-}
-
-resource "cloudflare_zero_trust_access_policy" "guardian_cloud_agent" {
-  for_each = local.cloud_agent_providers
-
-  account_id = var.cloudflare_account_id
-  name       = "Guardian ${title(each.key)} cloud Kubernetes service token"
-  decision   = "non_identity"
-  include = [
-    {
-      service_token = {
-        token_id = cloudflare_zero_trust_access_service_token.guardian_cloud_agent[each.key].id
-      }
-    },
-  ]
-}
-
-resource "cloudflare_zero_trust_access_application" "guardian_codex_cloud" {
-  account_id = var.cloudflare_account_id
-  type       = "self_hosted"
-  name       = "Guardian Codex cloud Kubernetes"
-  domain     = local.codex_cloud_k8s_api_hostname
-  policies = [
-    {
-      id         = cloudflare_zero_trust_access_policy.guardian_codex_cloud.id
-      precedence = 1
-    },
-    {
-      id         = cloudflare_zero_trust_access_policy.guardian_cloud_agent["cursor"].id
-      precedence = 2
-    },
-    {
-      id         = cloudflare_zero_trust_access_policy.guardian_cloud_agent["devin"].id
-      precedence = 3
-    },
-  ]
 }
 
 # The operator route. Access admits only the founder's identity (Cloudflare

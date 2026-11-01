@@ -11,8 +11,8 @@ resources:
   - cronjob-guardian-github.yaml
   - cronjob-guardian-codeql.yaml
   - cronjob-guardian-mgmt-dns.yaml
+  - job-guardian-mgmt-dns-retire-agent-access.yaml
   - cronjob-guardian-mgmt-cloudflare-tokens.yaml
-  - job-guardian-mgmt-cloudflare-tokens-anveio-footage.yaml
   - cronjob-guardian-mgmt.yaml
 
 # One copy of the non-secret account id every Cloudflare root's CronJob

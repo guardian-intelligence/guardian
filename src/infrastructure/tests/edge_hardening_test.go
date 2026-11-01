@@ -53,7 +53,7 @@ func TestCloudflareOriginPullIsRequired(t *testing.T) {
 	}
 }
 
-func TestCodexCloudTunnelIsServiceAuthenticatedAndReadPathOnly(t *testing.T) {
+func TestClusterTunnelCarriesAccessGatedOperatorRoutes(t *testing.T) {
 	tokenRootPath := runfilePath("src/infrastructure/bootstrap/guardian-mgmt-cloudflare-tokens/main.tf")
 	tokenRoot := readText(t, tokenRootPath)
 	for _, want := range []string{
@@ -69,14 +69,7 @@ func TestCodexCloudTunnelIsServiceAuthenticatedAndReadPathOnly(t *testing.T) {
 	for _, want := range []string{
 		`resource "cloudflare_zero_trust_tunnel_cloudflared" "guardian_codex_cloud"`,
 		`service  = "tcp://kubernetes.default.svc:443"`,
-		`resource "cloudflare_zero_trust_access_service_token" "guardian_codex_cloud"`,
-		`resource "cloudflare_zero_trust_access_service_token" "guardian_cloud_agent"`,
-		`for_each = local.cloud_agent_providers`,
-		`guardian_cloud_agent["cursor"].id`,
-		`guardian_cloud_agent["devin"].id`,
-		`decision   = "non_identity"`,
-		`token_id = cloudflare_zero_trust_access_service_token.guardian_codex_cloud.id`,
-		`name    = local.codex_cloud_k8s_api_hostname`,
+		`service  = local.operator_tunnel_routes.kubernetes.service`,
 		`proxied = true`,
 		`service  = "tcp://talos.default.svc:50000"`,
 		`resource "cloudflare_zero_trust_access_policy" "guardian_operator"`,
