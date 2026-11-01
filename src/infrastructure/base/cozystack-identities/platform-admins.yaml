@@ -350,7 +350,7 @@ spec:
     name: keycloakrealm-cozy
 ---
 # platform-agent — the read persona, and the identity long-horizon agent
-# sessions hold by default (Devin/Codex/Claude on the release runner or a
+# sessions hold by default (Claude/Codex on the release runner or a
 # laptop). Distinct from platform-admin so an agent credential leak is
 # revocable without locking the human out, and so audit logs separate agent
 # actions from human ones. The offline_access realm role is what authorizes
@@ -470,22 +470,11 @@ spec:
           has(object.spec.expirationSeconds) &&
           object.spec.expirationSeconds <= 900 &&
           size(object.spec.audiences) == 1 &&
-          object.spec.audiences[0] == "https://10.8.0.250:6443") ||
-        (request.operation == "CREATE" && request.resource.group == "" &&
-          request.resource.resource == "serviceaccounts" &&
-          has(request.subResource) && request.subResource == "token" &&
-          has(request.name) &&
-          request.name in ["guardian-cloud-agent-cursor", "guardian-cloud-agent-devin"] &&
-          request.namespace == "tenant-root" &&
-          has(object.spec.expirationSeconds) &&
-          object.spec.expirationSeconds <= 3600 &&
-          size(object.spec.audiences) == 1 &&
           object.spec.audiences[0] == "https://10.8.0.250:6443")
       message: >-
-        the read persona may only open pod port-forwards, mint a 15-minute
-        Mythra capability token, or mint one-hour-or-shorter delivery-read
-        cloud-agent tokens; every other write is denied. Re-authenticate as a
-        write persona for other repair verbs
+        the read persona may only open pod port-forwards or mint a 15-minute
+        Mythra capability token; every other write is denied. Re-authenticate
+        as a write persona for other repair verbs
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -493,6 +482,59 @@ metadata:
   name: guardian-persona-read
 spec:
   policyName: guardian-persona-read
+  validationActions:
+    - Deny
+---
+# Match the unattended identity by username as well as persona claim so a
+# missing or stale groups claim cannot bypass the read-only boundary.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: guardian-platform-agent-readonly
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - "*"
+        apiVersions:
+          - "*"
+        operations:
+          - CREATE
+          - UPDATE
+          - DELETE
+          - CONNECT
+        resources:
+          - "*/*"
+  matchConditions:
+    - name: platform-agent-identity
+      expression: >-
+        request.userInfo.username.endsWith("#platform-agent") ||
+        "guardian-platform-agent" in request.userInfo.groups
+  validations:
+    - expression: >-
+        (request.operation == "CONNECT" && request.resource.group == "" &&
+          request.resource.resource == "pods" &&
+          has(request.subResource) && request.subResource == "portforward") ||
+        (request.operation == "CREATE" && request.resource.group == "" &&
+          request.resource.resource == "serviceaccounts" &&
+          has(request.subResource) && request.subResource == "token" &&
+          has(request.name) && request.name in ["guardian-mythra-observer", "guardian-mythra-operator"] &&
+          request.namespace == "tenant-guardian-prod" &&
+          has(object.spec.expirationSeconds) &&
+          object.spec.expirationSeconds <= 900 &&
+          size(object.spec.audiences) == 1 &&
+          object.spec.audiences[0] == "https://10.8.0.250:6443")
+      message: >-
+        platform-agent is read-only except for pod port-forwards and 15-minute
+        Mythra capability tokens
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: guardian-platform-agent-readonly
+spec:
+  policyName: guardian-platform-agent-readonly
   validationActions:
     - Deny
 ---
@@ -700,17 +742,10 @@ spec:
           request.resource.resource == "serviceaccounts" &&
           has(request.subResource) && request.subResource == "token" &&
           has(request.name) &&
-          ((request.name == "secrets-writer" && request.namespace != "tenant-root") ||
-           (request.name in ["guardian-cloud-agent-cursor", "guardian-cloud-agent-devin"] &&
-            request.namespace == "tenant-root" &&
-            has(object.spec.expirationSeconds) &&
-            object.spec.expirationSeconds <= 3600 &&
-            size(object.spec.audiences) == 1 &&
-            object.spec.audiences[0] == "https://10.8.0.250:6443")))
+          request.name == "secrets-writer" && request.namespace != "tenant-root")
       message: >-
         the write-basic persona may only delete pods and jobs, scale workloads,
-        open pod port-forwards, mint non-root secrets-writer tokens, and mint
-        short-lived delivery-read cloud-agent tokens
+        open pod port-forwards, and mint non-root secrets-writer tokens
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
