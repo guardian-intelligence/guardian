@@ -332,13 +332,9 @@ extraKubeletExtraArgs: {}
 #   extraSysctls:
 #     net.core.somaxconn: "65535"
 #     fs.inotify.max_user_watches: "524288"
-# net.mptcp.enabled=0: no workload uses multipath TCP, and Go >= 1.24 opens
-# MPTCP listeners by default; MPTCP listeners were the exploitation
-# precondition for CVE-2026-98432 (IPv4 TCP inet_opt use-after-free).
-# Per network namespace: this covers the host namespace (hostNetwork
-# listeners); pod namespaces keep the kernel default.
-extraSysctls:
-  net.mptcp.enabled: "0"
+# The Talos kernel is built without CONFIG_MPTCP, so net.mptcp.* keys do
+# not exist; declaring one wedges KernelParamSpecController in a retry loop.
+extraSysctls: {}
 
 # Extra machine.files entries appended to the preset's built-in
 # files (CRI customization and lvm.conf). Lists append; Talos

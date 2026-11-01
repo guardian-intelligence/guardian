@@ -62,7 +62,6 @@ machine:
     net.ipv4.neigh.default.gc_thresh3: "16384"
     net.ipv4.tcp_fin_timeout: "30"
     net.ipv4.tcp_orphan_retries: "3"
-    net.mptcp.enabled: "0"
   # Scoped credential channel for the etcd-snapshot CronJob (base/backup/):
   # only pods in tenant-root may request Talos API access, and the only role
   # they can hold is os:etcd:backup.
