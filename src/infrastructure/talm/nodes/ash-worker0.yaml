@@ -53,7 +53,6 @@ machine:
     net.ipv4.neigh.default.gc_thresh3: "16384"
     net.ipv4.tcp_fin_timeout: "30"
     net.ipv4.tcp_orphan_retries: "3"
-    net.mptcp.enabled: "0"
   features:
     kubernetesTalosAPIAccess:
       enabled: true
