@@ -108,11 +108,14 @@ systemVolumeEncryption:
 # mirror host (a dark node has no other time source; Cozystack's air-gap
 # guidance requires local NTP). The registries list must equal the set of
 # hosts in the generated union lock (images.declared.lock + rendered refs)
-# — enforced by the infra conformance test.
+# — enforced by the infra conformance test. endpoint and timeServer name
+# the drill's mirror host (the machine serving the haul on the nodes'
+# 10.8.0.0/24 network) and are set by the pre-drill PR; they stay empty in
+# steady state and rendering with enabled: true fails until they are set.
 darkBundleMirror:
   enabled: false
-  endpoint: http://148.113.198.223:5000
-  timeServer: 148.113.198.223
+  endpoint: ""
+  timeServer: ""
   registries:
     - cr.fluentbit.io
     - docker-registry3.mariadb.com

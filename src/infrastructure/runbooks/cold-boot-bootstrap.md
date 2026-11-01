@@ -132,7 +132,10 @@ $TODO -- move image signing to a dual-signing model, move images-lock-sign.yaml 
    travels with the operator, like the seal key. Only then load the store.
 
 1. **Pre-drill PR**: flip `darkBundleMirror.enabled: true` in
-   `src/infrastructure/talm/values.yaml` and regenerate the node configs —
+   `src/infrastructure/talm/values.yaml`, set `darkBundleMirror.endpoint`
+   (`http://<mirror-host>:5000`) and `darkBundleMirror.timeServer`
+   (`<mirror-host>`) to the mirror host's address on the nodes' 10.8.0.0/24
+   network, and regenerate the node configs —
    every locked upstream registry then mirrors to the haul with
    `skipFallback: true` (a miss fails loudly instead of silently dialing
    the internet; our hauler build serves repo paths verbatim, matching
@@ -143,7 +146,7 @@ $TODO -- move image signing to a dual-signing model, move images-lock-sign.yaml 
    hauler store load --filename=haul.tar.zst --store=store
    hauler store serve registry --store=store --readonly=false &
    dark_source_push="$(
-     flux push artifact oci://148.113.198.223:5000/guardian/source:dark \
+     flux push artifact oci://<mirror-host>:5000/guardian/source:dark \
        --path . --source "$(git remote get-url origin)" \
        --revision "$(git rev-parse HEAD)" \
        --output json
@@ -157,7 +160,7 @@ $TODO -- move image signing to a dual-signing model, move images-lock-sign.yaml 
      exit 1
    fi
    flux create source oci guardian-oci \
-     --url=oci://148.113.198.223:5000/guardian/source \
+     --url=oci://<mirror-host>:5000/guardian/source \
      --digest "$dark_source_digest" \
      --insecure \
      --interval=1m \
