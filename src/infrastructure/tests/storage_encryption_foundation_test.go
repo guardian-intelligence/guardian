@@ -163,8 +163,8 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 }
 
 func TestTalosBootAndVolumeEncryptionConformance(t *testing.T) {
-	const controlplaneInstaller = "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:f6245aaf9c630fc40479e5798b616468c144c1601c29fc6e19de8d32cc7277e2"
-	const annualInstaller = "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.10@sha256:e892079895b227a83fd86c1249efbbc3684c61815e5b5efcffd3cc279e56703b"
+	const controlplaneInstaller = "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.12@sha256:32fb301b8e6fa9b5e9f5bf1dd1300483d6d1183fc66f8063a30dc5801fdfa6cf"
+	const annualInstaller = "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.12@sha256:32fb301b8e6fa9b5e9f5bf1dd1300483d6d1183fc66f8063a30dc5801fdfa6cf"
 
 	assetsPath := runfilePath("src/infrastructure/talm/secureboot-assets.yaml")
 	assets := singleYAMLDoc(t, assetsPath)
