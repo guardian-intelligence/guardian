@@ -29,7 +29,7 @@ machine:
   # is the cluster's time source.
   time:
     servers:
-      - {{ .Values.darkBundleMirror.timeServer }}
+      - {{ required "values.yaml: darkBundleMirror.timeServer must name the drill's mirror host when darkBundleMirror.enabled is true" .Values.darkBundleMirror.timeServer }}
   {{- end }}
   {{- if or (eq .MachineType "controlplane") $profileNodeLabels .Values.extraNodeLabels }}
   nodeLabels:
@@ -440,7 +440,7 @@ cluster:
 {{- range .Values.darkBundleMirror.registries }}
       {{ . }}:
         endpoints:
-        - {{ trimSuffix "/" $.Values.darkBundleMirror.endpoint }}
+        - {{ trimSuffix "/" (required "values.yaml: darkBundleMirror.endpoint must be the drill's mirror registry URL (http://<mirror-host>:5000) when darkBundleMirror.enabled is true" $.Values.darkBundleMirror.endpoint) }}
         skipFallback: true
 {{- end }}
 {{- else }}
@@ -466,7 +466,7 @@ apiVersion: v1alpha1
 kind: RegistryMirrorConfig
 name: {{ . }}
 endpoints:
-  - url: {{ trimSuffix "/" $.Values.darkBundleMirror.endpoint }}
+  - url: {{ trimSuffix "/" (required "values.yaml: darkBundleMirror.endpoint must be the drill's mirror registry URL (http://<mirror-host>:5000) when darkBundleMirror.enabled is true" $.Values.darkBundleMirror.endpoint) }}
 skipFallback: true
 {{- end }}
 {{- else }}
