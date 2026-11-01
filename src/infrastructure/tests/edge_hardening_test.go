@@ -372,9 +372,10 @@ func TestTalosPublicEdgeIsCloudflareOnly(t *testing.T) {
 	assertTextNotContains(t, publicEdge, "0.0.0.0/0", templatePath)
 	assertTextNotContains(t, publicEdge, "::/0", templatePath)
 
-	for _, want := range []string{"148.113.198.223/32", "operator-talos-api", "operator-kubernetes-api"} {
-		assertTextContains(t, values+template, want, "Talos operator access")
+	for _, want := range []string{"operator-talos-api", "operator-kubernetes-api"} {
+		assertTextContains(t, template, want, templatePath)
 	}
+	assertTextContains(t, values, "operatorSubnets: []", valuesPath)
 }
 
 func TestRootIngressHasNarrowPodSecurityExemption(t *testing.T) {

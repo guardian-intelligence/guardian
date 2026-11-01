@@ -86,7 +86,7 @@ vipLink: "enp1s0f0.2140"
 # contains the nine system extensions shipped by the Cozystack Talos profile.
 # This shared default is the Secure Boot installer used by the management
 # control planes. Disposable workers may override it in their node overlay.
-image: "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:f6245aaf9c630fc40479e5798b616468c144c1601c29fc6e19de8d32cc7277e2"
+image: "factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.12@sha256:32fb301b8e6fa9b5e9f5bf1dd1300483d6d1183fc66f8063a30dc5801fdfa6cf"
 
 # Secure Boot and system-volume encryption are independent controls. The
 # management control planes use the Sidero-signed UKI above and seal STATE and
@@ -151,10 +151,9 @@ advertisedSubnets:
 # operatorSubnets reach the Talos (50000) and Kubernetes (6443) APIs.
 # Cloudflare publishes one shared address inventory for proxied origin
 # connections and Load Balancer health monitors; only that inventory reaches
-# public 80/443. 148.113.198.223 was the operations VPS (also the dark-mirror
-# host); it is sunset, and operators now arrive through the Cloudflare Access
-# tunnel (tools/ops/mgmt-tunnel), which needs no entry here. The stale entry
-# is pending removal by a talm apply over that tunnel.
+# public 80/443. Operators arrive through the Cloudflare Access tunnel
+# (tools/ops/mgmt-tunnel), which needs no entry here; operatorSubnets admits
+# no public source.
 ingressFirewall:
   vlanSubnet: "10.8.0.0/24"
   podTCPPorts:
@@ -178,8 +177,7 @@ ingressFirewall:
   # here lets the gateway's twin listener refuse the candidate immediately.
   publicTCPPorts:
     - "4433"
-  operatorSubnets:
-    - "148.113.198.223/32"
+  operatorSubnets: []
   cloudflareEdgeSubnets:
     - "173.245.48.0/20"
     - "103.21.244.0/22"
@@ -334,7 +332,13 @@ extraKubeletExtraArgs: {}
 #   extraSysctls:
 #     net.core.somaxconn: "65535"
 #     fs.inotify.max_user_watches: "524288"
-extraSysctls: {}
+# net.mptcp.enabled=0: no workload uses multipath TCP, and Go >= 1.24 opens
+# MPTCP listeners by default; MPTCP listeners were the exploitation
+# precondition for CVE-2026-98432 (IPv4 TCP inet_opt use-after-free).
+# Per network namespace: this covers the host namespace (hostNetwork
+# listeners); pod namespaces keep the kernel default.
+extraSysctls:
+  net.mptcp.enabled: "0"
 
 # Extra machine.files entries appended to the preset's built-in
 # files (CRI customization and lvm.conf). Lists append; Talos

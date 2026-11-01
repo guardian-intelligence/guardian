@@ -611,6 +611,7 @@ ingress:
   - subnet: ::/0
 ---
 {{- end }}
+{{- with .Values.ingressFirewall.operatorSubnets }}
 apiVersion: v1alpha1
 kind: NetworkRuleConfig
 name: operator-talos-api
@@ -619,7 +620,7 @@ portSelector:
     - 50000
   protocol: tcp
 ingress:
-  {{- range .Values.ingressFirewall.operatorSubnets }}
+  {{- range . }}
   - subnet: {{ . }}
   {{- end }}
 ---
@@ -631,10 +632,11 @@ portSelector:
     - 6443
   protocol: tcp
 ingress:
-  {{- range .Values.ingressFirewall.operatorSubnets }}
+  {{- range . }}
   - subnet: {{ . }}
   {{- end }}
 ---
+{{- end }}
 apiVersion: v1alpha1
 kind: NetworkRuleConfig
 name: public-edge

@@ -35,9 +35,9 @@
 
 # --- bootstrap artifacts (not pod images) ---
 # Talos control-plane installer (machine.install.image default)
-factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:f6245aaf9c630fc40479e5798b616468c144c1601c29fc6e19de8d32cc7277e2
+factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.12@sha256:32fb301b8e6fa9b5e9f5bf1dd1300483d6d1183fc66f8063a30dc5801fdfa6cf
 # Talos disposable-worker installer (per-node override)
-factory.talos.dev/metal-installer/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.6@sha256:89997784056d862a59c2a2d0f2fa78714a6c3ef76f34ef4f8d835dee829719d3
+factory.talos.dev/metal-installer/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.12@sha256:dbefa706e5cc6357122fc5c05b4e935a18df672b49c937b6f6c4897a593f85b0
 # Cozystack installer Helm chart (OCI)
 ghcr.io/cozystack/cozystack/cozy-installer:1.6.3@sha256:8feeca3fa4efa0fde97c0ee58c6b2f63de92a2cb15add079a043f0767a522e87
 # Cozystack platform packages Flux artifact (pulled by source-controller, NOT containerd)

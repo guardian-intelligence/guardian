@@ -53,6 +53,8 @@ Common post-merge issues:
 
 House rules:
 
+- Opening and merging PRs in this repo is pre-authorized: don't ask before opening or merging a PR; merge once CI is green and blocking review comments are addressed.
+
 - Do not use administration CLIs as a second control plane, use them for reads. Rely on Flux to converge the cluster after merge.
 - If relevant to your task, clean up any hanging resources in the cluster post-merge.
   </development_loop>
