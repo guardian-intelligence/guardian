@@ -12,8 +12,16 @@ spec:
   gateway: 10.244.0.1
   gatewayType: distributed
   natOutgoing: true
+  # Flux owns this list, so it must carry everything kube-ovn must never hand
+  # out. Since Cozystack v1.6.5 Cilium takes its router and Ingress IPs from
+  # the last /21 of networking.podCIDR on the kube-ovn variants; the cilium
+  # post-upgrade hook (packages/system/cilium/files/ipam-migration.sh) adds
+  # that block here, and a Flux apply that dropped it would let kube-ovn give
+  # pods addresses Cilium holds. Same first..last spelling as the platform's
+  # cozystack.platform.ciliumPoolRange for 10.244.0.0/16.
   excludeIps:
     - 10.244.0.1
+    - 10.244.248.0..10.244.255.255
   mtu: 1362
 ---
 apiVersion: kubeovn.io/v1
