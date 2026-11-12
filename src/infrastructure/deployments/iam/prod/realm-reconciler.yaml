@@ -38,7 +38,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: reconcile
-          image: quay.io/keycloak/keycloak@sha256:3d911baa186f352563854039b95f21a7e2c01c76b527fdc64f24a0885b927bdf # 26.6.2
+          image: quay.io/keycloak/keycloak@sha256:4da21f9a53bcbac1026a0d654b740a81e98e5de4c45457076acc74b4d94b1551 # 26.6.2
           command:
             - /bin/sh
             - -ec
