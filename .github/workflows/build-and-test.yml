@@ -29,7 +29,7 @@ jobs:
   build-and-test:
     # Keep the required PR gate and main's bootstrap builds available until
     # the end-to-end Turbo canary has passed. See docs/postflight-ci-migration.md.
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.runner == 'postflight' && 'postflight-4vcpu-ubuntu24-turbo' || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.runner == 'postflight' && 'postflight-4vcpu-ubuntu24-turbo' || 'ubuntu-24.04' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -64,7 +64,13 @@ jobs:
           fi
 
       - name: Bootstrap toolchain
-        run: scripts/bootstrap.sh
+        run: |
+          scripts/bootstrap.sh
+          # The pinned PostgreSQL test archive dynamically links libxml2.
+          if [[ "$RUNNER_ENVIRONMENT" == github-hosted ]]; then
+            sudo apt-get update
+            sudo apt-get install -y libxml2
+          fi
 
       - name: Restore Bazel cache
         if: github.event_name != 'workflow_dispatch' || inputs.runner != 'postflight'

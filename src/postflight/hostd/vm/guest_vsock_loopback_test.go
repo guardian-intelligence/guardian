@@ -87,7 +87,7 @@ func TestVsockLoopbackTransportEndToEnd(t *testing.T) {
 	defer probeCancel()
 	probe, err := vsock.Dial(probeCtx, vsock.Local, port)
 	if err != nil {
-		if errors.Is(err, unix.ENODEV) || errors.Is(err, unix.EADDRNOTAVAIL) || errors.Is(err, unix.EAFNOSUPPORT) {
+		if errors.Is(err, unix.ENODEV) || errors.Is(err, unix.EADDRNOTAVAIL) || errors.Is(err, unix.EAFNOSUPPORT) || errors.Is(err, unix.ENETUNREACH) {
 			t.Skipf("vsock loopback unavailable: %v", err)
 		}
 		t.Fatal(err)

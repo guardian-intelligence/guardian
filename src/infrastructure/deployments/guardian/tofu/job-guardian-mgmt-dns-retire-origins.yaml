@@ -1,0 +1,81 @@
+# One-shot application of the reviewed earth/wind origin retirement.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tofu-guardian-mgmt-dns-manual-retire-origins-20261115
+  namespace: tofu-system
+  labels:
+    app.kubernetes.io/name: tofu-runner
+    app.kubernetes.io/part-of: guardian
+    guardian.dev/tofu-root: guardian-mgmt-dns
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 3000
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tofu-runner
+        guardian.dev/tofu-root: guardian-mgmt-dns
+    spec:
+      serviceAccountName: tofu-runner
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: tofu
+        image: ghcr.io/guardian-intelligence/tofu-runner:edge@sha256:d4ad2575dc8f802a953721aca74ff14b771f0957bd04424beba6b2384bc8ee40
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        env:
+        - name: ROOT_NAME
+          value: guardian-mgmt-dns
+        - name: ROOT_PATH
+          value: ./src/infrastructure/bootstrap/guardian-mgmt-dns
+        - name: SOURCE_KIND
+          value: ${GUARDIAN_SOURCE_KIND:=GitRepository}
+        - name: SOURCE_NAME
+          value: ${GUARDIAN_SOURCE_NAME:=guardian}
+        - name: TF_VAR_cloudflare_account_id
+          valueFrom:
+            configMapKeyRef:
+              name: tofu-vars
+              key: cloudflare_account_id
+        - name: MODE
+          value: apply
+        - name: TF_CLI_ARGS_plan
+          value: -target=cloudflare_load_balancer_pool.guardian_mgmt_ash -target=cloudflare_dns_record.guardian_mgmt_k8s_api
+            -target=cloudflare_dns_record.wakeupmythra_com_apex -target=cloudflare_dns_record.wakeupmythra_com_auth
+            -target=cloudflare_dns_record.rumi_engineering_apex -target=cloudflare_dns_record.anveio_com_web
+        envFrom:
+        - secretRef:
+            name: tofu-backend-r2
+        - secretRef:
+            name: tofu-state-encryption
+        - secretRef:
+            name: tofu-cloudflare-dns
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+      volumes:
+      - name: workspace
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}

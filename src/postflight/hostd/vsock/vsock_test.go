@@ -38,7 +38,7 @@ func loopbackListener(t *testing.T) (net.Listener, uint32) {
 	defer cancel()
 	probe, err := Dial(ctx, Local, addr.Port)
 	if err != nil {
-		if errors.Is(err, unix.ENODEV) || errors.Is(err, unix.EADDRNOTAVAIL) || errors.Is(err, unix.EAFNOSUPPORT) {
+		if errors.Is(err, unix.ENODEV) || errors.Is(err, unix.EADDRNOTAVAIL) || errors.Is(err, unix.EAFNOSUPPORT) || errors.Is(err, unix.ENETUNREACH) {
 			t.Skipf("vsock loopback unavailable: %v", err)
 		}
 		t.Fatal(err)
