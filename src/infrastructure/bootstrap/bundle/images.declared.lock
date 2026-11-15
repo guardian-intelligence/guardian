@@ -39,9 +39,9 @@ factory.talos.dev/metal-installer-secureboot/be66fdc8a38c2f517f33cba0a6daa7ab97f
 # Talos disposable-worker installer (per-node override)
 factory.talos.dev/metal-installer/be66fdc8a38c2f517f33cba0a6daa7ab97ff87d51e8ca7d2160e45911ba09cf5:v1.13.12@sha256:dbefa706e5cc6357122fc5c05b4e935a18df672b49c937b6f6c4897a593f85b0
 # Cozystack installer Helm chart (OCI)
-ghcr.io/cozystack/cozystack/cozy-installer:1.6.3@sha256:8feeca3fa4efa0fde97c0ee58c6b2f63de92a2cb15add079a043f0767a522e87
+ghcr.io/cozystack/cozystack/cozy-installer:1.7.0@sha256:915c2fcd0e7eb0a6886992a62713fc7619eca56163c6a616321192fa81d9d903
 # Cozystack platform packages Flux artifact (pulled by source-controller, NOT containerd)
-ghcr.io/cozystack/cozystack/cozystack-packages@sha256:b05b99f2dbfeedf29babf00b8bd0dc69b31dcfc0c3298786c95d625d8e64fe5a
+ghcr.io/cozystack/cozystack/cozystack-packages@sha256:d085adfd0b32dafd5ba3b7d844bf19718d8a445e1afaf12618a52d4bb51b6989
 
 # --- analytics ClickHouse keeper (spawned for the CHK by the Altinity
 # operator; the server/ingest/otel-collector images are rendered from
