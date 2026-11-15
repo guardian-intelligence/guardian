@@ -28,3 +28,48 @@ spec:
               - op: replace
                 path: /spec/templates/podTemplates/0/spec/containers/0/image
                 value: docker.io/clickhouse/clickhouse-keeper:24.9.2.42@sha256:681b4b8c8b3d397174dd32de156ed36e9c206700d27ce7aaed63db54471a9340
+---
+# Preserve all three Keeper identities while allowing them on one host.
+apiVersion: clickhouse-keeper.altinity.com/v1
+kind: ClickHouseKeeperInstallation
+metadata:
+  name: clickhouse-analytics-keeper
+  namespace: tenant-root
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: Override
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  templates:
+    podTemplates:
+    - metadata:
+        annotations:
+          prometheus.io/port: '7000'
+          prometheus.io/scrape: 'true'
+        labels:
+          app: clickhouse-analytics-keeper
+      name: default
+      spec:
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: clickhouse-analytics-keeper
+        containers:
+        - image: docker.io/clickhouse/clickhouse-keeper:24.9.2.42@sha256:681b4b8c8b3d397174dd32de156ed36e9c206700d27ce7aaed63db54471a9340
+          imagePullPolicy: IfNotPresent
+          name: clickhouse-keeper
+          resources:
+            limits:
+              cpu: '2'
+              ephemeral-storage: 2Gi
+              memory: 8Gi
+            requests:
+              cpu: '0.2'
+              ephemeral-storage: '53687091'
+              memory: '8589934592'
+        securityContext:
+          fsGroup: 101
