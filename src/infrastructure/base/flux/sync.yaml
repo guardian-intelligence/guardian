@@ -1114,9 +1114,9 @@ spec:
       failed: status.conditions.filter(e, e.type == 'Ready').all(e, e.status == 'False')
     - apiVersion: flagger.app/v1beta1
       kind: Canary
-      current: status.phase == 'Succeeded'
-      inProgress: status.phase in ['Initializing', 'Progressing', 'Promoting', 'Finalising']
-      failed: status.phase in ['Failed', 'Terminating']
+      current: (has(spec.suspend) && spec.suspend) || status.phase == 'Succeeded'
+      inProgress: (!has(spec.suspend) || !spec.suspend) && status.phase in ['Initializing', 'Progressing', 'Promoting', 'Finalising']
+      failed: (!has(spec.suspend) || !spec.suspend) && status.phase in ['Failed', 'Terminating']
 ---
 # Alerting delivery seam: the alert-relay Deployment in tenant-root plus its
 # ESO wiring, Cilium policy, and self-monitoring (deployments/alerting/).

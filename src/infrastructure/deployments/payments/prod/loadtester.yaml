@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
 spec:
-  replicas: 1
+  replicas: 0
   revisionHistoryLimit: 2
   selector:
     matchLabels:
