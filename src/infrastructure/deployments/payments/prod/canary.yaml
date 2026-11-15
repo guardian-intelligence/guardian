@@ -7,7 +7,10 @@ metadata:
     app.kubernetes.io/name: payments
     app.kubernetes.io/part-of: guardian
     guardian.dev/stage: prod
+# The fixed three-member ledger is parked for cost reduction.
+# Resume analysis only after its preserved state is recovered.
 spec:
+  suspend: true
   provider: kubernetes
   targetRef:
     apiVersion: apps/v1

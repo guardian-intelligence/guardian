@@ -12,7 +12,7 @@ metadata:
   annotations:
     reloader.stakater.com/auto: "true"
 spec:
-  replicas: 2
+  replicas: 0
   revisionHistoryLimit: 3
   selector:
     matchLabels:
@@ -216,3 +216,14 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/component: payments
+
+---
+# Flagger's existing serving Deployment remains data-independent, but its
+# ledger dependency is parked. Keep it stopped with the canary suspended.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-primary
+  namespace: tenant-guardian-prod
+spec:
+  replicas: 0
