@@ -64,7 +64,13 @@ jobs:
           fi
 
       - name: Bootstrap toolchain
-        run: scripts/bootstrap.sh
+        run: |
+          scripts/bootstrap.sh
+          # The pinned PostgreSQL test archive dynamically links libxml2.
+          if [[ "$RUNNER_ENVIRONMENT" == github-hosted ]]; then
+            sudo apt-get update
+            sudo apt-get install -y libxml2
+          fi
 
       - name: Restore Bazel cache
         if: github.event_name != 'workflow_dispatch' || inputs.runner != 'postflight'
