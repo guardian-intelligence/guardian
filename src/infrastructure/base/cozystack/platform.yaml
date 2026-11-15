@@ -14,8 +14,6 @@ spec:
           # Cloudflare Load Balancing probes and routes to each public node IP.
           # MetalLB remains private L2/ARP only on the Latitude VLAN.
           externalIPs:
-            - 206.223.228.101
-            - 45.250.254.119
             - 206.223.228.87
           exposedServices:
             - dashboard

@@ -67,7 +67,7 @@ spec:
             summary: "TigerBeetle replica metrics are unreachable"
             description: "VictoriaMetrics cannot scrape one TigerBeetle replica's local StatsD bridge."
         - alert: TigerBeetleReplicaCountDegraded
-          expr: (sum(up{namespace="tenant-guardian",job="tigerbeetle-metrics"}) or vector(0)) < 3
+          expr: ((sum(up{namespace="tenant-guardian",job="tigerbeetle-metrics"}) or vector(0)) < 3) and on() (sum(kube_deployment_spec_replicas{namespace="tenant-guardian",deployment=~"tigerbeetle-[0-2]"}) > 0)
           for: 2m
           labels:
             severity: critical
@@ -91,7 +91,7 @@ spec:
             summary: "TigerBeetle replica state sync is taking too long"
             description: "Replica {{ $labels.replica }} in cluster {{ $labels.cluster }} has remained in sync stage {{ $value }}."
         - alert: TigerBeetleMetricsAbsent
-          expr: absent(tb_replica_status)
+          expr: absent(tb_replica_status) and on() (sum(kube_deployment_spec_replicas{namespace="tenant-guardian",deployment=~"tigerbeetle-[0-2]"}) > 0)
           for: 5m
           labels:
             severity: critical

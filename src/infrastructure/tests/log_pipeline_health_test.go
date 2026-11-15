@@ -128,7 +128,7 @@ func TestLogPipelineCanaryContract(t *testing.T) {
 	diagnosticExpr := stringField(t, byAlert["LogPipelineDiagnosticCanaryMissing"], "expr")
 	assertTextContains(t, diagnosticExpr, `guardian_log_pipeline_canary:="diagnostic_ok"`, path)
 	assertTextContains(t, diagnosticExpr, "count_uniq(guardian_node) as nodes", path)
-	assertTextContains(t, diagnosticExpr, "filter nodes:<3", path)
+	assertTextContains(t, diagnosticExpr, "filter nodes:<1", path)
 	markerExpr := stringField(t, byAlert["LogSanitizerCanaryMissing"], "expr")
 	for _, want := range []string{
 		`guardian_log_sanitizer_canary:="api-key=[REDACTED]"`,
@@ -136,7 +136,7 @@ func TestLogPipelineCanaryContract(t *testing.T) {
 		`guardian_redacted:="true"`,
 		`guardian_redaction_rule:="sensitive_field"`,
 		"count_uniq(guardian_node) as nodes",
-		"filter nodes:<3",
+		"filter nodes:<1",
 	} {
 		assertTextContains(t, markerExpr, want, path)
 	}

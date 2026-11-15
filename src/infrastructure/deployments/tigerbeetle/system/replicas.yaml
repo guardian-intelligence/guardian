@@ -131,7 +131,7 @@ metadata:
     guardian.dev/phase: runtime
     guardian.dev/replica: "1"
 spec:
-  replicas: 1
+  replicas: 0
   revisionHistoryLimit: 2
   strategy:
     type: Recreate
@@ -250,7 +250,7 @@ metadata:
     guardian.dev/phase: runtime
     guardian.dev/replica: "2"
 spec:
-  replicas: 1
+  replicas: 0
   revisionHistoryLimit: 2
   strategy:
     type: Recreate

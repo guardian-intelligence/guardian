@@ -17,11 +17,9 @@
 #   `replicated-encrypted`): the
 #   chart's storageClass value is dead code — neither template
 #   consumes it (verified against the rendered CHI).
-#   Three-way DRBD under ReplicatedMergeTree(2 replicas) = 6x raw
-#   NVMe per byte. Fine at today's volume; REVISIT AT SCALE — when upstream
-#   wires storageClass, revisit the application/block replication split.
-# - 2 CH replicas (was 3): DRBD already provides block durability; CH
-#   replicas are for serving HA. Cuts the raw amplification 9x → 6x.
+#   The cost-reduction topology keeps one diskful DRBD copy and one
+#   ClickHouse process. Three Keeper identities share the retained host;
+#   neither layer provides hardware redundancy in this configuration.
 apiVersion: apps.cozystack.io/v1alpha1
 kind: ClickHouse
 metadata:
@@ -36,7 +34,7 @@ spec:
   # so declaring the value the template expects fixes the render. Drop
   # when upstream fixes the template.
   clusterDomain: cozy.local
-  replicas: 2
+  replicas: 1
   shards: 1
   size: 20Gi
   logStorageSize: 5Gi

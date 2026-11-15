@@ -2,7 +2,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: tofu-guardian-mgmt-dns-manual-retire-origins-20261115
+  name: tofu-guardian-mgmt-dns-manual-retire-origins-v2-20261115
   namespace: tofu-system
   labels:
     app.kubernetes.io/name: tofu-runner

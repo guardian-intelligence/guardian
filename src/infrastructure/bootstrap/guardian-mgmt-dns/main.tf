@@ -161,9 +161,8 @@ resource "cloudflare_dns_record" "guardian_mgmt_k8s_api" {
   proxied = false
   comment = "guardian-mgmt ${each.key} control-plane API"
 
-  lifecycle {
-    prevent_destroy = true
-  }
+  # This family follows the retained origin inventory. Removing an origin
+  # must remove its A record; other API/tunnel resources remain protected.
 }
 
 # The cluster Tunnel: a remotely managed Cloudflare Tunnel whose in-cluster

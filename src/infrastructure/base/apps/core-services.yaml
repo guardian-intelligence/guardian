@@ -16,6 +16,6 @@ metadata:
   name: ingress
   namespace: tenant-root
 spec:
-  replicas: 3
+  replicas: 1
   whitelist: []
   cloudflareProxy: true

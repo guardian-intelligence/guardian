@@ -42,19 +42,19 @@ spec:
         - alert: KubernetesFluentBitCollectorsMissing
           expr: >-
             (count(count by (pod)
-              (fluentbit_build_info{namespace="cozy-monitoring"})) or vector(0)) < 3
+              (fluentbit_build_info{namespace="cozy-monitoring"})) or vector(0))
+            < scalar(kube_daemonset_status_desired_number_scheduled{namespace="cozy-monitoring",daemonset="monitoring-agents-fluent-bit"})
           for: 10m
           labels:
             severity: warning
             guardian_component: observability
             exported_instance: guardian-mgmt/kubernetes-fluent-bit-collectors
           annotations:
-            summary: Fewer than three Kubernetes Fluent Bit collectors are reporting
+            summary: An expected Kubernetes Fluent Bit collector is not reporting
             description: >-
-              Guardian has three nodes and expects one Fluent Bit DaemonSet
-              target from each. Fewer than three distinct pods have reported
-              for ten minutes, so one node's logs may be missing even while the
-              others flow. Check the DaemonSet, Service endpoints, and vmagent.
+              Guardian expects one reporting collector per eligible DaemonSet
+              node. The reporting count has remained below the desired count
+              for ten minutes. Check the DaemonSet, endpoints, and vmagent.
         - alert: FluentBitOutputDeliveryDegraded
           expr: >-
             (sum by (namespace, pod, name)
@@ -290,7 +290,7 @@ data:
               _time:10m {kubernetes_namespace_name="tenant-root",kubernetes_container_name="canary"}
                 guardian_log_pipeline_canary:="diagnostic_ok" guardian_node:*
               | stats count_uniq(guardian_node) as nodes
-              | filter nodes:<3
+              | filter nodes:<1
             for: 5m
             labels:
               severity: warning
@@ -298,7 +298,7 @@ data:
             annotations:
               summary: 'The unmodified log-pipeline canary is missing'
               description: >-
-                Fewer than three distinct nodes have delivered
+                The retained collector node has not delivered
                 the normal diagnostic sentinel in ten minutes. At least one
                 Kubernetes collector or its VictoriaLogs path is not functioning.
           - alert: LogSanitizerCanaryMissing
@@ -309,7 +309,7 @@ data:
                 guardian_redacted:="true"
                 guardian_redaction_rule:="sensitive_field"
               | stats count_uniq(guardian_node) as nodes
-              | filter nodes:<3
+              | filter nodes:<1
             for: 5m
             labels:
               severity: critical
@@ -317,7 +317,7 @@ data:
             annotations:
               summary: 'The log-sanitizer canary is missing its redaction proof'
               description: >-
-                Fewer than three nodes contain the redacted canary field
+                The retained collector node does not contain the redacted canary field
                 and expected bounded marker fields. A collector may be bypassing
                 the sanitizer, over-redacting, or losing record metadata.
           - alert: LogSanitizerCanaryCredentialLeaked
