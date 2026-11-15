@@ -417,3 +417,12 @@ func TestRootIngressNetworkPolicyIsCloudflareOnly(t *testing.T) {
 	assertTextNotContains(t, raw, "cidr: 0.0.0.0/0", path)
 	assertTextNotContains(t, raw, "cidr: ::/0", path)
 }
+
+func TestRetirementLeavesOnlyRetainedPublicOrigin(t *testing.T) {
+	path := runfilePath("src/infrastructure/bootstrap/guardian-mgmt-dns/main.tf")
+	raw := readText(t, path)
+	assertTextContains(t, raw, `public_ipv4 = "206.223.228.87"`, path)
+	for _, retired := range []string{"206.223.228.101", "45.250.254.119"} {
+		assertTextNotContains(t, raw, retired, path)
+	}
+}

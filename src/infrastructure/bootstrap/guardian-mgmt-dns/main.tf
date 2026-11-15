@@ -1,18 +1,11 @@
 locals {
   cloudflare_zone_name  = "guardianintelligence.org"
   external_dns_owner_id = "guardian-mgmt-ash"
+  # Cost reduction: retire earth/wind; water remains the public ingress.
   public_ingress_origin_names = [
-    "ash-earth",
-    "ash-wind",
     "ash-water",
   ]
   public_ingress_origins = {
-    ash-earth = {
-      public_ipv4 = "206.223.228.101"
-    }
-    ash-wind = {
-      public_ipv4 = "45.250.254.119"
-    }
     ash-water = {
       public_ipv4 = "206.223.228.87"
     }
@@ -126,8 +119,8 @@ resource "cloudflare_load_balancer_pool" "guardian_mgmt_ash" {
     }
 
     precondition {
-      condition     = length(local.public_ingress_ipv4s) == 3
-      error_message = "Cloudflare Load Balancing must publish all three guardian-mgmt ASH control-plane origins."
+      condition     = length(local.public_ingress_ipv4s) == 1 && local.public_ingress_ipv4s[0] == "206.223.228.87"
+      error_message = "The cost-reduced public edge must retain ash-water at 206.223.228.87."
     }
   }
 }
