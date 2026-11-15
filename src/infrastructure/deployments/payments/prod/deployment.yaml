@@ -218,12 +218,225 @@ spec:
       app.kubernetes.io/component: payments
 
 ---
-# Flagger's existing serving Deployment remains data-independent, but its
-# ledger dependency is parked. Keep it stopped with the canary suspended.
+# Flagger is suspended while its fixed-member ledger is parked.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: payments-primary
   namespace: tenant-guardian-prod
+  labels:
+    app.kubernetes.io/name: payments-primary
 spec:
+  progressDeadlineSeconds: 600
   replicas: 0
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payments-primary
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        flagger-id: ecf23341-7229-4207-b1a2-1b6971e99a47
+        guardian.dev/tigerbeetle-cluster-id: '49532141921164377784457307205600684260'
+        guardian.dev/tigerbeetle-transport-api: mtls-host-ip-v1
+        reloader.stakater.com/last-reloaded-from: '{"type":"SECRET","name":"postgres-products-credentials","namespace":"tenant-guardian-prod","hash":"d7f4b75bc65b2175b183a7ada26512e5da297cd2","containerRefs":["payments"],"observedAt":1793230124}'
+      labels:
+        app.kubernetes.io/component: payments
+        app.kubernetes.io/name: payments-primary
+        app.kubernetes.io/part-of: guardian
+        guardian.dev/otel: producer
+        guardian.dev/product: guardian
+        guardian.dev/stage: prod
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: payments
+              topologyKey: kubernetes.io/hostname
+            weight: 100
+      automountServiceAccountToken: false
+      containers:
+      - env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: payments
+              name: postgres-products-credentials-primary
+        - name: DATABASE_URL
+          value: postgresql://payments:$(PGPASSWORD)@postgres-products-rw.tenant-guardian-prod.svc:5432/payments?sslmode=require
+        - name: PUBLIC_BASE_URL
+          value: https://guardianintelligence.org
+        - name: OIDC_ISSUER
+          value: https://guardianintelligence.org/realms/guardianintelligence.org
+        - name: OIDC_CLIENT_ID
+          value: postflight-web
+        - name: AUTHORIZATION_API_URL
+          value: http://authorization.tenant-guardian-prod.svc
+        - name: AUTHORIZATION_CHECK_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: authorization-check-token-primary
+        - name: STRIPE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: api_key
+              name: payments-stripe-primary
+        - name: STRIPE_ACCOUNT_ID
+          valueFrom:
+            secretKeyRef:
+              key: account_id
+              name: payments-stripe-primary
+        - name: STRIPE_WEBHOOK_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: webhook_secret
+              name: payments-stripe-primary
+        - name: STRIPE_CANARY_PRICE_ID
+          valueFrom:
+            secretKeyRef:
+              key: canary_price_id
+              name: payments-stripe-primary
+        - name: TIGERBEETLE_ADDRESSES
+          value: 127.0.0.1:13000,127.0.0.1:13001,127.0.0.1:13002
+        - name: TIGERBEETLE_CLUSTER_ID
+          value: '49532141921164377784457307205600684260'
+        - name: JOURNAL_S3_ENDPOINT
+          value: https://c3eaeffaadf7d4847684d4775c16d598.r2.cloudflarestorage.com
+        - name: JOURNAL_S3_REGION
+          value: auto
+        - name: JOURNAL_S3_BUCKET
+          value: guardian-payments-journal
+        - name: JOURNAL_S3_PREFIX
+          value: tenant-guardian-prod/payments-journal
+        - name: JOURNAL_S3_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              key: access_key_id
+              name: payments-journal-r2-primary
+        - name: JOURNAL_S3_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              key: secret_access_key
+              name: payments-journal-r2-primary
+        - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+          value: otel-collector.guardian-analytics.svc.cozy.local:4317
+        - name: PAYMENTS_CANARY_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: token
+              name: payments-canary-primary
+        - name: CUSTOMER_CHECKOUT_ENABLED
+          value: 'false'
+        image: ghcr.io/guardian-intelligence/payments:edge@sha256:51b118a547a09c2c06b8f62a965239b424680423dc6463801674106cf9def8e1
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: http
+            scheme: HTTP
+          periodSeconds: 20
+          successThreshold: 1
+          timeoutSeconds: 3
+        name: payments
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /readyz
+            port: http
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 3
+        resources:
+          limits:
+            cpu: '2'
+            ephemeral-storage: 512Mi
+            memory: 1Gi
+          requests:
+            cpu: 250m
+            ephemeral-storage: 128Mi
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          seccompProfile:
+            type: Unconfined
+        startupProbe:
+          failureThreshold: 120
+          httpGet:
+            path: /readyz
+            port: http
+            scheme: HTTP
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 3
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      - args:
+        - -c
+        - /etc/envoy/envoy.yaml
+        - --log-level
+        - warning
+        image: docker.io/envoyproxy/envoy:distroless-v1.36.4@sha256:2f71c5666a5209d6ee1ec519b17877ccb6d17be4d00e34de10f11e020ea8707a
+        imagePullPolicy: IfNotPresent
+        name: tigerbeetle-transport
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /etc/envoy
+          name: tigerbeetle-transport-config
+          readOnly: true
+        - mountPath: /tls
+          name: tigerbeetle-transport-tls
+          readOnly: true
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - configMap:
+          defaultMode: 420
+          name: payments-tigerbeetle-transport-primary
+        name: tigerbeetle-transport-config
+      - name: tigerbeetle-transport-tls
+        secret:
+          defaultMode: 420
+          secretName: payments-tigerbeetle-client-tls-primary
