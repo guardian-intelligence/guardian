@@ -216,8 +216,8 @@ func TestTalosBootAndVolumeEncryptionConformance(t *testing.T) {
 
 	poolsPath := runfilePath("src/infrastructure/base/storage/linstor-data-pools.yaml")
 	pools := readText(t, poolsPath)
-	if got := strings.Count(pools, "/dev/mapper/luks2-r-guardian-data"); got != 3 {
-		t.Fatalf("%s must source all three LINSTOR pools from the Talos encrypted mapper, got %d", poolsPath, got)
+	if got := strings.Count(pools, "/dev/mapper/luks2-r-guardian-data"); got != 2 {
+		t.Fatalf("%s must source both remaining LINSTOR pools from the Talos encrypted mapper, got %d", poolsPath, got)
 	}
 
 	nodes := map[string]string{
