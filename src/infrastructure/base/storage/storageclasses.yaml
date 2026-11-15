@@ -47,6 +47,7 @@ parameters:
   linstor.csi.linbit.com/allowRemoteVolumeAccess: "true"
   linstor.csi.linbit.com/autoPlace: "1"
   property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: disabled
+  property.linstor.csi.linbit.com/DrbdOptions/Resource/quorum: "off"
   property.linstor.csi.linbit.com/DrbdOptions/Resource/on-no-data-accessible: suspend-io
   property.linstor.csi.linbit.com/DrbdOptions/Resource/on-suspended-primary-outdated: force-secondary
   property.linstor.csi.linbit.com/DrbdOptions/Net/rr-conflict: retry-connect
@@ -70,6 +71,7 @@ parameters:
   linstor.csi.linbit.com/allowRemoteVolumeAccess: "true"
   linstor.csi.linbit.com/autoPlace: "1"
   property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: disabled
+  property.linstor.csi.linbit.com/DrbdOptions/Resource/quorum: "off"
   property.linstor.csi.linbit.com/DrbdOptions/Resource/on-no-data-accessible: suspend-io
   property.linstor.csi.linbit.com/DrbdOptions/Resource/on-suspended-primary-outdated: force-secondary
   property.linstor.csi.linbit.com/DrbdOptions/Net/rr-conflict: retry-connect
@@ -127,6 +129,7 @@ parameters:
   linstor.csi.linbit.com/layerList: drbd storage
   linstor.csi.linbit.com/autoPlace: "1"
   property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: disabled
+  property.linstor.csi.linbit.com/DrbdOptions/Resource/quorum: "off"
   property.linstor.csi.linbit.com/DrbdOptions/Resource/on-no-data-accessible: suspend-io
   property.linstor.csi.linbit.com/DrbdOptions/Resource/on-suspended-primary-outdated: force-secondary
   property.linstor.csi.linbit.com/DrbdOptions/Net/rr-conflict: retry-connect
@@ -150,6 +153,7 @@ parameters:
   linstor.csi.linbit.com/layerList: drbd storage
   linstor.csi.linbit.com/autoPlace: "1"
   property.linstor.csi.linbit.com/DrbdOptions/auto-quorum: disabled
+  property.linstor.csi.linbit.com/DrbdOptions/Resource/quorum: "off"
   property.linstor.csi.linbit.com/DrbdOptions/Resource/on-no-data-accessible: suspend-io
   property.linstor.csi.linbit.com/DrbdOptions/Resource/on-suspended-primary-outdated: force-secondary
   property.linstor.csi.linbit.com/DrbdOptions/Net/rr-conflict: retry-connect
