@@ -4,11 +4,6 @@ import {
 }
 
 import {
-  to = latitudesh_server.control_plane["ash-earth"]
-  id = "sv_vAPXaMxKM5epz"
-}
-
-import {
   to = latitudesh_server.control_plane["ash-wind"]
   id = "sv_nPRbajqEB5koM"
 }

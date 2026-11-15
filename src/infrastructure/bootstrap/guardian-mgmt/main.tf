@@ -20,14 +20,9 @@ locals {
     vip_link     = "enp1s0f0.2140"
     metallb_pool = "10.8.0.200-10.8.0.240"
   }
+  # ash-earth (sv_vAPXaMxKM5epz) retired after data preservation.
+  # Do not re-import or recreate it during root reconciliation.
   control_plane_nodes = {
-    ash-earth = {
-      name         = "ash-earth"
-      server_id    = "sv_vAPXaMxKM5epz"
-      hostname     = "ash-earth"
-      public_ipv4  = "206.223.228.101"
-      private_ipv4 = "10.8.0.11"
-    }
     ash-wind = {
       name         = "ash-wind"
       server_id    = "sv_nPRbajqEB5koM"
