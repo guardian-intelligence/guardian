@@ -1,0 +1,24 @@
+# Preserve the existing three Raft identities on one retained host. This
+# sacrifices hardware redundancy without rewriting Keeper membership or data.
+apiVersion: clickhouse-keeper.altinity.com/v1
+kind: ClickHouseKeeperInstallation
+metadata:
+  name: clickhouse-analytics-keeper
+  namespace: tenant-root
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: Override
+spec:
+  templates:
+    podTemplates:
+      - name: default
+        spec:
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution: []
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    topologyKey: kubernetes.io/hostname
+                    labelSelector:
+                      matchLabels:
+                        app: clickhouse-analytics-keeper

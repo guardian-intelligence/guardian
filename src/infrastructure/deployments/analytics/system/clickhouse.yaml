@@ -86,7 +86,7 @@ spec:
       name: guardian-backups-creds
   clickhouseKeeper:
     enabled: true
-    replicas: 1
+    replicas: 3
     size: 2Gi
 ---
 # Nightly base backup via the guardian-r2 class's Altinity strategy
