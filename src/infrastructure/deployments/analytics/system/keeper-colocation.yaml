@@ -1,5 +1,4 @@
-# Preserve the existing three Raft identities on one retained host. This
-# sacrifices hardware redundancy without rewriting Keeper membership or data.
+# Preserve all three Keeper identities while allowing them on one host.
 apiVersion: clickhouse-keeper.altinity.com/v1
 kind: ClickHouseKeeperInstallation
 metadata:
@@ -10,15 +9,35 @@ metadata:
 spec:
   templates:
     podTemplates:
-      - name: default
-        spec:
-          affinity:
-            podAntiAffinity:
-              requiredDuringSchedulingIgnoredDuringExecution: []
-              preferredDuringSchedulingIgnoredDuringExecution:
-                - weight: 100
-                  podAffinityTerm:
-                    topologyKey: kubernetes.io/hostname
-                    labelSelector:
-                      matchLabels:
-                        app: clickhouse-analytics-keeper
+    - metadata:
+        annotations:
+          prometheus.io/port: '7000'
+          prometheus.io/scrape: 'true'
+        labels:
+          app: clickhouse-analytics-keeper
+      name: default
+      spec:
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: clickhouse-analytics-keeper
+        containers:
+        - image: clickhouse/clickhouse-keeper:24.9.2.42
+          imagePullPolicy: IfNotPresent
+          name: clickhouse-keeper
+          resources:
+            limits:
+              cpu: '2'
+              ephemeral-storage: 2Gi
+              memory: 8Gi
+            requests:
+              cpu: '0.2'
+              ephemeral-storage: '53687091'
+              memory: '8589934592'
+        securityContext:
+          fsGroup: 101
