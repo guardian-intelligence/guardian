@@ -19,7 +19,7 @@ spec:
   config:
     datastoreEngine: postgres
     datastoreTLSSecretName: postgres-spicedb-ca
-    replicas: 3
+    replicas: 1
     dispatchEnabled: true
     tlsSecretName: spicedb-server-tls
     dispatchUpstreamCASecretName: spicedb-server-tls
@@ -35,7 +35,7 @@ spec:
     skipReleaseCheck: true
     telemetryEndpoint: ""
     pdb:
-      minAvailable: "2"
+      minAvailable: "1"
     extraPodLabels:
       app.kubernetes.io/part-of: guardian
       guardian.dev/component: authorization-datastore

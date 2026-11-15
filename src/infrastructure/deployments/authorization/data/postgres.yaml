@@ -4,7 +4,7 @@ metadata:
   name: spicedb
   namespace: tenant-guardian-prod
 spec:
-  replicas: 3
+  replicas: 1
   # 40Gi: the thumper's write load produces several GiB of WAL per day, and
   # CNPG refuses to start an instance whose volume has no room for WAL, so
   # headroom above the slot cap is what keeps a degraded cluster startable.
@@ -38,8 +38,8 @@ spec:
         admin:
           - spicedb
   quorum:
-    minSyncReplicas: 1
-    maxSyncReplicas: 1
+    minSyncReplicas: 0
+    maxSyncReplicas: 0
   backup:
     enabled: true
     useSystemBucket: true

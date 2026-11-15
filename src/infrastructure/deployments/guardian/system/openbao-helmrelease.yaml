@@ -217,7 +217,7 @@ spec:
         ha:
           enabled: true
           apiAddr: https://guardian-openbao-active.tenant-guardian.svc:8200
-          replicas: 3
+          replicas: 1
           raft:
             enabled: true
             setNodeId: true

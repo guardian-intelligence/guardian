@@ -36,7 +36,7 @@ spec:
   # so declaring the value the template expects fixes the render. Drop
   # when upstream fixes the template.
   clusterDomain: cozy.local
-  replicas: 2
+  replicas: 1
   shards: 1
   size: 20Gi
   logStorageSize: 5Gi
@@ -86,7 +86,7 @@ spec:
       name: guardian-backups-creds
   clickhouseKeeper:
     enabled: true
-    replicas: 3
+    replicas: 1
     size: 2Gi
 ---
 # Nightly base backup via the guardian-r2 class's Altinity strategy

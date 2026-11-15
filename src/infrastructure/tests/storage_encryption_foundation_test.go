@@ -46,8 +46,8 @@ func TestCozystackNativeLinstorEncryptionConformance(t *testing.T) {
 		if got := stringValue(sc["reclaimPolicy"]); got != want.reclaim {
 			t.Errorf("StorageClass %s reclaimPolicy = %q, want %q", want.name, got, want.reclaim)
 		}
-		if want.replicated && stringValue(parameters["linstor.csi.linbit.com/autoPlace"]) != "3" {
-			t.Errorf("StorageClass %s must place three DRBD replicas", want.name)
+		if want.replicated && stringValue(parameters["linstor.csi.linbit.com/autoPlace"]) != "1" {
+			t.Errorf("StorageClass %s must place one retained DRBD replica", want.name)
 		}
 		labels := mapValue(mapValue(sc["metadata"])["labels"])
 		if got := stringValue(labels["guardian.dev/encryption-at-rest"]); got != "linstor-luks" {
@@ -216,8 +216,8 @@ func TestTalosBootAndVolumeEncryptionConformance(t *testing.T) {
 
 	poolsPath := runfilePath("src/infrastructure/base/storage/linstor-data-pools.yaml")
 	pools := readText(t, poolsPath)
-	if got := strings.Count(pools, "/dev/mapper/luks2-r-guardian-data"); got != 2 {
-		t.Fatalf("%s must source both remaining LINSTOR pools from the Talos encrypted mapper, got %d", poolsPath, got)
+	if got := strings.Count(pools, "/dev/mapper/luks2-r-guardian-data"); got != 1 {
+		t.Fatalf("%s must source the remaining LINSTOR pool from the Talos encrypted mapper, got %d", poolsPath, got)
 	}
 
 	nodes := map[string]string{

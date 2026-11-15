@@ -36,6 +36,9 @@ spec:
     kubeovn:
       values:
         kube-ovn:
+          # Retain one OVN database member on the surviving monthly host.
+          MASTER_NODES: "10.8.0.13"
+          MASTER_NODES_LABEL: "kubernetes.io/hostname=ash-water"
           mtu: 1362
     cilium:
       values:

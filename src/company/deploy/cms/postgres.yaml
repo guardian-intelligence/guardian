@@ -35,7 +35,7 @@ metadata:
     # or tree move; Flux must never garbage-collect them.
     kustomize.toolkit.fluxcd.io/prune: disabled
 spec:
-  replicas: 3
+  replicas: 1
   size: 10Gi
   storageClass: replicated-encrypted
   external: false
@@ -79,8 +79,8 @@ spec:
         admin:
           - payments
   quorum:
-    minSyncReplicas: 1
-    maxSyncReplicas: 1
+    minSyncReplicas: 0
+    maxSyncReplicas: 0
   # Platform-managed backup flow: barmanObjectStore is SSA-patched onto the
   # live Cluster by the CNPG backup driver at first BackupJob time; continuous
   # WAL archiving starts then, not at merge - fire an ad-hoc BackupJob right
