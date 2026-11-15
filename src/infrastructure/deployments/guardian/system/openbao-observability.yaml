@@ -89,13 +89,13 @@ spec:
           annotations:
             summary: Guardian OpenBao has no active leader.
         - alert: OpenBaoQuorumAtRisk
-          expr: count(up{namespace="tenant-guardian",job="guardian-openbao-metrics"} == 1) < 2
+          expr: (count(up{namespace="tenant-guardian",job="guardian-openbao-metrics"} == 1) or vector(0)) < 1
           for: 2m
           labels:
             severity: critical
             guardian.dev/component: secrets
           annotations:
-            summary: Guardian OpenBao has fewer than two scrapeable replicas.
+            summary: The retained Guardian OpenBao voter is not scrapeable.
         - alert: OpenBaoAuditFailures
           expr: increase(vault_audit_log_request_failure{namespace="tenant-guardian",job="guardian-openbao-metrics"}[5m]) > 0 or increase(vault_audit_log_response_failure{namespace="tenant-guardian",job="guardian-openbao-metrics"}[5m]) > 0
           for: 1m

@@ -35,32 +35,32 @@ spec:
       interval: 15s
       rules:
         - alert: SpiceDBReplicaCountDegraded
-          expr: (sum(up{namespace="tenant-guardian-prod",job="spicedb"}) or vector(0)) < 3
+          expr: (sum(up{namespace="tenant-guardian-prod",job="spicedb"}) or vector(0)) < 1
           for: 2m
           labels:
             severity: critical
             guardian_stage: prod
           annotations:
-            summary: "Fewer than three SpiceDB replicas are serving"
-            description: "The authorization datastore has fewer than three scrapeable replicas. Preserve the remaining fault-domain capacity."
+            summary: "The retained SpiceDB replica is not serving"
+            description: "The single-host authorization datastore has no scrapeable replica."
         - alert: SpiceDBReplicaPlacementDegraded
-          expr: count(count by (node) (kube_pod_info{namespace="tenant-guardian-prod",pod=~"spicedb-spicedb-.*"})) < 3
+          expr: count(count by (node) (kube_pod_info{namespace="tenant-guardian-prod",pod=~"spicedb-spicedb-.*"})) < 1
           for: 5m
           labels:
             severity: critical
             guardian_stage: prod
           annotations:
-            summary: "SpiceDB replicas do not occupy three nodes"
-            description: "The three-replica authorization service has lost node-level fault isolation."
+            summary: "SpiceDB has no scheduled replica"
+            description: "The retained authorization replica is not scheduled on a node."
         - alert: SpiceDBPostgresPlacementDegraded
-          expr: count(count by (node) (kube_pod_info{namespace="tenant-guardian-prod",pod=~"postgres-spicedb-[0-9]+"})) < 3
+          expr: count(count by (node) (kube_pod_info{namespace="tenant-guardian-prod",pod=~"postgres-spicedb-[0-9]+"})) < 1
           for: 5m
           labels:
             severity: critical
             guardian_stage: prod
           annotations:
-            summary: "SpiceDB PostgreSQL replicas do not occupy three nodes"
-            description: "The three PostgreSQL instances have lost node-level fault isolation."
+            summary: "SpiceDB PostgreSQL has no scheduled instance"
+            description: "The retained PostgreSQL instance is not scheduled on a node."
         - alert: SpiceDBRequestErrors
           expr: |
             sum(rate(grpc_server_handled_total{namespace="tenant-guardian-prod",job="spicedb",grpc_code!~"OK|NotFound"}[5m]))
@@ -171,13 +171,13 @@ spec:
       interval: 15s
       rules:
         - alert: AuthorizationAPIReplicaCountDegraded
-          expr: (sum(up{namespace="tenant-guardian-prod",job="authorization"}) or vector(0)) < 3
+          expr: (sum(up{namespace="tenant-guardian-prod",job="authorization"}) or vector(0)) < 1
           for: 2m
           labels:
             severity: critical
             guardian_stage: prod
           annotations:
-            summary: "Fewer than three authorization API replicas are serving"
+            summary: "The retained authorization API replica is not serving"
             description: "The typed authorization boundary has lost replica capacity."
         - alert: AuthorizationAPICheckErrors
           expr: sum(rate(guardian_authorization_checks_total{decision="error"}[5m])) > 0

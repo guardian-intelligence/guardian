@@ -27,7 +27,7 @@ spec:
                   matchLabels:
                     app: clickhouse-analytics-keeper
         containers:
-        - image: clickhouse/clickhouse-keeper:24.9.2.42
+        - image: docker.io/clickhouse/clickhouse-keeper:24.9.2.42@sha256:681b4b8c8b3d397174dd32de156ed36e9c206700d27ce7aaed63db54471a9340
           imagePullPolicy: IfNotPresent
           name: clickhouse-keeper
           resources:
