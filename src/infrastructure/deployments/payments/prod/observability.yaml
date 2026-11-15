@@ -55,7 +55,8 @@ spec:
       interval: 30s
       rules:
         - alert: PaymentsScrapeDown
-          expr: sum(up{namespace="tenant-guardian-prod",job="payments-metrics"}) < 1 or absent(up{namespace="tenant-guardian-prod",job="payments-metrics"})
+          # Missing metrics are expected while both payment deployments are parked.
+          expr: (sum(up{namespace="tenant-guardian-prod",job="payments-metrics"}) < 1 or absent(up{namespace="tenant-guardian-prod",job="payments-metrics"})) and on() (sum(kube_deployment_spec_replicas{namespace="tenant-guardian-prod",deployment=~"payments|payments-primary"}) > 0)
           for: 5m
           labels:
             severity: warning
@@ -64,7 +65,8 @@ spec:
             summary: "Payments metrics scrape is down"
             description: "No payments replica has been scrapeable for five minutes."
         - alert: PaymentsStripeAccountBindingLost
-          expr: max(guardian_payments_stripe_account_binding) < 1 or absent(guardian_payments_stripe_account_binding)
+          # Missing metrics are expected while both payment deployments are parked.
+          expr: (max(guardian_payments_stripe_account_binding) < 1 or absent(guardian_payments_stripe_account_binding)) and on() (sum(kube_deployment_spec_replicas{namespace="tenant-guardian-prod",deployment=~"payments|payments-primary"}) > 0)
           for: 5m
           labels:
             severity: critical
@@ -100,7 +102,8 @@ spec:
             summary: "Stripe and Guardian payment records do not reconcile"
             description: "A Stripe balance transaction is still unmatched after the reconciliation grace period."
         - alert: PaymentsReconciliationStale
-          expr: time() - max(guardian_payments_reconciliation_last_success_timestamp_seconds) > 900 or absent(guardian_payments_reconciliation_last_success_timestamp_seconds)
+          # Missing metrics are expected while both payment deployments are parked.
+          expr: (time() - max(guardian_payments_reconciliation_last_success_timestamp_seconds) > 900 or absent(guardian_payments_reconciliation_last_success_timestamp_seconds)) and on() (sum(kube_deployment_spec_replicas{namespace="tenant-guardian-prod",deployment=~"payments|payments-primary"}) > 0)
           for: 5m
           labels:
             severity: critical
