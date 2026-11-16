@@ -1,5 +1,8 @@
 # Web workspace
 
+For private ChatGPT cloud tasks, start with
+[ChatGPT cloud development](chatgpt-cloud-development.md).
+
 The Guardian web frontend — TanStack Start (SSR on nitro), bundled with
 vite-plus. These apps and packages are members of the repo-rooted pnpm
 workspace; `pnpm-workspace.yaml`, `package.json`, the catalog, and
